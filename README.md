@@ -1,19 +1,10 @@
 # Hyperscan
 
-Hyperscan is a high-performance multiple regex matching library. It follows the
-regular expression syntax of the commonly-used libpcre library, but is a
-standalone library with its own C API.
+Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的大部分语法的前提下，Hyperscan增加了特定的语法和工作模式来保证其在真实网络场景下的实用性。Hyperscan针对不同使用场景设计了多种高效匹配算法，以及结合SIMD指令，实现了正则表达式的高性能匹配。Hyperscan适用于部署在诸如DPI/IPS/IDS/FW等场景中。在鲲鹏平台上，我们将Hyperscan进行了基于neon指令集改造，以适配aarch64架构，同时进行了算法上的进一步优化。
 
-Hyperscan uses hybrid automata techniques to allow simultaneous matching of
-large numbers (up to tens of thousands) of regular expressions and for the
-matching of regular expressions across streams of data.
+# 使用说明
 
-Hyperscan is typically used in a DPI library stack.
-
-# Documentation
-
-Information on building the Hyperscan library and using its API is available in
-the [Developer Reference Guide](http://intel.github.io/hyperscan/dev-reference/).
+使用说明及环境要求请参考鲲鹏官网https://www.hikunpeng.com/document/detail/zh/kunpengaccel/system-lib/cg-hyperscan/kunpengaccel_hyperscan_02_0001.html
 
 # License
 
@@ -30,6 +21,8 @@ release that supports the AArch64 architecture. The AArch64 branch was developed
 based on Intel Hyperscan 5.4.2. Each version released to `aarch64` branch goes through
 QA and testing before it is released; if you're a user of AArch64, rather than a developer,
 this is the version you should be using.
+
+The `khsel` branch on kunpengcompute contains the enhancement mainly on aarch64 platform. Visiting the kunpeng website to get more information. https://www.hikunpeng.com/developer/boostkit/library/detail?subtab=Hyperscan
 
 # Porting
 Perform platform-specific operations, including compilation, 
