@@ -6,50 +6,38 @@ Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 
 使用说明及环境要求请参考鲲鹏官网https://www.hikunpeng.com/document/detail/zh/kunpengaccel/system-lib/cg-hyperscan/kunpengaccel_hyperscan_02_0001.html
 
-# License
+# 许可证
 
-Hyperscan is licensed under the BSD License. See the LICENSE file in the
-project repository.
+Hyperscan 采用 BSD 许可证授权。许可证文件可在项目代码仓库中找到。
 
-# Versioning
+# 版本管理
 
-The `master` branch on Github/kunpengcompute will always contain the most recent 
-release of Intel Hyperscan. 
+`master` 分支 (Github/kunpengcompute):该分支始终包含 Intel Hyperscan 的最新版本。
 
-The `aarch64` branch on Github/kunpengcompute will always contain the most recent 
-release that supports the AArch64 architecture. The AArch64 branch was developed
-based on Intel Hyperscan 5.4.2. Each version released to `aarch64` branch goes through
-QA and testing before it is released; if you're a user of AArch64, rather than a developer,
-this is the version you should be using.
+`aarch64` 分支 (Github/kunpengcompute):该分支始终包含支持 AArch64 架构的最新版本。AArch64 分支是基于 Intel Hyperscan 5.4.2 版本开发的。发布到 aarch64 分支的每个版本在发布前都经过质量保证（QA）和测试。建议： 如果您是 AArch64 平台的用户（而非开发者），应使用此分支的版本。
 
-The `khsel` branch on kunpengcompute contains the enhancement mainly on aarch64 platform. Visiting the kunpeng website to get more information. https://www.hikunpeng.com/developer/boostkit/library/detail?subtab=Hyperscan
+`khsel` 分支该分支主要包含针对 aarch64 平台的增强功能。 更多信息请访问： https://www.hikunpeng.com/developer/boostkit/library/detail?subtab=Hyperscan
 
-# Porting
-Perform platform-specific operations, including compilation, 
-detecting specific header files, SIMD instruction judgment, and so on.
+# 移植工作
+执行平台特定的操作，包括：
+编译适配
+检测特定的头文件
+SIMD 指令集判断
+以及其他相关操作。
 
-# Optimization
-Improve the Kunpeng platform by using the NEON instructions, inline assembly, 
-data alignment, instruction alignment, memory data prefetching, static branch 
-prediction, code structure optimization, etc.
+# 性能优化
+通过以下技术在鲲鹏平台上进行性能提升：
+使用 NEON 指令集
+内联汇编优化
+数据对齐
+指令对齐
+内存数据预取
+静态分支预测
+代码结构优化等等。
 
-# Get Involved
+# 参与社区
+Hyperscan 的官方网站是 www.hyperscan.io。
 
-The official homepage for Hyperscan is at [www.hyperscan.io](https://www.hyperscan.io).
+`aarch64` 分支: 如有疑问或建议，我们鼓励您在 Github 上创建 issue。
 
-`master` branch
-
-If you have questions or comments, we encourage you to [join the mailing
-list](https://lists.01.org/mailman/listinfo/hyperscan). Bugs can be filed by
-sending email to the list, or by creating an issue on Github.
-
-If you wish to contact the Hyperscan team at Intel directly, without posting
-publicly to the mailing list, send email to
-[hyperscan@intel.com](mailto:hyperscan@intel.com).
-
-`aarch64` branch
-
-If you have questions or comments, we encourage you to create an issue on Github.
-
-If you wish to contact the Huawei team directly, you can send an email to 
-kunpengcompute@huawei.com.
+若您希望直接联系华为团队，可以发送邮件至 kunpengcompute@huawei.com。
