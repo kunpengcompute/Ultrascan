@@ -42,6 +42,8 @@ if (WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4309 /wd4018")
 endif()
 
+LINK_DIRECTORIES(/usr/local/ksl/lib/)
+
 set(unit_hyperscan_SOURCES
     ${gtest_SOURCES}
     hyperscan/allocators.cpp

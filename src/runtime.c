@@ -57,6 +57,7 @@
 #include "ue2common.h"
 #include "util/exhaust.h"
 #include "util/multibit.h"
+#include "khsel_runtime.h"
 
 static really_inline
 void prefetch_data(const char *data, unsigned length) {
@@ -395,6 +396,13 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
         DEBUG_PRINTF("block len=%u longer than maxBAWidth=%u\n", length,
                      rose->maxBiAnchoredWidth);
         goto done_scan;
+    }
+
+    if (unlikely(rose->lilyOffset)) {
+        if (KHSEL_LilyRunExec(rose, scratch) == 1) {
+            scratch->core_info.status = STATUS_TERMINATED;
+            goto done_scan;
+        }
     }
 
     // Is this a small write case?
@@ -949,6 +957,22 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
         break;
     case ROSE_RUNTIME_SINGLE_OUTFIX:
         soleOutfixStreamExec(id, scratch);
+    }
+
+    if (rose->lilyOffset) {
+
+        if (KHSEL_LilyRunExec(rose, scratch) == 1) {
+            scratch->core_info.status = STATUS_TERMINATED;
+        } else {
+            // highlander
+            if (!told_to_stop_matching(scratch) &&
+                isAllExhausted(rose, scratch->core_info.exhaustionVector)) {
+                DEBUG_PRINTF("stream exhausted\n");
+                scratch->core_info.status |= STATUS_EXHAUSTED;
+            } else {
+                scratch->core_info.status &= (0xFF - STATUS_EXHAUSTED);
+            }
+        }
     }
 
     if (rose->hasSom && !told_to_stop_matching(scratch)) {

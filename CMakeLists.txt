@@ -256,8 +256,8 @@ else()
     if (NOT RELEASE_BUILD)
         # -Werror is most useful during development, don't potentially break
         # release builds
-        set(EXTRA_C_FLAGS "${EXTRA_C_FLAGS} -Werror")
-        set(EXTRA_CXX_FLAGS "${EXTRA_CXX_FLAGS} -Werror")
+        #set(EXTRA_C_FLAGS "${EXTRA_C_FLAGS} -Werror")
+        #set(EXTRA_CXX_FLAGS "${EXTRA_CXX_FLAGS} -Werror")
     endif()
 
     if (DISABLE_ASSERTS)
@@ -568,6 +568,9 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${EXTRA_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${EXTRA_CXX_FLAGS}")
 endif()
 
+message("-- C_FLAGS: ${CMAKE_C_FLAGS}")
+message("-- CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
+
 if (WIN32)
 # PCRE check, we have a fixed requirement for PCRE to use Chimera
 # and hscollider
@@ -647,12 +650,14 @@ set (hs_exec_SRCS
     src/crc32.c
     src/crc32.h
     src/report.h
+    src/khsel_runtime.h
     src/runtime.c
     src/stream_compress.c
     src/stream_compress.h
     src/stream_compress_impl.h
     src/fdr/fdr.c
     src/fdr/fdr.h
+    src/fdr/fdr_enhanced.h
     src/fdr/fdr_internal.h
     src/fdr/fdr_confirm.h
     src/fdr/fdr_confirm_runtime.h
@@ -759,6 +764,7 @@ set (hs_exec_SRCS
     src/rose/rose_common.h
     src/rose/validate_mask.h
     src/rose/validate_shufti.h
+    src/rose/lily.h
     src/util/bitutils.h
     src/util/copybytes.h
     src/util/exhaust.h
@@ -1240,18 +1246,19 @@ if (NOT FAT_RUNTIME)
     endif()
 
     if (BUILD_STATIC_LIBS)
+        LINK_DIRECTORIES(/usr/local/ksl/lib/)
         add_library(hs_exec OBJECT ${hs_exec_SRCS})
 
         add_library(hs_runtime STATIC src/hs_version.c src/hs_valid_platform.c $<TARGET_OBJECTS:hs_exec>)
         set_target_properties(hs_runtime PROPERTIES LINKER_LANGUAGE C)
 
         add_library(hs_compile OBJECT ${hs_compile_SRCS})
-
         add_library(hs STATIC
             src/hs_version.c
             src/hs_valid_platform.c
             $<TARGET_OBJECTS:hs_exec>
             $<TARGET_OBJECTS:hs_compile>)
+        target_link_libraries(hs -lKHSEL_core)
     endif (BUILD_STATIC_LIBS)
 
     if (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS)
@@ -1426,6 +1433,8 @@ if (NOT BUILD_SHARED_LIBS)
 endif()
 
 if (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS)
+    LINK_DIRECTORIES(/usr/local/ksl/lib/)
+
     set(hs_shared_SRCS
         src/hs_version.c
         src/hs_valid_platform.c
@@ -1450,6 +1459,8 @@ if (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS)
     endif ()
 
     add_library(hs_shared SHARED ${hs_shared_SRCS} hs.def)
+
+    target_link_libraries(hs_shared -lKHSEL_core)
 
     add_dependencies(hs_shared ragel_Parser)
     set_target_properties(hs_shared PROPERTIES

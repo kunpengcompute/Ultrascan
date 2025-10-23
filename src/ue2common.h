@@ -99,6 +99,8 @@ typedef u32 ReportID;
 #define UNUSED
 #endif
 
+#define REALLY_INLINE really_inline
+
 /* really_inline forces inlining always */
 #if !defined(_WIN32)
 #if defined(HS_OPTIMIZE)

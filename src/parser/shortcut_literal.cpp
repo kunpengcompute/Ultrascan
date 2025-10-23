@@ -49,6 +49,8 @@
 #include "compiler/compiler.h"
 #include "util/ue2string.h"
 #include "ue2common.h"
+#include "rose/rose_build.h"
+#include "rose/rose_in_util.h"
 
 #include <stack>
 
@@ -159,7 +161,7 @@ public:
 ConstructLiteralVisitor::~ConstructLiteralVisitor() {}
 
 /** \brief True if the literal expression \a expr could be added to Rose. */
-bool shortcutLiteral(NG &ng, const ParsedExpression &pe) {
+bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags) {
     assert(pe.component);
 
     if (!ng.cc.grey.allowLiteral) {
@@ -192,7 +194,10 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe) {
         return false;
     }
 
-    if (expr.highlander && lit.length() <= 1) {
+    if ((lit.length() <= 1)) {
+        if (lit.length() == 1) {
+            return ng.rose->addChar(lit, expr.index, expr.report, expr.highlander, expr.som, expr.quiet, ng, flags);
+        }
         DEBUG_PRINTF("not shortcutting SEP literal\n");
         return false;
     }

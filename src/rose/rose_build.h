@@ -45,6 +45,8 @@
 #include "util/flat_containers.h"
 #include "util/noncopyable.h"
 #include "util/ue2string.h"
+#include "som/som.h"
+#include "nfagraph/ng.h"
 
 #include <memory>
 #include <set>
@@ -122,6 +124,10 @@ public:
 
     /** Note that we have seen a SOM pattern. */
     virtual void setSom() = 0;
+
+    virtual bool addChar(const ue2_literal &lit, u32 expr_index,
+                         u32 external_report, bool highlander, som_type som,
+                         bool quiet, NG& ng, unsigned flags) = 0;
 };
 
 // Construct a usable Rose builder.
