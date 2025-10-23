@@ -365,7 +365,7 @@ void addExpression(NG &ng, unsigned index, const char *expression,
 
     // If this expression is a literal, we can feed it directly to Rose rather
     // than building the NFA graph.
-    if (shortcutLiteral(ng, pe)) {
+    if (shortcutLiteral(ng, pe, flags)) {
         DEBUG_PRINTF("took literal short cut\n");
         return;
     }

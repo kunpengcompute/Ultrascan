@@ -1748,6 +1748,41 @@ bool addEodOutfix(RoseBuildImpl &build, const NGHolder &h) {
     return true;
 }
 
+bool RoseBuildImpl::addChar(const ue2_literal &lit, u32 expr_index,
+                    u32 external_report, bool highlander, som_type som,
+                    bool quiet, NG& ng, unsigned flags) {
+    assert(lit.length() == 1);
+    // Register external report and validate highlander constraints.
+    rm.registerExtReport(external_report,
+                         external_report_info(highlander, expr_index));
+    u32 ekey;
+    ReportID id;
+    if (som) {
+        assert(!highlander); // not allowed, checked earlier.
+        Report r = makeSomRelativeCallback(external_report, 0, lit.length());
+        id = rm.getInternalId(r);
+        this->setSom();
+        ekey = INVALID_EKEY;
+    } else {
+        ekey = highlander ? rm.getExhaustibleKey(external_report)
+                              : INVALID_EKEY;
+        Report r = makeECallback(external_report, 0, ekey, quiet);
+        id = rm.getInternalId(r);
+    }
+
+    DEBUG_PRINTF("success: graph is literal '%s', report ID %u\n",
+                 dumpString(lit).c_str(), id);
+    ng.minWidth = depth(1);
+    std::pair<ReportID, unsigned> p(id, flags);
+    lilyReport report = {id, ekey, flags};
+    if (this->lily.size() < 8) {
+        auto res = this->lily.insert(std::pair<char, lilyReport>(lit.get_string()[0], report));
+        return (res.second);
+    } else {
+        return false;
+    }
+}
+
 bool RoseBuildImpl::addOutfix(const NGHolder &h) {
     DEBUG_PRINTF("%zu vertices, %zu edges\n", num_vertices(h), num_edges(h));
 

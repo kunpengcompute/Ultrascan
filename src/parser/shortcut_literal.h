@@ -39,7 +39,7 @@ class NG;
 class ParsedExpression;
 
 /** \brief True if the literal expression \a expr could be added to Rose. */
-bool shortcutLiteral(NG &ng, const ParsedExpression &expr);
+bool shortcutLiteral(NG &ng, const ParsedExpression &expr, unsigned flags);
 
 } // namespace ue2
 

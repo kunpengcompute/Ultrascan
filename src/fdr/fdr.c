@@ -38,6 +38,7 @@
 #include "util/arch.h"
 #include "util/simd_utils.h"
 #include "util/uniform_ops.h"
+#include "fdr_enhanced.h"
 
 /** \brief number of bytes processed in each iteration */
 #define ITER_BYTES          16
@@ -848,6 +849,7 @@ hwlm_error_t fdr_engine_exec(const struct FDR *fdr,
     u32 floodBackoff = FLOOD_BACKOFF_START;
     u32 last_match_id = INVALID_MATCH_ID;
     u32 domain_mask_flipped = ~fdr->domainMask;
+    //u32 domain_mask_flipped = fdr->domainMask;
     u8 stride = fdr->stride;
     const u64a *ft =
         (const u64a *)((const u8 *)fdr + ROUNDUP_CL(sizeof(struct FDR)));
@@ -917,7 +919,7 @@ typedef hwlm_error_t (*FDRFUNCTYPE)(const struct FDR *fdr,
                                     hwlm_group_t control);
 
 static const FDRFUNCTYPE funcs[] = {
-    fdr_engine_exec,
+    KHSEL_FdrEngineExec,
     NULL, /* old: fast teddy */
     NULL, /* old: fast teddy */
     ONLY_AVX2(fdr_exec_fat_teddy_msks1),
@@ -947,7 +949,6 @@ hwlm_error_t fdrExec(const struct FDR *fdr, const u8 *buf, size_t len,
     // We guarantee (for safezone construction) that it is safe to read 16
     // bytes before the end of the history buffer.
     const u8 *hbuf = fake_history + FAKE_HISTORY_SIZE;
-
     const struct FDR_Runtime_Args a = {
         buf,
         len,

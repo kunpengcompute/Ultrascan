@@ -46,6 +46,7 @@
 #include "util/ue2string.h"
 #include "util/unordered.h"
 #include "util/verify_types.h"
+#include "lily.h"
 
 #include <deque>
 #include <map>
@@ -60,6 +61,8 @@ namespace ue2 {
 #define ROSE_GROUPS_MAX 64
 
 #define ROSE_LONG_LITERAL_THRESHOLD_MIN 33
+
+#define LILY_VEC_LEN 8
 
 /**
  * \brief The largest allowable "short" literal fragment which can be given to
@@ -526,6 +529,10 @@ public:
                  const flat_set<ReportID> &reports, bool anchored,
                  bool eod) override;
 
+    bool addChar(const ue2_literal &lit, u32 expr_index,
+                 u32 external_report, bool highlander, som_type som,
+                 bool quiet, NG& ng, unsigned flags);
+
     // Construct a runtime implementation.
     bytecode_ptr<RoseEngine> buildRose(u32 minWidth) override;
     bytecode_ptr<RoseEngine> buildFinalEngine(u32 minWidth);
@@ -646,6 +653,8 @@ public:
     SomSlotManager &ssm;
     SmallWriteBuild &smwr;
     const BoundaryReports &boundary;
+
+    std::map<char, lilyReport> lily;
 
 private:
     ReportID next_nfa_report;
