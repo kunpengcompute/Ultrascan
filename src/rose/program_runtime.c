@@ -1900,7 +1900,7 @@ int roseCheckLongLiteral(const struct RoseEngine *t,
         u64a scan_start = end - ci->buf_offset - scan_len;
         DEBUG_PRINTF("checking suffix (%u bytes) in buf[%llu:%llu]\n", scan_len,
                      scan_start, end);
-        if (cmpForward(ci->buf + scan_start, lit + lit_length - scan_len,
+        if (cmpForward_optimized_unaligned(ci->buf + scan_start, lit + lit_length - scan_len,
                        scan_len, nocase)) {
             DEBUG_PRINTF("cmp of suffix failed\n");
             return 0;
@@ -1942,7 +1942,7 @@ int roseCheckLongLiteral(const struct RoseEngine *t,
     DEBUG_PRINTF("check prefix len=%u from hist (len %zu, rewind %u)\n",
                  prefix_len, ll_len, hist_rewind);
     assert(hist_rewind <= ll_len);
-    if (cmpForward(ll_buf + ll_len - hist_rewind, lit, prefix_len, nocase)) {
+    if (cmpForward_optimized_unaligned(ll_buf + ll_len - hist_rewind, lit, prefix_len, nocase)) {
         DEBUG_PRINTF("cmp of prefix failed\n");
         return 0;
     }
@@ -1972,7 +1972,7 @@ int roseCheckMediumLiteral(const struct RoseEngine *t,
         u64a scan_start = end - ci->buf_offset - scan_len;
         DEBUG_PRINTF("checking suffix (%u bytes) in buf[%llu:%llu]\n", scan_len,
                      scan_start, end);
-        if (cmpForward(ci->buf + scan_start, lit + lit_length - scan_len,
+        if (cmpForward_optimized_unaligned(ci->buf + scan_start, lit + lit_length - scan_len,
                        scan_len, nocase)) {
             DEBUG_PRINTF("cmp of suffix failed\n");
             return 0;
@@ -2003,7 +2003,7 @@ int roseCheckMediumLiteral(const struct RoseEngine *t,
     DEBUG_PRINTF("check prefix len=%u from hist (len %zu, rewind %u)\n",
                  prefix_len, ci->hlen, hist_rewind);
     assert(hist_rewind <= ci->hlen);
-    if (cmpForward(ci->hbuf + ci->hlen - hist_rewind, lit, prefix_len,
+    if (cmpForward_optimized_unaligned(ci->hbuf + ci->hlen - hist_rewind, lit, prefix_len,
                    nocase)) {
         DEBUG_PRINTF("cmp of prefix failed\n");
         return 0;
