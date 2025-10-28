@@ -174,55 +174,6 @@ int cmpForward(const u8 *p1, const u8 *p2, size_t len, char nocase) {
     return 0;
 }
 
-#if defined(HAVE_NEON)
-#define NEON_SIZE 16
-#define UNROLL_FACTOR 4
-#define TOUPPER_OPT(c) ((c) >= 'a' && (c) <= 'z' ? (c) & 0xDF : (c))
-
-static really_inline
-int cmpForward_optimized_unaligned(const uint8_t *p1, const uint8_t *p2, size_t len, char nocase) {
-    
-    // 小数据使用朴素算法
-    if (len < 4) {
-        return nocase ? cmpNocaseNaive(p1, p2, len)
-                     : cmpCaseNaive(p1, p2, len);
-    }
-
-    const u8 *p1_end = p1 + len - CMP_SIZE;
-    const u8 *p2_end = p2 + len - CMP_SIZE;
-    const size_t step = UNROLL_FACTOR * CMP_SIZE;
-
-    // Case-sensitive
-    if (!nocase) {
-        for (; p1 < p1_end; p1 += step, p2 += step) {
-            if (unlikely(ULOAD(p1) != ULOAD(p2))) return 1;
-            if (unlikely(ULOAD(p1 + CMP_SIZE) != ULOAD(p2 + CMP_SIZE))) return 1;
-            if (unlikely(ULOAD(p1 + 2*CMP_SIZE) != ULOAD(p2 + 2*CMP_SIZE))) return 1;
-            if (unlikely(ULOAD(p1 + 3*CMP_SIZE) != ULOAD(p2 + 3*CMP_SIZE))) return 1;
-        }
-        
-        if (unlikely(ULOAD(p1_end) != ULOAD(p2_end))) {
-            return 1;
-        }
-    } else {
-
-    // case insensitive
-        for (; p1 < p1_end; p1 += step, p2 += step) {
-            if (unlikely(TOUPPER_OPT(ULOAD(p1)) != ULOAD(p2))) return 1;
-            if (unlikely(TOUPPER_OPT(ULOAD(p1 + CMP_SIZE)) != ULOAD(p2 + CMP_SIZE))) return 1;
-            if (unlikely(TOUPPER_OPT(ULOAD(p1 + 2*CMP_SIZE)) != ULOAD(p2 + 2*CMP_SIZE))) return 1;
-            if (unlikely(TOUPPER_OPT(ULOAD(p1 + 3*CMP_SIZE)) != ULOAD(p2 + 3*CMP_SIZE))) return 1;
-        }
-        
-        if (unlikely(TOUPPER_OPT(ULOAD(p1_end)) != ULOAD(p2_end))) {
-            return 1;
-        }
-    }
-
-    return 0;
-}
-#endif
-
 #undef CMP_T
 #undef ULOAD
 #undef TOUPPER
