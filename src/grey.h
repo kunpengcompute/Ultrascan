@@ -53,8 +53,10 @@ struct Grey {
     bool allowMcClellan;
     bool allowSheng;
     bool allowMcSheng;
+    bool allowNeoFdr;
     bool allowPuff;
     bool allowLiteral;
+    bool allowLily;
     bool allowViolet;
     bool allowExtendedNFA;
     bool allowLimExNFA;
@@ -209,10 +211,8 @@ struct Grey {
     u32 limitApproxMatchingVertices; //!< max number of vertices per graph
 };
 
-#ifndef RELEASE_BUILD
 #include <string>
 void applyGreyOverrides(Grey *g, const std::string &overrides);
-#endif
 
 } // namespace ue2
 

@@ -853,6 +853,27 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         }
     }
 
+    if (grey.allowNeoFdr) {
+        auto des = (hint == HINT_INVALID) ? chooseNeoFdrEngine(target, lits, make_small)
+                                        : getFdrDescription(hint);
+        if (!des) {
+            return nullptr;
+        }
+
+        // temporary hack for unit testing
+        if (hint != HINT_INVALID) {
+            des->bits = 9;
+            des->stride = 1;
+        }
+
+        auto bucketToLits = assignStringsToBuckets(lits, *des);
+        addIncludedInfo(lits, des->getNumBuckets(), bucketToLits);
+        auto proto =
+            ue2::make_unique<HWLMProto>(engType, move(des), lits, bucketToLits,
+                                        make_small);
+        return proto;        
+    }
+
     auto des = (hint == HINT_INVALID) ? chooseEngine(target, lits, make_small)
                                       : getFdrDescription(hint);
     if (!des) {

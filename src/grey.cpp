@@ -32,6 +32,10 @@
 #include <algorithm>
 #include <cstdlib> // exit
 #include <string>
+#include <unistd.h>
+#include <limits.h>
+#include <cstring>
+#include <fstream>
 #include <vector>
 
 #define DEFAULT_MAX_HISTORY 110
@@ -53,11 +57,13 @@ Grey::Grey(void) :
                    allowMcClellan(true),
                    allowSheng(true),
                    allowMcSheng(true),
+                   allowNeoFdr(false),
                    allowPuff(true),
                    allowLiteral(true),
                    allowViolet(true),
                    allowExtendedNFA(true), /* bounded repeats of course */
                    allowLimExNFA(true),
+                   allowLily(false),
                    allowAnchoredAcyclic(true),
                    allowSmallLiteralSet(true),
                    allowCastle(true),
@@ -163,11 +169,29 @@ Grey::Grey(void) :
                    limitApproxMatchingVertices(5000)
 {
     assert(maxAnchoredRegion < 64); /* a[lm]_log_sum have limited capacity */
+    char cwd[PATH_MAX];
+    if (!getcwd(cwd, sizeof(cwd))) {
+        return;
+    }
+    std::string path = std::string(cwd) + "/../config.txt";
+    if (access(path.c_str(), F_OK) != 0) {
+        return;
+    }
+
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return;
+    }
+
+    std::string line;
+    if (std::getline(file, line)) {
+        static string configText = line;
+        applyGreyOverrides(this, line);
+    }
+    file.close();
 }
 
 } // namespace ue2
-
-#ifndef RELEASE_BUILD
 
 #include <boost/lexical_cast.hpp>
 using boost::lexical_cast;
@@ -231,8 +255,10 @@ void applyGreyOverrides(Grey *g, const string &s) {
         G_UPDATE(allowMcClellan);
         G_UPDATE(allowSheng);
         G_UPDATE(allowMcSheng);
+        G_UPDATE(allowNeoFdr);
         G_UPDATE(allowPuff);
         G_UPDATE(allowLiteral);
+        G_UPDATE(allowLily);
         G_UPDATE(allowViolet);
         G_UPDATE(allowExtendedNFA);
         G_UPDATE(allowLimExNFA);
@@ -415,5 +441,3 @@ void applyGreyOverrides(Grey *g, const string &s) {
 }
 
 } // namespace ue2
-
-#endif

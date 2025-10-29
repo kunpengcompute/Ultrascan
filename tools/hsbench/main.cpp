@@ -1042,9 +1042,7 @@ void runBenchmark(const Engine &db,
 /** Main driver. */
 int HS_CDECL main(int argc, char *argv[]) {
     unique_ptr<Grey> grey;
-#if !defined(RELEASE_BUILD)
     grey = make_unique<Grey>();
-#endif
     setlocale(LC_ALL, ""); // use the user's locale
 
 #ifndef NDEBUG

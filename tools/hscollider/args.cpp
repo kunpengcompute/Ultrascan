@@ -516,6 +516,9 @@ void processArgs(int argc, char *argv[], CorpusProperties &corpus_gen_prop,
         in_corpora = MAX(0, in_corpora - 1);
     }
 
+    string allowLily = "allowLily:0;";
+    applyGreyOverrides(grey, allowLily);
+
     if (g_streamOffset && !g_streamBlocks) {
         usage(argv[0], "stream offset requires streams");
         exit(1);
