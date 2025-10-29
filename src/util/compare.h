@@ -174,6 +174,167 @@ int cmpForward(const u8 *p1, const u8 *p2, size_t len, char nocase) {
     return 0;
 }
 
+#if defined(HAVE_NEON)
+#define NEON_SIZE 16
+#define UNROLL_FACTOR 4
+
+static really_inline
+int cmpForward_optimized_unaligned(const uint8_t *p1, const uint8_t *p2, size_t len, char nocase) {
+    
+    // 小数据使用朴素算法
+    if (len < 4) {
+        return nocase ? cmpNocaseNaive(p1, p2, len)
+                     : cmpCaseNaive(p1, p2, len);
+    }
+
+    const size_t step = UNROLL_FACTOR * CMP_SIZE;
+    const u8 *p1_end = p1 + len - step;
+    const u8 *p1_end_raw = p1 + len - CMP_SIZE;
+    const u8 *p2_end_raw = p2 + len - CMP_SIZE;
+
+
+    // Case-sensitive
+    if (!nocase) {
+        for (; p1 < p1_end; p1 += step, p2 += step) {
+            if (unlikely(ULOAD(p1) != ULOAD(p2))) return 1;
+            if (unlikely(ULOAD(p1 + CMP_SIZE) != ULOAD(p2 + CMP_SIZE))) return 1;
+            if (unlikely(ULOAD(p1 + 2*CMP_SIZE) != ULOAD(p2 + 2*CMP_SIZE))) return 1;
+            if (unlikely(ULOAD(p1 + 3*CMP_SIZE) != ULOAD(p2 + 3*CMP_SIZE))) return 1;
+        }
+
+        
+        for (; p1 < p1_end_raw; p1 += CMP_SIZE, p2 += CMP_SIZE) {
+            if (unlikely(ULOAD(p1) != ULOAD(p2))) {
+                return 1;
+            }
+        }
+
+        if (unlikely(ULOAD(p1_end_raw) != ULOAD(p2_end_raw))) {
+            return 1;
+        }
+    } else {
+        for (; p1 < p1_end_raw; p1 += CMP_SIZE, p2 += CMP_SIZE) {
+            if (TOUPPER(ULOAD(p1)) != ULOAD(p2)) {
+                return 1;
+            }
+        }
+        if (TOUPPER(ULOAD(p1_end_raw)) != ULOAD(p2_end_raw)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+#endif
+
+static really_inline
+int cmpForward_small(const u8 *p1, const u8 *p2, size_t len, char nocase) {
+    if (len < CMP_SIZE) {
+        return nocase ? cmpNocaseNaive(p1, p2, len)
+                      : cmpCaseNaive(p1, p2, len);
+    }
+
+    const u8 *p1_end = p1 + len - CMP_SIZE;
+    const u8 *p2_end = p2 + len - CMP_SIZE;
+
+    if (nocase) {
+        for (; p1 < p1_end; p1 += CMP_SIZE, p2 += CMP_SIZE) {
+            if (TOUPPER(ULOAD(p1)) != ULOAD(p2)) return 1;
+        }
+        if (TOUPPER(ULOAD(p1_end)) != ULOAD(p2_end)) return 1;
+    } else {
+        for (; p1 < p1_end; p1 += CMP_SIZE, p2 += CMP_SIZE) {
+            if (ULOAD(p1) != ULOAD(p2)) return 1;
+        }
+        if (ULOAD(p1_end) != ULOAD(p2_end)) return 1;
+    }
+
+    return 0;
+}
+
+// 大字符串（≥96字节）：混合策略（标量前缀 + NEON主体）
+static really_inline
+int cmpForward_large(const u8 *p1, const u8 *p2, size_t len, char nocase) {
+    // 前32字节用标量（快速退出）
+    const size_t SCALAR_PREFIX = 32;
+    
+    if (nocase) {
+        for (size_t i = 0; i < SCALAR_PREFIX && i + CMP_SIZE <= len; i += CMP_SIZE) {
+            if (TOUPPER(ULOAD(p1 + i)) != ULOAD(p2 + i)) return 1;
+        }
+    } else {
+        for (size_t i = 0; i < SCALAR_PREFIX && i + CMP_SIZE <= len; i += CMP_SIZE) {
+            if (ULOAD(p1 + i) != ULOAD(p2 + i)) return 1;
+        }
+    }
+    
+    // 中间部分用NEON
+    const u8 *p1_cur = p1 + SCALAR_PREFIX;
+    const u8 *p2_cur = p2 + SCALAR_PREFIX;
+    const u8 *p1_neon_end = p1 + len - 16;
+    
+    if (nocase) {
+        uint8x16_t lower = vdupq_n_u8('a');
+        uint8x16_t upper = vdupq_n_u8('z');
+        uint8x16_t mask = vdupq_n_u8(0x20);
+        
+        while (p1_cur <= p1_neon_end) {
+            uint8x16_t d1 = vld1q_u8(p1_cur);
+            uint8x16_t d2 = vld1q_u8(p2_cur);
+            
+            // 检测并转换小写字母
+            uint8x16_t is_lower = vandq_u8(
+                vcgeq_u8(d1, lower),
+                vcleq_u8(d1, upper)
+            );
+            uint8x16_t toggled = veorq_u8(d1, mask);
+            d1 = vbslq_u8(is_lower, toggled, d1);
+            
+            // 比较
+            uint8x16_t cmp = vceqq_u8(d1, d2);
+            uint64x2_t cmp64 = vreinterpretq_u64_u8(cmp);
+            
+            if (vgetq_lane_u64(cmp64, 0) != ~0ULL || 
+                vgetq_lane_u64(cmp64, 1) != ~0ULL) {
+                return 1;
+            }
+            
+            p1_cur += 16;
+            p2_cur += 16;
+        }
+    } else {
+        while (p1_cur <= p1_neon_end) {
+            uint8x16_t d1 = vld1q_u8(p1_cur);
+            uint8x16_t d2 = vld1q_u8(p2_cur);
+            uint8x16_t cmp = vceqq_u8(d1, d2);
+            uint64x2_t cmp64 = vreinterpretq_u64_u8(cmp);
+            
+            if (vgetq_lane_u64(cmp64, 0) != ~0ULL || 
+                vgetq_lane_u64(cmp64, 1) != ~0ULL) {
+                return 1;
+            }
+            
+            p1_cur += 16;
+            p2_cur += 16;
+        }
+    }
+    
+    // 剩余尾部用标量
+    size_t processed = p1_cur - p1;
+    return cmpForward_small(p1 + processed, p2 + processed, len - processed, nocase);
+}
+
+static really_inline
+int cmpForward_PRO(const u8 *p1, const u8 *p2, size_t len, char nocase) {
+    if (len < 96) {
+        return cmpForward_small(p1, p2, len, nocase);
+    } else {
+        return cmpForward_large(p1, p2, len, nocase);
+    }
+}
+
+
 #undef CMP_T
 #undef ULOAD
 #undef TOUPPER
