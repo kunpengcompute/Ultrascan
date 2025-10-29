@@ -580,7 +580,13 @@ bool NG::addLiteral(const ue2_literal &literal, u32 expr_index,
                     u32 external_report, bool highlander, som_type som,
                     bool quiet) {
     assert(!literal.empty());
-
+    // ==TODO: 过滤尾部8字节全为0的literal
+    if (literal.length() >= 8) {
+        const std::string &str = literal.get_string();  // 获取底层字符串
+        if (memcmp(str.c_str() + str.length() - 8, "\0\0\0\0\0\0\0\0", 8) == 0) {
+            return false;
+        }
+    }
     if (!cc.grey.shortcutLiterals) {
         return false;
     }

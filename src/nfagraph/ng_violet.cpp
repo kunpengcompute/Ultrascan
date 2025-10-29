@@ -682,6 +682,65 @@ unique_ptr<VertLitInfo> findBestSplit(const NGHolder &g,
     getRegionRoseLiterals(g, seeking_anchored, depths, cand_raw, allowed_cand,
                           &lits, min_len, desperation, last_chance, cc);
 
+    // ==TODO: 添加过滤尾部8字节全为0的字符串
+    int removed_count = 0;
+    int total_lits_before = 0;
+    int total_lits_after = 0;
+    
+    for (auto it = lits.begin(); it != lits.end(); ) {
+        if (!*it) {
+            ++it;
+            continue;
+        }
+        
+        set<ue2_literal>& lit_set = (*it)->lit;
+        total_lits_before += lit_set.size();
+        
+        // 从 set 中删除末尾8字节为0的 literal
+        for (auto lit_it = lit_set.begin(); lit_it != lit_set.end(); ) {
+            const ue2_literal& literal = *lit_it;
+            size_t len = literal.length();
+            
+            bool should_remove = false;
+            
+            // 检查长度 >= 8 且末8字节全为0
+            if (len >= 8) {
+                const std::string& s = literal.get_string();
+                bool all_zero = true;
+                
+                for (size_t j = len - 8; j < len; j++) {
+                    if (s[j] != 0) {
+                        all_zero = false;
+                        break;
+                    }
+                }
+                
+                if (all_zero) {
+                    should_remove = true;
+                    removed_count++;
+                    
+                    DEBUG_PRINTF("Removing literal with zero tail: length=%zu\n", len);
+                }
+            }
+            
+            if (should_remove) {
+                lit_it = lit_set.erase(lit_it);
+            } else {
+                ++lit_it;
+            }
+        }
+        
+        total_lits_after += lit_set.size();
+        
+        // 如果 VertLitInfo 的 lit set 变空了，删除整个 VertLitInfo
+        if (lit_set.empty()) {
+            DEBUG_PRINTF("Removing empty VertLitInfo at index %zu\n", 
+                        std::distance(lits.begin(), it));
+            it = lits.erase(it);
+        } else {
+            ++it;
+        }
+    }
     if (lits.empty()) {
         DEBUG_PRINTF("no literals found\n");
         return nullptr;
@@ -939,7 +998,26 @@ unique_ptr<VertLitInfo> findSimplePrefixSplit(const NGHolder &g,
     if (best_lit.length() < cc.grey.minRoseLiteralLength) {
         return nullptr;
     }
-
+    // ==TODO: 过滤尾部8字节全为0的best_lit
+    {
+        size_t len = best_lit.length();
+        if (len >= 8) {
+            const std::string& s = best_lit.get_string();
+            bool zero_tail = true;
+            
+            for (size_t i = len - 8; i < len; i++) {
+                if (s[i] != 0) {
+                    zero_tail = false;
+                    break;
+                }
+            }
+            
+            if (zero_tail) {
+                DEBUG_PRINTF("Rejecting best_lit with zero tail: len=%zu\n", len);
+                return nullptr;
+            }
+        }
+    }
     set<ue2_literal> best_lit_set({best_lit});
     if (bad_mixed_sensitivity(best_lit)) {
         sanitizeAndCompressAndScore(best_lit_set);
@@ -1393,7 +1471,36 @@ bool doNetflowCut(NGHolder &h,
     for (const auto &e : cut) {
         set<ue2_literal> lits = getLiteralSet(h, e);
         sanitizeAndCompressAndScore(lits);
-
+        // ==TODO: lits某一条边全0，直接break，清空cut_lits, return false
+        bool all_tail_zero = true;
+        for (const auto &lit : lits) {
+            if (lit.empty()) {
+                continue; // 空字面量跳过
+            }
+            
+            // 检查尾部8字节
+            size_t check_len = std::min(lit.length(), size_t(8));
+            bool has_nonzero = false;
+            
+            const std::string &str = lit.get_string();
+            for (size_t i = str.length() - check_len; i < str.length(); ++i) {
+                if (str[i] != '\0') {
+                    has_nonzero = true;
+                    break;
+                }
+            }
+            
+            if (has_nonzero) {
+                all_tail_zero = false;
+                break;
+            }
+        }
+        
+        // 如果某条边的所有字面量尾部8字节都为0，清空cut_lits并返回false
+        if (all_tail_zero && !lits.empty()) {
+            cut_lits.clear();
+            return false;
+        }
         cut_lits[e] = lits;
     }
 
@@ -2376,6 +2483,31 @@ bool replaceSuffixWithInfix(const NGHolder &h, RoseInGraph &vg,
 
     for (NFAVertex v : inv_adjacent_vertices_range(h.accept, h)) {
         set<ue2_literal> ss = getLiteralSet(h, v, false);
+        // ==TODO: 过滤尾部8字节全为0的ss
+        for (auto it = ss.begin(); it != ss.end(); ) {
+            size_t len = it->length();
+            bool should_remove = false;
+            
+            if (len >= 8) {
+                const std::string& s = it->get_string();
+                bool zero_tail = true;
+                
+                for (size_t i = len - 8; i < len; i++) {
+                    if (s[i] != 0) {
+                        zero_tail = false;
+                        break;
+                    }
+                }
+                
+                should_remove = zero_tail;
+            }
+            
+            if (should_remove) {
+                it = ss.erase(it);
+            } else {
+                ++it;
+            }
+        }
         if (ss.empty()) {
             DEBUG_PRINTF("candidate is too shitty\n");
             return false;
@@ -2394,6 +2526,31 @@ bool replaceSuffixWithInfix(const NGHolder &h, RoseInGraph &vg,
         }
 
         set<ue2_literal> ss = getLiteralSet(h, v, false);
+        // ==TODO: 过滤尾部8字节全为0的ss
+        for (auto it = ss.begin(); it != ss.end(); ) {
+            size_t len = it->length();
+            bool should_remove = false;
+            
+            if (len >= 8) {
+                const std::string& s = it->get_string();
+                bool zero_tail = true;
+                
+                for (size_t i = len - 8; i < len; i++) {
+                    if (s[i] != 0) {
+                        zero_tail = false;
+                        break;
+                    }
+                }
+                
+                should_remove = zero_tail;
+            }
+            
+            if (should_remove) {
+                it = ss.erase(it);
+            } else {
+                ++it;
+            }
+        }
         if (ss.empty()) {
             DEBUG_PRINTF("candidate is too shitty\n");
             return false;
@@ -2520,6 +2677,28 @@ bool leadingDotStartLiteral(const NGHolder &h, VertLitInfo *out) {
     }
 
     DEBUG_PRINTF("%zu found %s\n", h[v].index, dumpString(lit).c_str());
+    // ==TODO: 过滤尾部8字节全为0的字符串,不给out->lit = {lit}赋值
+    {
+        size_t lit_len = lit.length();
+        
+        // 检查长度 >= 8 且尾部8字节全为0
+        if (lit_len >= 8) {
+            const std::string& s = lit.get_string();
+            bool all_zero = true;
+            
+            for (size_t i = lit_len - 8; i < lit_len; i++) {
+                if (s[i] != 0) {
+                    all_zero = false;
+                    break;
+                }
+            }
+            // todo 直接过滤，返回false，不给out->lit = {lit}赋值
+            if(all_zero){
+                return false;
+            }
+
+        }
+    }
     out->vv = {v};
     out->lit = {lit};
     return true;
