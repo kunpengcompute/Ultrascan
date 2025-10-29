@@ -179,7 +179,12 @@ bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v, const bool anchored,
         DEBUG_PRINTF("skipping literal of length 1\n");
         return false;
     }
-
+    if (literal.length() >= 8) {
+        const std::string &str = literal;  // 获取底层字符串
+        if (memcmp(str.c_str() + str.length() - 8, "\0\0\0\0\0\0\0\0", 8) == 0) {
+            return false;
+        }
+    }
     ng.rose->add(anchored, eod, ue2_literal(literal, nocase), g[u].reports);
 
     // Remove the terminal vertex. Later, we rely on pruneUseless to remove the

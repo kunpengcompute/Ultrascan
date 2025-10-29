@@ -919,8 +919,8 @@ typedef hwlm_error_t (*FDRFUNCTYPE)(const struct FDR *fdr,
                                     hwlm_group_t control);
 
 static const FDRFUNCTYPE funcs[] = {
-    KHSEL_FdrEngineExec,
-    NULL, /* old: fast teddy */
+    KHSEL_FdrEngineExec, /* KHSEL_FdrEngineExec */
+    KHSEL_NeoFdrEngineExec, /* KHSEL_NeoFdrEngineExec */
     NULL, /* old: fast teddy */
     ONLY_AVX2(fdr_exec_fat_teddy_msks1),
     ONLY_AVX2(fdr_exec_fat_teddy_msks1_pck),
@@ -963,6 +963,7 @@ hwlm_error_t fdrExec(const struct FDR *fdr, const u8 *buf, size_t len,
     if (unlikely(a.start_offset >= a.len)) {
         return HWLM_SUCCESS;
     } else {
+        // printf("=============== into fdrexec %d ================\n", fdr->engineID);
         assert(funcs[fdr->engineID]);
         return funcs[fdr->engineID](fdr, &a, groups);
     }
