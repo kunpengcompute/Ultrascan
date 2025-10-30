@@ -963,7 +963,6 @@ hwlm_error_t fdrExec(const struct FDR *fdr, const u8 *buf, size_t len,
     if (unlikely(a.start_offset >= a.len)) {
         return HWLM_SUCCESS;
     } else {
-        // printf("=============== into fdrexec %d ================\n", fdr->engineID);
         assert(funcs[fdr->engineID]);
         return funcs[fdr->engineID](fdr, &a, groups);
     }
