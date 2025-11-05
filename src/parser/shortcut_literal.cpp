@@ -161,7 +161,7 @@ public:
 ConstructLiteralVisitor::~ConstructLiteralVisitor() {}
 
 /** \brief True if the literal expression \a expr could be added to Rose. */
-bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags) {
+bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const CompileContext &cc) {
     assert(pe.component);
 
     if (!ng.cc.grey.allowLiteral) {
@@ -195,8 +195,10 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags) {
     }
 
     if ((lit.length() <= 1)) {
-        if (lit.length() == 1) {
-            return ng.rose->addChar(lit, expr.index, expr.report, expr.highlander, expr.som, expr.quiet, ng, flags);
+        if (cc.grey.allowLily) {
+            if (lit.length() == 1) {
+                return ng.rose->addChar(lit, expr.index, expr.report, expr.highlander, expr.som, expr.quiet, ng, flags);
+            }
         }
         DEBUG_PRINTF("not shortcutting SEP literal\n");
         return false;

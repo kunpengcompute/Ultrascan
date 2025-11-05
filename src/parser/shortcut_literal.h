@@ -33,13 +33,15 @@
 #ifndef SHORTCUT_LITERAL_H
 #define SHORTCUT_LITERAL_H
 
+#include "util/compile_context.h"
+
 namespace ue2 {
 
 class NG;
 class ParsedExpression;
 
 /** \brief True if the literal expression \a expr could be added to Rose. */
-bool shortcutLiteral(NG &ng, const ParsedExpression &expr, unsigned flags);
+bool shortcutLiteral(NG &ng, const ParsedExpression &expr, unsigned flags, const CompileContext & cc);
 
 } // namespace ue2
 
