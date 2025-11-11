@@ -44,7 +44,7 @@ using namespace std;
 
 namespace ue2 {
 
-Grey::Grey(void) :
+Grey::Grey(bool applyOverrides) :
                    optimiseComponentTree(true),
                    calcComponents(true),
                    performGraphSimplification(true),
@@ -169,26 +169,62 @@ Grey::Grey(void) :
                    limitApproxMatchingVertices(5000)
 {
     assert(maxAnchoredRegion < 64); /* a[lm]_log_sum have limited capacity */
-    char cwd[PATH_MAX];
-    if (!getcwd(cwd, sizeof(cwd))) {
+    
+    if (!applyOverrides) {
         return;
     }
-    std::string path = std::string(cwd) + "/../config.txt";
-    if (access(path.c_str(), F_OK) != 0) {
-        return;
-    }
+    
+    char exe_path[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len == -1) {
+        char cwd[PATH_MAX];
+        if (!getcwd(cwd, sizeof(cwd))) {
+            return;
+        }
+        std::string path = std::string(cwd) + "/config.txt";
+        if (access(path.c_str(), F_OK) != 0) {
+            return;
+        }
+        
+        std::ifstream file(path);
+        if (!file.is_open()) {
+            return;
+        }
 
-    std::ifstream file(path);
-    if (!file.is_open()) {
+        std::string line;
+        if (std::getline(file, line)) {
+            applyGreyOverrides(this, line);
+        }
+        file.close();
         return;
     }
-
-    std::string line;
-    if (std::getline(file, line)) {
-        static string configText = line;
-        applyGreyOverrides(this, line);
+    
+    exe_path[len] = '\0';
+    
+    std::string exe_dir(exe_path);
+    size_t last_slash = exe_dir.find_last_of('/');
+    if (last_slash != std::string::npos) {
+        exe_dir = exe_dir.substr(0, last_slash);
     }
-    file.close();
+    
+    std::vector<std::string> config_paths;
+    config_paths.push_back(exe_dir + "/config.txt");
+    config_paths.push_back(exe_dir + "/../config.txt");
+    config_paths.push_back(exe_dir + "/../../config.txt");
+    
+    for (const auto& path : config_paths) {
+        if (access(path.c_str(), F_OK) == 0) {
+            std::ifstream file(path);
+            if (file.is_open()) {
+                std::string line;
+                if (std::getline(file, line)) {
+                    applyGreyOverrides(this, line);
+                }
+                file.close();
+                return;
+            }
+        }
+    }
 }
 
 } // namespace ue2
@@ -203,7 +239,8 @@ void applyGreyOverrides(Grey *g, const string &s) {
     string::const_iterator pe = s.end();
     string help = "help:0";
     bool invalid_key_seen = false;
-    Grey defaultg;
+
+    Grey defaultg(false);
 
     if (s == "help" || s == "help:") {
         printf("Valid grey overrides:\n");

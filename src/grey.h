@@ -37,7 +37,7 @@
 namespace ue2 {
 
 struct Grey {
-    Grey(void);
+    Grey(bool applyOverrides = true);
 
     bool optimiseComponentTree;
 
