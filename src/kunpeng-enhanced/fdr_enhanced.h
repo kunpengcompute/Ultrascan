@@ -31,9 +31,9 @@
 
 #include <stdio.h>
 #include "ue2common.h"
-#include "../src/core/include/khsel_hwlm.h" // for hwlm_group_t, HWLMCallback
-#include "../src/core/include/khsel_fdr_internal.h"
-#include "../src/core/include/simd_arm.h"
+#include "khsel_hwlm.h" // for hwlm_group_t, HWLMCallback
+#include "khsel_fdr_internal.h"
+#include "simd_arm.h"
 
 #ifdef __aarch64__
 #define NO_ASM

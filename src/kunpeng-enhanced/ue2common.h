@@ -66,7 +66,7 @@ typedef unsigned long long KHSEL_ALIGN_ATTR(8) u64a;
 typedef signed long long KHSEL_ALIGN_ATTR(8) s64a;
 
 /* get the SIMD types */
-#include "../src/core/include/simd_types.h"
+#include "simd_types.h"
 
 typedef u32 ReportID;
 // define HS_OPTIMIZE in cmakefile
