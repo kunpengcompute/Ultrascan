@@ -34,7 +34,6 @@
 #include "rose_internal.h"
 #include "khsel_runtime.h"
 #include "report.h"
-#include "securec.h"
 
 #define GET_LO_4(chars) And128(chars, low4bits)
 #define GET_HI_4(chars) Rshift8_m128(chars, BYTE_SIZE_FOUR)
@@ -156,7 +155,7 @@ int runLily(const char *maskLily, u32 *reportVec, u32 *ekeyVec, hs_scratch_t *sc
     }
 
     u8 zerobuf[16] = {0};
-    memcpy_s(zerobuf, step, itPtr, length - (itPtr - buffer));
+    memcpy(zerobuf, itPtr, length - (itPtr - buffer));
     m128 chars = Loadu128(zerobuf);
     
     m128 c_lo  = Pshufb_m128_opt(mask_lo, GET_LO_4(chars));

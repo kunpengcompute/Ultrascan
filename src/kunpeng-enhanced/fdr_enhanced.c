@@ -29,7 +29,7 @@
  */
 
 #include "core_precomp.h"
-#include "../src/core/include/simd_types.h"
+#include "simd_types.h"
 #include "fdr_confirm_runtime.h"
 #include "fdr_loadval.h"
 #include "fdr_enhanced.h"
