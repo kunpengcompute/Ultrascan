@@ -1770,11 +1770,12 @@ bool RoseBuildImpl::addChar(const ue2_literal &lit, u32 expr_index,
         id = rm.getInternalId(r);
     }
 
-    DEBUG_PRINTF("success: graph is literal '%s', report ID %u\n",
-                 dumpString(lit).c_str(), id);
+    // Set both internal and external report IDs for Lily
+    DEBUG_PRINTF("success: graph is literal '%s', internal report ID %u, external report ID %u\n",
+                 dumpString(lit).c_str(), id, external_report);
     ng.minWidth = depth(1);
     std::pair<ReportID, unsigned> p(id, flags);
-    lilyReport report = {id, ekey, flags};
+    lilyReport report = {id, external_report, ekey, flags};
     if (this->lily.size() < 8) {
         auto res = this->lily.insert(std::pair<char, lilyReport>(lit.get_string()[0], report));
         return (res.second);

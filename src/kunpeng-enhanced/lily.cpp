@@ -52,7 +52,7 @@ std::vector<u8> buildLily(std::map<char, lilyReport> &lily, std::vector<u32> &re
         }
         lo_a[lo] |= idx;
         idx = idx << 1;
-        reportVec[litCount] = it.second.ReportID;
+        reportVec[litCount] = it.second.external_report;
         ekeyVec[litCount] = it.second.ekey;
         litCount++;
     }

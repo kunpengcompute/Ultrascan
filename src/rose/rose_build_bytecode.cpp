@@ -3188,7 +3188,7 @@ set<ReportID> findEngineReports(const RoseBuildImpl &build) {
 
     for (const auto &it : build.lily) {
         std::set<ReportID> set_t;
-        set_t.insert(it.second.ReportID);
+        set_t.insert(it.second.internal_id);
         insert(&reports, set_t);
     }
 
