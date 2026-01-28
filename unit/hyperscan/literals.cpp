@@ -33,6 +33,7 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <boost/random.hpp>
 
 using namespace std;
@@ -238,6 +239,63 @@ static const unsigned test_flags[] = {0, HS_FLAG_SINGLEMATCH,
 static const unsigned test_sizes[] = {1, 10, 100, 500, 10000};
 
 static const pair<unsigned, unsigned> test_bounds[] = {{3u, 10u}, {10u, 100u}};
+
+// Test for Lily algorithm - single character literals with specific report IDs
+TEST(HyperscanLiteralTest, LilySingleCharReportIDs) {
+    // Test with single character literals and specific report IDs
+    // This test verifies that the Lily algorithm correctly reports the right IDs
+    vector<pattern> patterns;
+    
+    // Add single character patterns with different report IDs
+    patterns.emplace_back("a", 0, 100);  // 'a' with report ID 100
+    patterns.emplace_back("b", 0, 200);  // 'b' with report ID 200
+    patterns.emplace_back("c", 0, 300);  // 'c' with report ID 300
+    patterns.emplace_back("d", 0, 400);  // 'd' with report ID 400
+    patterns.emplace_back("e", 0, 500);  // 'e' with report ID 500
+    patterns.emplace_back("f", 0, 600);  // 'f' with report ID 600
+    patterns.emplace_back("g", 0, 700);  // 'g' with report ID 700
+    patterns.emplace_back("h", 0, 800);  // 'h' with report ID 800
+    
+    // Build database in block mode
+    const unsigned mode = HS_MODE_BLOCK;
+    auto *db = buildDB(patterns, mode);
+    ASSERT_TRUE(db != nullptr);
+    
+    // Scratch space
+    hs_scratch_t *scratch = nullptr;
+    hs_error_t err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    
+    // Test string containing all characters
+    const string test_str = "abcdefgh";
+    
+    // Track which report IDs were found
+    unordered_set<unsigned> found_ids;
+    
+    // Callback function to capture report IDs
+    auto capture_id_cb = [](unsigned int id, unsigned long long, 
+                            unsigned long long, unsigned int, 
+                            void *ctxt) -> int {
+        auto *ids = static_cast<unordered_set<unsigned>*>(ctxt);
+        ids->insert(id);
+        return 0;
+    };
+    
+    // Scan the test string
+    err = hs_scan(db, test_str.c_str(), test_str.size(), 0, scratch, capture_id_cb, &found_ids);
+    ASSERT_EQ(HS_SUCCESS, err);
+    
+    // Verify all report IDs were found
+    ASSERT_EQ(found_ids.size(), patterns.size());
+    for (const auto &p : patterns) {
+        ASSERT_TRUE(found_ids.count(p.id) > 0) << "Report ID " << p.id << " not found";
+    }
+    
+    // Free resources
+    err = hs_free_scratch(scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    hs_free_database(db);
+}
 
 INSTANTIATE_TEST_CASE_P(LiteralTest, HyperscanLiteralTest,
                         Combine(ValuesIn(test_modes), ValuesIn(test_flags),

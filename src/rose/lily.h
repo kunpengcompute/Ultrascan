@@ -7,7 +7,8 @@
 #include <map>
 
 typedef struct {
-    u32 ReportID;
+    u32 internal_id;    // 内部报告ID，用于构建过程
+    u32 external_report; // 外部报告ID，用于运行时
     u32 ekey;
     unsigned flags;
 } lilyReport;
