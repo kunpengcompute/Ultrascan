@@ -171,7 +171,8 @@ struct Grey {
         DUMP_BASICS     = 1 << 0, // Dump basic textual data
         DUMP_PARSE      = 1 << 1, // Dump component tree to .txt
         DUMP_INT_GRAPH  = 1 << 2, // Dump non-implementation graphs
-        DUMP_IMPL       = 1 << 3  // Dump implementation graphs
+        DUMP_IMPL       = 1 << 3, // Dump implementation graphs
+        DUMP_LILY       = 1 << 4  // Dump Lily matcher data
     };
 
     u32 dumpFlags;
