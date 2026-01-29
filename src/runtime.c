@@ -435,6 +435,8 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
     }
 
 done_scan:
+    // 兜底上报Lily暂存项
+    flushStoredLilyMatches(scratch, ALL_LILY_MATCH_ITEMS);
     if (unlikely(internal_matching_error(scratch))) {
         unmarkScratchInUse(scratch);
         return HS_UNKNOWN_ERROR;
@@ -974,6 +976,8 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
             }
         }
     }
+    // 兜底上报Lily暂存项
+    flushStoredLilyMatches(scratch, ALL_LILY_MATCH_ITEMS);
 
     if (rose->hasSom && !told_to_stop_matching(scratch)) {
         int halt = flushStoredSomMatches(scratch, ~0ULL);
