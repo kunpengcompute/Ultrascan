@@ -47,6 +47,14 @@ extern "C"
  */
 hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch);
 
+// LilyMatchItem相关常量
+#define LILY_TO_OFFSET_MAX        (((unsigned long long)1 << LILY_TO_OFFSET_BITS) - 1U)
+#define ALL_LILY_MATCH_ITEMS ((u64a)-1) // 标识上报所有Lily匹配项
+// Lily缓存匹配项操作函数声明
+void initLilyItems(hs_scratch_t *scratch);
+int pushLilyItems(hs_scratch_t *scratch, const LilyMatchItem *item);
+int flushStoredLilyMatches(hs_scratch_t *scratch, u64a to_offset);
+
 
 #ifdef __cplusplus
 } /* extern "C" */

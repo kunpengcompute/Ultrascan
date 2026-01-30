@@ -48,6 +48,9 @@ typedef u64a rose_group;
 #define MAX_DELAY                   (DELAY_SLOT_COUNT - 1)
 #define DELAY_MASK                  (DELAY_SLOT_COUNT - 1)
 
+// 最大支持的lily匹配数限制
+#define LILY_ITEMS_COUNT            4096
+
 /* Allocation of Rose literal ids
  *
  * The rose literal id space is segmented:

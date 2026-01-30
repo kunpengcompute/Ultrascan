@@ -65,6 +65,16 @@ struct queue_match {
     u32 queue; /**< queue index. */
 };
 
+#define LILY_REPORT_INDEX_BITS    3U
+#define LILY_TO_OFFSET_BITS       61U
+
+// LilyMatchItem结构体（8字节位域）
+struct LilyMatchItem {
+    unsigned long long onmatch_index : LILY_REPORT_INDEX_BITS; // 低3bit：ReportID索引(0~7)
+    unsigned long long toOffset      : LILY_TO_OFFSET_BITS;    // 剩余61bit：toOffset值
+};
+typedef struct LilyMatchItem LilyMatchItem;
+
 struct catchup_pq {
     struct queue_match *qm;
     u32 qm_size; /**< current size of the priority queue */
@@ -211,6 +221,10 @@ struct ALIGN_CL_DIRECTIVE hs_scratch {
     u64a *fdr_conf; /**< FDR confirm value */
     u8 fdr_conf_offset; /**< offset where FDR/Teddy front end matches
                          * in buffer */
+    struct LilyMatchItem *lily_items;  // 数组用于暂存lily匹配项
+    size_t lily_items_start; // 未上报的起始下标，初始为0
+    size_t lily_items_size;          // 当前元素数
+    size_t lily_items_capacity;      // 容量（预分配）
 };
 
 /* array of fatbit ptr; TODO: why not an array of fatbits? */

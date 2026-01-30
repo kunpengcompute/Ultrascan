@@ -57,6 +57,8 @@ typedef struct hs_scratch hs_scratch_t;
 
 #define BYTE_SIZE_FOUR 4
 #define LILY_VEC_LEN 8
+// LilyMatchItem相关常量
+#define LILY_TO_OFFSET_MAX        (((unsigned long long)1 << LILY_TO_OFFSET_BITS) - 1U)
 #define INVALID_EKEY    (~(u32)0)
 #define KHSEL_MO_HALT_MATCHING 0
 #define KHSEL_MO_CONTINUE_MATCHING 1
@@ -83,6 +85,12 @@ typedef struct hs_scratch hs_scratch_t;
  */
 hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch);
 
+
+#define ALL_LILY_MATCH_ITEMS ((u64a)-1) // 标识上报所有Lily匹配项
+// Lily缓存匹配项操作函数声明
+void initLilyItems(hs_scratch_t *scratch);
+int pushLilyItems(hs_scratch_t *scratch, const LilyMatchItem *item);
+int flushStoredLilyMatches(hs_scratch_t *scratch, u64a to_offset);
 
 #ifdef __cplusplus
 } /* extern "C" */
