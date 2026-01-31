@@ -207,6 +207,7 @@ int lilyMatch(u64a conf, u32 *ekeyVec, const u8 *ptr, hs_scratch_t *scratch)
         return -1;
     }
     const u8 bucket = 8;
+    size_t i = 0;
 
     do {
         u32 bit = CTZ64(conf);
@@ -214,10 +215,10 @@ int lilyMatch(u64a conf, u32 *ekeyVec, const u8 *ptr, hs_scratch_t *scratch)
         u32 index = bit % bucket;
         conf = conf & (conf - 1);
 
-        size_t i = ptr - scratch->core_info.buf + byte;
 
         if (ekeyVec[index] == INVALID_EKEY ||
             !IsExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) {
+            i = scratch->core_info.buf_offset + ptr - scratch->core_info.buf + byte;
             int ret = RoseDeliverReport(i + 1 , index, 0, scratch, ekeyVec[index]);
             if (ret == 0) { // 上报异常，终止后续操作
                 return 1;
