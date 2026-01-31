@@ -948,6 +948,11 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
         }
     }
 
+    hs_error_t lilyResult = 0;
+    if (rose->lilyOffset) {
+        lilyResult = KHSEL_LilyRunExec(rose, scratch);
+    }
+
     switch (rose->runtimeImpl) {
     default:
         assert(0);
@@ -961,19 +966,17 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
         soleOutfixStreamExec(id, scratch);
     }
 
-    if (rose->lilyOffset) {
 
-        if (KHSEL_LilyRunExec(rose, scratch) == 1) {
-            scratch->core_info.status = STATUS_TERMINATED;
+    if (lilyResult == 1) {
+        scratch->core_info.status = STATUS_TERMINATED;
+    } else if (rose->lilyOffset) {
+        // highlander
+        if (!told_to_stop_matching(scratch) &&
+            isAllExhausted(rose, scratch->core_info.exhaustionVector)) {
+            DEBUG_PRINTF("stream exhausted\n");
+            scratch->core_info.status |= STATUS_EXHAUSTED;
         } else {
-            // highlander
-            if (!told_to_stop_matching(scratch) &&
-                isAllExhausted(rose, scratch->core_info.exhaustionVector)) {
-                DEBUG_PRINTF("stream exhausted\n");
-                scratch->core_info.status |= STATUS_EXHAUSTED;
-            } else {
-                scratch->core_info.status &= (0xFF - STATUS_EXHAUSTED);
-            }
+            scratch->core_info.status &= (0xFF - STATUS_EXHAUSTED);
         }
     }
     // 兜底上报Lily暂存项
