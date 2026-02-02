@@ -2242,6 +2242,7 @@ void roseDumpStructRaw(const RoseEngine *t, FILE *f) {
     DUMP_U32(t, amatcherMinWidth);
     DUMP_U32(t, fmatcherMinWidth);
     DUMP_U32(t, eodmatcherMinWidth);
+    DUMP_U32(t, lilyOffset);
     DUMP_U32(t, amatcherMaxBiAnchoredWidth);
     DUMP_U32(t, fmatcherMaxBiAnchoredWidth);
     DUMP_U32(t, reportProgramOffset);
@@ -2345,6 +2346,63 @@ void roseDumpPrograms(const vector<LitFragment> &fragments, const RoseEngine *t,
 }
 
 static
+void roseDumpLily(const RoseBuildImpl &build, const RoseEngine *t, const string &base) {
+    if (!t->lilyOffset) {
+        return; // No Lily data available
+    }
+
+    // Open output file
+    FILE *f = fopen((base + "/rose_lily.txt").c_str(), "w");
+    if (!f) {
+        return;
+    }
+
+    fprintf(f, "Lily Matcher Data:\n");
+    fprintf(f, "====================\n");
+    fprintf(f, "lilyOffset: 0x%08x\n\n", t->lilyOffset);
+
+    // Get pointers to Lily data
+    const char *maskLily = (const char *)t + t->lilyOffset;
+
+    // Dump Lily mask data
+    fprintf(f, "Lily Mask (32 bytes):\n");
+    for (size_t i = 0; i < LILY_VEC_LEN * sizeof(u32); i++) {
+        fprintf(f, "%02x ", (unsigned char)maskLily[i]);
+        if ((i + 1) % 16 == 0) {
+            fprintf(f, "\n");
+        }
+    }
+    fprintf(f, "\n\n");
+
+    // Dump Lily patterns (characters and their corresponding report information)
+    uint8_t idx = 0;
+    fprintf(f, "Lily Patterns:\n");
+    fprintf(f, "===================================================\n");
+    fprintf(f, "Char | Internal ID | External ID | EKey | Bit Mask\n");
+    fprintf(f, "---------------------------------------------------\n");
+
+    for (const auto &entry : build.lily) {
+        const char c = entry.first;
+        const lilyReport &lr = entry.second;
+
+        // Determine if the character is printable
+        char buffer[5];
+        if (isprint((unsigned char)c)) {
+            snprintf(buffer, sizeof(buffer), "\'%c\' ", (unsigned char)c);
+        } else {
+            snprintf(buffer, sizeof(buffer), "\\x%02x", (unsigned char)c);
+        }
+
+        fprintf(f, "%4s | %11d | %11d | %4d | %3d:0x%02x\n", 
+                buffer, lr.internal_id, lr.external_report, lr.ekey, idx, 1 << idx);
+        ++idx;
+    }
+    fprintf(f, "\n");
+
+    fclose(f);
+}
+
+static
 void roseDumpLiteralMatchers(const RoseEngine *t, const string &base) {
     if (const HWLM *hwlm = getFloatingMatcher(t)) {
         hwlmGenerateDumpFiles(hwlm, base + "/lit_table_floating");
@@ -2393,6 +2451,11 @@ void dumpRose(const RoseBuildImpl &build, const vector<LitFragment> &fragments,
 
     // Literals
     dumpRoseLiterals(build, fragments, grey);
+
+    // Lily matcher data
+    if (grey.dumpFlags & Grey::DUMP_LILY) {
+        roseDumpLily(build, t, grey.dumpPath);
+    }
 
     f = StdioFile(grey.dumpPath + "/rose_struct.txt", "w");
     roseDumpStructRaw(t, f);
