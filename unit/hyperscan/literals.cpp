@@ -297,6 +297,97 @@ TEST(HyperscanLiteralTest, LilySingleCharReportIDs) {
     hs_free_database(db);
 }
 
+// Block块模式多引擎联合匹配，上报顺序校验
+TEST(MMAdaptor, RoseAfterLilyBlockMode) {
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    CallBackContext c;
+    const string data = "a456a";
+    const char *expr[] = {"a", "456"};
+    unsigned flags[] = {0, 0};
+    unsigned ids[] = {10, 20};
+
+    // 编译多规则集，块模式
+    hs_error_t err = hs_compile_multi(expr, flags, ids, 2, HS_MODE_BLOCK,
+                                      nullptr, &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(scratch != nullptr);
+
+    // 初始化上下文+块模式扫描
+    c.clear();
+    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, record_cb, (void *)&c);
+    ASSERT_EQ(HS_SUCCESS, err);
+
+    // 校验1：匹配数量（3次）
+    ASSERT_EQ(3U, c.matches.size());
+    // 校验2：目标匹配记录存在
+    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(1, 10)) != c.matches.end());
+    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(4, 20)) != c.matches.end());
+    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(5, 10)) != c.matches.end());
+    // 校验3：to严格递增
+    for (size_t i = 1; i < c.matches.size(); ++i) {
+        ASSERT_TRUE(c.matches[i].to > c.matches[i-1].to);
+    }
+
+    hs_free_database(db);
+    err = hs_free_scratch(scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    hs_free_compile_error(compile_err);
+}
+
+// Stream流模式多引擎联合匹配，上报顺序校验
+TEST(MMAdaptor, RoseAfterLilyStreamSingleMode) {
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    CallBackContext c;
+    const string data = "a456a";
+    const char *expr[] = {"a", "456"};
+    unsigned flags[] = {0, 0};
+    unsigned ids[] = {10, 20};
+
+    // 编译多规则集，流模式
+    hs_error_t err = hs_compile_multi(expr, flags, ids, 2, HS_MODE_STREAM,
+                                      nullptr, &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(scratch != nullptr);
+
+    hs_stream_t *stream = nullptr;
+    err = hs_open_stream(db, 0, &stream);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(stream != nullptr);
+
+    // 初始化上下文+流模式扫描（对应hscollider的-t 1参数配置，整段数据一次扫描）
+    c.clear();
+    err = hs_scan_stream(stream, data.c_str(), data.size(), 0, scratch, record_cb, (void *)&c);
+    ASSERT_TRUE(err == HS_SUCCESS || err == HS_SCAN_TERMINATED);
+    err = hs_close_stream(stream, scratch, record_cb, (void *)&c);
+    ASSERT_EQ(HS_SUCCESS, err);
+
+    // 校验：数量+记录+to递增
+    ASSERT_EQ(3U, c.matches.size());
+    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(1, 10)) != c.matches.end());
+    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(4, 20)) != c.matches.end());
+    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(5, 10)) != c.matches.end());
+    for (size_t i = 1; i < c.matches.size(); ++i) {
+        ASSERT_TRUE(c.matches[i].to > c.matches[i-1].to);
+    }
+
+    hs_free_database(db);
+    err = hs_free_scratch(scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    hs_free_compile_error(compile_err);
+}
+
 INSTANTIATE_TEST_CASE_P(LiteralTest, HyperscanLiteralTest,
                         Combine(ValuesIn(test_modes), ValuesIn(test_flags),
                                 ValuesIn(test_sizes), ValuesIn(test_bounds),
