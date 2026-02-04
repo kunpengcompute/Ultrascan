@@ -35,6 +35,7 @@
 #include "khsel_runtime.h"
 #include "report.h"
 #include "hs_common.h"
+#include "hs_compile.h"
 
 #define GET_LO_4(chars) And128(chars, low4bits)
 #define GET_HI_4(chars) Rshift8_m128(chars, BYTE_SIZE_FOUR)
@@ -69,6 +70,17 @@ u32 *getLilyEkeyVec(const struct RoseEngine *t)
     size_t offset = 0x2 * LILY_VEC_LEN * BYTE_SIZE_FOUR;
     u32 *ekeyVec = (u32 *)((const char *)t + t->lilyOffset + offset);
     return ekeyVec;
+}
+
+static REALLY_INLINE
+u8 getLilyQuietFlags(const struct RoseEngine *t)
+{
+    if (!t->lilyOffset) {
+        return 0;
+    }
+    size_t offset = 0x2 * LILY_VEC_LEN * BYTE_SIZE_FOUR;
+    u8 flagsQuiet = *((u8 *)((const char *)t + t->lilyOffset + offset + LILY_VEC_LEN * BYTE_SIZE_FOUR));
+    return flagsQuiet;
 }
 
 REALLY_INLINE
@@ -201,7 +213,7 @@ int RoseDeliverReport(u64a offset, uint8_t index, s32 offset_adjust,
 }
 
 static REALLY_INLINE
-int lilyMatch(u64a conf, u32 *ekeyVec, const u8 *ptr, hs_scratch_t *scratch)
+int lilyMatch(u64a conf, u32 *ekeyVec, u8 flagsQuiet, const u8 *ptr, hs_scratch_t *scratch)
 {
     if (likely(!conf)) {
         return -1;
@@ -215,9 +227,10 @@ int lilyMatch(u64a conf, u32 *ekeyVec, const u8 *ptr, hs_scratch_t *scratch)
         u32 index = bit % bucket;
         conf = conf & (conf - 1);
 
-
-        if (ekeyVec[index] == INVALID_EKEY ||
-            !IsExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) {
+        // 只有当规则不是quiet模式时才上报
+        if ((ekeyVec[index] == INVALID_EKEY ||
+            !IsExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) &&
+            !(flagsQuiet & (1 << index))) {
             i = scratch->core_info.buf_offset + ptr - scratch->core_info.buf + byte;
             int ret = RoseDeliverReport(i + 1 , index, 0, scratch, ekeyVec[index]);
             if (ret == 0) { // 上报异常，终止后续操作
@@ -229,7 +242,7 @@ int lilyMatch(u64a conf, u32 *ekeyVec, const u8 *ptr, hs_scratch_t *scratch)
 }
 
 static REALLY_INLINE
-int runLily(const char *maskLily, u32 *ekeyVec, hs_scratch_t *scratch)
+int runLily(const char *maskLily, u32 *ekeyVec, u8 flagsQuiet, hs_scratch_t *scratch)
 {
     const size_t step = 16;
     const u8 *buffer = scratch->core_info.buf;
@@ -250,8 +263,8 @@ int runLily(const char *maskLily, u32 *ekeyVec, hs_scratch_t *scratch)
 
         u64a conf0 = vgetq_lane_u64(rst.vectU64, 0);
         u64a conf8 = vgetq_lane_u64(rst.vectU64, 1);
-        if (lilyMatch(conf0, ekeyVec, itPtr, scratch) == KHSEL_MATCHING_TERMINATED ||
-            lilyMatch(conf8, ekeyVec, itPtr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {
+        if (lilyMatch(conf0, ekeyVec, flagsQuiet, itPtr, scratch) == KHSEL_MATCHING_TERMINATED ||
+            lilyMatch(conf8, ekeyVec, flagsQuiet, itPtr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {
             return KHSEL_MATCHING_TERMINATED;
         }
     }
@@ -266,8 +279,8 @@ int runLily(const char *maskLily, u32 *ekeyVec, hs_scratch_t *scratch)
 
     u64a conf0 = vgetq_lane_u64(rst.vectU64, 0);
     u64a conf8 = vgetq_lane_u64(rst.vectU64, 1);
-    if (lilyMatch(conf0, ekeyVec, itPtr, scratch) == KHSEL_MATCHING_TERMINATED ||
-        lilyMatch(conf8, ekeyVec, itPtr + 8, scratch) == 1) {
+    if (lilyMatch(conf0, ekeyVec, flagsQuiet, itPtr, scratch) == KHSEL_MATCHING_TERMINATED ||
+        lilyMatch(conf8, ekeyVec, flagsQuiet, itPtr + 8, scratch) == 1) {
         return KHSEL_MATCHING_TERMINATED;
     }
     return KHSEL_MATCHING_SUCCESS;
@@ -276,11 +289,12 @@ int runLily(const char *maskLily, u32 *ekeyVec, hs_scratch_t *scratch)
 hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch)
 {
     u32 *ekeyVec = getLilyEkeyVec(rose);
+    u8 flagsQuiet = getLilyQuietFlags(rose);
     const char *maskLily = getLily(rose);
 
     initLilyItems(scratch);
 
-    hs_error_t ret = runLily(maskLily, ekeyVec, scratch);
+    hs_error_t ret = runLily(maskLily, ekeyVec, flagsQuiet, scratch);
 
     // 初始化未上报起始位置（保证其他算法首次flush从0开始）
     scratch->lily_items_start = 0;

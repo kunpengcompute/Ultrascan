@@ -30,11 +30,10 @@
 #define LILY_H_
 
 #include "ue2common.h"
+#include "hs_compile.h"
 
 #include <vector>
 #include <map>
-
-#define HS_FLAG_CASELESS 1
 
 typedef struct {
     u32 internal_id;    // 内部报告ID，用于构建过程
@@ -43,7 +42,7 @@ typedef struct {
     unsigned flags;
 } lilyReport;
 
-std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily,
-                                std::vector<u32> &reportVec, std::vector<u32> &ekeyVec);
+std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily, std::vector<u32> &reportVec,
+                                std::vector<u32> &ekeyVec, u8 &flagsQuiet);
 
 #endif
