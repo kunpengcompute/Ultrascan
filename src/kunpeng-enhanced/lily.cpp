@@ -32,13 +32,17 @@
 #include <map>
 
 static REALLY_INLINE
-std::vector<u8> buildLily(std::map<char, lilyReport> &lily, std::vector<u32> &reportVec, std::vector<u32> &ekeyVec)
+std::vector<u8> buildLily(std::map<char, lilyReport> &lily, std::vector<u32> &reportVec, std::vector<u32> &ekeyVec, u8 &flagsQuiet)
 {
     std::vector<u8> singleMask;
     std::vector<u8> lo_a(16);
     std::vector<u8> hi_a(16);
     u8 idx = 1;
     int litCount = 0;
+    
+    // 初始化flagsQuiet为0
+    flagsQuiet = 0;
+    
     for (auto it : lily) {
         u8 t = it.first;
         u8 hi = t >> 4;
@@ -51,6 +55,12 @@ std::vector<u8> buildLily(std::map<char, lilyReport> &lily, std::vector<u32> &re
             hi_a[hi] |= idx;
         }
         lo_a[lo] |= idx;
+        
+        // 检查当前规则是否为quiet模式，如果是则设置对应位
+        if (it.second.flags & HS_FLAG_QUIET) {
+            flagsQuiet |= idx; // 使用idx作为位掩码
+        }
+        
         idx = idx << 1;
         reportVec[litCount] = it.second.external_report;
         ekeyVec[litCount] = it.second.ekey;
@@ -64,7 +74,7 @@ std::vector<u8> buildLily(std::map<char, lilyReport> &lily, std::vector<u32> &re
 }
 
 std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily,
-                                std::vector<u32> &reportVec, std::vector<u32> &ekeyVec)
+                                std::vector<u32> &reportVec, std::vector<u32> &ekeyVec, u8 &flagsQuiet)
 {
-    return buildLily(lily, reportVec, ekeyVec);
+    return buildLily(lily, reportVec, ekeyVec, flagsQuiet);
 }
