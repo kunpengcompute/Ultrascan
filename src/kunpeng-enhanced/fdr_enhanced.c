@@ -358,6 +358,12 @@ static REALLY_INLINE void KHSEL_CreateShortZone(const u8 *buf, const u8 *hend, c
     case 8:
         *(u64a *)zone_data = UnalignedLoadU64a(end - 8);
         break;
+    case 9:
+    case 10:
+    case 11:
+    case 12:
+    case 13:
+    case 14:
     case 15:
         *(u64a *)zone_data = UnalignedLoadU64a(end - copy_len);
         Unaligned_store_u64a(zone_data + copy_len - sizeof(u64a),

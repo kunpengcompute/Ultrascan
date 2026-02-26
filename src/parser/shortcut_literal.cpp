@@ -195,7 +195,7 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const C
     }
 
     if ((lit.length() <= 1)) {
-        if (cc.grey.allowLily) {
+        if (cc.grey.allowLily && !cc.streaming) {
             if (lit.length() == 1) {
                 return ng.rose->addChar(lit, expr.index, expr.report, expr.highlander, expr.som, expr.quiet, ng, flags);
             }

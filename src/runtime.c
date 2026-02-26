@@ -949,7 +949,7 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
     }
 
     hs_error_t lilyResult = 0;
-    if (rose->lilyOffset) {
+    if (rose->lilyOffset && !(rose->mode & HS_MODE_STREAM)) {
         lilyResult = KHSEL_LilyRunExec(rose, scratch);
     }
 
