@@ -79,6 +79,16 @@ struct LilyMatchItem {
 };
 typedef struct LilyMatchItem LilyMatchItem;
 
+struct LilyEngineCtx {
+    struct LilyMatchItem *items;    // 数组指针
+    size_t start;                   // 未上报的起始下标
+    size_t size;                    // 当前元素数
+    size_t capacity;                // 预分配容量
+};
+typedef struct LilyEngineCtx LilyEngineCtx;
+
+#define LILY_MATCH_ITEMS_PER_CACHELINE (64 / sizeof(struct LilyMatchItem))
+
 struct catchup_pq {
     struct queue_match *qm;
     u32 qm_size; /**< current size of the priority queue */
@@ -189,10 +199,8 @@ struct KHSEL_ALIGN_CL_DIRECTIVE hs_scratch {
     char *scratch_alloc;
     u64a *fdr_conf;
     u8 fdr_conf_offset;
-    struct LilyMatchItem *lily_items;  // 数组用于暂存lily匹配项
-    size_t lily_items_start; // 未上报的起始下标，初始为0
-    size_t lily_items_size;          // 当前元素数
-    size_t lily_items_capacity;      // 容量（预分配）
+    struct LilyEngineCtx lily_ctx;
+    struct LilyEngineCtx lily_for_teddy_ctx;
 };
 
 #ifdef __cplusplus

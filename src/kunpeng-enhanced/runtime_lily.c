@@ -84,41 +84,35 @@ u8 getLilyQuietFlags(const struct RoseEngine *t)
 }
 
 REALLY_INLINE
-int packLilyItem(uint8_t index, u64a toOffset, LilyMatchItem *out_item) {
-    if (index >= 8U || (unsigned long long)toOffset > LILY_TO_OFFSET_MAX) {
-        return HS_INVALID;
-    }
-    out_item->onmatch_index = index;
-    out_item->toOffset = (unsigned long long)toOffset;
-    return 0;
-}
-
-REALLY_INLINE
-u64a unpackToOffset(const LilyMatchItem *item) {
-    return (u64a)item->toOffset;
-}
-
-REALLY_INLINE
 void initLilyItems(hs_scratch_t *scratch) {
     if (!scratch) {
         return;
     }
-    scratch->lily_items_size = 0;
-    scratch->lily_items_start = 0;
+    scratch->lily_ctx.size = 0;
+    scratch->lily_ctx.start = 0;
 }
 
 REALLY_INLINE
-int pushLilyItems(hs_scratch_t *scratch, const LilyMatchItem *item) {
-    if (!scratch || !item || !scratch->lily_items || scratch->lily_items_capacity == 0) {
+void initLilyForTeddyItems(hs_scratch_t *scratch) {
+    if (!scratch) {
+        return;
+    }
+    scratch->lily_for_teddy_ctx.size = 0;
+    scratch->lily_for_teddy_ctx.start = 0;
+}
+
+REALLY_INLINE
+int pushLilyItems(const LilyMatchItem *item, LilyEngineCtx *ctx) {
+    if (!ctx || !item || !ctx->items || ctx->capacity == 0) {
         return HS_INVALID;
     }
 
-    if (scratch->lily_items_size >= scratch->lily_items_capacity) {
+    if (ctx->size >= ctx->capacity) {
         return HS_INSUFFICIENT_SPACE; // 空间不足直接返回报错，不插入新项
     }
 
     // 尾插, O(1)
-    scratch->lily_items[scratch->lily_items_size++] = *item;
+    ctx->items[ctx->size++] = *item;
     return 0;
 }
 
@@ -132,7 +126,7 @@ static REALLY_INLINE
 int lilyItemReport(hs_scratch_t *scratch, const LilyMatchItem *item, u32 *reportVec) {
     uint8_t index = item->onmatch_index;
     ReportID onmatch = reportVec[index];
-    u64a toOffset = unpackToOffset(item);
+    u64a toOffset = (u64a)item->toOffset;
 
     int halt = scratch->core_info.userCallback(onmatch, 0, toOffset, 0, scratch->core_info.userContext);
     if (halt) {
@@ -142,6 +136,69 @@ int lilyItemReport(hs_scratch_t *scratch, const LilyMatchItem *item, u32 *report
     }
 
     return 0;
+}
+
+// ===================== report_range（非交叉块批量上报） =====================
+static REALLY_INLINE
+void report_range(hs_scratch_t *scratch, LilyEngineCtx *ctx, size_t end, int *halt, u32 *report_vec)
+{
+    for (; ctx->start < end && !(*halt); ctx->start++) {
+        *halt = lilyItemReport(scratch, &ctx->items[ctx->start], report_vec);
+    }
+}
+
+// ===================== report_range_with_offset_check（剩余元素上报） =====================
+static REALLY_INLINE
+void report_range_with_offset_check(hs_scratch_t *scratch, LilyEngineCtx *ctx, size_t end, u64a to_offset,
+                                    int *halt, u32 *report_vec)
+{
+    for (; ctx->start < end && !(*halt); ctx->start++) {
+        if (likely((u64a)ctx->items[ctx->start].toOffset <= to_offset)) {
+            *halt = lilyItemReport(scratch, &ctx->items[ctx->start], report_vec);
+        } else {
+            break; /* 升序特性：当前项>阈值，后续均>，终止遍历 */
+        }
+    }
+}
+
+// ===================== process_cross_block（交叉块处理） =====================
+static REALLY_INLINE
+void process_cross_block(size_t l_block_end, size_t t_block_end, LilyEngineCtx *l_ctx, LilyEngineCtx *t_ctx,
+                         int *halt, hs_scratch_t *scratch, u64a to_offset, u32 **report_vec_table)
+{
+    size_t l_ptr = l_ctx->start;
+    size_t t_ptr = t_ctx->start;
+    // 当前阈值下队列是否还有有效项（升序特性，仅用于提前终止）
+    int l_has_valid = 1;
+    int t_has_valid = 1;
+    // 循环条件：halt+块范围+两队列首都有至少一个有效项
+    while (!(*halt) && l_has_valid && t_has_valid && l_ptr < l_block_end && t_ptr < t_block_end) {
+        // 解析当前项+有效性判断
+        uint64_t l_toOffset = (u64a)l_ctx->items[l_ptr].toOffset;
+        uint64_t t_toOffset = (u64a)t_ctx->items[t_ptr].toOffset;
+        l_has_valid = (l_toOffset <= to_offset);
+        t_has_valid = (t_toOffset <= to_offset);
+        // 上报决策
+        if (t_has_valid && (!l_has_valid || t_toOffset < l_toOffset)) {
+            *halt = lilyItemReport(scratch, &t_ctx->items[t_ptr], report_vec_table[HS_ENGINE_LILY_FOR_TEDDY]);
+            t_ptr++; /* 仅推进块内指针，循环结束后同步到start */
+        } else if (l_has_valid) {
+            *halt = lilyItemReport(scratch, &l_ctx->items[l_ptr], report_vec_table[HS_ENGINE_LILY]);
+            l_ptr++; /* 仅推进块内指针，循环结束后同步到start */
+        } else {
+            // 双队列当前项均超阈值 → 提前终止循环
+            break;
+        }
+    }
+    l_ctx->start = l_ptr;
+    t_ctx->start = t_ptr;
+}
+
+// 计算块边界
+static REALLY_INLINE
+size_t calc_block_end(size_t start, size_t size) {
+    size_t block_end = start + LILY_MATCH_ITEMS_PER_CACHELINE;
+    return (block_end > size) ? size : block_end;
 }
 
 /**
@@ -155,30 +212,64 @@ int lilyItemReport(hs_scratch_t *scratch, const LilyMatchItem *item, u32 *report
 REALLY_INLINE
 int flushStoredLilyMatches(hs_scratch_t *scratch, u64a to_offset) {
     // 无未上报项直接返回
-    if (!scratch || scratch->lily_items == NULL || scratch->lily_items_start >= scratch->lily_items_size) {
+    if (!scratch || (scratch->lily_ctx.start >= scratch->lily_ctx.size &&
+                     scratch->lily_for_teddy_ctx.start >= scratch->lily_for_teddy_ctx.size)) {
         return 0;
     }
 
     int halt = 0;
-    u32 *reportVec = getLilyReportVec(scratch->core_info.rose);
-    struct LilyMatchItem *item = NULL;
-    // 从lily_items_start开始遍历
-    size_t i = scratch->lily_items_start;
+    u32* report_vec_table[] = {
+        [HS_ENGINE_LILY] = getLilyReportVec(scratch->core_info.rose),
+        [HS_ENGINE_LILY_FOR_TEDDY] = getLilyReportVec(scratch->core_info.rose) // 后续调整成真实getLilyForTeddyReportVec函数
+    };
 
-    // 遍历筛选并上报（已预先确保lily_items有序，这里是连续内存遍历，无冗余拷贝）
-    for (; i < scratch->lily_items_size && !halt; i++) {
-        item = &scratch->lily_items[i];
-        // 筛选逻辑：上报所有 或 上报 <= to_offset的项
-        if (likely(item->toOffset <= to_offset)) {
-            halt = lilyItemReport(scratch, item, reportVec);
+    if (scratch->lily_ctx.start >= scratch->lily_ctx.size) { // 仅teddy有数据
+        report_range_with_offset_check(scratch, &scratch->lily_for_teddy_ctx, scratch->lily_for_teddy_ctx.size, to_offset, &halt, report_vec_table[HS_ENGINE_LILY_FOR_TEDDY]);
+        return halt;
+    } else if (scratch->lily_for_teddy_ctx.start >= scratch->lily_for_teddy_ctx.size) { // 仅lily有数据
+        report_range_with_offset_check(scratch, &scratch->lily_ctx, scratch->lily_ctx.size, to_offset, &halt, report_vec_table[HS_ENGINE_LILY]);
+        return halt;
+    }
+
+    // 绑定ctx指针
+    LilyEngineCtx *l_ctx = &scratch->lily_ctx;
+    LilyEngineCtx *t_ctx = &scratch->lily_for_teddy_ctx;
+
+    // 批量归并主循环
+    while (!halt
+           && l_ctx->start < l_ctx->size && t_ctx->start < t_ctx->size
+           && (u64a)l_ctx->items[l_ctx->start].toOffset <= to_offset
+           && (u64a)t_ctx->items[t_ctx->start].toOffset <= to_offset) {
+        // 计算块边界（直接用ctx->start/size）
+        size_t l_block_end = calc_block_end(l_ctx->start, l_ctx->size);
+        size_t t_block_end = calc_block_end(t_ctx->start, t_ctx->size);
+
+        // 计算块边界值
+        u64a l_block_max = (u64a)l_ctx->items[l_block_end-1].toOffset;
+        u64a t_block_max = (u64a)t_ctx->items[t_block_end-1].toOffset;
+        u64a l_block_min = (u64a)l_ctx->items[l_ctx->start].toOffset;
+        u64a t_block_min = (u64a)t_ctx->items[t_ctx->start].toOffset;
+
+        // 非交叉块处理
+        if (l_block_max <= to_offset && l_block_max < t_block_min) {
+            report_range(scratch, l_ctx, l_block_end, &halt, report_vec_table[HS_ENGINE_LILY]);
+        } else if (t_block_max <= to_offset && t_block_max < l_block_min) {
+            report_range(scratch, t_ctx, t_block_end, &halt, report_vec_table[HS_ENGINE_LILY_FOR_TEDDY]);
         } else {
-            // 有序数组特性：当前项>目标值，后续都>，直接终止遍历
-            break;
+            // 交叉块处理（与非交叉块处理互斥）
+            process_cross_block(l_block_end, t_block_end, l_ctx, t_ctx, &halt, scratch, to_offset, report_vec_table);
         }
     }
 
-    // 更新未上报起始位置（无论是否终止/提前退出）
-    scratch->lily_items_start = i;
+    if (!halt) {
+        // 剩余元素上报
+        report_range_with_offset_check(scratch, l_ctx, l_ctx->size,
+                                       to_offset, &halt,
+                                       report_vec_table[HS_ENGINE_LILY]);
+        report_range_with_offset_check(
+            scratch, t_ctx, t_ctx->size, to_offset, &halt,
+            report_vec_table[HS_ENGINE_LILY_FOR_TEDDY]);
+    }
 
     return halt;
 }
@@ -190,15 +281,18 @@ int RoseDeliverReport(u64a offset, uint8_t index, s32 offset_adjust,
     struct core_info *ci = &scratch->core_info;
     u64a toOffset = offset + offset_adjust;
 
-    LilyMatchItem item = {0};
-    int pack_ret = packLilyItem(index, toOffset, &item);
-    if (pack_ret != 0) {
+    if (index >=  8U || (unsigned long long)toOffset > LILY_TO_OFFSET_MAX) {
         ci->status |= SCRATCH_STATUS_TERMINATED;
         return KHSEL_MO_HALT_MATCHING;
     }
 
+    LilyMatchItem item = {
+        .onmatch_index = index,
+        .toOffset = toOffset
+    };
+
     // 暂存
-    int ret = pushLilyItems(scratch, &item);
+    int ret = pushLilyItems(&item, &scratch->lily_ctx);
     if (ret != 0) { // 暂存失败，停止后续匹配
         ci->status |= SCRATCH_STATUS_TERMINATED;
         return KHSEL_MO_HALT_MATCHING;
@@ -295,9 +389,6 @@ hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratc
     initLilyItems(scratch);
 
     hs_error_t ret = runLily(maskLily, ekeyVec, flagsQuiet, scratch);
-
-    // 初始化未上报起始位置（保证其他算法首次flush从0开始）
-    scratch->lily_items_start = 0;
 
     return ret;
 }
