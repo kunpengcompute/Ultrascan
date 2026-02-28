@@ -963,6 +963,11 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
         lilyResult = KHSEL_LilyRunExec(rose, scratch);
     }
 
+    hs_error_t lilyForTeddyResult = 0;
+    if (rose->lilyForTeddyOffset && !(rose->mode & HS_MODE_STREAM)) {
+        lilyForTeddyResult = KHSEL_LilyForTeddyRunExec(rose, scratch);
+    }
+
     switch (rose->runtimeImpl) {
     default:
         assert(0);
@@ -977,9 +982,9 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
     }
 
 
-    if (lilyResult == 1) {
+    if (lilyResult == 1 || lilyForTeddyResult == 1) {
         scratch->core_info.status = STATUS_TERMINATED;
-    } else if (rose->lilyOffset) {
+    } else if (rose->lilyOffset || rose->lilyForTeddyOffset) {
         // highlander
         if (!told_to_stop_matching(scratch) &&
             isAllExhausted(rose, scratch->core_info.exhaustionVector)) {
