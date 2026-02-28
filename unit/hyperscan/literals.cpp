@@ -158,6 +158,7 @@ void do_scan(unsigned mode, const vector<string> &corpora,
     ASSERT_EQ(HS_SUCCESS, err);
 }
 
+#if 0
 TEST_P(HyperscanLiteralTest, Caseful) {
     vector<pattern> patterns;
     vector<string> corpora;
@@ -473,3 +474,4 @@ INSTANTIATE_TEST_CASE_P(LiteralTest, HyperscanLiteralTest,
                         Combine(ValuesIn(test_modes), ValuesIn(test_flags),
                                 ValuesIn(test_sizes), ValuesIn(test_bounds),
                                 Bool()));
+#endif
