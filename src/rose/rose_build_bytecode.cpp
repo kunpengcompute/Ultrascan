@@ -96,6 +96,8 @@
 #include "util/report_manager.h"
 #include "util/ue2string.h"
 #include "util/verify_types.h"
+#include "src/fdr/fdr_internal.h"
+#include "src/fdr/teddy_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -106,6 +108,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <iostream>
 
 #include <boost/range/adaptor/map.hpp>
 
@@ -3552,6 +3555,32 @@ bytecode_ptr<RoseEngine> addLily(vector<u8> mask, vector<u32> reportVec, vector<
     return rose2;
 }
 
+static
+bytecode_ptr<RoseEngine> addLilyForTeddy(bytecode_ptr<lilyTeddy> fdr,
+                                         bytecode_ptr<RoseEngine> rose) {
+    assert(rose);
+    const size_t mainSize = rose.size();
+    const size_t lilySize = fdr.size();
+    DEBUG_PRINTF("adding lily engine for teddy, size=%zu\n", lilySize);
+
+    const size_t lilyForTeddyOffset = ROUNDUP_CL(mainSize);
+    const size_t newSize = lilyForTeddyOffset + lilySize;
+
+    auto rose2 = make_zeroed_bytecode_ptr<RoseEngine>(newSize, 64);
+    char *ptr = (char *)rose2.get();
+    memcpy(ptr, rose.get(), mainSize);
+    memcpy(ptr + lilyForTeddyOffset, fdr.get(), fdr.size());
+
+    rose2->lilyForTeddyOffset = verify_u32(lilyForTeddyOffset);
+    rose2->size = verify_u32(newSize);
+
+    lilyTeddy *teddy = (lilyTeddy *)(ptr + lilyForTeddyOffset);
+    u32 *reportVecArr = (u32 *)(ptr + lilyForTeddyOffset + teddy->lilyReportOffset);
+    u32 *ekeyVecArr = (u32 *)(ptr + lilyForTeddyOffset + teddy->lilyEkeyOffset);
+
+    return rose2;
+}
+
 /**
  * \brief Returns the pair (number of literals, max length) for all real
  * literals in the floating table that are in-use.
@@ -3681,6 +3710,14 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::buildFinalEngine(u32 minWidth) {
     bool lilyRun = false;
     u8 maskZero[32] = {0};
     vector<u8> maskLily = KHSEL_BuildLily((*this).lily, reportVec, ekeyVec, flagsQuiet);
+
+    vector<u32> reportVecLilyForTeddy(LILY_VEC_LEN);
+    vector<u32> ekeyVecLilyForTeddy(LILY_VEC_LEN);
+    vector<u32> lenVecLilyForTeddy(LILY_VEC_LEN);
+    bytecode_ptr<lilyTeddy> lilyForTeddyFdr;
+    if ((*this).lilyForTeddyPQ.size() > 0) {
+        lilyForTeddyFdr = KHSEL_BuildLilyForTeddy((*this).lilyForTeddy, (*this).lilyForTeddyPQ, reportVecLilyForTeddy, ekeyVecLilyForTeddy, lenVecLilyForTeddy);
+    }
 
     // Build NFAs
     bool mpv_as_outfix;
@@ -3890,6 +3927,9 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::buildFinalEngine(u32 minWidth) {
     proto.floatingMinLiteralMatchOffset = floatingMinLiteralMatchOffset;
 
     proto.maxBiAnchoredWidth = findMaxBAWidth(*this);
+    if ((*this).lilyForTeddy.size() > 0) {
+        proto.maxBiAnchoredWidth = ROSE_BOUND_INF;
+    }
     if (memcmp(maskLily.data(), maskZero, 32) != 0) {
         proto.maxBiAnchoredWidth = ROSE_BOUND_INF;
         lilyRun = true;
@@ -3932,6 +3972,10 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::buildFinalEngine(u32 minWidth) {
         engine = addLily(maskLily, reportVec, ekeyVec, flagsQuiet, move(engine));
     }
 
+    // Add a lily teddy engine
+    if ((*this).lilyForTeddy.size() > 0) {
+        engine = addLilyForTeddy(move(lilyForTeddyFdr), move(engine));
+    }
 
     DEBUG_PRINTF("rose done %p\n", engine.get());
 

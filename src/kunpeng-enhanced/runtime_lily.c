@@ -33,12 +33,18 @@
 #include "core_precomp.h"
 #include "rose_internal.h"
 #include "khsel_runtime.h"
+#include "khsel_hwlm.h"
+#include "khsel_fdr_internal.h"
 #include "report.h"
+#include "../util/unaligned.h"
+#include "../fdr/teddy_internal.h"
 #include "hs_common.h"
 #include "hs_compile.h"
 
 #define GET_LO_4(chars) And128(chars, low4bits)
 #define GET_HI_4(chars) Rshift8_m128(chars, BYTE_SIZE_FOUR)
+#define ones_u32            0xfffffffful
+static const u8 KHSEL_ALIGN_DIRECTIVE p_mask_arr[17][32];
 
 static REALLY_INLINE
 const char *getLily(const struct RoseEngine *t)
@@ -81,6 +87,39 @@ u8 getLilyQuietFlags(const struct RoseEngine *t)
     size_t offset = 0x2 * LILY_VEC_LEN * BYTE_SIZE_FOUR;
     u8 flagsQuiet = *((u8 *)((const char *)t + t->lilyOffset + offset + LILY_VEC_LEN * BYTE_SIZE_FOUR));
     return flagsQuiet;
+}
+
+static REALLY_INLINE
+u32 *getLilyForTeddyReportVec(const struct RoseEngine *t)
+{
+    if (!t->lilyForTeddyOffset) {
+        return NULL;
+    }
+    const struct lilyTeddy *teddy = (const struct lilyTeddy *)((const char *)t + t->lilyForTeddyOffset);
+    u32 *reportVec = (u32 *)((const char *)teddy + teddy->lilyReportOffset);
+    return reportVec;
+}
+
+static REALLY_INLINE
+u32 *getLilyForTeddyEkeyVec(const struct RoseEngine *t)
+{
+    if (!t->lilyForTeddyOffset) {
+        return NULL;
+    }
+    const struct lilyTeddy *teddy = (const struct lilyTeddy *)((const char *)t + t->lilyForTeddyOffset);
+    u32 *ekeyVec = (u32 *)((const char *)teddy + teddy->lilyEkeyOffset);
+    return ekeyVec;
+}
+
+static REALLY_INLINE
+u32 *getLilyForTeddyLenVec(const struct RoseEngine *t)
+{
+    if (!t->lilyForTeddyOffset) {
+        return NULL;
+    }
+    const struct lilyTeddy *teddy = (const struct lilyTeddy *)((const char *)t + t->lilyForTeddyOffset);
+    u32 *lenVec = (u32 *)((const char *)teddy + teddy->lilyLenOffset);
+    return lenVec;
 }
 
 REALLY_INLINE
@@ -220,7 +259,7 @@ int flushStoredLilyMatches(hs_scratch_t *scratch, u64a to_offset) {
     int halt = 0;
     u32* report_vec_table[] = {
         [HS_ENGINE_LILY] = getLilyReportVec(scratch->core_info.rose),
-        [HS_ENGINE_LILY_FOR_TEDDY] = getLilyReportVec(scratch->core_info.rose) // 后续调整成真实getLilyForTeddyReportVec函数
+        [HS_ENGINE_LILY_FOR_TEDDY]  = getLilyForTeddyReportVec(scratch->core_info.rose)
     };
 
     if (scratch->lily_ctx.start >= scratch->lily_ctx.size) { // 仅teddy有数据
@@ -275,7 +314,7 @@ int flushStoredLilyMatches(hs_scratch_t *scratch, u64a to_offset) {
 }
 
 static REALLY_INLINE
-int RoseDeliverReport(u64a offset, uint8_t index, s32 offset_adjust,
+int RoseDeliverReport(enum HsEngine engine_type, u64a offset, uint8_t index, s32 offset_adjust,
                       struct hs_scratch *scratch, u32 ekey) 
 {
     struct core_info *ci = &scratch->core_info;
@@ -292,7 +331,12 @@ int RoseDeliverReport(u64a offset, uint8_t index, s32 offset_adjust,
     };
 
     // 暂存
-    int ret = pushLilyItems(&item, &scratch->lily_ctx);
+    int ret = 0;
+    if (engine_type == HS_ENGINE_LILY) {
+    	ret = pushLilyItems(&item, &scratch->lily_ctx);
+    } else {
+    	ret = pushLilyItems(&item, &scratch->lily_for_teddy_ctx);
+    }
     if (ret != 0) { // 暂存失败，停止后续匹配
         ci->status |= SCRATCH_STATUS_TERMINATED;
         return KHSEL_MO_HALT_MATCHING;
@@ -326,8 +370,35 @@ int lilyMatch(u64a conf, u32 *ekeyVec, u8 flagsQuiet, const u8 *ptr, hs_scratch_
             !IsExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) &&
             !(flagsQuiet & (1 << index))) {
             i = scratch->core_info.buf_offset + ptr - scratch->core_info.buf + byte;
-            int ret = RoseDeliverReport(i + 1 , index, 0, scratch, ekeyVec[index]);
+            int ret = RoseDeliverReport(HS_ENGINE_LILY, i + 1 , index, 0, scratch, ekeyVec[index]);
             if (ret == 0) { // 上报异常，终止后续操作
+                return 1;
+            }
+        }
+    } while (unlikely(!!conf));
+    return 0;
+}
+
+static REALLY_INLINE
+int lilyForTeddyMatch(u64a conf, u32 *ekeyVec, const u8 *ptr, hs_scratch_t *scratch) {
+    conf = ~conf;
+    if (likely(!conf)) {
+        return -1;
+    }
+    const u8 bucket = 8;
+    size_t i = 0;
+
+    do {
+        u32 bit = CTZ64(conf);
+        u32 byte = bit / bucket;
+        u32 index = bit % bucket;
+        conf = conf & (conf - 1);
+
+        if ((ekeyVec[index] == INVALID_EKEY) ||
+            !IsExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) {
+            i = scratch->core_info.buf_offset + ptr - scratch->core_info.buf + byte;
+            int ret = RoseDeliverReport(HS_ENGINE_LILY_FOR_TEDDY, i + 1 , index, 0, scratch, ekeyVec[index]);
+            if (ret == 0) {
                 return 1;
             }
         }
@@ -390,5 +461,344 @@ hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratc
 
     hs_error_t ret = runLily(maskLily, ekeyVec, flagsQuiet, scratch);
 
+    return ret;
+}
+
+static REALLY_INLINE
+void copyRuntBlock128(u8 *dst, const u8 *src, size_t len) {
+    switch (len) {
+    case 0:
+        break;
+    case 1:
+        *dst = *src;
+        break;
+    case 2:
+        unaligned_store_u16(dst, unaligned_load_u16(src));
+        break;
+    case 3:
+        unaligned_store_u16(dst, unaligned_load_u16(src));
+        dst[2] = src[2];
+        break;
+    case 4:
+        unaligned_store_u32(dst, unaligned_load_u32(src));
+        break;
+    case 5:
+    case 6:
+    case 7:
+        /* Perform copy with two overlapping 4-byte chunks. */
+        unaligned_store_u32(dst + len - 4, unaligned_load_u32(src + len - 4));
+        unaligned_store_u32(dst, unaligned_load_u32(src));
+        break;
+    case 8:
+        unaligned_store_u64a(dst, unaligned_load_u64a(src));
+        break;
+    default:
+        /* Perform copy with two overlapping 8-byte chunks. */
+        assert(len < 16);
+        unaligned_store_u64a(dst + len - 8, unaligned_load_u64a(src + len - 8));
+        unaligned_store_u64a(dst, unaligned_load_u64a(src));
+        break;
+    }
+}
+
+static REALLY_INLINE
+m128 vectoredLoad128(m128 *p_mask, const u8 *ptr, const size_t start_offset,
+                     const u8 *lo, const u8 *hi,
+                     const u8 *buf_history, size_t len_history,
+                     const u32 nMasks) {
+    union {
+        u8 val8[16];
+        m128 val128;
+    } u;
+    u.val128 = zeroes128();
+
+    uintptr_t copy_start;
+    uintptr_t copy_len;
+
+    if (ptr >= lo) { // short/end/start zone
+        uintptr_t start = (uintptr_t)(ptr - lo);
+        uintptr_t avail = (uintptr_t)(hi - ptr);
+        if (avail >= 16) {
+            assert(start_offset - start <= 16);
+            *p_mask = Loadu128(p_mask_arr[16 - start_offset + start]
+                               + 16 - start_offset + start);
+            return Loadu128(ptr);
+        }
+        assert(start_offset - start <= avail);
+        *p_mask = Loadu128(p_mask_arr[avail - start_offset + start]
+                           + 16 - start_offset + start);
+        copy_start = 0;
+        copy_len = avail;
+    } else { // start zone
+        uintptr_t need = MIN((uintptr_t)(lo - ptr),
+                             MIN(len_history, nMasks - 1));
+        uintptr_t start = (uintptr_t)(lo - ptr);
+        uintptr_t i;
+        for (i = start - need; i < start; i++) {
+            u.val8[i] = buf_history[len_history - (start - i)];
+        }
+        uintptr_t end = MIN(16, (uintptr_t)(hi - ptr));
+        assert(start + start_offset <= end);
+        *p_mask = Loadu128(p_mask_arr[end - start - start_offset]
+                           + 16 - start - start_offset);
+        copy_start = start;
+        copy_len = end - start;
+    }
+
+    // Runt block from the buffer.
+    copyRuntBlock128(&u.val8[copy_start], &ptr[copy_start], copy_len);
+
+    return u.val128;
+}
+
+
+static REALLY_INLINE
+m128 prep_conf_teddy_m1(const m128 *maskBase, m128 val) {
+    m128 mask = Set16x8(0xf);
+    m128 lo = And128(val, mask);
+    m128 hi = And128(Rshift64_m128(val, 4), mask);
+    return Or128(Pshufb_m128_opt(maskBase[0 * 2], lo),
+                 Pshufb_m128_opt(maskBase[0 * 2 + 1], hi));
+}
+
+static REALLY_INLINE
+m128 prep_conf_teddy_m2(const m128 *maskBase, m128 *old_1, m128 val) {
+    m128 mask = Set16x8(0xf);
+    m128 lo = And128(val, mask);
+    m128 hi = And128(Rshift64_m128(val, 4), mask);
+    m128 r = prep_conf_teddy_m1(maskBase, val);
+
+    m128 res_1 = Or128(Pshufb_m128_opt(maskBase[1 * 2], lo),
+                       Pshufb_m128_opt(maskBase[1 * 2 + 1], hi));
+    m128 res_shifted_1 = Palignr(res_1, *old_1, 16 - 1);
+    *old_1 = res_1;
+    return Or128(r, res_shifted_1);
+}
+
+static REALLY_INLINE
+m128 prep_conf_teddy_m3(const m128 *maskBase, m128 *old_1, m128 *old_2,
+                        m128 val) {
+    m128 mask = Set16x8(0xf);
+    m128 lo = And128(val, mask);
+    m128 hi = And128(Rshift64_m128(val, 4), mask);
+    m128 r = prep_conf_teddy_m2(maskBase, old_1, val);
+
+    m128 res_2 = Or128(Pshufb_m128_opt(maskBase[2 * 2], lo),
+                       Pshufb_m128_opt(maskBase[2 * 2 + 1], hi));
+    m128 res_shifted_2 = Palignr(res_2, *old_2, 16 - 2);
+    *old_2 = res_2;
+    return Or128(r, res_shifted_2);
+}
+
+static REALLY_INLINE
+m128 prep_conf_teddy_m4(const m128 *maskBase, m128 *old_1, m128 *old_2,
+                        m128 *old_3, m128 val) {
+    m128 mask = Set16x8(0xf);
+    m128 lo = And128(val, mask);
+    m128 hi = And128(Rshift64_m128(val, 4), mask);
+    m128 r = prep_conf_teddy_m3(maskBase, old_1, old_2, val);
+
+    m128 res_3 = Or128(Pshufb_m128_opt(maskBase[3 * 2], lo),
+                       Pshufb_m128_opt(maskBase[3 * 2 + 1], hi));
+    m128 res_shifted_3 = Palignr(res_3, *old_3, 16 - 3);
+    *old_3 = res_3;
+    return Or128(r, res_shifted_3);
+}
+
+#define FDR_EXEC_TEDDY_RES_OLD_1
+
+#define FDR_EXEC_TEDDY_RES_OLD_2                                              \
+    m128 res_old_1 = ones128();
+
+#define FDR_EXEC_TEDDY_RES_OLD_3                                              \
+    m128 res_old_1 = ones128();                                             \
+    m128 res_old_2 = ones128();
+
+#define FDR_EXEC_TEDDY_RES_OLD_4                                              \
+    m128 res_old_1 = ones128();                                             \
+    m128 res_old_2 = ones128();                                             \
+    m128 res_old_3 = ones128();
+
+#define FDR_EXEC_TEDDY_RES_OLD(n) FDR_EXEC_TEDDY_RES_OLD_##n
+
+#define FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK_1(p_mask)
+
+#define FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK_2(p_mask)                          \
+    res_old_1 = Or128(res_old_1, p_mask);
+
+#define FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK_3(p_mask)                          \
+    res_old_1 = Or128(res_old_1, p_mask);                                     \
+    res_old_2 = Or128(res_old_2, p_mask);
+
+#define FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK_4(p_mask)                          \
+    res_old_1 = Or128(res_old_1, p_mask);                                     \
+    res_old_2 = Or128(res_old_2, p_mask);                                     \
+    res_old_3 = Or128(res_old_3, p_mask);
+
+#define FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK(p_mask, n) FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK_##n(p_mask)
+
+#define PREP_CONF_FN_1(mask_base, val)                                        \
+    prep_conf_teddy_m1(mask_base, val)
+
+#define PREP_CONF_FN_2(mask_base, val)                                        \
+    prep_conf_teddy_m2(mask_base, &res_old_1, val)
+
+#define PREP_CONF_FN_3(mask_base, val)                                        \
+    prep_conf_teddy_m3(mask_base, &res_old_1, &res_old_2, val)
+
+#define PREP_CONF_FN_4(mask_base, val)                                        \
+    prep_conf_teddy_m4(mask_base, &res_old_1, &res_old_2, &res_old_3, val)
+
+#define PREP_CONF_FN(mask_base, val, n)                                       \
+    PREP_CONF_FN_##n(mask_base, val)
+
+#define FDR_EXEC_LILY_TEDDY(fdr, a, ekeyVec, scratch, n_msk)                  \
+do {                                                                          \
+    const u8 *buf_end = a->buf + a->len;                                      \
+    const u8 *ptr = a->buf + a->start_offset;                                 \
+    u32 last_match = ones_u32;                                                \
+    const struct lilyTeddy *teddy = (const struct lilyTeddy *)fdr;            \
+    const size_t iterBytes = 32;                                              \
+    const m128 *maskBase = (const m128 *)((const u8 *)teddy + KHSEL_ROUNDUP_CL(sizeof(struct lilyTeddy)));                                \
+                                                                              \
+    FDR_EXEC_TEDDY_RES_OLD(n_msk);                                            \
+    const u8 *mainStart = KHSEL_ROUNDUP_PTR(ptr, 16);                               \
+    if (ptr < mainStart) {                                                    \
+        ptr = mainStart - 16;                                                 \
+        m128 p_mask;                                                          \
+        m128 val_0 = vectoredLoad128(&p_mask, ptr, a->start_offset,           \
+                                     a->buf, buf_end,                         \
+                                     a->buf_history, a->len_history, n_msk);  \
+        m128 r_0 = PREP_CONF_FN(maskBase, val_0, n_msk);                      \
+        r_0 = Or128(r_0, p_mask);                                             \
+        FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK(p_mask, n_msk);                    \
+        u64a conf0 = vgetq_lane_u64(r_0.vectU64, 0);                          \
+        u64a conf8 = vgetq_lane_u64(r_0.vectU64, 1);                          \
+        if (lilyForTeddyMatch(conf0, ekeyVec, ptr, scratch) == KHSEL_MATCHING_TERMINATED ||      \
+            lilyForTeddyMatch(conf8, ekeyVec, ptr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {  \
+            return KHSEL_MATCHING_TERMINATED;                                            \
+        }                                                                     \
+        ptr += 16;                                                            \
+    }                                                                         \
+                                                                              \
+    if (ptr + 16 <= buf_end) {                                                \
+        m128 r_0 = PREP_CONF_FN(maskBase, Load128(ptr), n_msk);               \
+        u64a conf0 = vgetq_lane_u64(r_0.vectU64, 0);                          \
+        u64a conf8 = vgetq_lane_u64(r_0.vectU64, 1);                          \
+        if (lilyForTeddyMatch(conf0, ekeyVec, ptr, scratch) == KHSEL_MATCHING_TERMINATED ||      \
+            lilyForTeddyMatch(conf8, ekeyVec, ptr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {  \
+            return KHSEL_MATCHING_TERMINATED;                                              \
+        }                                                                     \
+        ptr += 16;                                                            \
+    }                                                                         \
+                                                                              \
+    for (; ptr + iterBytes <= buf_end; ptr += iterBytes) {                    \
+        __builtin_prefetch(ptr + (iterBytes * 4));                            \
+        m128 r_0 = PREP_CONF_FN(maskBase, Load128(ptr), n_msk);               \
+        u64a conf0 = vgetq_lane_u64(r_0.vectU64, 0);                          \
+        u64a conf8 = vgetq_lane_u64(r_0.vectU64, 1);                          \
+        if (lilyForTeddyMatch(conf0, ekeyVec, ptr, scratch) == KHSEL_MATCHING_TERMINATED ||      \
+            lilyForTeddyMatch(conf8, ekeyVec, ptr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {  \
+            return KHSEL_MATCHING_TERMINATED;                                              \
+        }                                                                     \
+        m128 r_1 = PREP_CONF_FN(maskBase, Load128(ptr + 16), n_msk);          \
+        u64a conf16 = vgetq_lane_u64(r_1.vectU64, 0);                          \
+        u64a conf24 = vgetq_lane_u64(r_1.vectU64, 1);                          \        
+        if (lilyForTeddyMatch(conf16, ekeyVec, ptr + 16, scratch) == KHSEL_MATCHING_TERMINATED ||      \
+            lilyForTeddyMatch(conf24, ekeyVec, ptr + 24, scratch) == KHSEL_MATCHING_TERMINATED) {  \
+            return KHSEL_MATCHING_TERMINATED;                                              \
+        }                                                                     \
+    }                                                                         \
+                                                                              \
+    if (ptr + 16 <= buf_end) {                                                \
+        m128 r_0 = PREP_CONF_FN(maskBase, Load128(ptr), n_msk);               \
+        u64a conf0 = vgetq_lane_u64(r_0.vectU64, 0);                          \
+        u64a conf8 = vgetq_lane_u64(r_0.vectU64, 1);                          \
+        if (lilyForTeddyMatch(conf0, ekeyVec, ptr, scratch) == KHSEL_MATCHING_TERMINATED ||      \
+            lilyForTeddyMatch(conf8, ekeyVec, ptr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {  \
+            return KHSEL_MATCHING_TERMINATED;                                              \
+        }                                                                     \
+        ptr += 16;                                                            \
+    }                                                                         \
+                                                                              \
+    assert(ptr + 16 > buf_end);                                               \
+    if (ptr < buf_end) {                                                      \
+        m128 p_mask;                                                          \
+        m128 val_0 = vectoredLoad128(&p_mask, ptr, 0, ptr, buf_end,           \
+                                     a->buf_history, a->len_history, n_msk);  \
+        m128 r_0 = PREP_CONF_FN(maskBase, val_0, n_msk);                      \
+        r_0 = Or128(r_0, p_mask);                                             \
+        u64a conf0 = vgetq_lane_u64(r_0.vectU64, 0);                          \
+        u64a conf8 = vgetq_lane_u64(r_0.vectU64, 1);                          \
+        if (lilyForTeddyMatch(conf0, ekeyVec, ptr, scratch) == KHSEL_MATCHING_TERMINATED ||      \
+            lilyForTeddyMatch(conf8, ekeyVec, ptr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {  \
+            return KHSEL_MATCHING_TERMINATED;                                              \
+        }                                                                     \
+    }                                                                         \
+    return KHSEL_MATCHING_SUCCESS;                                                      \
+} while(0)
+
+hs_error_t fdr_exec_lily_teddy_msks1(const struct FDR *fdr,
+                                  const struct FDR_Runtime_Args *a,
+                                  u32* ekeyVec,
+                                  hs_scratch_t* scratch) {
+    FDR_EXEC_LILY_TEDDY(fdr, a, ekeyVec, scratch, 1);
+}
+
+hs_error_t fdr_exec_lily_teddy_msks2(const struct FDR *fdr,
+                                  const struct FDR_Runtime_Args *a,
+                                  u32* ekeyVec,
+                                  hs_scratch_t* scratch) {
+    FDR_EXEC_LILY_TEDDY(fdr, a, ekeyVec, scratch, 2);
+}
+
+
+hs_error_t fdr_exec_lily_teddy_msks3(const struct FDR *fdr,
+                                  const struct FDR_Runtime_Args *a,
+                                  u32* ekeyVec,
+                                  hs_scratch_t* scratch) {
+    FDR_EXEC_LILY_TEDDY(fdr, a, ekeyVec, scratch, 3);
+}
+
+
+hs_error_t fdr_exec_lily_teddy_msks4(const struct FDR *fdr,
+                                  const struct FDR_Runtime_Args *a,
+                                  u32* ekeyVec,
+                                  hs_scratch_t* scratch) {
+    FDR_EXEC_LILY_TEDDY(fdr, a, ekeyVec, scratch, 4);
+}
+
+#define FAKE_HISTORY_SIZE 16
+static const u8 fake_history[FAKE_HISTORY_SIZE];
+
+hs_error_t KHSEL_LilyForTeddyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch)
+{
+    struct FDR* lilyForTeddyFdr = (struct FDR *)((char *)rose + rose->lilyForTeddyOffset);
+    u32* ekeyVec = getLilyForTeddyEkeyVec(rose);
+    const u8* hbuf = fake_history + FAKE_HISTORY_SIZE;
+    initLilyForTeddyItems(scratch);
+    const struct FDR_Runtime_Args a = {
+        scratch->core_info.buf,
+        scratch->core_info.len,
+        hbuf,
+        0,
+        0,
+        NULL,
+        scratch,
+        NULL,
+        0
+    };
+    hs_error_t ret = KHSEL_MATCHING_SUCCESS;
+    switch (lilyForTeddyFdr->maxStringLen) {
+        case 2:
+            ret = fdr_exec_lily_teddy_msks2(lilyForTeddyFdr, &a, ekeyVec, scratch);
+            break;
+        case 3:
+            ret = fdr_exec_lily_teddy_msks3(lilyForTeddyFdr, &a, ekeyVec, scratch);
+            break;
+        case 4:
+            ret = fdr_exec_lily_teddy_msks4(lilyForTeddyFdr, &a, ekeyVec, scratch);
+            break;
+    }
     return ret;
 }

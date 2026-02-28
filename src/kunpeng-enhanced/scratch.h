@@ -70,12 +70,14 @@ struct queue_match {
 };
 
 #define LILY_REPORT_INDEX_BITS    3U
-#define LILY_TO_OFFSET_BITS       61U
+#define LILY_ENGINE_BITS          1U
+#define LILY_TO_OFFSET_BITS       (64U - LILY_REPORT_INDEX_BITS - LILY_ENGINE_BITS)
 // LilyMatchItem结构体（8字节位域）
 
 struct LilyMatchItem {
-    unsigned long long onmatch_index : LILY_REPORT_INDEX_BITS; // 低3bit：ReportID索引(0~7)
-    unsigned long long toOffset      : LILY_TO_OFFSET_BITS;    // 剩余61bit：toOffset值
+    unsigned long long engine_type   : LILY_ENGINE_BITS;       // 首位1bit：引擎类型
+    unsigned long long onmatch_index : LILY_REPORT_INDEX_BITS; // 次3bit：ReportID索引(0~7)
+    unsigned long long toOffset      : LILY_TO_OFFSET_BITS;    // 剩余60bit：toOffset值
 };
 typedef struct LilyMatchItem LilyMatchItem;
 
