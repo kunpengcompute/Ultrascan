@@ -58,7 +58,7 @@ typedef struct hs_scratch hs_scratch_t;
 // 引擎枚举：仅2个值，适配1bit位域，贴合Hyperscan引擎命名
 enum HsEngine {
     HS_ENGINE_LILY = 0,  // lily引擎标识（0）
-    HS_ENGINE_LILY_FOR_TEDDY  = 1
+    HS_ENGINE_LILY_FOR_TEDDY  = 1   // lilyForTeddy引擎标识（1）
 };
 
 #define BYTE_SIZE_FOUR 4
@@ -90,6 +90,7 @@ enum HsEngine {
  *      error.
  */
 hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch);
+hs_error_t KHSEL_LilyForTeddyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch);
 
 
 #define ALL_LILY_MATCH_ITEMS ((u64a)-1) // 标识上报所有Lily匹配项

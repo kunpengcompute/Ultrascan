@@ -46,11 +46,12 @@ extern "C"
  *      error.
  */
 hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch);
+hs_error_t KHSEL_LilyForTeddyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch);
 
 // 引擎枚举：仅2个值，适配1bit位域，贴合Hyperscan引擎命名
 enum HsEngine {
     HS_ENGINE_LILY = 0,  // lily引擎标识（0）
-    HS_ENGINE_LILY_FOR_TEDDY  = 1
+    HS_ENGINE_LILY_FOR_TEDDY  = 1   // lilyForTeddy引擎标识（1）
 };
 
 // LilyMatchItem相关常量

@@ -318,6 +318,8 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
                             unsigned length, unsigned flags,
                             hs_scratch_t *scratch, match_event_handler onEvent,
                             void *userCtx) {
+    u8 lilyed = 0;
+    u8 lilyTeddyed = 0;
     if (unlikely(!scratch || !data)) {
         return HS_INVALID;
     }
@@ -400,9 +402,17 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
 
     if (unlikely(rose->lilyOffset)) {
         if (KHSEL_LilyRunExec(rose, scratch) == 1) {
-            scratch->core_info.status = STATUS_TERMINATED;
-            goto done_scan;
+            lilyed = 1;
         }
+    }
+    if (unlikely(rose->lilyForTeddyOffset)) {
+        if (KHSEL_LilyForTeddyRunExec(rose, scratch) == 1) {
+            lilyTeddyed = 1;
+        }
+    }
+    if (lilyed || lilyTeddyed) {
+        scratch->core_info.status = STATUS_TERMINATED;
+        goto done_scan;
     }
 
     // Is this a small write case?

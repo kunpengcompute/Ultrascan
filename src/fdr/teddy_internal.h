@@ -63,4 +63,16 @@ struct Teddy {
     u32 floodOffset;
 };
 
+struct lilyTeddy {
+    u32 engineID;
+    u32 size;
+    u32 maxStringLen;
+    u32 numStrings;
+    u32 confOffset;
+    u32 floodOffset;
+    u32 lilyReportOffset;
+    u32 lilyEkeyOffset;
+    u32 lilyLenOffset;
+};
+
 #endif

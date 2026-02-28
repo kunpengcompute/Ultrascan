@@ -367,6 +367,7 @@ struct RoseEngine {
                            * used for sizing scratch only. */
     u32 smallWriteOffset; /**< offset of small-write matcher */
     u32 lilyOffset;     /**< offset of lily matcher */
+    u32 lilyForTeddyOffset;     /**< offset of lily teddy matcher */
     u32 amatcherOffset; // offset of the anchored literal matcher (bytes)
     u32 ematcherOffset; // offset of the eod-anchored literal matcher (bytes)
     u32 fmatcherOffset; // offset of the floating literal matcher (bytes)
