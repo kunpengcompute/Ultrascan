@@ -205,7 +205,7 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const C
     }
 
     if ((lit.length() >=2) && (lit.length() <= 4)) {
-        if (cc.grey.allowLily) {
+        if (cc.grey.allowLily && !cc.streaming) {
             return ng.rose->addShortLit(lit, expr.index, expr.report, expr.highlander, expr.som, expr.quiet, ng, flags);
         }
         DEBUG_PRINTF("not shortcutting SEP literal\n");

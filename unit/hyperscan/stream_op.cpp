@@ -157,7 +157,6 @@ TEST(StreamUtil, reset_matches) {
     hs_free_database(db);
 }
 
-#if 0
 TEST(StreamUtil, reset_close) {
     hs_error_t err;
     hs_scratch_t *scratch = nullptr;
@@ -196,7 +195,6 @@ TEST(StreamUtil, reset_close) {
     ASSERT_EQ(HS_SUCCESS, err);
     hs_free_database(db);
 }
-#endif
 
 TEST(StreamUtil, copy1) {
     hs_error_t err;
