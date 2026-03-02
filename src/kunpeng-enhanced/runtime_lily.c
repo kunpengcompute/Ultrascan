@@ -387,6 +387,7 @@ int lilyForTeddyMatch(u64a conf, u32 *ekeyVec, const u8 *ptr, hs_scratch_t *scra
     }
     const u8 bucket = 8;
     size_t i = 0;
+    u32 *lenVec = getLilyForTeddyLenVec(scratch->core_info.rose);
 
     do {
         u32 bit = CTZ64(conf);
@@ -397,9 +398,12 @@ int lilyForTeddyMatch(u64a conf, u32 *ekeyVec, const u8 *ptr, hs_scratch_t *scra
         if ((ekeyVec[index] == INVALID_EKEY) ||
             !IsExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) {
             i = scratch->core_info.buf_offset + ptr - scratch->core_info.buf + byte;
-            int ret = RoseDeliverReport(HS_ENGINE_LILY_FOR_TEDDY, i + 1 , index, 0, scratch, ekeyVec[index]);
-            if (ret == 0) {
-                return 1;
+            if (i < scratch->core_info.len && i >= lenVec[index] - 1) {
+                // 过滤掉ptr < core_info.buf，以及填充导致误报的场景
+                int ret = RoseDeliverReport(HS_ENGINE_LILY_FOR_TEDDY, i + 1 , index, 0, scratch, ekeyVec[index]);
+                if (ret == 0) {
+                    return 1;
+                }
             }
         }
     } while (unlikely(!!conf));
@@ -608,16 +612,16 @@ m128 prep_conf_teddy_m4(const m128 *maskBase, m128 *old_1, m128 *old_2,
 #define FDR_EXEC_TEDDY_RES_OLD_1
 
 #define FDR_EXEC_TEDDY_RES_OLD_2                                              \
-    m128 res_old_1 = ones128();
+    m128 res_old_1 = zeroes128();
 
 #define FDR_EXEC_TEDDY_RES_OLD_3                                              \
-    m128 res_old_1 = ones128();                                             \
-    m128 res_old_2 = ones128();
+    m128 res_old_1 = zeroes128();                                             \
+    m128 res_old_2 = zeroes128();
 
 #define FDR_EXEC_TEDDY_RES_OLD_4                                              \
-    m128 res_old_1 = ones128();                                             \
-    m128 res_old_2 = ones128();                                             \
-    m128 res_old_3 = ones128();
+    m128 res_old_1 = zeroes128();                                             \
+    m128 res_old_2 = zeroes128();                                             \
+    m128 res_old_3 = zeroes128();
 
 #define FDR_EXEC_TEDDY_RES_OLD(n) FDR_EXEC_TEDDY_RES_OLD_##n
 
