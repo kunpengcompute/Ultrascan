@@ -96,7 +96,8 @@ ue2::bytecode_ptr<lilyTeddy> buildLilyForTeddy(std::map<std::string, lilyReport>
         lilyForTeddyPQ.pop();
         maxLitSize = (p.first.size() >= maxLitSize) ? p.first.size() : maxLitSize;
         lilyForTeddy.insert(p);
-        lits.push_back(ue2::hwlmLiteral(p.first, false, (u32)p.second.external_report));
+        const bool nocase = (p.second.flags & HS_FLAG_CASELESS) != 0;
+        lits.push_back(ue2::hwlmLiteral(p.first, nocase, (u32)p.second.external_report));
         reportVec[i] = (u32)p.second.external_report;
         ekeyVec[i] = (u32)p.second.ekey;
         lenVec[i] = (u32)p.first.length();
