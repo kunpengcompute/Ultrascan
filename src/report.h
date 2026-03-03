@@ -321,7 +321,7 @@ int roseDeliverReport(u64a offset, ReportID onmatch, s32 offset_adjust,
     u64a from_offset = 0;
     u64a to_offset = offset + offset_adjust;
 
-    if (scratch->lily_ctx.items != NULL && scratch->lily_ctx.size > 0) {
+    if (scratch->lily_ctx.size > 0 || scratch->lily_for_teddy_ctx.size > 0) {
         // 调用Lily筛选上报函数，仅上报toOffset < 当前算法上报结束位置的项
         int lily_halt = flushStoredLilyMatches(scratch, to_offset);
         // 若Lily上报触发终止，直接返回，不再执行后续上报
