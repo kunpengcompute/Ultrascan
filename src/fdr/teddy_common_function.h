@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2017, Intel Corporation
+ * Copyright (c) 2015-2020, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -26,54 +26,31 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* Teddy bytecode layout:
- * * |-----|
- * * |     | struct Teddy
- * * |-----|
- * * |     | teddy masks
- * * |     |
- * * |-----|
- * * |     | reinforcement mask table for bucket 0..7
- * * |     |
- * * |-----|
- * * |     | reinforcement mask table for bucket 8..15 (FAT teddy)
- * * |     |
- * * |-----|
- * * |     | confirm
- * * |     |
- * * |     |
- * * |-----|
- * * |     | flood control
- * * |     |
- * * |-----|
+/**
+ * \file
+ * \brief FDR literal matcher: Common Teddy functions.
  */
 
-#ifndef TEDDY_INTERNAL_H
-#define TEDDY_INTERNAL_H
+#ifndef TEDDY_COMMON_FUNCTION_H
+#define TEDDY_COMMON_FUNCTION_H
+
+#include <map>
+#include <vector>
 
 #include "ue2common.h"
+#include "fdr_compile_internal.h"
+#include "hwlm/hwlm_literal.h"
 
-// first part is compatible with an FDR
-struct Teddy {
-    u32 engineID;
-    u32 size;
-    u32 maxStringLen;
-    u32 numStrings;
-    u32 confOffset;
-    u32 floodOffset;
-};
+namespace ue2 {
 
-struct lilyTeddy {
-    u32 engineID;
-    u32 size;
-    u32 maxStringLen;
-    u32 numStrings;
-    u32 confOffset;
-    u32 floodOffset;
-    u32 lilyReportOffset;
-    u32 lilyEkeyOffset;
-    u32 lilyLenOffset;
-    u32 lilyQuietOffset;
-};
+/**
+ * \brief Fills nibble masks for Teddy engine.
+ */
+void fillNibbleMasks(const std::map<BucketIndex, std::vector<LiteralIndex>> &bucketToLits,
+                     const std::vector<hwlmLiteral> &lits,
+                     u32 numMasks, u32 maskWidth, size_t maskLen,
+                     u8 *baseMsk);
 
-#endif
+} // namespace ue2
+
+#endif // TEDDY_COMMON_FUNCTION_H

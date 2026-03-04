@@ -3574,10 +3574,6 @@ bytecode_ptr<RoseEngine> addLilyForTeddy(bytecode_ptr<lilyTeddy> fdr,
     rose2->lilyForTeddyOffset = verify_u32(lilyForTeddyOffset);
     rose2->size = verify_u32(newSize);
 
-    lilyTeddy *teddy = (lilyTeddy *)(ptr + lilyForTeddyOffset);
-    u32 *reportVecArr = (u32 *)(ptr + lilyForTeddyOffset + teddy->lilyReportOffset);
-    u32 *ekeyVecArr = (u32 *)(ptr + lilyForTeddyOffset + teddy->lilyEkeyOffset);
-
     return rose2;
 }
 

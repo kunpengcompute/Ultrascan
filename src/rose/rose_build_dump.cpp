@@ -48,6 +48,7 @@
 #include "util/compile_context.h"
 #include "util/container.h"
 #include "util/dump_charclass.h"
+#include "fdr/teddy_internal.h"
 #include "util/dump_util.h"
 #include "util/graph_range.h"
 #include "util/multibit.h"
@@ -2243,6 +2244,7 @@ void roseDumpStructRaw(const RoseEngine *t, FILE *f) {
     DUMP_U32(t, fmatcherMinWidth);
     DUMP_U32(t, eodmatcherMinWidth);
     DUMP_U32(t, lilyOffset);
+    DUMP_U32(t, lilyForTeddyOffset);
     DUMP_U32(t, amatcherMaxBiAnchoredWidth);
     DUMP_U32(t, fmatcherMaxBiAnchoredWidth);
     DUMP_U32(t, reportProgramOffset);
@@ -2347,59 +2349,115 @@ void roseDumpPrograms(const vector<LitFragment> &fragments, const RoseEngine *t,
 
 static
 void roseDumpLily(const RoseBuildImpl &build, const RoseEngine *t, const string &base) {
-    if (!t->lilyOffset) {
-        return; // No Lily data available
-    }
+    // Dump regular Lily data
+    if (t->lilyOffset) {
+        // Open output file
+        FILE *f = fopen((base + "/rose_lily.txt").c_str(), "w");
+        if (f) {
+            fprintf(f, "Lily Matcher Data:\n");
+            fprintf(f, "====================\n");
+            fprintf(f, "lilyOffset: 0x%08x\n\n", t->lilyOffset);
 
-    // Open output file
-    FILE *f = fopen((base + "/rose_lily.txt").c_str(), "w");
-    if (!f) {
-        return;
-    }
+            // Get pointers to Lily data
+            const char *maskLily = (const char *)t + t->lilyOffset;
 
-    fprintf(f, "Lily Matcher Data:\n");
-    fprintf(f, "====================\n");
-    fprintf(f, "lilyOffset: 0x%08x\n\n", t->lilyOffset);
+            // Dump Lily mask data
+            fprintf(f, "Lily Mask (32 bytes):\n");
+            for (size_t i = 0; i < LILY_VEC_LEN * sizeof(u32); i++) {
+                fprintf(f, "%02x ", (unsigned char)maskLily[i]);
+                if ((i + 1) % 16 == 0) {
+                    fprintf(f, "\n");
+                }
+            }
+            fprintf(f, "\n\n");
 
-    // Get pointers to Lily data
-    const char *maskLily = (const char *)t + t->lilyOffset;
+            // Dump Lily patterns (characters and their corresponding report information)
+            uint8_t idx = 0;
+            fprintf(f, "Lily Patterns:\n");
+            fprintf(f, "=================================================================\n");
+            fprintf(f, "Char | Internal ID | External ID | EKey | Bit Mask | Quiet Mode\n");
+            fprintf(f, "---------------------------------------------------------------\n");
 
-    // Dump Lily mask data
-    fprintf(f, "Lily Mask (32 bytes):\n");
-    for (size_t i = 0; i < LILY_VEC_LEN * sizeof(u32); i++) {
-        fprintf(f, "%02x ", (unsigned char)maskLily[i]);
-        if ((i + 1) % 16 == 0) {
+            for (const auto &entry : build.lily) {
+                const char c = entry.first;
+                const lilyReport &lr = entry.second;
+
+                // Determine if the character is printable
+                char buffer[5];
+                if (isprint((unsigned char)c)) {
+                    snprintf(buffer, sizeof(buffer), "\'%c\' ", (unsigned char)c);
+                } else {
+                    snprintf(buffer, sizeof(buffer), "\\x%02x", (unsigned char)c);
+                }
+
+                fprintf(f, "%4s | %11d | %11d | %4d | %3d:0x%02x | %s\n", 
+                        buffer, lr.internal_id, lr.external_report, lr.ekey, idx, 1 << idx, 
+                        (lr.flags & HS_FLAG_QUIET) ? "Yes" : "No");
+                ++idx;
+            }
             fprintf(f, "\n");
+
+            fclose(f);
         }
     }
-    fprintf(f, "\n\n");
 
-    // Dump Lily patterns (characters and their corresponding report information)
-    uint8_t idx = 0;
-    fprintf(f, "Lily Patterns:\n");
-    fprintf(f, "===================================================\n");
-    fprintf(f, "Char | Internal ID | External ID | EKey | Bit Mask\n");
-    fprintf(f, "---------------------------------------------------\n");
+    // Dump Lily For Teddy data
+    if (t->lilyForTeddyOffset) {
+        // Open output file
+        FILE *f = fopen((base + "/rose_lily_for_teddy.txt").c_str(), "w");
+        if (f) {
+            fprintf(f, "Lily For Teddy Matcher Data:\n");
+            fprintf(f, "===============================\n");
+            fprintf(f, "lilyForTeddyOffset: 0x%08x\n\n", t->lilyForTeddyOffset);
 
-    for (const auto &entry : build.lily) {
-        const char c = entry.first;
-        const lilyReport &lr = entry.second;
+            // Get pointers to Lily For Teddy data
+            const struct lilyTeddy *teddy = (const struct lilyTeddy *)((const char *)t + t->lilyForTeddyOffset);
 
-        // Determine if the character is printable
-        char buffer[5];
-        if (isprint((unsigned char)c)) {
-            snprintf(buffer, sizeof(buffer), "\'%c\' ", (unsigned char)c);
-        } else {
-            snprintf(buffer, sizeof(buffer), "\\x%02x", (unsigned char)c);
+            // Dump Lily For Teddy header information
+            fprintf(f, "Lily For Teddy Header:\n");
+            fprintf(f, "------------------------\n");
+            fprintf(f, "engineID: %u\n", teddy->engineID);
+            fprintf(f, "size: %u\n", teddy->size);
+            fprintf(f, "maxStringLen: %u\n", teddy->maxStringLen);
+            fprintf(f, "numStrings: %u\n", teddy->numStrings);
+            fprintf(f, "lilyReportOffset: 0x%08x\n", teddy->lilyReportOffset);
+            fprintf(f, "lilyEkeyOffset: 0x%08x\n", teddy->lilyEkeyOffset);
+            fprintf(f, "lilyLenOffset: 0x%08x\n", teddy->lilyLenOffset);
+            fprintf(f, "lilyQuietOffset: 0x%08x\n\n", teddy->lilyQuietOffset);
+
+            // Dump Lily For Teddy patterns (strings and their corresponding report information)
+            uint8_t idx = 0;
+            fprintf(f, "Lily For Teddy Patterns:\n");
+            fprintf(f, "=================================================================================\n");
+            fprintf(f, "String | Length | Internal ID | External ID | EKey | Bit Mask | Quiet Mode\n");
+            fprintf(f, "-------------------------------------------------------------------------------\n");
+
+            for (const auto &entry : build.lilyForTeddy) {
+                const string &s = entry.first;
+                const lilyReport &lr = entry.second;
+
+                // Determine if the string is printable
+                string printableString = "";
+                for (char c : s) {
+                    if (isprint((unsigned char)c)) {
+                        printableString += c;
+                    } else {
+                        char hex[5];
+                        snprintf(hex, sizeof(hex), "\\x%02x", (unsigned char)c);
+                        printableString += hex;
+                    }
+                }
+
+                fprintf(f, "%6s | %6d | %11d | %11d | %4d | %3d:0x%02x | %s\n", 
+                        printableString.c_str(), (int)s.length(), lr.internal_id, lr.external_report, lr.ekey, idx, 1 << idx, 
+                        (lr.flags & HS_FLAG_QUIET) ? "Yes" : "No");
+                ++idx;
+            }
+            fprintf(f, "\n");
+
+            fclose(f);
         }
-
-        fprintf(f, "%4s | %11d | %11d | %4d | %3d:0x%02x\n", 
-                buffer, lr.internal_id, lr.external_report, lr.ekey, idx, 1 << idx);
-        ++idx;
     }
-    fprintf(f, "\n");
-
-    fclose(f);
 }
 
 static
