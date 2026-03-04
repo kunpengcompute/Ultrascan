@@ -56,10 +56,10 @@ struct Grey {
     bool allowNeoFdr;
     bool allowPuff;
     bool allowLiteral;
-    bool allowLily;
     bool allowViolet;
     bool allowExtendedNFA;
     bool allowLimExNFA;
+    bool allowLily;
     bool allowAnchoredAcyclic;
     bool allowSmallLiteralSet;
     bool allowCastle;
