@@ -32,6 +32,7 @@
  */
 
 #include "teddy_compile.h"
+#include "teddy_common_function.h"
 
 #include "fdr.h"
 #include "fdr_internal.h"
@@ -436,77 +437,7 @@ void fillDupNibbleMasks(const map<BucketIndex,
     }
 }
 
-static
-void fillNibbleMasks(const map<BucketIndex,
-                               vector<LiteralIndex>> &bucketToLits,
-                     const vector<hwlmLiteral> &lits,
-                     u32 numMasks, u32 maskWidth, size_t maskLen,
-                     u8 *baseMsk) {
-    memset(baseMsk, 0xff, maskLen);
 
-    for (const auto &b2l : bucketToLits) {
-        const u32 &bucket_id = b2l.first;
-        const vector<LiteralIndex> &ids = b2l.second;
-        const u8 bmsk = 1U << (bucket_id % 8);
-
-        for (const LiteralIndex &lit_id : ids) {
-            const hwlmLiteral &l = lits[lit_id];
-            DEBUG_PRINTF("putting lit %u into bucket %u\n", lit_id, bucket_id);
-            const u32 sz = verify_u32(l.s.size());
-
-            // fill in masks
-            for (u32 j = 0; j < numMasks; j++) {
-                const u32 msk_id_lo = j * 2 * maskWidth + (bucket_id / 8);
-                const u32 msk_id_hi = (j * 2 + 1) * maskWidth + (bucket_id / 8);
-                const u32 lo_base = msk_id_lo * 16;
-                const u32 hi_base = msk_id_hi * 16;
-
-                // if we don't have a char at this position, fill in i
-                // locations in these masks with '1'
-                if (j >= sz) {
-                    for (u32 n = 0; n < 16; n++) {
-                        baseMsk[lo_base + n] &= ~bmsk;
-                        baseMsk[hi_base + n] &= ~bmsk;
-                    }
-                } else {
-                    u8 c = l.s[sz - 1 - j];
-                    // if we do have a char at this position
-                    const u32 hiShift = 4;
-                    u32 n_hi = (c >> hiShift) & 0xf;
-                    u32 n_lo = c & 0xf;
-
-                    if (j < l.msk.size() && l.msk[l.msk.size() - 1 - j]) {
-                        u8 m = l.msk[l.msk.size() - 1 - j];
-                        u8 m_hi = (m >> hiShift) & 0xf;
-                        u8 m_lo = m & 0xf;
-                        u8 cmp = l.cmp[l.msk.size() - 1 - j];
-                        u8 cmp_lo = cmp & 0xf;
-                        u8 cmp_hi = (cmp >> hiShift) & 0xf;
-
-                        for (u8 cm = 0; cm < 0x10; cm++) {
-                            if ((cm & m_lo) == (cmp_lo & m_lo)) {
-                                baseMsk[lo_base + cm] &= ~bmsk;
-                            }
-                            if ((cm & m_hi) == (cmp_hi & m_hi)) {
-                                baseMsk[hi_base + cm] &= ~bmsk;
-                            }
-                        }
-                    } else {
-                        if (l.nocase && ourisalpha(c)) {
-                            u32 cmHalfClear = (0xdf >> hiShift) & 0xf;
-                            u32 cmHalfSet = (0x20 >> hiShift) & 0xf;
-                            baseMsk[hi_base + (n_hi & cmHalfClear)] &= ~bmsk;
-                            baseMsk[hi_base + (n_hi | cmHalfSet)] &= ~bmsk;
-                        } else {
-                            baseMsk[hi_base + n_hi] &= ~bmsk;
-                        }
-                        baseMsk[lo_base + n_lo] &= ~bmsk;
-                    }
-                }
-            }
-        }
-    }
-}
 
 static
 void fillReinforcedTable(const map<BucketIndex,
@@ -651,6 +582,77 @@ bool assignStringsToBuckets(
 }
 
 } // namespace
+
+void fillNibbleMasks(const map<BucketIndex,
+                               vector<LiteralIndex>> &bucketToLits,
+                     const vector<hwlmLiteral> &lits,
+                     u32 numMasks, u32 maskWidth, size_t maskLen,
+                     u8 *baseMsk) {
+    memset(baseMsk, 0xff, maskLen);
+
+    for (const auto &b2l : bucketToLits) {
+        const u32 &bucket_id = b2l.first;
+        const vector<LiteralIndex> &ids = b2l.second;
+        const u8 bmsk = 1U << (bucket_id % 8);
+
+        for (const LiteralIndex &lit_id : ids) {
+            const hwlmLiteral &l = lits[lit_id];
+            DEBUG_PRINTF("putting lit %u into bucket %u\n", lit_id, bucket_id);
+            const u32 sz = verify_u32(l.s.size());
+
+            // fill in masks
+            for (u32 j = 0; j < numMasks; j++) {
+                const u32 msk_id_lo = j * 2 * maskWidth + (bucket_id / 8);
+                const u32 msk_id_hi = (j * 2 + 1) * maskWidth + (bucket_id / 8);
+                const u32 lo_base = msk_id_lo * 16;
+                const u32 hi_base = msk_id_hi * 16;
+
+                // if we don't have a char at this position, fill in i
+                // locations in these masks with '1'
+                if (j >= sz) {
+                    for (u32 n = 0; n < 16; n++) {
+                        baseMsk[lo_base + n] &= ~bmsk;
+                        baseMsk[hi_base + n] &= ~bmsk;
+                    }
+                } else {
+                    u8 c = l.s[sz - 1 - j];
+                    // if we do have a char at this position
+                    const u32 hiShift = 4;
+                    u32 n_hi = (c >> hiShift) & 0xf;
+                    u32 n_lo = c & 0xf;
+
+                    if (j < l.msk.size() && l.msk[l.msk.size() - 1 - j]) {
+                        u8 m = l.msk[l.msk.size() - 1 - j];
+                        u8 m_hi = (m >> hiShift) & 0xf;
+                        u8 m_lo = m & 0xf;
+                        u8 cmp = l.cmp[l.msk.size() - 1 - j];
+                        u8 cmp_lo = cmp & 0xf;
+                        u8 cmp_hi = (cmp >> hiShift) & 0xf;
+
+                        for (u8 cm = 0; cm < 0x10; cm++) {
+                            if ((cm & m_lo) == (cmp_lo & m_lo)) {
+                                baseMsk[lo_base + cm] &= ~bmsk;
+                            }
+                            if ((cm & m_hi) == (cmp_hi & m_hi)) {
+                                baseMsk[hi_base + cm] &= ~bmsk;
+                            }
+                        }
+                    } else {
+                        if (l.nocase && ourisalpha(c)) {
+                            u32 cmHalfClear = (0xdf >> hiShift) & 0xf;
+                            u32 cmHalfSet = (0x20 >> hiShift) & 0xf;
+                            baseMsk[hi_base + (n_hi & cmHalfClear)] &= ~bmsk;
+                            baseMsk[hi_base + (n_hi | cmHalfSet)] &= ~bmsk;
+                        } else {
+                            baseMsk[hi_base + n_hi] &= ~bmsk;
+                        }
+                        baseMsk[lo_base + n_lo] &= ~bmsk;
+                    }
+                }
+            }
+        }
+    }
+}
 
 bytecode_ptr<FDR> teddyBuildTable(const HWLMProto &proto, const Grey &grey) {
     TeddyCompiler tc(proto.lits, proto.bucketToLits, *(proto.teddyEng),
