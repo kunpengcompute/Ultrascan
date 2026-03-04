@@ -73,6 +73,7 @@ struct lilyTeddy {
     u32 lilyReportOffset;
     u32 lilyEkeyOffset;
     u32 lilyLenOffset;
+    u32 lilyQuietOffset;
 };
 
 #endif

@@ -159,6 +159,7 @@ ue2::bytecode_ptr<lilyTeddy> buildLilyForTeddy(std::map<std::string, lilyReport>
     std::vector<ue2::hwlmLiteral> lits;
     std::map<ue2::BucketIndex, std::vector<ue2::LiteralIndex>> bucketToLits;
     size_t maxRules = std::min((size_t)8, lilyForTeddyPQ.size());
+    u8 flagsQuiet = 0;
     for (int i = 0;i < maxRules;i++) {
         LilyForTeddyPair p = lilyForTeddyPQ.top();
         lilyForTeddyPQ.pop();
@@ -168,6 +169,12 @@ ue2::bytecode_ptr<lilyTeddy> buildLilyForTeddy(std::map<std::string, lilyReport>
         reportVec[i] = (u32)p.second.external_report;
         ekeyVec[i] = (u32)p.second.ekey;
         lenVec[i] = (u32)p.first.length();
+        
+        // 检查当前规则是否为quiet模式，如果是则设置对应位
+        if (p.second.flags & HS_FLAG_QUIET) {
+            flagsQuiet |= (1 << i); // 使用i作为位掩码
+        }
+        
         std::vector<ue2::LiteralIndex> litIdxVec;
         litIdxVec.push_back((ue2::LiteralIndex)i);
         bucketToLits.insert(std::make_pair((ue2::BucketIndex)i, litIdxVec));
@@ -182,7 +189,8 @@ ue2::bytecode_ptr<lilyTeddy> buildLilyForTeddy(std::map<std::string, lilyReport>
     size_t reportVecLen = 8 * sizeof(u32);
     size_t ekeyVecLen = 8 * sizeof(u32);
     size_t lenVecLen = 8 * sizeof(u32);
-    size_t size = KHSEL_ROUNDUP_CL(headerSize) + KHSEL_ROUNDUP_CL(maskLen) + KHSEL_ROUNDUP_CL(reportVecLen) + KHSEL_ROUNDUP_CL(ekeyVecLen) + KHSEL_ROUNDUP_CL(lenVecLen);
+    size_t quietVecLen = sizeof(u8);
+    size_t size = KHSEL_ROUNDUP_CL(headerSize) + KHSEL_ROUNDUP_CL(maskLen) + KHSEL_ROUNDUP_CL(reportVecLen) + KHSEL_ROUNDUP_CL(ekeyVecLen) + KHSEL_ROUNDUP_CL(lenVecLen) + KHSEL_ROUNDUP_CL(quietVecLen);
 
     auto fdr = ue2::make_zeroed_bytecode_ptr<lilyTeddy>(size, 64);
     assert(fdr); // otherwise would have thrown std::bad_alloc
@@ -212,6 +220,12 @@ ue2::bytecode_ptr<lilyTeddy> buildLilyForTeddy(std::map<std::string, lilyReport>
     teddy->lilyLenOffset = ue2::verify_u32(ptr - teddy_base);
     memcpy(ptr, &lenVec[0], lenVecLen);
     ptr += KHSEL_ROUNDUP_CL(lenVecLen);
+
+    // Write quiet flags
+    assert(KHSEL_ISALIGNED_CL(ptr));
+    teddy->lilyQuietOffset = ue2::verify_u32(ptr - teddy_base);
+    memcpy(ptr, &flagsQuiet, quietVecLen);
+    ptr += KHSEL_ROUNDUP_CL(quietVecLen);
 
     // Write teddy masks.
     u8 *baseMsk = teddy_base + KHSEL_ROUNDUP_CL(headerSize);
