@@ -233,16 +233,33 @@ hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
         CompileContext cc(isStreaming, isVectored, target_info, g);
         NG ng(cc, elements, somPrecision);
 
+        // First pass: process all HS_FLAG_COMBINATION rules to populate toLogicalKeyMap
         for (unsigned int i = 0; i < elements; i++) {
-            // Add this expression to the compiler
-            try {
-                addExpression(ng, i, expressions[i], flags ? flags[i] : 0,
-                              ext ? ext[i] : nullptr, ids ? ids[i] : 0);
-            } catch (CompileError &e) {
-                /* Caught a parse error:
-                 * throw it upstream as a CompileError with a specific index */
-                e.setExpressionIndex(i);
-                throw; /* do not slice */
+            if (flags && (flags[i] & HS_FLAG_COMBINATION)) {
+                try {
+                    addExpression(ng, i, expressions[i], flags[i],
+                                  ext ? ext[i] : nullptr, ids ? ids[i] : 0);
+                } catch (CompileError &e) {
+                    /* Caught a parse error:
+                     * throw it upstream as a CompileError with a specific index */
+                    e.setExpressionIndex(i);
+                    throw; /* do not slice */
+                }
+            }
+        }
+
+        // Second pass: process all non-HS_FLAG_COMBINATION rules
+        for (unsigned int i = 0; i < elements; i++) {
+            if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
+                try {
+                    addExpression(ng, i, expressions[i], flags ? flags[i] : 0,
+                                  ext ? ext[i] : nullptr, ids ? ids[i] : 0);
+                } catch (CompileError &e) {
+                    /* Caught a parse error:
+                     * throw it upstream as a CompileError with a specific index */
+                    e.setExpressionIndex(i);
+                    throw; /* do not slice */
+                }
             }
         }
 
