@@ -1186,7 +1186,6 @@ SET (hs_compile_SRCS
     src/kunpeng-enhanced/lily.h
     src/kunpeng-enhanced/shufti_enhanced.h
     src/kunpeng-enhanced/ue2common.h
-    src/kunpeng-enhanced/cpufeature.c
     src/kunpeng-enhanced/fdr_enhanced.c
     src/kunpeng-enhanced/runtime_lily.c
     src/kunpeng-enhanced/shufti.c

@@ -62,14 +62,14 @@ static REALLY_INLINE u64a Comparemask(uint16x8_t mask)
     return vget_lane_u64((uint64x1_t)vshrn_n_u16(mask, BYTE_SIZE_FOUR), 0);
 }
 
-static REALLY_INLINE u8* FirstMatchOpt(const u8 *buf, m128 mask)
+static REALLY_INLINE const u8 *FirstMatchOpt(const u8 *buf, m128 mask)
 {
     uint32x4_t m = mask.vectU32;
     uint64_t vmax = vgetq_lane_u64 (vreinterpretq_u64_u32 (vpmaxq_u32(m, m)), 0);
     if (vmax != 0) {
         u64a z = Comparemask(mask.vectU16);
         u32 pos = CTZ64(z) / BYTE_SIZE_FOUR;
-        return (u8 *)buf + pos;
+        return (const u8 *)buf + pos;
     } else {
         return NULL; // no match
     }
