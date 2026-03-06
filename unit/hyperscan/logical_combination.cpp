@@ -38,7 +38,6 @@
 
 using namespace std;
 
-#if 0
 TEST(LogicalCombination, SingleComb1) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
@@ -921,4 +920,3 @@ TEST(LogicalCombination, MultiCombStream1) {
     err = hs_free_scratch(scratch);
     ASSERT_EQ(HS_SUCCESS, err);
 }
-#endif

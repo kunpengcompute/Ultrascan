@@ -194,8 +194,16 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const C
         return false;
     }
 
+    // Check if this expression is referenced by any logical combination rules
+    bool is_referenced_by_combination = false;
+    if (ng.rm.pl.getLkeyMap().find(expr.report) != ng.rm.pl.getLkeyMap().end()) {
+        is_referenced_by_combination = true;
+        DEBUG_PRINTF("literal '%s' (id=%u) is referenced by combination rules, skipping lily\n",
+            dumpString(lit).c_str(), expr.report);
+    }
+
     if ((lit.length() <= 1)) {
-        if (cc.grey.allowLily && !cc.streaming) {
+        if (cc.grey.allowLily && !cc.streaming && !is_referenced_by_combination) {
             if (lit.length() == 1) {
                 return ng.rose->addChar(lit, expr.index, expr.report, expr.highlander, expr.som, expr.quiet, ng, flags);
             }
@@ -205,7 +213,7 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const C
     }
 
     if ((lit.length() >=2) && (lit.length() <= 4)) {
-        if (cc.grey.allowLily && !cc.streaming) {
+        if (cc.grey.allowLily && !cc.streaming && !is_referenced_by_combination) {
             return ng.rose->addShortLit(lit, expr.index, expr.report, expr.highlander, expr.som, expr.quiet, ng, flags);
         }
         DEBUG_PRINTF("not shortcutting SEP literal\n");
