@@ -35,5 +35,5 @@ srange = [ chr(c) for c in crange ]
 i = 0
 for x in product(srange, repeat = options.depth):
     line = str(i) + ":/" + "".join(x) + "/"
-    print line
+    print (line)
     i += 1
