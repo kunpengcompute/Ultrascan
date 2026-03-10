@@ -1,111 +1,130 @@
-# 项目介绍
+# Hyperscan介绍<a name="ZH-CN_TOPIC_0000002518252292"></a>
+
+## 最新消息
+
+\[2026-03-30\]: 发布Hyperscan 2.6.0。新增基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短字节规则匹配算法。
+
+\[2025-12-30\]: 发布Hyperscan KHSEL 2.5.3。优化Hyperscan多模匹配算法。优化Rose解释器后端长字符串校验。增加短规则旁路算法开关。
+
+
+## 项目介绍<a name="ZH-CN_TOPIC_0000002549772085"></a>
 
 Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的大部分语法的前提下，增加了特定的语法和工作模式来保证其在真实网络场景下的实用性。Hyperscan针对不同使用场景设计了多种高效匹配算法，以及结合SIMD指令，实现了正则表达式的高性能匹配。Hyperscan适用于部署在诸如DPI/IPS/IDS/FW等场景中。在鲲鹏平台上，华为基于NEON指令集对Hyperscan进行了改造，以适配AAarch64架构，同时针对算法进行了优化。
 
-# 版本说明
-
-**表 1**  版本说明
-
-<table><thead align="left"><tr id="row16841427102415"><th class="cellrowborder" valign="top" width="33.33333333333333%" id="mcps1.2.4.1.1"><p id="p884142792414"><a name="p884142792414"></a><a name="p884142792414"></a>Kunpeng Hyperscan</p>
-</th>
-<th class="cellrowborder" valign="top" width="33.33333333333333%" id="mcps1.2.4.1.2"><p id="p38418273243"><a name="p38418273243"></a><a name="p38418273243"></a>开源Hyperscan</p>
-</th>
-<th class="cellrowborder" valign="top" width="33.33333333333333%" id="mcps1.2.4.1.3"><p id="p18841162714243"><a name="p18841162714243"></a><a name="p18841162714243"></a>特性</p>
-</th>
-</tr>
-</thead>
-<tbody><tr id="row88410276244"><td class="cellrowborder" valign="top" width="33.33333333333333%" headers="mcps1.2.4.1.1 "><p id="p2841827172419"><a name="p2841827172419"></a><a name="p2841827172419"></a>2.5.1</p>
-</td>
-<td class="cellrowborder" valign="top" width="33.33333333333333%" headers="mcps1.2.4.1.2 "><p id="p1084192762411"><a name="p1084192762411"></a><a name="p1084192762411"></a>5.4.2</p>
-</td>
-<td class="cellrowborder" valign="top" width="33.33333333333333%" headers="mcps1.2.4.1.3 "><p id="p42261134102514"><a name="p42261134102514"></a><a name="p42261134102514"></a>正则表达式匹配与匹配函数。</p>
-</td>
-</tr>
-</tbody>
-</table>
-
-# 约束与限制
-Arm平台上，Hyperscan使用lily引擎对单字节规则匹配场景进行性能增强，该优化特性存在如下约束：
-1. lily引擎仅能处理至多8条单字节规则，超出部分将采用原有引擎处理。
-2. 在单条语料中，lily引擎所负责匹配的单字节规则命中次数合计应不大于4096，否则将停止匹配，并返回HS_SCAN_TERMINATED信号。
-
-# 环境部署
-
-Hyperscan当前适配的处理器和操作系统为鲲鹏920系列处理器，openEuler 22.03操作系统，若您在使用过程中遇到问题，请先检查使用的环境是否在已验证的环境范围内。
-
-**表 1**  Hyperscan已验证环境
-
-<table><thead align="left"><tr id="row49014226274"><th class="cellrowborder" valign="top" width="50%" id="mcps1.2.3.1.1"><p id="p19628134422716"><a name="p19628134422716"></a><a name="p19628134422716"></a>操作系统</p>
-</th>
-<th class="cellrowborder" valign="top" width="50%" id="mcps1.2.3.1.2"><p id="p7628104492718"><a name="p7628104492718"></a><a name="p7628104492718"></a>CPU类型</p>
-</th>
-</tr>
-</thead>
-<tbody><tr id="row179062222716"><td class="cellrowborder" valign="top" width="50%" headers="mcps1.2.3.1.1 "><p id="p1862834462712"><a name="p1862834462712"></a><a name="p1862834462712"></a>openEuler 22.03 LTS SP3</p>
-</td>
-<td class="cellrowborder" valign="top" width="50%" headers="mcps1.2.3.1.2 "><p id="p12628184482717"><a name="p12628184482717"></a><a name="p12628184482717"></a>鲲鹏920系列处理器</p>
-</td>
-</tr>
-</tbody>
-</table>
-
-具体编译方法可以参考《[Hyperscan编译指南](https://www.hikunpeng.com/document/detail/zh/kunpengaccel/system-lib/cg-hyperscan/kunpengaccel_hyperscan_02_0001.html)》。
-
-# 快速上手
-
-hsbench是Hyperscan官方提供的性能Benchmark工具，通过hsbench的测试结果能够对比使用开源Hyperscan和Kunpeng Hyperscan的性能差异。
-
-1.  进入创建好的“build”目录。
-
-    ```
-    cd build
-    ```
-
-2.  获取hsbench规则集和输入数据，并解压到“build/hsbench-samples”目录。
-
-    [获取链接](https://cdrdv2.intel.com/v1/dl/getContent/739375)
-
-3.  运行hsbench。
-
-    ```
-    ./bin/hsbench -e ./hsbench-samples/pcre/snort_literals -c ./hsbench-samples/corpora/gutenberg.db -N -n1
-    ```
-
-# 安装后验证
-
-运行结果：
+## 目录结构<a name="ZH-CN_TOPIC_0000002549772081"></a>
 
 ```
-Signatures:        ./hsbench-samples/pcre/snort_literals
-Hyperscan info:    Version: 5.4.2 Features:  Mode: BLOCK
-Expression count:  3,116
-Bytecode size:     923,384 bytes
-Database CRC:      0xc4b8895e
-Scratch size:      5,183 bytes
-Compile time:      0.137 seconds
-Peak heap usage:   23,830,528 bytes
-
-Time spent scanning:       0.025 seconds
-Corpus size:               6,701,044 bytes (3,280 blocks)
-Matches per iteration:     4,302 (0.657 matches/kilobyte)
-Overall block rate:        132,895.00 blocks/sec
-Mean throughput (overall): 2,172.04 Mbit/sec
-Max throughput (per core): 2,172.10 Mbit/sec
-
+├── chimera                                                    # Chimera接口目录，提供PCRE兼容的正则表达式功能
+│   ├── ch.h                                                  # Chimera公共API头文件
+│   ├── ch_compile.cpp                                        # Chimera编译时功能实现
+│   ├── ch_runtime.c                                          # Chimera运行时功能实现
+│   └── ...                                                   # 其他Chimera相关文件
+├── cmake                                                      # CMake构建系统配置目录
+├── doc                                                        # 开发参考文档目录
+│   └── dev-reference                                         # RST文件和Doxygen配置，生成API文档和开发指南
+├── docs                                                       # 项目文档目录
+│   └── zh                                                    # 中文文档目录
+│       ├── figures                                           # 中文文档图片资源目录
+│       ├── quick_start.md                                    # 快速入门
+│       ├── release_notes.md                                  # 版本说明书
+│       ├── compilation_guide.md                              # 编译指南
+│       ├── developer_guide.md                                # 开发指南
+│       ├── user_guide.md                                     # 用户指南
+├── examples                                                   # 示例代码目录
+│   ├── CMakeLists.txt                                        # 示例代码构建配置
+│   ├── README.md                                             # 示例代码说明文档
+│   ├── simplegrep.c                                          # 简单的grep实现示例
+│   ├── pcapscan.cc                                           # 网络数据包扫描示例
+│   └── patbench.cc                                           # 模式匹配性能测试示例
+├── include                                                    # 公共头文件目录
+│   └── boost-patched/                                        # Boost库补丁版本
+├── src                                                        # 核心源代码目录
+│   ├── compiler/                                             # 编译器模块，负责将正则表达式编译为内部表示
+│   ├── fdr/                                                  # FDR引擎
+│   ├── hwlm/                                                 # HWLM引擎
+│   ├── kunpeng-enhanced/                                     # 鲲鹏平台增强实现，包含Lily引擎
+│   ├── nfa/                                                  # NFA引擎
+│   ├── nfagraph/                                             # NFA图构建和优化模块
+│   ├── rose/                                                 # ROSE引擎相关模块
+│   ├── som/                                                  # SOM（Start of Match）相关实现
+│   └── util/                                                 # 内部工具函数
+├── tools                                                      # 工具目录
+│   ├── fuzz/                                                 # fuzz测试工具
+│   ├── hsbench/                                              # 性能基准测试工具
+│   │   ├── CMakeLists.txt                                    # 构建配置
+│   │   ├── README.md                                         # 性能基准测试工具说明文档
+│   │   ├── scripts/                                          # 辅助脚本
+│   │   └── ...                                               # 其他源文件
+│   ├── hscheck/                                              # Hyperscan检查工具
+│   ├── hscollider/                                           # 对比pcre的正确性测试工具
+│   └── hsdump/                                               # Hyperscan转储工具
+├── unit                                                       # 单元测试目录
+│   ├── chimera/                                              # Chimera接口单元测试
+│   ├── gtest/                                                # Google Test框架
+│   ├── hyperscan/                                            # Hyperscan核心功能单元测试
+│   ├── internal/                                             # 内部模块单元测试
+│   └── CMakeLists.txt                                        # 单元测试工具构建配置
+├── util                                                       # 实用工具目录
+│   ├── CMakeLists.txt                                        # 实用工具构建配置
+│   ├── ExpressionParser.rl                                   # 正则表达式解析器（ragel）
+│   ├── cross_compile.cpp                                     # 交叉编译支持
+│   ├── database_util.cpp                                     # 数据库工具
+│   ├── ng_corpus_editor.cpp                                  # 语料库编辑器
+│   ├── ng_corpus_generator.cpp                               # 语料库生成器
+│   └── ...                                                   # 其他实用工具
+├── README.md                                                  # 项目说明文档
+├── config.txt                                                 # 配置文件
+└── ...                                                        # 其他根级文件
 ```
 
-运行结果参数说明如下：
 
--   Time spent scanning：使用目标规则集扫描目标数据库，扫描所用的时间。
--   Matches per iteration：每次迭代，按规则集匹配命中的数量。
--   Mean throughput \(overall\)：平均吞吐量（Mbit每秒）。
--   Max throughput \(per core\)：所有CPU核中的最大吞吐量（Mbit每秒）。
+## 版本说明<a name="ZH-CN_TOPIC_0000002518252296"></a>
 
-# 贡献指南
+每个版本的特性变更详细信息，具体请参见[版本说明书](docs/zh/release_notes.md)。
 
-如果使用过程中有任何问题，或者需要反馈特性需求和bug报告，可以提交issues联系我们，具体贡献方法可参考[这里](https://gitcode.com/boostkit/community/blob/master/docs/contributor/contributing.md)。
+## 约束与限制
+Arm平台上，Hyperscan使用lily引擎对单字节规则、2-4字节短规则匹配场景进行性能增强，该优化特性存在如下约束：
 
-# 免责声明
+lily单字节、2-4字节短规则匹配引擎各自仅能处理至多8条单字节规则，超出部分将采用原有引擎处理。
+在单条语料中，lily引擎所负责匹配的单字节规则命中次数合计应不大于4096，否则将停止匹配，并返回HS_SCAN_TERMINATED错误码。
+在单条语料中，lily引擎所负责匹配的2-4字节短规则命中次数合计应不大于4096，否则将停止匹配，并返回HS_SCAN_TERMINATED错误码。
+
+## 环境部署<a name="ZH-CN_TOPIC_0000002549772083"></a>
+
+介绍Hyperscan的环境依赖及安装方式和编译方法，具体请参见[安装指南](./docs/zh/installation_guide.md)。
+
+
+## 快速入门<a name="ZH-CN_TOPIC_0000002549892057"></a>
+
+Hyperscan的快速入门通过使用Hyperscan官方提供的性能Benchmark工具hsbench，具体请参见[快速入门](./docs/zh/quick_start.md)。
+
+
+## 学习文档<a name="ZH-CN_TOPIC_0000002518252300"></a>
+
+|名称|简介|
+|--|--|
+|《[快速入门](./docs/zh/quick_start.md)》|提供快速上手验证指导。|
+|《[版本说明书](docs/zh/release_notes.md)》|提供Hyperscan每个发布版本的基础信息和特性更新信息。|
+|《[安装指南](./docs/zh/installation_guide.md)》|指导用户如何安装部署及编译软件。|
+|《[开发指南](./docs/zh/developer_guide.md)》|提供Hyperscan特性相关接口说明及定义等。|
+|《[用户指南](./docs/zh/user_guide.md)》|提供Hyperscan特性使用指导。|
+
+
+
+## 贡献声明<a name="ZH-CN_TOPIC_0000002518412216"></a>
+
+欢迎大家为社区做贡献，如果使用过程中有任何问题/建议，或者需要反馈特性需求和bug报告，可以提交[Issues](https://gitcode.com/boostkit/hyperscan)联系我们，具体贡献方法可参考[这里](https://gitcode.com/boostkit/community/blob/master/docs/contributor/contributing.md)。同时也欢迎大家在[讨论专区](https://gitcode.com/boostkit/community/discussions)展开讨论交流。感谢您的支持。
+
+
+## 免责声明<a name="ZH-CN_TOPIC_0000002518412214"></a>
 
 此代码仓计划参与Hyperscan软件开源，仅作Hyperscan性能提升，编码风格遵照原生开源软件，继承原生开源软件安全设计，不破坏原生开源软件设计及编码风格和方式，软件的任何漏洞与安全问题，均由相应的上游社区根据其漏洞和安全响应机制解决。请密切关注上游社区发布的通知和版本更新。鲲鹏计算社区对软件的漏洞及安全问题不承担任何责任。
+
+
+## License<a name="ZH-CN_TOPIC_0000002549892075"></a>
+
+本项目采用BSD License许可证。详见[LICENSE](LICENSE)文件。
+
+本项目的文档适用CC-BY 4.0许可证，具体请参见[LICENSE](docs/LICENSE)文件。
+
 
