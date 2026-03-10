@@ -38,8 +38,8 @@ if (options.full):
 else:
     crange = range(32, 127)
 
-for i in xrange(0, options.count):
+for i in range(0, options.count):
     len = randint(1, options.depth)
-    s = [ chr(choice(crange)) for x in xrange(len) ]
+    s = [ chr(choice(crange)) for x in range(len) ]
     line = str(i) + ":/" + "".join(s) + "/" + generateRandomOptions()
-    print line
+    print (line)

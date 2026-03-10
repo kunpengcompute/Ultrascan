@@ -18,7 +18,7 @@ def chooseLeafWidth(nChildren):
 def generateConcat(nChildren, atTopIgnored):
     v = [ generateRE(w, atTop = False) for w in chooseLeafWidth(nChildren) ]
     v = [ r for r in v if r != '' ]	
-    return string.join(v, "")
+    return "".join(v)
 
 def makeGroup(s):
     # Parenthesise either in normal parens or a non-capturing group.
@@ -30,7 +30,7 @@ def makeGroup(s):
 def generateAlt(nChildren, atTop):
     v = [ generateRE(w, [generateAlt], atTop) for w in chooseLeafWidth(nChildren) ]
     v = [ r for r in v if r != '' ]	
-    s = string.join(v, "|")
+    s = "|".join(v)
     if len(v) == 1:
 	    return s
     else:
@@ -73,7 +73,7 @@ def generateCharClass(nChildren, atTop = False):
     else:
         nChars = randint(2,4)
 
-    for i in xrange(nChars):
+    for i in range(nChars):
         s += generateChar(1)
     return "[" + s + "]"
 
@@ -97,7 +97,7 @@ def generateLogicalNot(nChildren, atTop):
 def generateLogicalAnd(nChildren, atTop):
     v = [ generateCombination(w, [generateLogicalAnd], atTop = False) for w in chooseLeafWidth(nChildren) ]
     v = [ r for r in v if r != '' ]
-    s = string.join(v, "&")
+    s = "&".join(v)
     if len(v) == 1:
 	    return s
     else:
@@ -106,7 +106,7 @@ def generateLogicalAnd(nChildren, atTop):
 def generateLogicalOr(nChildren, atTop):
     v = [ generateCombination(w, [generateLogicalOr], atTop = False) for w in chooseLeafWidth(nChildren) ]
     v = [ r for r in v if r != '' ]
-    s = string.join(v, "|")
+    s = "|".join(v)
     if len(v) == 1:
 	    return s
     else:
@@ -251,9 +251,9 @@ alphabet = range(ord('a'), ord('a') + options.alphabet)
 if options.nocase:
     alphabet += range(ord('A'), ord('A') + options.alphabet)
     
-for i in xrange(0, options.count):
-    print "%08d:/%s/%s%s" % (i, generateRE(randint(1, options.depth), atTop = True), generateRandomOptions(), generateRandomExtParam(options.depth, options.extparam))
+for i in range(0, options.count):
+    print ("%08d:/%s/%s%s" % (i, generateRE(randint(1, options.depth), atTop = True), generateRandomOptions(), generateRandomExtParam(options.depth, options.extparam)))
 
 if options.logical:
-    for i in xrange(options.count, options.count + 3000):
-        print "%08d:/%s/C" % (i, generateCombination(randint(1, options.depth), atTop = True))
+    for i in range(options.count, options.count + 3000):
+        print ("%08d:/%s/C" % (i, generateCombination(randint(1, options.depth), atTop = True)))
