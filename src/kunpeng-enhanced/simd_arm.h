@@ -282,6 +282,7 @@ static REALLY_INLINE m128 Palignr(m128 a, m128 b, int count) {
 }
 
 static REALLY_INLINE m128 Variable_byte_shift_m128(m128 in, s32 amount) {
+    assert(amount >= -16 && amount <= 16);
     m128 shift_mask = Loadu128(khsel_vbs_mask_data + 16 - amount);
     return pshufb_m128(in, shift_mask);
 }
