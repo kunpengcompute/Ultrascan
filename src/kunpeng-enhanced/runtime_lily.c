@@ -400,8 +400,8 @@ int lilyForTeddyMatch(u64a conf, const u32 *ekeyVec, u8 flagsQuiet, const u8 *pt
             !IsExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) &&
             !(flagsQuiet & (1 << index))) {
             i = scratch->core_info.buf_offset + ptr - scratch->core_info.buf + byte;
-            if (i < scratch->core_info.len && i >= lenVec[index] - 1) {
-                // 过滤掉ptr < core_info.buf，以及填充导致误报的场景
+            if (i < scratch->core_info.buf_offset + scratch->core_info.len && i >= lenVec[index] - 1) {
+                // 过滤掉ptr < core_info.buf_offset + core_info.len，以及填充导致误报的场景
                 int ret = RoseDeliverReport(HS_ENGINE_LILY_FOR_TEDDY, i + 1 , index, 0, scratch, ekeyVec[index]);
                 if (ret == 0) {
                     return 1;
