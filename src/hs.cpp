@@ -43,6 +43,7 @@
 #include "parser/parse_error.h"
 #include "parser/prefilter.h"
 #include "parser/unsupported.h"
+#include "parser/shortcut_literal.h"
 #include "util/compile_error.h"
 #include "util/cpuid_flags.h"
 #include "util/cpuid_inline.h"
@@ -228,10 +229,31 @@ hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
 
     target_t target_info = platform ? target_t(*platform)
                                     : get_current_target();
+    u32 count_2_4_byte_literals = 0;
+    for (unsigned int i = 0; i < elements; i++) {
+        try {
+                // Use ParsedExpression constructor directly
+                ParsedExpression pe(i, expressions[i], flags ? flags[i] : 0, 0, ext ? ext[i] : nullptr);
+                // Check if it's a literal using the same logic as shortcut_literal
+                if (isShortLiteral(pe) > 0) {
+                    count_2_4_byte_literals++;
+                }
+            }
+        catch (const ParseError &) {
+            continue; // Skip invalid expressions, they'll be caught later
+        } catch (const CompileError &) {
+            continue; // Skip compilation errors, they'll be caught later
+        }
+    }
 
     try {
         CompileContext cc(isStreaming, isVectored, target_info, g);
         NG ng(cc, elements, somPrecision);
+
+        if (count_2_4_byte_literals > 8) {
+            DEBUG_PRINTF("More than 8 2-4 rules exist, will not start lilyForTeddy\n");
+            ng.allowLilyForTeddy = false;
+        }
 
         // First pass: process all HS_FLAG_COMBINATION rules to populate toLogicalKeyMap
         for (unsigned int i = 0; i < elements; i++) {

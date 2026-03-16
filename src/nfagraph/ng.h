@@ -96,6 +96,8 @@ public:
 
     const std::unique_ptr<SmallWriteBuild> smwr; //!< SmallWrite builder.
     const std::unique_ptr<RoseBuild> rose; //!< Rose builder.
+
+    bool allowLilyForTeddy;
 };
 
 /** \brief Run graph reduction passes.

@@ -86,7 +86,8 @@ NG::NG(const CompileContext &in_cc, size_t num_patterns,
       ssm(in_somPrecision),
       cc(in_cc),
       smwr(makeSmallWriteBuilder(num_patterns, rm, cc)),
-      rose(makeRoseBuilder(rm, ssm, *smwr, cc, boundary)) {
+      rose(makeRoseBuilder(rm, ssm, *smwr, cc, boundary)),
+      allowLilyForTeddy(true) {
 }
 
 NG::~NG() {
