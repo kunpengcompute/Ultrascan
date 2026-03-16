@@ -251,6 +251,7 @@ hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
         NG ng(cc, elements, somPrecision);
 
         if (count_2_4_byte_literals > 8) {
+            DEBUG_PRINTF("More than 8 2-4 rules exist, will not start lilyForTeddy\n");
             ng.allowLilyForTeddy = false;
         }
 
