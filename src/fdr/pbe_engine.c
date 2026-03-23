@@ -5,6 +5,18 @@
 #include "fdr_enhanced.h"
 #include "fdr_internal.h"
 #include "pbe_runtime.h"
+#include "util/compare.h"
+
+static u32 pbeExtractKey(const struct PBERuntimeBitSelector *selectors,
+                         u32 selectorCount, const u8 *cur,
+                         const u8 *bufStart);
+
+static int pbeEntryMayMatchAtPos(
+    const struct PBERuntimeSecondaryHashEntry *entry, const u8 *cur,
+    const u8 *bufStart);
+
+static int pbeHasAnyCandidate(const struct PBERuntimeHeader *hdr,
+                              const struct FDR_Runtime_Args *a);
 
 static int pbeValidateLayout(const struct FDR *fdr,
                              const struct PBERuntimeHeader *hdr) {
@@ -35,6 +47,63 @@ static int pbeValidateLayout(const struct FDR *fdr,
     return 1;
 }
 
+static int pbeEntryMayMatchAtPos(
+    const struct PBERuntimeSecondaryHashEntry *entry, const u8 *cur,
+    const u8 *bufStart) {
+    if (!entry || !entry->ruleCount || !cur || !bufStart || cur < bufStart) {
+        return 0;
+    }
+
+    const size_t avail = (size_t)(cur - bufStart) + 1;
+    const u8 c = *cur;
+    const u8 cUpper = (u8)mytoupper((char)c);
+    u32 i;
+
+    for (i = 0; i < entry->ruleCount && i < 32; i++) {
+        const u8 len = entry->tableControl[i];
+        const u8 tail = entry->ruleVector[i];
+        if (!len || avail < len) {
+            continue;
+        }
+
+        if (c == tail || cUpper == tail) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int pbeHasAnyCandidate(const struct PBERuntimeHeader *hdr,
+                              const struct FDR_Runtime_Args *a) {
+    if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
+        return 0;
+    }
+
+    const struct PBERuntimeBitSelector *selectors =
+        (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
+                                               hdr->selectorsOffset);
+    const u32 *primaryHashTable =
+        (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
+    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable =
+        (const struct PBERuntimeSecondaryHashEntry *)((const u8 *)hdr +
+                                                      hdr->secondaryOffset);
+
+    size_t i;
+    for (i = a->start_offset; i < a->len; i++) {
+        const u8 *cur = a->buf + i;
+        const u32 key =
+            pbeExtractKey(selectors, hdr->selectorCount, cur, a->buf);
+        const u32 idx = (hdr->primaryCount > 1) ? (key % hdr->primaryCount) : 0;
+        const u32 secOff = primaryHashTable[idx];
+
+        if (secOff && secOff < hdr->secondaryCount &&
+            pbeEntryMayMatchAtPos(&secondaryHashTable[secOff], cur, a->buf)) {
+            return 1;
+        }
+    }
+    return 0;
+}
 static u32 pbeExtractKey(const struct PBERuntimeBitSelector *selectors,
                          u32 selectorCount, const u8 *cur, const u8 *bufStart) {
     u32 key = 0;
@@ -69,36 +138,13 @@ hwlm_error_t PbeEngineExec(const struct FDR *fdr,
         return KHSEL_NeoFdrEngineExec(fdr, a, control);
     }
 
-    {
-        const struct PBERuntimeBitSelector *selectors =
-            (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
-                                                   hdr->selectorsOffset);
-        const u32 *primaryHashTable =
-            (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
-        const struct PBERuntimeSecondaryHashEntry *secondaryHashTable =
-            (const struct PBERuntimeSecondaryHashEntry *)((const u8 *)hdr +
-                                                          hdr->secondaryOffset);
-
-        if (a && a->buf && a->len) {
-            const u8 *cur = a->buf + a->start_offset;
-            if (cur < a->buf + a->len) {
-                const u32 key =
-                    pbeExtractKey(selectors, hdr->selectorCount, cur, a->buf);
-                const u32 maskedKey =
-                    (hdr->primaryCount > 1) ? (key % hdr->primaryCount) : 0;
-                const u32 secOff = primaryHashTable[maskedKey];
-
-                // Read secondary entry once to validate pipeline wiring.
-                if (secOff && secOff < hdr->secondaryCount) {
-                    volatile u32 sanity = secondaryHashTable[secOff].headMask;
-                    (void)sanity;
-                }
-            }
-        }
+    if (!(hdr->flags & PBE_RUNTIME_FLAG_PARTIAL_COVERAGE) && a &&
+        !a->len_history && !pbeHasAnyCandidate(hdr, a)) {
+        return HWLM_SUCCESS;
     }
 
-    /* Phase-2 step 1: PBE table layout is attached and readable.
-     * Matching path still falls back to Neo until vectorized verify lands.
+    /* Phase-2 step 2: use PBE as a safe pre-check fast path. Matching and
+     * callback behavior remains on the Neo path for candidate cases.
      */
     return KHSEL_NeoFdrEngineExec(fdr, a, control);
 }

@@ -252,7 +252,8 @@ static
 void buildHashTables(const std::vector<hwlmLiteral> &lits,
                      const std::vector<PBEBitSelector> &selectors,
                      PBEPrimaryHashTable *primaryHashTable,
-                     std::vector<PBESecondaryHashEntry> *secondaryHashTable) {
+                     std::vector<PBESecondaryHashEntry> *secondaryHashTable,
+                     u32 *flags) {
     primaryHashTable->offsets.clear();
     secondaryHashTable->clear();
 
@@ -269,8 +270,12 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
     std::map<u32, std::vector<u32>> keyToLiteralIndexes;
     for (u32 i = 0; i < lits.size(); i++) {
         std::vector<u32> keys;
-        if (!enumerateHashKeysForLiteral(lits[i], selectors, &keys, nullptr)) {
+        bool truncated = false;
+        if (!enumerateHashKeysForLiteral(lits[i], selectors, &keys, &truncated)) {
             continue;
+        }
+        if (truncated && flags) {
+            *flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
         }
 
         for (const auto key : keys) {
@@ -289,6 +294,9 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
         entry.ruleBase = verify_u16(idxes.front());
         entry.ruleCount =
             verify_u16(std::min<size_t>(idxes.size(), PBE_MAX_RULES_PER_ENTRY));
+        if (idxes.size() > PBE_MAX_RULES_PER_ENTRY && flags) {
+            *flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+        }
 
         for (u32 i = 0; i < entry.ruleCount; i++) {
             const auto &lit = lits[idxes[i]];
@@ -345,6 +353,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     }
 
     artifacts->keyBits = 0;
+    artifacts->flags = 0;
     artifacts->bitSelectors.clear();
     artifacts->primaryHashTable.offsets.clear();
     artifacts->secondaryHashTable.clear();
@@ -359,7 +368,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     }
 
     buildHashTables(lits, artifacts->bitSelectors, &artifacts->primaryHashTable,
-                    &artifacts->secondaryHashTable);
+                    &artifacts->secondaryHashTable, &artifacts->flags);
 
     return true;
 }
@@ -391,6 +400,7 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     auto *hdr = reinterpret_cast<PBERuntimeHeader *>(blob.get());
     hdr->magic = PBE_RUNTIME_MAGIC;
     hdr->version = PBE_RUNTIME_VERSION;
+    hdr->flags = artifacts.flags;
     hdr->keyBits = artifacts.keyBits;
     hdr->selectorCount = selectorCount;
     hdr->primaryCount = primaryCount;

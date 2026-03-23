@@ -9,6 +9,8 @@
 
 namespace ue2 {
 
+static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE = 1U << 0;
+
 struct Grey;
 struct target_t;
 
@@ -32,6 +34,7 @@ struct PBESecondaryHashEntry {
 
 struct PBECompileArtifacts {
     u32 keyBits = 0;
+    u32 flags = 0;
     std::vector<PBEBitSelector> bitSelectors;
     PBEPrimaryHashTable primaryHashTable;
     std::vector<PBESecondaryHashEntry> secondaryHashTable;

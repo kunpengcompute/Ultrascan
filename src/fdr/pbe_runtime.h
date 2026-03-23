@@ -5,10 +5,12 @@
 
 #define PBE_RUNTIME_MAGIC 0x50424530U /* "PBE0" */
 #define PBE_RUNTIME_VERSION 1U
+#define PBE_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 
 struct PBERuntimeHeader {
     u32 magic;
     u32 version;
+    u32 flags;
     u32 keyBits;
     u32 selectorCount;
     u32 primaryCount;
