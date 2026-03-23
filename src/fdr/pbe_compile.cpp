@@ -2,8 +2,313 @@
 
 #include "grey.h"
 #include "util/target_info.h"
+#include "util/compare.h"
+#include "util/verify_types.h"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <map>
+#include <unordered_set>
+#include <utility>
 
 namespace ue2 {
+
+namespace {
+
+static constexpr u32 PBE_MAX_SUFFIX_BYTES = 8;
+static constexpr u32 PBE_MAX_CANDIDATE_BITS = PBE_MAX_SUFFIX_BYTES * 8;
+static constexpr u32 PBE_DEFAULT_KEY_BITS = 12;
+static constexpr u32 PBE_MAX_RULES_PER_ENTRY = 32;
+static constexpr u32 PBE_MAX_EXPANDED_KEYS_PER_RULE = 64;
+static constexpr u8 PBE_STATE_DONT_CARE = 2;
+
+struct PBEBitCandidate {
+    u32 bitIndex = 0;
+    double score = 0.0;
+    std::vector<u8> states; // 0, 1, or PBE_STATE_DONT_CARE
+};
+
+static
+bool getBitState(const hwlmLiteral &lit, u32 bitIndex, u8 *state) {
+    if (!state) {
+        return false;
+    }
+
+    const u32 byteFromEnd = bitIndex / 8;
+    const u32 bitInByte = bitIndex % 8;
+    const u32 len = verify_u32(lit.s.size());
+
+    bool care = false;
+    bool value = false;
+
+    if (byteFromEnd < len) {
+        const u8 c = verify_u8(lit.s[len - byteFromEnd - 1]);
+        care = true;
+        value = !!(c & (1U << bitInByte));
+        if (lit.nocase && ourisalpha(c) && bitInByte == 5) {
+            care = false;
+        }
+    }
+
+    if (!lit.msk.empty() && !lit.cmp.empty()) {
+        const u32 mlen = verify_u32(lit.msk.size());
+        if (byteFromEnd < mlen) {
+            const u8 m = lit.msk[mlen - byteFromEnd - 1];
+            if (m & (1U << bitInByte)) {
+                const u8 v = lit.cmp[mlen - byteFromEnd - 1];
+                care = true;
+                value = !!(v & (1U << bitInByte));
+            }
+        }
+    }
+
+    *state = care ? (value ? 1 : 0) : PBE_STATE_DONT_CARE;
+    return true;
+}
+
+static
+double entropyScore(u32 zeros, u32 ones) {
+    const u32 total = zeros + ones;
+    if (!total || !zeros || !ones) {
+        return 0.0;
+    }
+
+    const double p0 = static_cast<double>(zeros) / total;
+    const double p1 = static_cast<double>(ones) / total;
+    return -(p0 * std::log2(p0) + p1 * std::log2(p1));
+}
+
+static
+u64a signatureOfStates(const std::vector<u8> &states) {
+    // FNV-1a 64-bit
+    u64a h = 1469598103934665603ULL;
+    for (u8 v : states) {
+        h ^= static_cast<u64a>(v + 1U);
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+static
+std::vector<PBEBitCandidate> buildBitCandidates(
+    const std::vector<hwlmLiteral> &lits) {
+    std::vector<PBEBitCandidate> out;
+    out.reserve(PBE_MAX_CANDIDATE_BITS);
+
+    for (u32 bit = 0; bit < PBE_MAX_CANDIDATE_BITS; bit++) {
+        PBEBitCandidate c;
+        c.bitIndex = bit;
+        c.states.reserve(lits.size());
+
+        u32 careCount = 0;
+        u32 zeros = 0;
+        u32 ones = 0;
+
+        for (const auto &lit : lits) {
+            u8 state = PBE_STATE_DONT_CARE;
+            getBitState(lit, bit, &state);
+            c.states.push_back(state);
+            if (state == PBE_STATE_DONT_CARE) {
+                continue;
+            }
+            careCount++;
+            if (state) {
+                ones++;
+            } else {
+                zeros++;
+            }
+        }
+
+        if (!careCount) {
+            continue;
+        }
+
+        // Principle 1 + 2:
+        // prioritize low don't-care ratio and high discrimination.
+        const double careRatio =
+            static_cast<double>(careCount) / std::max<size_t>(1, lits.size());
+        const double entropy = entropyScore(zeros, ones);
+        c.score = (careRatio * 0.7) + (entropy * 0.3);
+        out.push_back(std::move(c));
+    }
+
+    return out;
+}
+
+static
+void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
+                        std::vector<PBEBitSelector> *selectors,
+                        u32 *keyBitsOut) {
+    selectors->clear();
+    if (keyBitsOut) {
+        *keyBitsOut = 0;
+    }
+    if (lits.empty()) {
+        return;
+    }
+
+    auto candidates = buildBitCandidates(lits);
+    if (candidates.empty()) {
+        return;
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const PBEBitCandidate &a, const PBEBitCandidate &b) {
+                  if (a.score != b.score) {
+                      return a.score > b.score;
+                  }
+                  return a.bitIndex < b.bitIndex;
+              });
+
+    const u32 targetBits =
+        std::min<u32>(PBE_DEFAULT_KEY_BITS, verify_u32(candidates.size()));
+
+    std::unordered_set<u64a> signatures;
+    for (const auto &cand : candidates) {
+        if (selectors->size() >= targetBits) {
+            break;
+        }
+
+        // Principle 3: keep only one from identical-feature columns.
+        const u64a sig = signatureOfStates(cand.states);
+        if (!signatures.insert(sig).second) {
+            continue;
+        }
+
+        PBEBitSelector s;
+        s.byteOffset = verify_u8(cand.bitIndex / 8);
+        s.bitOffset = verify_u8(cand.bitIndex % 8);
+        selectors->push_back(s);
+    }
+
+    if (keyBitsOut) {
+        *keyBitsOut = verify_u32(selectors->size());
+    }
+}
+
+static
+bool enumerateHashKeysForLiteral(const hwlmLiteral &lit,
+                                 const std::vector<PBEBitSelector> &selectors,
+                                 std::vector<u32> *keys,
+                                 bool *truncated) {
+    if (!keys) {
+        return false;
+    }
+
+    keys->clear();
+    keys->push_back(0);
+    bool cut = false;
+
+    for (u32 i = 0; i < selectors.size(); i++) {
+        const auto &sel = selectors[i];
+        const u32 bitIndex = static_cast<u32>(sel.byteOffset) * 8U +
+                             static_cast<u32>(sel.bitOffset);
+
+        u8 state = PBE_STATE_DONT_CARE;
+        getBitState(lit, bitIndex, &state);
+
+        if (state == PBE_STATE_DONT_CARE) {
+            const size_t oldSize = keys->size();
+            if (oldSize >= PBE_MAX_EXPANDED_KEYS_PER_RULE) {
+                // Keep subset and mark truncated; runtime fallback still covers
+                // semantic corner cases for this rule.
+                cut = true;
+                continue;
+            }
+
+            const size_t newSize = std::min<size_t>(
+                oldSize * 2, PBE_MAX_EXPANDED_KEYS_PER_RULE);
+            keys->resize(newSize);
+            for (size_t k = 0; k < newSize - oldSize; k++) {
+                (*keys)[oldSize + k] = (*keys)[k] | (1U << i);
+            }
+
+            if (newSize < oldSize * 2) {
+                cut = true;
+            }
+            continue;
+        }
+
+        if (state) {
+            for (auto &k : *keys) {
+                k |= (1U << i);
+            }
+        }
+    }
+
+    if (truncated) {
+        *truncated = cut;
+    }
+    return true;
+}
+
+static
+void buildHashTables(const std::vector<hwlmLiteral> &lits,
+                     const std::vector<PBEBitSelector> &selectors,
+                     PBEPrimaryHashTable *primaryHashTable,
+                     std::vector<PBESecondaryHashEntry> *secondaryHashTable) {
+    primaryHashTable->offsets.clear();
+    secondaryHashTable->clear();
+
+    if (selectors.empty()) {
+        return;
+    }
+
+    const u32 tableSize = 1U << verify_u32(selectors.size());
+    primaryHashTable->offsets.assign(tableSize, 0);
+
+    // secondaryHashTable[0] stays empty as a null target.
+    secondaryHashTable->push_back(PBESecondaryHashEntry{});
+
+    std::map<u32, std::vector<u32>> keyToLiteralIndexes;
+    for (u32 i = 0; i < lits.size(); i++) {
+        std::vector<u32> keys;
+        if (!enumerateHashKeysForLiteral(lits[i], selectors, &keys, nullptr)) {
+            continue;
+        }
+
+        for (const auto key : keys) {
+            keyToLiteralIndexes[key].push_back(i);
+        }
+    }
+
+    for (const auto &it : keyToLiteralIndexes) {
+        const u32 key = it.first;
+        const auto &idxes = it.second;
+        if (idxes.empty()) {
+            continue;
+        }
+
+        PBESecondaryHashEntry entry = {};
+        entry.ruleBase = verify_u16(idxes.front());
+        entry.ruleCount =
+            verify_u16(std::min<size_t>(idxes.size(), PBE_MAX_RULES_PER_ENTRY));
+
+        for (u32 i = 0; i < entry.ruleCount; i++) {
+            const auto &lit = lits[idxes[i]];
+            const u32 len = verify_u32(lit.s.size());
+            const u8 last = verify_u8(lit.s.back());
+
+            entry.ruleVector[i] = lit.nocase ? mytoupper(last) : last;
+            entry.tableControl[i] = verify_u8(std::min<u32>(len, 255));
+            if (len) {
+                entry.tailMask |= (1U << i);
+            }
+            if (len > 1) {
+                entry.headMask |= (1U << i);
+            }
+        }
+
+        const u32 secondaryOffset = verify_u32(secondaryHashTable->size());
+        secondaryHashTable->push_back(entry);
+        primaryHashTable->offsets[key] = secondaryOffset;
+    }
+}
+
+} // namespace
 
 bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
                  const Grey &grey) {
@@ -11,11 +316,19 @@ bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
         return false;
     }
 
-    if (!target.has_neon()) {
+    // PBE is currently only enabled on Arm64 builds.
+#if !defined(__aarch64__)
+    (void)target;
+    return false;
+#else
+    (void)target;
+#endif
+
+    if (lits.size() < 4) {
         return false;
     }
 
-    if (lits.empty()) {
+    if (lits.size() > std::numeric_limits<u16>::max()) {
         return false;
     }
 
@@ -28,6 +341,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
         return false;
     }
 
+    artifacts->keyBits = 0;
     artifacts->bitSelectors.clear();
     artifacts->primaryHashTable.offsets.clear();
     artifacts->secondaryHashTable.clear();
@@ -36,9 +350,14 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
         return false;
     }
 
-    // Phase-0 placeholder: reserve an empty slot so layout code can be
-    // integrated incrementally without changing APIs.
-    artifacts->primaryHashTable.offsets.push_back(0);
+    selectBitSelectors(lits, &artifacts->bitSelectors, &artifacts->keyBits);
+    if (artifacts->bitSelectors.empty()) {
+        return false;
+    }
+
+    buildHashTables(lits, artifacts->bitSelectors, &artifacts->primaryHashTable,
+                    &artifacts->secondaryHashTable);
+
     return true;
 }
 

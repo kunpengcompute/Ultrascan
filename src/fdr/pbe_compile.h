@@ -30,6 +30,7 @@ struct PBESecondaryHashEntry {
 };
 
 struct PBECompileArtifacts {
+    u32 keyBits = 0;
     std::vector<PBEBitSelector> bitSelectors;
     PBEPrimaryHashTable primaryHashTable;
     std::vector<PBESecondaryHashEntry> secondaryHashTable;
