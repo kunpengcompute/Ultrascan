@@ -580,3 +580,11 @@ hwlm_error_t KHSEL_NeoFdrEngineExec(const struct FDR *fdr,
 
     return KHSEL_HWLM_SUCCESS;
 }
+
+hwlm_error_t KHSEL_PbeEngineExec(const struct FDR *fdr,
+    const struct FDR_Runtime_Args *a, hwlm_group_t control)
+{
+    // Phase-0: PBE uses the proven Neo execution path until
+    // primary/secondary hash runtime tables are wired in.
+    return KHSEL_NeoFdrEngineExec(fdr, a, control);
+}

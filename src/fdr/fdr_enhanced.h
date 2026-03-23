@@ -24,6 +24,10 @@ hwlm_error_t KHSEL_FdrEngineExec(const struct FDR *fdr,
 hwlm_error_t KHSEL_NeoFdrEngineExec(const struct FDR *fdr,
                              const struct FDR_Runtime_Args *a,
                              hwlm_group_t control);
+
+hwlm_error_t KHSEL_PbeEngineExec(const struct FDR *fdr,
+                             const struct FDR_Runtime_Args *a,
+                             hwlm_group_t control);
 #ifdef __cplusplus
 }
 #endif // __cplusplus

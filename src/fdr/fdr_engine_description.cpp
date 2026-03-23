@@ -65,6 +65,12 @@ void getNeoFdrDescriptions(vector<FDREngineDescription> *out) {
     out->emplace_back(def);
 }
 
+void getPbeDescriptions(vector<FDREngineDescription> *out) {
+    static const FDREngineDef def = {2, 64, 8, 0};
+    out->clear();
+    out->emplace_back(def);
+}
+
 static
 u32 findDesiredStride(size_t num_lits, size_t min_len, size_t min_len_count) {
     u32 desiredStride = 1; // always our safe fallback
@@ -310,6 +316,93 @@ unique_ptr<FDREngineDescription> chooseNeoFdrEngine(const target_t &target,
     return ue2::make_unique<FDREngineDescription>(*best);
 }
 
+unique_ptr<FDREngineDescription> choosePbeEngine(const target_t &target,
+                                                 const vector<hwlmLiteral> &vl,
+                                                 bool make_small) {
+    vector<FDREngineDescription> allDescs;
+    getPbeDescriptions(&allDescs);
+
+    // find desired stride
+    size_t count;
+    size_t msl = minLenCount(vl, &count);
+    u32 desiredStride = findDesiredStride(vl.size(), msl, count);
+
+    DEBUG_PRINTF("%zu lits, msl=%zu, desiredStride=%u\n", vl.size(), msl,
+                 desiredStride);
+
+    FDREngineDescription *best = nullptr;
+    u32 best_score = 0;
+
+    FDREngineDescription &eng = allDescs[0];
+
+    for (u32 domain = 9; domain <= 15; domain++) {
+        for (size_t stride = 1; stride <= 4; stride *= 2) {
+            if (domain > 13 && stride > 1) {
+                continue;
+            }
+            if (!eng.isValidOnTarget(target)) {
+                continue;
+            }
+            if (msl < stride) {
+                continue;
+            }
+
+            u32 score = 100;
+            score -= absdiff(desiredStride, stride);
+
+            if (stride <= desiredStride) {
+                score += stride;
+            }
+
+            u32 effLits = vl.size();
+            u32 ideal;
+            if (effLits < eng.getNumBuckets()) {
+                ideal = (stride == 1) ? 8 : 10;
+            } else if (effLits < 20) {
+                ideal = 10;
+            } else if (effLits < 100) {
+                ideal = 11;
+            } else if (effLits < 1000) {
+                ideal = 12;
+            } else if (effLits < 10000) {
+                ideal = 13;
+            } else {
+                ideal = 15;
+            }
+
+            if (ideal != 8 && eng.schemeWidth == 32) {
+                ideal += 1;
+            }
+            if (make_small) {
+                ideal -= 2;
+            }
+            if (stride > 1) {
+                ideal++;
+            }
+            if (target.is_atom_class() && !make_small && effLits < 4000) {
+                ideal -= 2;
+            }
+
+            score -= absdiff(ideal, domain);
+
+            if (!best || score > best_score) {
+                eng.bits = domain;
+                eng.stride = stride;
+                best = &eng;
+                best_score = score;
+            }
+        }
+    }
+
+    if (!best) {
+        DEBUG_PRINTF("failed to find engine\n");
+        return nullptr;
+    }
+
+    DEBUG_PRINTF("using engine %u\n", best->getID());
+    return ue2::make_unique<FDREngineDescription>(*best);
+}
+
 SchemeBitIndex FDREngineDescription::getSchemeBit(BucketIndex b,
                                                   PositionInBucket p) const {
     assert(p < getBucketWidth(b));
@@ -329,11 +422,21 @@ unique_ptr<FDREngineDescription> getFdrDescription(u32 engineID) {
     vector<FDREngineDescription> allDescs;
     getFdrDescriptions(&allDescs);
 
-    if (engineID >= allDescs.size()) {
-        return nullptr;
+    vector<FDREngineDescription> neoDescs;
+    getNeoFdrDescriptions(&neoDescs);
+    allDescs.insert(allDescs.end(), neoDescs.begin(), neoDescs.end());
+
+    vector<FDREngineDescription> pbeDescs;
+    getPbeDescriptions(&pbeDescs);
+    allDescs.insert(allDescs.end(), pbeDescs.begin(), pbeDescs.end());
+
+    for (const auto &desc : allDescs) {
+        if (desc.getID() == engineID) {
+            return ue2::make_unique<FDREngineDescription>(desc);
+        }
     }
 
-    return ue2::make_unique<FDREngineDescription>(allDescs[engineID]);
+    return nullptr;
 }
 
 } // namespace ue2

@@ -838,6 +838,8 @@ SET (hs_compile_SRCS
     src/fdr/fdr_engine_description.cpp
     src/fdr/fdr_engine_description.h
     src/fdr/fdr_internal.h
+    src/fdr/pbe_compile.cpp
+    src/fdr/pbe_compile.h
     src/fdr/flood_compile.cpp
     src/fdr/teddy_compile.cpp
     src/fdr/teddy_compile.h

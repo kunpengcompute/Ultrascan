@@ -36,6 +36,7 @@
 #include "fdr_confirm.h"
 #include "fdr_compile_internal.h"
 #include "fdr_engine_description.h"
+#include "pbe_compile.h"
 #include "teddy_compile.h"
 #include "teddy_engine_description.h"
 #include "grey.h"
@@ -850,6 +851,28 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
             return proto;
         } else {
             DEBUG_PRINTF("build with teddy failed, will try with FDR\n");
+        }
+    }
+
+    if (canBuildPBE(target, lits, grey)) {
+        PBECompileArtifacts pbeArtifacts;
+        if (buildPBEArtifacts(lits, &pbeArtifacts)) {
+            auto des = (hint == HINT_INVALID)
+                           ? choosePbeEngine(target, lits, make_small)
+                           : getFdrDescription(hint);
+            if (des && des->getID() == 2) {
+                // temporary hack for unit testing
+                if (hint != HINT_INVALID) {
+                    des->bits = 9;
+                    des->stride = 1;
+                }
+
+                auto bucketToLits = assignStringsToBuckets(lits, *des);
+                addIncludedInfo(lits, des->getNumBuckets(), bucketToLits);
+                auto proto = ue2::make_unique<HWLMProto>(
+                    engType, move(des), lits, bucketToLits, make_small);
+                return proto;
+            }
         }
     }
 
