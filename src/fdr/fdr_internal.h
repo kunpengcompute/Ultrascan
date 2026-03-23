@@ -73,6 +73,8 @@ struct FDR {
     u32 numStrings;
     u32 confOffset;
     u32 floodOffset;
+    u32 pbeOffset;
+    u32 pbeSize;
     u8 stride; /* stride - how frequently the data is consulted by the first
                 * stage matcher */
     u8 domain; /* number of bits used to index into main FDR table. This value

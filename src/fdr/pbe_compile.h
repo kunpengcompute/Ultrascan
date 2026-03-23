@@ -3,6 +3,7 @@
 
 #include "ue2common.h"
 #include "hwlm/hwlm_literal.h"
+#include "util/bytecode_ptr.h"
 
 #include <vector>
 
@@ -41,6 +42,8 @@ bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
 
 bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
                        PBECompileArtifacts *artifacts);
+
+bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts);
 
 } // namespace ue2
 

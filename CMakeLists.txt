@@ -675,6 +675,8 @@ set (hs_exec_SRCS
     src/fdr/fdr_confirm_runtime.h
     src/fdr/flood_runtime.h
     src/fdr/fdr_loadval.h
+    src/fdr/pbe_engine.c
+    src/fdr/pbe_runtime.h
     src/fdr/teddy.c
     src/fdr/teddy.h
     src/fdr/teddy_internal.h
@@ -840,6 +842,7 @@ SET (hs_compile_SRCS
     src/fdr/fdr_internal.h
     src/fdr/pbe_compile.cpp
     src/fdr/pbe_compile.h
+    src/fdr/pbe_runtime.h
     src/fdr/flood_compile.cpp
     src/fdr/teddy_compile.cpp
     src/fdr/teddy_compile.h

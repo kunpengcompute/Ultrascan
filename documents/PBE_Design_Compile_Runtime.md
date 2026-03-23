@@ -24,7 +24,7 @@ PBE 的编译期入口挂接在：
 
 - `engineID=0`: `KHSEL_FdrEngineExec`
 - `engineID=1`: `KHSEL_NeoFdrEngineExec`
-- `engineID=2`: `KHSEL_PbeEngineExec`
+- `engineID=2`: `PbeEngineExec`
 
 ## 3. 编译期设计
 
@@ -88,13 +88,13 @@ PBE 的编译期入口挂接在：
    - `src/fdr/pbe_compile.h`
    - `src/fdr/pbe_compile.cpp`
 2. 在 `fdrBuildProtoInternal` 中加入 PBE 选择挂点。
-3. 新增运行期入口 `KHSEL_PbeEngineExec`，并完成 `engineID=2` 分派。
+3. 新增运行期入口 `PbeEngineExec`，并完成 `engineID=2` 分派。
 4. CMake 已加入 PBE 编译期源码。
 
 当前行为说明：
 
 1. PBE 编译期构建函数为占位实现，接口与数据结构已固定。
-2. `KHSEL_PbeEngineExec` 先复用 Neo 路径，保证可编译、可运行、可回退。
+2. `PbeEngineExec` 先复用 Neo 路径，保证可编译、可运行、可回退。
 
 ## 6. Phase-1 已实现内容（2026-03-23）
 
@@ -109,7 +109,7 @@ PBE 的编译期入口挂接在：
    - 结合 `nocase` 与 `msk/cmp` 语义计算 bit 的 `0/1/X` 状态。
    - 使用“关心位比例 + 熵”评分，落实原则 1/2。
    - 使用列特征签名去重，落实原则 3。
-   - 默认选择最多 `12` 位作为哈希键。
+   - 默认选择最多 `16` 位作为哈希键。
 3. 一级/二级哈希表生成：
    - 一级哈希表 `PrimaryHashTable.offsets`：大小 `2^keyBits`。
    - 二级哈希表 `SecondaryHashTable`：第 `0` 项保留为空项。
@@ -117,11 +117,23 @@ PBE 的编译期入口挂接在：
 4. 不完全指定位（X）规则处理增强：
    - 从“直接回退”升级为“多 key 展开（最多 64 个 key/规则）后入一级哈希表”。
    - 降低纯回退规则比例，为后续运行期向量化校验提供更高覆盖率输入。
+5. Phase-2 第一步（表布局打通）：
+   - 新增 `PBE runtime blob` 结构并序列化到 bytecode（`pbeOffset/pbeSize`）。
+   - 运行期 `PbeEngineExec` 可读取并校验 PBE 表头（magic/version）。
+   - 当前匹配主逻辑仍回退到 Neo 路径，确保行为稳定。
+6. 运行期代码组织调整：
+   - `PbeEngineExec` 从 `src/kunpeng-enhanced/fdr_enhanced.c` 迁移到独立文件 `src/fdr/pbe_engine.c`。
+   - 运行期实现保持纯 C。
+   - 避免 `kunpeng-enhanced` 的本地 `struct FDR` 重定义与主线 `struct FDR` 字段不一致问题。
+7. 运行期读取骨架增强：
+   - 在 `PbeEngineExec` 中增加 PBE blob 布局校验函数。
+   - 增加基于位提取码的 key 提取与一级/二级哈希表查询骨架。
+   - 当前仅用于打通运行期数据路径验证，匹配回调语义仍由 Neo 路径承载。
 
 当前 Phase-1 限制：
 
 1. X 位数量过多时会触发展开上限裁剪（64 个 key/规则），剩余语义由回退路径兜底。
-2. 运行期 `KHSEL_PbeEngineExec` 仍复用 Neo 路径，尚未消费 PBE 表。
+2. 运行期 `PbeEngineExec` 仍以 Neo 路径承载最终匹配回调（当前阶段）。
 3. 二级表中的 `ruleVector/tableControl` 目前为可运行的过渡编码，后续会替换为最终向量校验编码格式。
 
 ## 7. 下一阶段实现计划（Phase-2）

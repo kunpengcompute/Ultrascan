@@ -1,6 +1,8 @@
 #include "pbe_compile.h"
 
 #include "grey.h"
+#include "pbe_runtime.h"
+#include "util/alloc.h"
 #include "util/target_info.h"
 #include "util/compare.h"
 #include "util/verify_types.h"
@@ -9,6 +11,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <unordered_set>
@@ -20,7 +23,7 @@ namespace {
 
 static constexpr u32 PBE_MAX_SUFFIX_BYTES = 8;
 static constexpr u32 PBE_MAX_CANDIDATE_BITS = PBE_MAX_SUFFIX_BYTES * 8;
-static constexpr u32 PBE_DEFAULT_KEY_BITS = 12;
+static constexpr u32 PBE_DEFAULT_KEY_BITS = 16;
 static constexpr u32 PBE_MAX_RULES_PER_ENTRY = 32;
 static constexpr u32 PBE_MAX_EXPANDED_KEYS_PER_RULE = 64;
 static constexpr u8 PBE_STATE_DONT_CARE = 2;
@@ -359,6 +362,71 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
                     &artifacts->secondaryHashTable);
 
     return true;
+}
+
+bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
+    const u32 selectorCount = verify_u32(artifacts.bitSelectors.size());
+    const u32 primaryCount = verify_u32(artifacts.primaryHashTable.offsets.size());
+    const u32 secondaryCount = verify_u32(artifacts.secondaryHashTable.size());
+
+    const size_t selectorBytes =
+        sizeof(PBERuntimeBitSelector) * artifacts.bitSelectors.size();
+    const size_t primaryBytes = sizeof(u32) * artifacts.primaryHashTable.offsets.size();
+    const size_t secondaryBytes = sizeof(PBERuntimeSecondaryHashEntry) *
+                                  artifacts.secondaryHashTable.size();
+
+    size_t totalSize = ROUNDUP_N(sizeof(PBERuntimeHeader), alignof(u32));
+    const u32 selectorsOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(selectorBytes, alignof(u32));
+    const u32 primaryOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(primaryBytes, alignof(u32));
+    const u32 secondaryOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(secondaryBytes, alignof(u32));
+
+    auto blob = make_zeroed_bytecode_ptr<u8>(totalSize);
+    if (!blob) {
+        return nullptr;
+    }
+
+    auto *hdr = reinterpret_cast<PBERuntimeHeader *>(blob.get());
+    hdr->magic = PBE_RUNTIME_MAGIC;
+    hdr->version = PBE_RUNTIME_VERSION;
+    hdr->keyBits = artifacts.keyBits;
+    hdr->selectorCount = selectorCount;
+    hdr->primaryCount = primaryCount;
+    hdr->secondaryCount = secondaryCount;
+    hdr->selectorsOffset = selectorsOffset;
+    hdr->primaryOffset = primaryOffset;
+    hdr->secondaryOffset = secondaryOffset;
+
+    u8 *base = blob.get();
+    auto *selectorsOut =
+        reinterpret_cast<PBERuntimeBitSelector *>(base + selectorsOffset);
+    for (u32 i = 0; i < selectorCount; i++) {
+        selectorsOut[i].byteOffset = artifacts.bitSelectors[i].byteOffset;
+        selectorsOut[i].bitOffset = artifacts.bitSelectors[i].bitOffset;
+        selectorsOut[i].reserved = 0;
+    }
+
+    auto *primaryOut = reinterpret_cast<u32 *>(base + primaryOffset);
+    for (u32 i = 0; i < primaryCount; i++) {
+        primaryOut[i] = artifacts.primaryHashTable.offsets[i];
+    }
+
+    auto *secondaryOut =
+        reinterpret_cast<PBERuntimeSecondaryHashEntry *>(base + secondaryOffset);
+    for (u32 i = 0; i < secondaryCount; i++) {
+        const auto &in = artifacts.secondaryHashTable[i];
+        auto &out = secondaryOut[i];
+        memcpy(out.ruleVector, in.ruleVector, sizeof(out.ruleVector));
+        memcpy(out.tableControl, in.tableControl, sizeof(out.tableControl));
+        out.headMask = in.headMask;
+        out.tailMask = in.tailMask;
+        out.ruleBase = in.ruleBase;
+        out.ruleCount = in.ruleCount;
+    }
+
+    return blob;
 }
 
 } // namespace ue2

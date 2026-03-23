@@ -85,6 +85,7 @@ private:
     vector<hwlmLiteral> lits;
     map<BucketIndex, std::vector<LiteralIndex> > bucketToLits;
     bool make_small;
+    bytecode_ptr<u8> pbeBlob;
 
     u8 *tabIndexToMask(u32 indexInTable);
 #ifdef DEBUG
@@ -98,10 +99,11 @@ public:
     FDRCompiler(vector<hwlmLiteral> lits_in,
                 map<BucketIndex, std::vector<LiteralIndex>> bucketToLits_in,
                 const FDREngineDescription &eng_in,
-                bool make_small_in, const Grey &grey_in)
+                bool make_small_in, const Grey &grey_in,
+                bytecode_ptr<u8> pbeBlob_in = nullptr)
         : eng(eng_in), grey(grey_in), tab(eng_in.getTabSizeBytes()),
           lits(move(lits_in)), bucketToLits(move(bucketToLits_in)),
-          make_small(make_small_in) {}
+          make_small(make_small_in), pbeBlob(move(pbeBlob_in)) {}
 
     bytecode_ptr<FDR> build();
 };
@@ -166,13 +168,15 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     size_t tabSize = eng.getTabSizeBytes();
 
     // Note: we place each major structure here on a cacheline boundary.
+    size_t pbeSize = pbeBlob ? pbeBlob.size() : 0;
     size_t size = ROUNDUP_CL(headerSize) + ROUNDUP_CL(tabSize) +
-                  ROUNDUP_CL(confirmTable.size()) + floodTable.size();
+                  ROUNDUP_CL(pbeSize) + ROUNDUP_CL(confirmTable.size()) +
+                  floodTable.size();
 
-    DEBUG_PRINTF("sizes base=%zu tabSize=%zu confirm=%zu floodControl=%zu "
-                 "total=%zu\n",
-                 headerSize, tabSize, confirmTable.size(), floodTable.size(),
-                 size);
+    DEBUG_PRINTF("sizes base=%zu tabSize=%zu pbe=%zu confirm=%zu "
+                 "floodControl=%zu total=%zu\n",
+                 headerSize, tabSize, pbeSize, confirmTable.size(),
+                 floodTable.size(), size);
 
     auto fdr = make_zeroed_bytecode_ptr<FDR>(size, 64);
     assert(fdr); // otherwise would have thrown std::bad_alloc
@@ -188,6 +192,8 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     fdr->domain = eng.bits;
     fdr->domainMask = (1 << eng.bits) - 1;
     fdr->tabSize = tabSize;
+    fdr->pbeOffset = 0;
+    fdr->pbeSize = 0;
     fdr->stride = eng.stride;
     createInitialState(fdr.get());
 
@@ -196,6 +202,15 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     assert(ISALIGNED_CL(ptr));
     copy(tab.begin(), tab.end(), ptr);
     ptr += ROUNDUP_CL(tabSize);
+
+    // Write PBE structures if present.
+    if (pbeBlob && pbeBlob.size()) {
+        assert(ISALIGNED_CL(ptr));
+        fdr->pbeOffset = verify_u32(ptr - fdr_base);
+        fdr->pbeSize = verify_u32(pbeBlob.size());
+        memcpy(ptr, pbeBlob.get(), pbeBlob.size());
+        ptr += ROUNDUP_CL(pbeBlob.size());
+    }
 
     // Write confirm structures.
     assert(ISALIGNED_CL(ptr));
@@ -932,8 +947,16 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
         return teddyBuildTable(proto, grey);
     }
 
+    bytecode_ptr<u8> pbeBlob = nullptr;
+    if (proto.fdrEng && proto.fdrEng->getID() == 2) {
+        PBECompileArtifacts artifacts;
+        if (buildPBEArtifacts(proto.lits, &artifacts)) {
+            pbeBlob = buildPBEBlob(artifacts);
+        }
+    }
+
     FDRCompiler fc(proto.lits, proto.bucketToLits, *(proto.fdrEng),
-                   proto.make_small, grey);
+                   proto.make_small, grey, move(pbeBlob));
     return fc.build();
 }
 
