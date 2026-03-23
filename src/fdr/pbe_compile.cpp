@@ -323,7 +323,7 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
 
 bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
                  const Grey &grey) {
-    if (!grey.allowNeoFdr) {
+    if (!grey.allowPbe) {
         return false;
     }
 

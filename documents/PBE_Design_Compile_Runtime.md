@@ -20,6 +20,11 @@ PBE 的编译期入口挂接在：
 
 当前链路为：`teddy -> PBE -> NeoFDR/FDR`（按条件与回退策略选择）。
 
+灰度开关：
+
+1. `allowPbe=0`（默认）：不尝试 PBE。
+2. `allowPbe=1`：在 Teddy 之后尝试 PBE。
+
 运行期通过 `fdr->engineID` 分派：
 
 - `engineID=0`: `KHSEL_FdrEngineExec`
@@ -129,8 +134,10 @@ PBE 的编译期入口挂接在：
    - 在 `PbeEngineExec` 中增加 PBE blob 布局校验函数。
    - 增加基于位提取码的 key 提取与一级/二级哈希表查询骨架。
    - 在“全覆盖表 + 无历史依赖 + 全缓冲区无候选”条件下，允许快速返回 `HWLM_SUCCESS`。
-   - 增加二级表非向量化前置过滤（长度边界 + 尾字节）以降低误候选率。
-   - 其余情况仍由 Neo 路径承载最终匹配与回调语义。
+   - 增加二级表非向量化前置过滤（长度边界 + 单尾字节）以降低误候选率。
+   - 测试安全模式下已关闭 `HWLM_SUCCESS` 早退，统一回退 Neo 路径承载最终匹配与回调语义。
+   - 运行期布局保持朴素稳定版本（`PBE runtime blob v1`）。
+   - `struct FDR` 兼容性：`pbeOffset/pbeSize` 放置在结构体尾部，避免破坏既有 NeoFdr 运行时对前部字段偏移的依赖。
 
 当前 Phase-1 限制：
 

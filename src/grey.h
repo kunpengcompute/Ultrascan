@@ -54,6 +54,7 @@ struct Grey {
     bool allowSheng;
     bool allowMcSheng;
     bool allowNeoFdr;
+    bool allowPbe;
     bool allowPuff;
     bool allowLiteral;
     bool allowViolet;

@@ -7,7 +7,7 @@
 
 #include <stdio.h>
 #include "ue2common.h"
-#include "hwlm/hwlm.h"
+#include "fdr/fdr_internal.h"
 
 #ifdef __aarch64__
 #define NO_ASM
@@ -17,9 +17,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-struct FDR;
-struct FDR_Runtime_Args;
 
 hwlm_error_t KHSEL_FdrEngineExec(const struct FDR *fdr,
                              const struct FDR_Runtime_Args *a,

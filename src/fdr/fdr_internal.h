@@ -73,8 +73,6 @@ struct FDR {
     u32 numStrings;
     u32 confOffset;
     u32 floodOffset;
-    u32 pbeOffset;
-    u32 pbeSize;
     u8 stride; /* stride - how frequently the data is consulted by the first
                 * stage matcher */
     u8 domain; /* number of bits used to index into main FDR table. This value
@@ -84,6 +82,8 @@ struct FDR {
     m128 start; /* initial start state to use at offset 0. The state has been
                  * set up based on the min length of buckets to reduce the need
                  * for pointless confirms. */
+    u32 pbeOffset; /* optional PBE blob offset from FDR base */
+    u32 pbeSize;   /* optional PBE blob size in bytes */
 };
 
 /** \brief FDR runtime arguments.
