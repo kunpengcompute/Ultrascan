@@ -6,6 +6,15 @@
 #include "fdr_internal.h"
 #include "pbe_runtime.h"
 #include "util/compare.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+struct PBEProbeStats {
+    u64a scannedPositions;
+    u64a primaryHits;
+    u64a secondaryHits;
+    u64a ruleWindowChecks;
+};
 
 static u32 pbeExtractKey(const struct PBERuntimeBitSelector *selectors,
                          u32 selectorCount, const u8 *cur,
@@ -13,10 +22,22 @@ static u32 pbeExtractKey(const struct PBERuntimeBitSelector *selectors,
 
 static int pbeEntryMayMatchAtPos(
     const struct PBERuntimeSecondaryHashEntry *entry, const u8 *cur,
-    const u8 *bufStart);
+    const u8 *bufStart, struct PBEProbeStats *stats);
 
 static int pbeHasAnyCandidate(const struct PBERuntimeHeader *hdr,
-                              const struct FDR_Runtime_Args *a);
+                              const struct FDR_Runtime_Args *a,
+                              struct PBEProbeStats *stats);
+
+static int pbeStatsEnabled(void) {
+    static int init = 0;
+    static int enabled = 0;
+    if (!init) {
+        const char *v = getenv("HS_PBE_STATS");
+        enabled = (v && v[0] == '1') ? 1 : 0;
+        init = 1;
+    }
+    return enabled;
+}
 
 static int pbeValidateLayout(const struct FDR *fdr,
                              const struct PBERuntimeHeader *hdr) {
@@ -44,12 +65,17 @@ static int pbeValidateLayout(const struct FDR *fdr,
         (u64a)fdr->pbeSize) {
         return 0;
     }
+    if ((u64a)hdr->ruleMetaOffset + (u64a)hdr->ruleMetaCount *
+            sizeof(struct PBERuntimeRuleMeta) >
+        (u64a)fdr->pbeSize) {
+        return 0;
+    }
     return 1;
 }
 
 static int pbeEntryMayMatchAtPos(
     const struct PBERuntimeSecondaryHashEntry *entry, const u8 *cur,
-    const u8 *bufStart) {
+    const u8 *bufStart, struct PBEProbeStats *stats) {
     if (!entry || !entry->ruleCount || !cur || !bufStart || cur < bufStart) {
         return 0;
     }
@@ -60,6 +86,9 @@ static int pbeEntryMayMatchAtPos(
     u32 i;
 
     for (i = 0; i < entry->ruleCount && i < 32; i++) {
+        if (stats) {
+            stats->ruleWindowChecks++;
+        }
         const u8 len = entry->tableControl[i];
         const u8 tail = entry->ruleVector[i];
         if (!len || avail < len) {
@@ -75,7 +104,8 @@ static int pbeEntryMayMatchAtPos(
 }
 
 static int pbeHasAnyCandidate(const struct PBERuntimeHeader *hdr,
-                              const struct FDR_Runtime_Args *a) {
+                              const struct FDR_Runtime_Args *a,
+                              struct PBEProbeStats *stats) {
     if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
         return 0;
     }
@@ -88,18 +118,38 @@ static int pbeHasAnyCandidate(const struct PBERuntimeHeader *hdr,
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable =
         (const struct PBERuntimeSecondaryHashEntry *)((const u8 *)hdr +
                                                       hdr->secondaryOffset);
+    const struct PBERuntimeRuleMeta *ruleMeta =
+        (const struct PBERuntimeRuleMeta *)((const u8 *)hdr +
+                                            hdr->ruleMetaOffset);
 
     size_t i;
     for (i = a->start_offset; i < a->len; i++) {
+        if (stats) {
+            stats->scannedPositions++;
+        }
         const u8 *cur = a->buf + i;
         const u32 key =
             pbeExtractKey(selectors, hdr->selectorCount, cur, a->buf);
         const u32 idx = (hdr->primaryCount > 1) ? (key % hdr->primaryCount) : 0;
         const u32 secOff = primaryHashTable[idx];
 
-        if (secOff && secOff < hdr->secondaryCount &&
-            pbeEntryMayMatchAtPos(&secondaryHashTable[secOff], cur, a->buf)) {
-            return 1;
+        if (secOff && secOff < hdr->secondaryCount) {
+            if (stats) {
+                stats->primaryHits++;
+            }
+            const struct PBERuntimeSecondaryHashEntry *entry =
+                &secondaryHashTable[secOff];
+            if ((u32)entry->ruleBase + (u32)entry->ruleCount >
+                hdr->ruleMetaCount) {
+                continue;
+            }
+            (void)ruleMeta;
+            if (stats) {
+                stats->secondaryHits++;
+            }
+            if (pbeEntryMayMatchAtPos(entry, cur, a->buf, stats)) {
+                return 1;
+            }
         }
     }
     return 0;
@@ -139,8 +189,18 @@ hwlm_error_t PbeEngineExec(const struct FDR *fdr,
     }
 
     if (!(hdr->flags & PBE_RUNTIME_FLAG_PARTIAL_COVERAGE) && a &&
-        !a->len_history && !pbeHasAnyCandidate(hdr, a)) {
-        return HWLM_SUCCESS;
+        !a->len_history) {
+        struct PBEProbeStats stats = {0, 0, 0, 0};
+        int hasCandidate = pbeHasAnyCandidate(hdr, a, &stats);
+        if (pbeStatsEnabled()) {
+            fprintf(stderr,
+                    "[PBE] candidate=%d scan=%llu primary=%llu secondary=%llu "
+                    "rule_checks=%llu\n",
+                    hasCandidate, (unsigned long long)stats.scannedPositions,
+                    (unsigned long long)stats.primaryHits,
+                    (unsigned long long)stats.secondaryHits,
+                    (unsigned long long)stats.ruleWindowChecks);
+        }
     }
 
     /* Phase-2 step 2: use PBE as a safe pre-check fast path. Matching and

@@ -1,1 +1,1 @@
-allowLily:1;allowNeoFdr:1;allowPbe:0;
+allowLily:1;allowPbe:1;allowNeoFdr:1;

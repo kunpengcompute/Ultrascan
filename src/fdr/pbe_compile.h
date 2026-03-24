@@ -32,12 +32,20 @@ struct PBESecondaryHashEntry {
     u16 ruleCount;
 };
 
+struct PBERuleMeta {
+    u32 id;
+    hwlm_group_t groups;
+    u16 len;
+    u16 flags;
+};
+
 struct PBECompileArtifacts {
     u32 keyBits = 0;
     u32 flags = 0;
     std::vector<PBEBitSelector> bitSelectors;
     PBEPrimaryHashTable primaryHashTable;
     std::vector<PBESecondaryHashEntry> secondaryHashTable;
+    std::vector<PBERuleMeta> ruleMeta;
 };
 
 bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,

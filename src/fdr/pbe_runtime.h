@@ -2,6 +2,7 @@
 #define PBE_RUNTIME_H
 
 #include "ue2common.h"
+#include "hwlm/hwlm.h"
 
 #define PBE_RUNTIME_MAGIC 0x50424530U /* "PBE0" */
 #define PBE_RUNTIME_VERSION 1U
@@ -15,9 +16,11 @@ struct PBERuntimeHeader {
     u32 selectorCount;
     u32 primaryCount;
     u32 secondaryCount;
+    u32 ruleMetaCount;
     u32 selectorsOffset;
     u32 primaryOffset;
     u32 secondaryOffset;
+    u32 ruleMetaOffset;
 };
 
 struct PBERuntimeBitSelector {
@@ -33,6 +36,13 @@ struct PBERuntimeSecondaryHashEntry {
     u32 tailMask;
     u16 ruleBase;
     u16 ruleCount;
+};
+
+struct PBERuntimeRuleMeta {
+    u32 id;
+    hwlm_group_t groups;
+    u16 len;
+    u16 flags;
 };
 
 #endif // PBE_RUNTIME_H

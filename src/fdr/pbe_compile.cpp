@@ -27,6 +27,8 @@ static constexpr u32 PBE_DEFAULT_KEY_BITS = 16;
 static constexpr u32 PBE_MAX_RULES_PER_ENTRY = 32;
 static constexpr u32 PBE_MAX_EXPANDED_KEYS_PER_RULE = 64;
 static constexpr u8 PBE_STATE_DONT_CARE = 2;
+static constexpr u16 PBE_RULE_FLAG_NOCASE = 1U << 0;
+static constexpr u16 PBE_RULE_FLAG_NORUNS = 1U << 1;
 
 struct PBEBitCandidate {
     u32 bitIndex = 0;
@@ -319,6 +321,28 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
     }
 }
 
+static
+void buildRuleMeta(const std::vector<hwlmLiteral> &lits,
+                   std::vector<PBERuleMeta> *ruleMeta) {
+    ruleMeta->clear();
+    ruleMeta->reserve(lits.size());
+
+    for (const auto &lit : lits) {
+        PBERuleMeta m = {};
+        m.id = lit.id;
+        m.groups = lit.groups;
+        m.len = verify_u16(std::min<size_t>(lit.s.size(),
+                                            std::numeric_limits<u16>::max()));
+        if (lit.nocase) {
+            m.flags |= PBE_RULE_FLAG_NOCASE;
+        }
+        if (lit.noruns) {
+            m.flags |= PBE_RULE_FLAG_NORUNS;
+        }
+        ruleMeta->push_back(m);
+    }
+}
+
 } // namespace
 
 bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
@@ -357,6 +381,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     artifacts->bitSelectors.clear();
     artifacts->primaryHashTable.offsets.clear();
     artifacts->secondaryHashTable.clear();
+    artifacts->ruleMeta.clear();
 
     if (lits.empty()) {
         return false;
@@ -369,6 +394,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
 
     buildHashTables(lits, artifacts->bitSelectors, &artifacts->primaryHashTable,
                     &artifacts->secondaryHashTable, &artifacts->flags);
+    buildRuleMeta(lits, &artifacts->ruleMeta);
 
     return true;
 }
@@ -377,12 +403,15 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     const u32 selectorCount = verify_u32(artifacts.bitSelectors.size());
     const u32 primaryCount = verify_u32(artifacts.primaryHashTable.offsets.size());
     const u32 secondaryCount = verify_u32(artifacts.secondaryHashTable.size());
+    const u32 ruleMetaCount = verify_u32(artifacts.ruleMeta.size());
 
     const size_t selectorBytes =
         sizeof(PBERuntimeBitSelector) * artifacts.bitSelectors.size();
     const size_t primaryBytes = sizeof(u32) * artifacts.primaryHashTable.offsets.size();
     const size_t secondaryBytes = sizeof(PBERuntimeSecondaryHashEntry) *
                                   artifacts.secondaryHashTable.size();
+    const size_t ruleMetaBytes =
+        sizeof(PBERuntimeRuleMeta) * artifacts.ruleMeta.size();
 
     size_t totalSize = ROUNDUP_N(sizeof(PBERuntimeHeader), alignof(u32));
     const u32 selectorsOffset = verify_u32(totalSize);
@@ -391,6 +420,8 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     totalSize += ROUNDUP_N(primaryBytes, alignof(u32));
     const u32 secondaryOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(secondaryBytes, alignof(u32));
+    const u32 ruleMetaOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(ruleMetaBytes, alignof(u32));
 
     auto blob = make_zeroed_bytecode_ptr<u8>(totalSize);
     if (!blob) {
@@ -405,9 +436,11 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     hdr->selectorCount = selectorCount;
     hdr->primaryCount = primaryCount;
     hdr->secondaryCount = secondaryCount;
+    hdr->ruleMetaCount = ruleMetaCount;
     hdr->selectorsOffset = selectorsOffset;
     hdr->primaryOffset = primaryOffset;
     hdr->secondaryOffset = secondaryOffset;
+    hdr->ruleMetaOffset = ruleMetaOffset;
 
     u8 *base = blob.get();
     auto *selectorsOut =
@@ -434,6 +467,15 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
         out.tailMask = in.tailMask;
         out.ruleBase = in.ruleBase;
         out.ruleCount = in.ruleCount;
+    }
+
+    auto *ruleMetaOut =
+        reinterpret_cast<PBERuntimeRuleMeta *>(base + ruleMetaOffset);
+    for (u32 i = 0; i < ruleMetaCount; i++) {
+        ruleMetaOut[i].id = artifacts.ruleMeta[i].id;
+        ruleMetaOut[i].groups = artifacts.ruleMeta[i].groups;
+        ruleMetaOut[i].len = artifacts.ruleMeta[i].len;
+        ruleMetaOut[i].flags = artifacts.ruleMeta[i].flags;
     }
 
     return blob;

@@ -119,10 +119,13 @@ PBE 的编译期入口挂接在：
    - 一级哈希表 `PrimaryHashTable.offsets`：大小 `2^keyBits`。
    - 二级哈希表 `SecondaryHashTable`：第 `0` 项保留为空项。
    - 每个 key 聚合候选规则，写入 `ruleVector/tableControl/headMask/tailMask/ruleBase/ruleCount`。
-4. 不完全指定位（X）规则处理增强：
+4. 规则元信息（RuleMeta）布局：
+   - 编译期产出并序列化 `id/groups/len/flags`。
+   - 运行期可基于 `ruleBase/ruleCount` 索引 RuleMeta，为后续向量化确认与回调对接做准备。
+5. 不完全指定位（X）规则处理增强：
    - 从“直接回退”升级为“多 key 展开（最多 64 个 key/规则）后入一级哈希表”。
    - 降低纯回退规则比例，为后续运行期向量化校验提供更高覆盖率输入。
-5. Phase-2 第一步（表布局打通）：
+6. Phase-2 第一步（表布局打通）：
    - 新增 `PBE runtime blob` 结构并序列化到 bytecode（`pbeOffset/pbeSize`）。
    - 运行期 `PbeEngineExec` 可读取并校验 PBE 表头（magic/version）。
    - 当前匹配主逻辑仍回退到 Neo 路径，确保行为稳定。
@@ -136,6 +139,8 @@ PBE 的编译期入口挂接在：
    - 在“全覆盖表 + 无历史依赖 + 全缓冲区无候选”条件下，允许快速返回 `HWLM_SUCCESS`。
    - 增加二级表非向量化前置过滤（长度边界 + 单尾字节）以降低误候选率。
    - 测试安全模式下已关闭 `HWLM_SUCCESS` 早退，统一回退 Neo 路径承载最终匹配与回调语义。
+   - 支持运行期命中统计开关：设置环境变量 `HS_PBE_STATS=1` 后打印
+     `scan/primary/secondary/rule_checks` 等计数，便于评估 PBE 参与度。
    - 运行期布局保持朴素稳定版本（`PBE runtime blob v1`）。
    - `struct FDR` 兼容性：`pbeOffset/pbeSize` 放置在结构体尾部，避免破坏既有 NeoFdr 运行时对前部字段偏移的依赖。
 
