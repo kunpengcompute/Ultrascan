@@ -10,6 +10,11 @@
 namespace ue2 {
 
 static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE = 1U << 0;
+static constexpr u32 PBE_ARTIFACT_FLAG_NEEDS_NEO_FALLBACK = 1U << 1;
+
+static constexpr u16 PBE_RULE_FLAG_NOCASE = 1U << 0;
+static constexpr u16 PBE_RULE_FLAG_NORUNS = 1U << 1;
+static constexpr u16 PBE_RULE_FLAG_HAS_MASK = 1U << 2;
 
 struct Grey;
 struct target_t;
@@ -26,6 +31,7 @@ struct PBEPrimaryHashTable {
 struct PBESecondaryHashEntry {
     u8 ruleVector[32];
     u8 tableControl[32];
+    u16 ruleIndex[32];
     u32 headMask;
     u32 tailMask;
     u16 ruleBase;
@@ -37,6 +43,11 @@ struct PBERuleMeta {
     hwlm_group_t groups;
     u16 len;
     u16 flags;
+    u8 maskLen;
+    u32 litOffset;
+    u8 lit[8];
+    u8 msk[8];
+    u8 cmp[8];
 };
 
 struct PBECompileArtifacts {
@@ -46,6 +57,7 @@ struct PBECompileArtifacts {
     PBEPrimaryHashTable primaryHashTable;
     std::vector<PBESecondaryHashEntry> secondaryHashTable;
     std::vector<PBERuleMeta> ruleMeta;
+    std::vector<u8> literalBlob;
 };
 
 bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,

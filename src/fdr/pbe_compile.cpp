@@ -27,8 +27,6 @@ static constexpr u32 PBE_DEFAULT_KEY_BITS = 16;
 static constexpr u32 PBE_MAX_RULES_PER_ENTRY = 32;
 static constexpr u32 PBE_MAX_EXPANDED_KEYS_PER_RULE = 64;
 static constexpr u8 PBE_STATE_DONT_CARE = 2;
-static constexpr u16 PBE_RULE_FLAG_NOCASE = 1U << 0;
-static constexpr u16 PBE_RULE_FLAG_NORUNS = 1U << 1;
 
 struct PBEBitCandidate {
     u32 bitIndex = 0;
@@ -305,6 +303,7 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
             const u32 len = verify_u32(lit.s.size());
             const u8 last = verify_u8(lit.s.back());
 
+            entry.ruleIndex[i] = verify_u16(idxes[i]);
             entry.ruleVector[i] = lit.nocase ? mytoupper(last) : last;
             entry.tableControl[i] = verify_u8(std::min<u32>(len, 255));
             if (len) {
@@ -323,9 +322,11 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
 
 static
 void buildRuleMeta(const std::vector<hwlmLiteral> &lits,
-                   std::vector<PBERuleMeta> *ruleMeta) {
+                   std::vector<PBERuleMeta> *ruleMeta,
+                   std::vector<u8> *literalBlob) {
     ruleMeta->clear();
     ruleMeta->reserve(lits.size());
+    literalBlob->clear();
 
     for (const auto &lit : lits) {
         PBERuleMeta m = {};
@@ -339,8 +340,52 @@ void buildRuleMeta(const std::vector<hwlmLiteral> &lits,
         if (lit.noruns) {
             m.flags |= PBE_RULE_FLAG_NORUNS;
         }
+        if (!lit.msk.empty() && !lit.cmp.empty()) {
+            m.flags |= PBE_RULE_FLAG_HAS_MASK;
+            m.maskLen = verify_u8(std::min<size_t>(lit.msk.size(), sizeof(m.msk)));
+            for (size_t j = 0; j < m.maskLen; j++) {
+                m.msk[j] = lit.msk[j];
+                m.cmp[j] = lit.cmp[j];
+            }
+        }
+        m.litOffset = verify_u32(literalBlob->size());
+        literalBlob->reserve(literalBlob->size() + lit.s.size());
+        for (size_t i = 0; i < lit.s.size(); i++) {
+            u8 c = verify_u8(lit.s[i]);
+            literalBlob->push_back(lit.nocase ? mytoupper(c) : c);
+        }
+        for (size_t i = 0; i < lit.s.size() && i < sizeof(m.lit); i++) {
+            u8 c = verify_u8(lit.s[i]);
+            m.lit[i] = lit.nocase ? mytoupper(c) : c;
+        }
         ruleMeta->push_back(m);
     }
+}
+
+static
+u32 evaluateNeoFallbackFlags(const std::vector<hwlmLiteral> &lits) {
+    u32 flags = 0;
+
+    for (const auto &lit : lits) {
+        // PBE currently expects msk/cmp to be either both present or both
+        // absent, and of identical length.
+        if (lit.msk.empty() != lit.cmp.empty()) {
+            flags |= PBE_ARTIFACT_FLAG_NEEDS_NEO_FALLBACK;
+            break;
+        }
+        if (lit.msk.size() != lit.cmp.size()) {
+            flags |= PBE_ARTIFACT_FLAG_NEEDS_NEO_FALLBACK;
+            break;
+        }
+        if (!lit.msk.empty() && lit.msk.size() > lit.s.size()) {
+            // Supplementary tail mask longer than literal body is currently
+            // not modelled in PBE naive path.
+            flags |= PBE_ARTIFACT_FLAG_NEEDS_NEO_FALLBACK;
+            break;
+        }
+    }
+
+    return flags;
 }
 
 } // namespace
@@ -382,6 +427,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     artifacts->primaryHashTable.offsets.clear();
     artifacts->secondaryHashTable.clear();
     artifacts->ruleMeta.clear();
+    artifacts->literalBlob.clear();
 
     if (lits.empty()) {
         return false;
@@ -394,7 +440,8 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
 
     buildHashTables(lits, artifacts->bitSelectors, &artifacts->primaryHashTable,
                     &artifacts->secondaryHashTable, &artifacts->flags);
-    buildRuleMeta(lits, &artifacts->ruleMeta);
+    buildRuleMeta(lits, &artifacts->ruleMeta, &artifacts->literalBlob);
+    artifacts->flags |= evaluateNeoFallbackFlags(lits);
 
     return true;
 }
@@ -404,6 +451,7 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     const u32 primaryCount = verify_u32(artifacts.primaryHashTable.offsets.size());
     const u32 secondaryCount = verify_u32(artifacts.secondaryHashTable.size());
     const u32 ruleMetaCount = verify_u32(artifacts.ruleMeta.size());
+    const u32 literalBlobSize = verify_u32(artifacts.literalBlob.size());
 
     const size_t selectorBytes =
         sizeof(PBERuntimeBitSelector) * artifacts.bitSelectors.size();
@@ -412,6 +460,7 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
                                   artifacts.secondaryHashTable.size();
     const size_t ruleMetaBytes =
         sizeof(PBERuntimeRuleMeta) * artifacts.ruleMeta.size();
+    const size_t literalBlobBytes = artifacts.literalBlob.size();
 
     size_t totalSize = ROUNDUP_N(sizeof(PBERuntimeHeader), alignof(u32));
     const u32 selectorsOffset = verify_u32(totalSize);
@@ -422,6 +471,8 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     totalSize += ROUNDUP_N(secondaryBytes, alignof(u32));
     const u32 ruleMetaOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(ruleMetaBytes, alignof(u32));
+    const u32 literalBlobOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(literalBlobBytes, alignof(u32));
 
     auto blob = make_zeroed_bytecode_ptr<u8>(totalSize);
     if (!blob) {
@@ -437,10 +488,12 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     hdr->primaryCount = primaryCount;
     hdr->secondaryCount = secondaryCount;
     hdr->ruleMetaCount = ruleMetaCount;
+    hdr->literalBlobSize = literalBlobSize;
     hdr->selectorsOffset = selectorsOffset;
     hdr->primaryOffset = primaryOffset;
     hdr->secondaryOffset = secondaryOffset;
     hdr->ruleMetaOffset = ruleMetaOffset;
+    hdr->literalBlobOffset = literalBlobOffset;
 
     u8 *base = blob.get();
     auto *selectorsOut =
@@ -463,6 +516,7 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
         auto &out = secondaryOut[i];
         memcpy(out.ruleVector, in.ruleVector, sizeof(out.ruleVector));
         memcpy(out.tableControl, in.tableControl, sizeof(out.tableControl));
+        memcpy(out.ruleIndex, in.ruleIndex, sizeof(out.ruleIndex));
         out.headMask = in.headMask;
         out.tailMask = in.tailMask;
         out.ruleBase = in.ruleBase;
@@ -476,6 +530,19 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
         ruleMetaOut[i].groups = artifacts.ruleMeta[i].groups;
         ruleMetaOut[i].len = artifacts.ruleMeta[i].len;
         ruleMetaOut[i].flags = artifacts.ruleMeta[i].flags;
+        ruleMetaOut[i].maskLen = artifacts.ruleMeta[i].maskLen;
+        ruleMetaOut[i].litOffset = artifacts.ruleMeta[i].litOffset;
+        memcpy(ruleMetaOut[i].lit, artifacts.ruleMeta[i].lit,
+               sizeof(ruleMetaOut[i].lit));
+        memcpy(ruleMetaOut[i].msk, artifacts.ruleMeta[i].msk,
+               sizeof(ruleMetaOut[i].msk));
+        memcpy(ruleMetaOut[i].cmp, artifacts.ruleMeta[i].cmp,
+               sizeof(ruleMetaOut[i].cmp));
+    }
+
+    if (!artifacts.literalBlob.empty()) {
+        memcpy(base + literalBlobOffset, artifacts.literalBlob.data(),
+               artifacts.literalBlob.size());
     }
 
     return blob;

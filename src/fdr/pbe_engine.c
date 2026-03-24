@@ -6,37 +6,99 @@
 #include "fdr_internal.h"
 #include "pbe_runtime.h"
 #include "util/compare.h"
-#include <stdio.h>
-#include <stdlib.h>
-
-struct PBEProbeStats {
-    u64a scannedPositions;
-    u64a primaryHits;
-    u64a secondaryHits;
-    u64a ruleWindowChecks;
-};
 
 static u32 pbeExtractKey(const struct PBERuntimeBitSelector *selectors,
                          u32 selectorCount, const u8 *cur,
                          const u8 *bufStart);
 
 static int pbeEntryMayMatchAtPos(
-    const struct PBERuntimeSecondaryHashEntry *entry, const u8 *cur,
-    const u8 *bufStart, struct PBEProbeStats *stats);
+    const struct PBERuntimeSecondaryHashEntry *entry, size_t endPos,
+    size_t lenHistory, const u8 *cur);
 
-static int pbeHasAnyCandidate(const struct PBERuntimeHeader *hdr,
-                              const struct FDR_Runtime_Args *a,
-                              struct PBEProbeStats *stats);
+static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
+                       const struct FDR_Runtime_Args *a,
+                       hwlm_group_t *control);
 
-static int pbeStatsEnabled(void) {
-    static int init = 0;
-    static int enabled = 0;
-    if (!init) {
-        const char *v = getenv("HS_PBE_STATS");
-        enabled = (v && v[0] == '1') ? 1 : 0;
-        init = 1;
+static int pbeGetByteAt(const struct FDR_Runtime_Args *a, s64a pos, u8 *out) {
+    if (!a || !out) {
+        return 0;
     }
-    return enabled;
+    if (pos >= 0) {
+        if ((u64a)pos >= a->len) {
+            return 0;
+        }
+        *out = a->buf[pos];
+        return 1;
+    }
+
+    if (!a->buf_history || !a->len_history) {
+        return 0;
+    }
+
+    // pos is negative, index from end of history.
+    s64a idx = (s64a)a->len_history + pos;
+    if (idx < 0 || (u64a)idx >= a->len_history) {
+        return 0;
+    }
+    *out = a->buf_history[idx];
+    return 1;
+}
+
+static int pbeRuleExactMatch(const struct PBERuntimeRuleMeta *rm,
+                             const struct FDR_Runtime_Args *a, size_t endPos,
+                             const u8 *literalBlob, u32 literalBlobSize) {
+    if (!rm || !a || !literalBlob) {
+        return 0;
+    }
+    const u16 len = rm->len;
+    if (!len) {
+        return 0;
+    }
+    if (rm->litOffset > literalBlobSize ||
+        (u64a)rm->litOffset + len > literalBlobSize) {
+        return 0;
+    }
+    if ((u64a)len > (u64a)endPos + 1 + a->len_history) {
+        return 0;
+    }
+
+    const s64a startPos = (s64a)endPos - (s64a)len + 1;
+    const u8 *pat = literalBlob + rm->litOffset;
+    const int nocase = (rm->flags & PBE_RULE_FLAG_NOCASE) ? 1 : 0;
+    u16 i;
+    for (i = 0; i < len; i++) {
+        u8 got;
+        if (!pbeGetByteAt(a, startPos + i, &got)) {
+            return 0;
+        }
+        const u8 expect = pat[i];
+        if (nocase) {
+            if ((u8)mytoupper((char)got) != expect) {
+                return 0;
+            }
+        } else if (got != expect) {
+            return 0;
+        }
+    }
+
+    if ((rm->flags & PBE_RULE_FLAG_HAS_MASK) && rm->maskLen) {
+        const u8 mlen = rm->maskLen;
+        if (mlen > len || mlen > sizeof(rm->msk)) {
+            return 0;
+        }
+        const s64a maskStart = startPos + (s64a)len - (s64a)mlen;
+        for (i = 0; i < mlen; i++) {
+            u8 got;
+            if (!pbeGetByteAt(a, maskStart + i, &got)) {
+                return 0;
+            }
+            if ((got & rm->msk[i]) != rm->cmp[i]) {
+                return 0;
+            }
+        }
+    }
+
+    return 1;
 }
 
 static int pbeValidateLayout(const struct FDR *fdr,
@@ -70,25 +132,26 @@ static int pbeValidateLayout(const struct FDR *fdr,
         (u64a)fdr->pbeSize) {
         return 0;
     }
+    if ((u64a)hdr->literalBlobOffset + (u64a)hdr->literalBlobSize >
+        (u64a)fdr->pbeSize) {
+        return 0;
+    }
     return 1;
 }
 
 static int pbeEntryMayMatchAtPos(
-    const struct PBERuntimeSecondaryHashEntry *entry, const u8 *cur,
-    const u8 *bufStart, struct PBEProbeStats *stats) {
-    if (!entry || !entry->ruleCount || !cur || !bufStart || cur < bufStart) {
+    const struct PBERuntimeSecondaryHashEntry *entry, size_t endPos,
+    size_t lenHistory, const u8 *cur) {
+    if (!entry || !entry->ruleCount || !cur) {
         return 0;
     }
 
-    const size_t avail = (size_t)(cur - bufStart) + 1;
+    const size_t avail = endPos + 1 + lenHistory;
     const u8 c = *cur;
     const u8 cUpper = (u8)mytoupper((char)c);
     u32 i;
 
     for (i = 0; i < entry->ruleCount && i < 32; i++) {
-        if (stats) {
-            stats->ruleWindowChecks++;
-        }
         const u8 len = entry->tableControl[i];
         const u8 tail = entry->ruleVector[i];
         if (!len || avail < len) {
@@ -103,11 +166,11 @@ static int pbeEntryMayMatchAtPos(
     return 0;
 }
 
-static int pbeHasAnyCandidate(const struct PBERuntimeHeader *hdr,
-                              const struct FDR_Runtime_Args *a,
-                              struct PBEProbeStats *stats) {
+static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
+                       const struct FDR_Runtime_Args *a,
+                       hwlm_group_t *control) {
     if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
-        return 0;
+        return HWLM_SUCCESS;
     }
 
     const struct PBERuntimeBitSelector *selectors =
@@ -121,12 +184,12 @@ static int pbeHasAnyCandidate(const struct PBERuntimeHeader *hdr,
     const struct PBERuntimeRuleMeta *ruleMeta =
         (const struct PBERuntimeRuleMeta *)((const u8 *)hdr +
                                             hdr->ruleMetaOffset);
+    const u8 *literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
+    const u32 literalBlobSize = hdr->literalBlobSize;
+    u32 lastMatchId = ~0U;
 
     size_t i;
     for (i = a->start_offset; i < a->len; i++) {
-        if (stats) {
-            stats->scannedPositions++;
-        }
         const u8 *cur = a->buf + i;
         const u32 key =
             pbeExtractKey(selectors, hdr->selectorCount, cur, a->buf);
@@ -134,25 +197,42 @@ static int pbeHasAnyCandidate(const struct PBERuntimeHeader *hdr,
         const u32 secOff = primaryHashTable[idx];
 
         if (secOff && secOff < hdr->secondaryCount) {
-            if (stats) {
-                stats->primaryHits++;
-            }
             const struct PBERuntimeSecondaryHashEntry *entry =
                 &secondaryHashTable[secOff];
-            if ((u32)entry->ruleBase + (u32)entry->ruleCount >
-                hdr->ruleMetaCount) {
-                continue;
-            }
-            (void)ruleMeta;
-            if (stats) {
-                stats->secondaryHits++;
-            }
-            if (pbeEntryMayMatchAtPos(entry, cur, a->buf, stats)) {
-                return 1;
+            if (pbeEntryMayMatchAtPos(entry, i, a->len_history, cur)) {
+                u32 r;
+                for (r = 0; r < entry->ruleCount && r < 32; r++) {
+                    const u8 len = entry->tableControl[r];
+                    const u16 ridx = entry->ruleIndex[r];
+                    const struct PBERuntimeRuleMeta *rm;
+
+                    if (!len || ridx >= hdr->ruleMetaCount) {
+                        continue;
+                    }
+                    rm = &ruleMeta[ridx];
+                    if (!(rm->groups & *control)) {
+                        continue;
+                    }
+                    if (rm->id == lastMatchId &&
+                        (rm->flags & PBE_RULE_FLAG_NORUNS)) {
+                        continue;
+                    }
+
+                    if (!pbeRuleExactMatch(rm, a, i, literalBlob,
+                                           literalBlobSize)) {
+                        continue;
+                    }
+
+                    lastMatchId = rm->id;
+                    *control = a->cb(i, rm->id, a->scratch);
+                    if (*control == HWLM_TERMINATE_MATCHING) {
+                        return HWLM_TERMINATED;
+                    }
+                }
             }
         }
     }
-    return 0;
+    return HWLM_SUCCESS;
 }
 static u32 pbeExtractKey(const struct PBERuntimeBitSelector *selectors,
                          u32 selectorCount, const u8 *cur, const u8 *bufStart) {
@@ -188,23 +268,10 @@ hwlm_error_t PbeEngineExec(const struct FDR *fdr,
         return KHSEL_NeoFdrEngineExec(fdr, a, control);
     }
 
-    if (!(hdr->flags & PBE_RUNTIME_FLAG_PARTIAL_COVERAGE) && a &&
-        !a->len_history) {
-        struct PBEProbeStats stats = {0, 0, 0, 0};
-        int hasCandidate = pbeHasAnyCandidate(hdr, a, &stats);
-        if (pbeStatsEnabled()) {
-            fprintf(stderr,
-                    "[PBE] candidate=%d scan=%llu primary=%llu secondary=%llu "
-                    "rule_checks=%llu\n",
-                    hasCandidate, (unsigned long long)stats.scannedPositions,
-                    (unsigned long long)stats.primaryHits,
-                    (unsigned long long)stats.secondaryHits,
-                    (unsigned long long)stats.ruleWindowChecks);
-        }
+    if (!a || (hdr->flags & (PBE_RUNTIME_FLAG_PARTIAL_COVERAGE |
+                       PBE_RUNTIME_FLAG_NEEDS_NEO_FALLBACK))) {
+        return KHSEL_NeoFdrEngineExec(fdr, a, control);
     }
 
-    /* Phase-2 step 2: use PBE as a safe pre-check fast path. Matching and
-     * callback behavior remains on the Neo path for candidate cases.
-     */
-    return KHSEL_NeoFdrEngineExec(fdr, a, control);
+    return pbeRunNaive(hdr, a, &control);
 }
