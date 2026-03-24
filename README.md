@@ -29,7 +29,7 @@ Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │       ├── release_notes.md                                  # 版本说明书
 │       ├── compilation_guide.md                              # 编译指南
 │       ├── developer_guide.md                                # 开发指南
-│       ├── user_guide.md                                     # 用户指南
+│       ├── user_guide.md                                     # 使用指南
 ├── examples                                                   # 示例代码目录
 │   ├── CMakeLists.txt                                        # 示例代码构建配置
 │   ├── README.md                                             # 示例代码说明文档
@@ -107,7 +107,7 @@ Hyperscan的快速入门通过使用Hyperscan官方提供的性能Benchmark工�
 |《[版本说明书](docs/zh/release_notes.md)》|提供Hyperscan每个发布版本的基础信息和特性更新信息。|
 |《[安装指南](./docs/zh/installation_guide.md)》|指导用户如何安装部署及编译软件。|
 |《[开发指南](./docs/zh/developer_guide.md)》|提供Hyperscan特性相关接口说明及定义等。|
-|《[用户指南](./docs/zh/user_guide.md)》|提供Hyperscan特性使用指导。|
+|《[使用指南](./docs/zh/user_guide.md)》|提供Hyperscan特性使用指导。|
 
 
 
