@@ -158,3 +158,83 @@
    - `msk.size != cmp.size`
    - `msk.size > literal.size`
 2. 运行期保守回退条件与编译期标记严格对齐，便于后续逐项收敛回退范围。
+
+### 4.5 增量补充（2026-03-25）
+1. 放宽 `msk/cmp` 朴素路径约束：支持 `maskLen > literalLen` 的 overhang 场景。
+2. 编译期不再因 `msk.size() > literal.size()` 打 `NEEDS_NEO_FALLBACK`。
+3. 运行期 `msk/cmp` 校验仍锚定在匹配结束位置的尾窗口，允许历史区参与比较。
+
+### 4.6 增量补充（2026-03-25）
+1. 增加 `msk/cmp` 编译期归一化（normalize）规则：
+   - 支持 msk-only（cmp 默认 0）
+   - 支持 msk/cmp 等长
+   - 支持 msk 长于 cmp（缺失 cmp 按 0 填充）
+2. 仍保守回退的场景：
+   - cmp-only
+   - cmp 长于 msk
+3. 归一化后，位提取建模与 RuleMeta 载荷使用同一语义，避免编译期/运行期约束不一致。
+
+### 4.7 增量补充（2026-03-25）
+1. 扩展 `msk/cmp` 归一化：
+   - 新增支持 cmp-only（msk 缺省按 0xff）
+   - 新增支持 cmp 长于 msk（缺失 msk 按 0xff）
+2. 归一化后统一落到 `(byte & msk) == cmp` 语义执行。
+3. 该改动进一步缩小 `NEEDS_NEO_FALLBACK` 触发面。
+
+### 4.8 增量补充（2026-03-25）
+1. 移除 `NEEDS_NEO_FALLBACK` 主流程依赖：
+   - 编译期不再额外打该标记
+   - 运行期回退条件收敛为 `PARTIAL_COVERAGE`（及布局校验失败）
+2. 当前可覆盖语义（朴素路径）包括：
+   - history 跨边界读取
+   - nocase
+   - noruns
+   - groups
+   - msk/cmp（含归一化场景）
+   - 长度大于 8 的规则（literal blob）
+
+### 4.9 增量补充（2026-03-25）
+1. 进入 P0 一致性封口，新增最小回归集：`PBE vs Neo`。
+2. 用例文件：
+   - `unit/internal/pbe_vs_neo.cpp`
+3. 覆盖维度（最小闭环）：
+   - block + groups：验证 group mask 对候选结果的一致性过滤
+   - block + noruns：验证 run 抑制语义一致
+   - streaming + mask：验证跨 history 的匹配及 msk/cmp 一致性
+   - block + mask+nocase：验证掩码与大小写无关组合语义一致
+4. 构建策略：
+   - 显式关闭 Teddy（`fdrAllowTeddy=0`）
+   - 打开 `allowNeoFdr=1` 与 `allowPbe=1`
+   - 分别用 hint=1（Neo）和 hint=2（PBE）构建并对比输出
+5. 平台策略：
+   - 非 Arm64 或当前环境无法构建 PBE 时，该组用例自动跳过（不影响现有主线）。
+
+### 4.10 增量补充（2026-03-26）
+1. 新增 `PARTIAL_COVERAGE` 回退一致性用例：
+   - 在 `unit/internal/pbe_vs_neo.cpp` 增加 `PartialCoverageFallbackConsistency`。
+2. 用例构造方式：
+   - 构造 40 条同 key 规则，触发二级表 `ruleCount` 截断。
+   - 编译期应写入 `PBE_RUNTIME_FLAG_PARTIAL_COVERAGE`。
+3. 断言点：
+   - 运行期读取 PBE header，确认 `PARTIAL_COVERAGE` 标记存在。
+   - 同一输入下，`PBE` 与 `Neo` 输出完全一致（证明回退路径生效）。
+
+### 4.11 增量补充（2026-03-26）
+1. 修复 `BlockNorunsConsistency` 暴露的语义偏差：
+   - 原 PBE 朴素路径使用全局 `lastMatchId` 做 `noruns` 抑制，会误抑制相邻位置合法匹配。
+2. 当前策略（P0 一致性优先）：
+   - 暂时移除 PBE 运行期 `noruns` 抑制逻辑，先保证 `PBE vs Neo` 结果对齐。
+3. 后续计划：
+   - 在 P1 阶段按与 Neo 一致的规则重建 `noruns` 语义（而非全局 last-id 近似）。
+
+### 4.12 增量补充（2026-03-26）
+1. 目标对齐调整：当命中 PBE 条件后，运行期不再以 Neo 作为兜底执行路径。
+2. 编译期策略变更：
+   - `buildPBEArtifacts` 在出现 `PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE` 时直接返回失败。
+   - 含 partial 覆盖风险的规则集不再进入 PBE 引擎分支（即“不符合 PBE 条件”）。
+   - `fdrBuildTableInternal` 对 `engineID=2` 增加硬校验：若未生成有效 `pbeBlob` 则直接构建失败，避免生成“空 PBE”运行时对象。
+3. 运行期策略变更：
+   - `PbeEngineExec` 移除到 `KHSEL_NeoFdrEngineExec` 的回退调用，保持纯 PBE 执行路径。
+4. 回归用例调整：
+   - 将 `PartialCoverageFallbackConsistency` 改为 `PartialCoverageRejectedByPbeBuild`。
+   - 校验 partial 覆盖场景下 Neo 可构建而 PBE 构建失败（符合新的 PBE 条件定义）。

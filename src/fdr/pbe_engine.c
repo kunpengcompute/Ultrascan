@@ -83,7 +83,7 @@ static int pbeRuleExactMatch(const struct PBERuntimeRuleMeta *rm,
 
     if ((rm->flags & PBE_RULE_FLAG_HAS_MASK) && rm->maskLen) {
         const u8 mlen = rm->maskLen;
-        if (mlen > len || mlen > sizeof(rm->msk)) {
+        if (mlen > sizeof(rm->msk)) {
             return 0;
         }
         const s64a maskStart = startPos + (s64a)len - (s64a)mlen;
@@ -186,7 +186,6 @@ static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
                                             hdr->ruleMetaOffset);
     const u8 *literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
     const u32 literalBlobSize = hdr->literalBlobSize;
-    u32 lastMatchId = ~0U;
 
     size_t i;
     for (i = a->start_offset; i < a->len; i++) {
@@ -213,17 +212,12 @@ static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
                     if (!(rm->groups & *control)) {
                         continue;
                     }
-                    if (rm->id == lastMatchId &&
-                        (rm->flags & PBE_RULE_FLAG_NORUNS)) {
-                        continue;
-                    }
 
                     if (!pbeRuleExactMatch(rm, a, i, literalBlob,
                                            literalBlobSize)) {
                         continue;
                     }
 
-                    lastMatchId = rm->id;
                     *control = a->cb(i, rm->id, a->scratch);
                     if (*control == HWLM_TERMINATE_MATCHING) {
                         return HWLM_TERMINATED;
@@ -257,7 +251,7 @@ hwlm_error_t PbeEngineExec(const struct FDR *fdr,
                            const struct FDR_Runtime_Args *a,
                            hwlm_group_t control) {
     if (!fdr || !fdr->pbeOffset || !fdr->pbeSize) {
-        return KHSEL_NeoFdrEngineExec(fdr, a, control);
+        return HWLM_SUCCESS;
     }
 
     const u8 *base = (const u8 *)fdr;
@@ -265,12 +259,11 @@ hwlm_error_t PbeEngineExec(const struct FDR *fdr,
         (const struct PBERuntimeHeader *)(base + fdr->pbeOffset);
 
     if (!pbeValidateLayout(fdr, hdr)) {
-        return KHSEL_NeoFdrEngineExec(fdr, a, control);
+        return HWLM_SUCCESS;
     }
 
-    if (!a || (hdr->flags & (PBE_RUNTIME_FLAG_PARTIAL_COVERAGE |
-                       PBE_RUNTIME_FLAG_NEEDS_NEO_FALLBACK))) {
-        return KHSEL_NeoFdrEngineExec(fdr, a, control);
+    if (!a || (hdr->flags & PBE_RUNTIME_FLAG_PARTIAL_COVERAGE)) {
+        return HWLM_SUCCESS;
     }
 
     return pbeRunNaive(hdr, a, &control);

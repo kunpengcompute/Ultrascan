@@ -35,6 +35,37 @@ struct PBEBitCandidate {
 };
 
 static
+bool normalizeMaskCmp(const hwlmLiteral &lit, std::array<u8, 8> *mskOut,
+                      std::array<u8, 8> *cmpOut, u8 *lenOut) {
+    if (!mskOut || !cmpOut || !lenOut) {
+        return false;
+    }
+    mskOut->fill(0);
+    cmpOut->fill(0);
+    *lenOut = 0;
+
+    const size_t mlen = lit.msk.size();
+    const size_t clen = lit.cmp.size();
+
+    if (!mlen && !clen) {
+        return true;
+    }
+
+    // Normalize to a common tail window:
+    // 1) msk-only => cmp defaults to 0.
+    // 2) cmp-only => msk defaults to 0xff.
+    // 3) unequal lengths => missing msk defaults to 0xff, missing cmp to 0.
+    // This preserves a deterministic `(byte & msk) == cmp` semantics.
+    const size_t useLen = std::min<size_t>(std::max(mlen, clen), mskOut->size());
+    *lenOut = verify_u8(useLen);
+    for (size_t i = 0; i < useLen; i++) {
+        (*mskOut)[i] = (i < mlen) ? lit.msk[i] : 0xff;
+        (*cmpOut)[i] = (i < clen) ? lit.cmp[i] : 0;
+    }
+    return true;
+}
+
+static
 bool getBitState(const hwlmLiteral &lit, u32 bitIndex, u8 *state) {
     if (!state) {
         return false;
@@ -56,12 +87,15 @@ bool getBitState(const hwlmLiteral &lit, u32 bitIndex, u8 *state) {
         }
     }
 
-    if (!lit.msk.empty() && !lit.cmp.empty()) {
-        const u32 mlen = verify_u32(lit.msk.size());
+    std::array<u8, 8> normMsk = {};
+    std::array<u8, 8> normCmp = {};
+    u8 normLen = 0;
+    if (normalizeMaskCmp(lit, &normMsk, &normCmp, &normLen) && normLen) {
+        const u32 mlen = normLen;
         if (byteFromEnd < mlen) {
-            const u8 m = lit.msk[mlen - byteFromEnd - 1];
+            const u8 m = normMsk[mlen - byteFromEnd - 1];
             if (m & (1U << bitInByte)) {
-                const u8 v = lit.cmp[mlen - byteFromEnd - 1];
+                const u8 v = normCmp[mlen - byteFromEnd - 1];
                 care = true;
                 value = !!(v & (1U << bitInByte));
             }
@@ -340,12 +374,15 @@ void buildRuleMeta(const std::vector<hwlmLiteral> &lits,
         if (lit.noruns) {
             m.flags |= PBE_RULE_FLAG_NORUNS;
         }
-        if (!lit.msk.empty() && !lit.cmp.empty()) {
+        std::array<u8, 8> normMsk = {};
+        std::array<u8, 8> normCmp = {};
+        u8 normLen = 0;
+        if (normalizeMaskCmp(lit, &normMsk, &normCmp, &normLen) && normLen) {
             m.flags |= PBE_RULE_FLAG_HAS_MASK;
-            m.maskLen = verify_u8(std::min<size_t>(lit.msk.size(), sizeof(m.msk)));
+            m.maskLen = normLen;
             for (size_t j = 0; j < m.maskLen; j++) {
-                m.msk[j] = lit.msk[j];
-                m.cmp[j] = lit.cmp[j];
+                m.msk[j] = normMsk[j];
+                m.cmp[j] = normCmp[j];
             }
         }
         m.litOffset = verify_u32(literalBlob->size());
@@ -360,32 +397,6 @@ void buildRuleMeta(const std::vector<hwlmLiteral> &lits,
         }
         ruleMeta->push_back(m);
     }
-}
-
-static
-u32 evaluateNeoFallbackFlags(const std::vector<hwlmLiteral> &lits) {
-    u32 flags = 0;
-
-    for (const auto &lit : lits) {
-        // PBE currently expects msk/cmp to be either both present or both
-        // absent, and of identical length.
-        if (lit.msk.empty() != lit.cmp.empty()) {
-            flags |= PBE_ARTIFACT_FLAG_NEEDS_NEO_FALLBACK;
-            break;
-        }
-        if (lit.msk.size() != lit.cmp.size()) {
-            flags |= PBE_ARTIFACT_FLAG_NEEDS_NEO_FALLBACK;
-            break;
-        }
-        if (!lit.msk.empty() && lit.msk.size() > lit.s.size()) {
-            // Supplementary tail mask longer than literal body is currently
-            // not modelled in PBE naive path.
-            flags |= PBE_ARTIFACT_FLAG_NEEDS_NEO_FALLBACK;
-            break;
-        }
-    }
-
-    return flags;
 }
 
 } // namespace
@@ -441,7 +452,12 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     buildHashTables(lits, artifacts->bitSelectors, &artifacts->primaryHashTable,
                     &artifacts->secondaryHashTable, &artifacts->flags);
     buildRuleMeta(lits, &artifacts->ruleMeta, &artifacts->literalBlob);
-    artifacts->flags |= evaluateNeoFallbackFlags(lits);
+
+    // PBE-only policy: if current artifacts cannot provide full coverage,
+    // treat this literal set as not buildable by PBE.
+    if (artifacts->flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
+        return false;
+    }
 
     return true;
 }

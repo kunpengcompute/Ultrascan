@@ -10,7 +10,6 @@
 namespace ue2 {
 
 static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE = 1U << 0;
-static constexpr u32 PBE_ARTIFACT_FLAG_NEEDS_NEO_FALLBACK = 1U << 1;
 
 static constexpr u16 PBE_RULE_FLAG_NOCASE = 1U << 0;
 static constexpr u16 PBE_RULE_FLAG_NORUNS = 1U << 1;

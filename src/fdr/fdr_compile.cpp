@@ -953,6 +953,9 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
         if (buildPBEArtifacts(proto.lits, &artifacts)) {
             pbeBlob = buildPBEBlob(artifacts);
         }
+        if (!pbeBlob) {
+            return nullptr;
+        }
     }
 
     FDRCompiler fc(proto.lits, proto.bucketToLits, *(proto.fdrEng),
