@@ -1,5 +1,3 @@
-# Hyperscan特性指南
-
 - [快速入门](quick_start.md)
 - [版本说明书](release_notes.md)
 - [安装指南](installation_guide.md)
