@@ -10,13 +10,20 @@
 #include "fdr/fdr_compile.h"
 #include "fdr/fdr_compile_internal.h"
 #include "fdr/fdr_internal.h"
+#include "fdr/pbe_compile.h"
 #include "hwlm/hwlm_internal.h"
 #include "scratch.h"
+#include "util/compare.h"
 #include "util/target_info.h"
+#include "util/verify_types.h"
 
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <bitset>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -135,6 +142,72 @@ static
 void skipIfNoPbeSupport() {
     // PBE compile path is currently gated on Arm64 in canBuildPBE().
     SUCCEED() << "Skip PBE vs Neo regression on this target (PBE unavailable).";
+}
+
+static
+std::string u32ToBin(u32 v, u32 width) {
+    const std::string full = std::bitset<32>(v).to_string();
+    if (width >= 32) {
+        return full;
+    }
+    return full.substr(32 - width);
+}
+
+static
+std::string u8ToBin(u8 v) {
+    return std::bitset<8>(v).to_string();
+}
+
+static
+char printableOrDot(u8 c) {
+    return std::isprint(static_cast<unsigned char>(c)) ? static_cast<char>(c)
+                                                        : '.';
+}
+
+static
+u8 ruleBitStateNoMask(const hwlmLiteral &lit, const PBEBitSelector &sel) {
+    // 0 -> bit 0, 1 -> bit 1, 2 -> don't-care(X)
+    const u32 bitIndex = static_cast<u32>(sel.byteOffset) * 8U +
+                         static_cast<u32>(sel.bitOffset);
+    const u32 byteFromEnd = bitIndex / 8;
+    const u32 bitInByte = bitIndex % 8;
+    const u32 len = static_cast<u32>(lit.s.size());
+    if (byteFromEnd >= len) {
+        return 2;
+    }
+    const u8 c = verify_u8(lit.s[len - byteFromEnd - 1]);
+    if (lit.nocase && ourisalpha(c) && bitInByte == 5) {
+        return 2;
+    }
+    return (c & (1U << bitInByte)) ? 1 : 0;
+}
+
+static
+std::vector<u32> enumerateKeysForRuleNoMask(
+    const hwlmLiteral &lit, const std::vector<PBEBitSelector> &selectors) {
+    std::vector<u32> keys;
+    keys.push_back(0);
+
+    for (u32 i = 0; i < selectors.size(); i++) {
+        const u8 state = ruleBitStateNoMask(lit, selectors[i]);
+        if (state == 2) {
+            const size_t oldSize = keys.size();
+            keys.resize(oldSize * 2);
+            for (size_t k = 0; k < oldSize; k++) {
+                keys[oldSize + k] = keys[k] | (1U << i);
+            }
+            continue;
+        }
+        if (state == 1) {
+            for (auto &k : keys) {
+                k |= (1U << i);
+            }
+        }
+    }
+
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    return keys;
 }
 
 TEST(PBEvsNeo, BlockGroupsConsistency) {
@@ -261,6 +334,126 @@ TEST(PBEvsNeo, PartialCoverageRejectedByPbeBuild) {
 
     auto pbe = buildFdrWithHint(std::move(lits), ENGINE_ID_PBE);
     EXPECT_EQ(nullptr, pbe.get());
+}
+
+TEST(PBEInspect, DumpSelectorsAndHashTables) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 100, 0x1, {}, {}),
+        hwlmLiteral("ALPHA", true,  false, 101, 0x3, {}, {}),
+        hwlmLiteral("beta",  false, false, 102, 0x1, {}, {}),
+        hwlmLiteral("delta", false, true,  103, 0x2, {}, {}),
+        hwlmLiteral("gamma", false, false, 104, 0x4, {}, {}),
+        hwlmLiteral("theta", true,  false, 105, 0x7, {}, {}),
+    };
+
+    PBECompileArtifacts artifacts;
+    const bool ok = buildPBEArtifacts(lits, &artifacts);
+    ASSERT_TRUE(ok);
+
+    std::cout << "\n========== PBE Inspect Begin ==========\n";
+    std::cout << "[Rules]\n";
+    for (size_t i = 0; i < lits.size(); i++) {
+        const auto &lit = lits[i];
+        std::cout << "  r" << i
+                  << " id=" << lit.id
+                  << " s=\"" << lit.s << "\""
+                  << " nocase=" << lit.nocase
+                  << " noruns=" << lit.noruns
+                  << " groups=0x" << std::hex << lit.groups << std::dec
+                  << "\n";
+    }
+
+    std::cout << "\n[Selectors]\n";
+    std::cout << "  keyBits=" << artifacts.keyBits
+              << " selectorCount=" << artifacts.bitSelectors.size() << "\n";
+    for (size_t i = 0; i < artifacts.bitSelectors.size(); i++) {
+        const auto &sel = artifacts.bitSelectors[i];
+        std::cout << "  s" << i
+                  << " byteOffset=" << static_cast<u32>(sel.byteOffset)
+                  << " bitOffset=" << static_cast<u32>(sel.bitOffset)
+                  << " suffixBitIndex="
+                  << static_cast<u32>(sel.byteOffset) * 8U +
+                         static_cast<u32>(sel.bitOffset)
+                  << " states=[";
+        for (size_t r = 0; r < lits.size(); r++) {
+            const u8 st = ruleBitStateNoMask(lits[r], sel);
+            const char c = (st == 2) ? 'X' : (st ? '1' : '0');
+            std::cout << "r" << r << ":" << c;
+            if (r + 1 != lits.size()) {
+                std::cout << ", ";
+            }
+        }
+        std::cout << "]\n";
+    }
+
+    std::cout << "\n[Rule -> Keys]\n";
+    for (size_t i = 0; i < lits.size(); i++) {
+        auto keys = enumerateKeysForRuleNoMask(lits[i], artifacts.bitSelectors);
+        std::cout << "  r" << i << " id=" << lits[i].id << " keys(" << keys.size()
+                  << "): ";
+        for (size_t k = 0; k < keys.size(); k++) {
+            const u32 key = keys[k];
+            std::cout << "{dec=" << key
+                      << ",hex=0x" << std::hex << key << std::dec
+                      << ",bin=" << u32ToBin(key, artifacts.keyBits) << "}";
+            if (k + 1 != keys.size()) {
+                std::cout << ", ";
+            }
+        }
+        std::cout << "\n";
+    }
+
+    std::cout << "\n[L1 Hash Table]\n";
+    std::cout << "  size=" << artifacts.primaryHashTable.offsets.size() << "\n";
+    size_t nonEmpty = 0;
+    for (u32 key = 0; key < artifacts.primaryHashTable.offsets.size(); key++) {
+        const u32 value = artifacts.primaryHashTable.offsets[key];
+        if (!value) {
+            continue;
+        }
+        nonEmpty++;
+        std::cout << "  key={dec=" << key
+                  << ",hex=0x" << std::hex << key << std::dec
+                  << ",bin=" << u32ToBin(key, artifacts.keyBits) << "}"
+                  << " -> value={dec=" << value
+                  << ",hex=0x" << std::hex << value << std::dec << "}\n";
+    }
+    std::cout << "  nonEmpty=" << nonEmpty << "\n";
+
+    std::cout << "\n[L2 Hash Table]\n";
+    std::cout << "  size=" << artifacts.secondaryHashTable.size()
+              << " (entry0 is null)\n";
+    for (u32 i = 1; i < artifacts.secondaryHashTable.size(); i++) {
+        const auto &e = artifacts.secondaryHashTable[i];
+        std::cout << "  L2[" << i << "]"
+                  << " ruleBase=" << e.ruleBase
+                  << " ruleCount=" << e.ruleCount
+                  << " headMask={hex=0x" << std::hex << e.headMask
+                  << ",bin=" << u32ToBin(e.headMask, 32) << "}"
+                  << " tailMask={hex=0x" << e.tailMask << std::dec
+                  << ",bin=" << u32ToBin(e.tailMask, 32) << "}\n";
+
+        for (u32 j = 0; j < e.ruleCount && j < 32; j++) {
+            const u16 ridx = e.ruleIndex[j];
+            const u8 rv = e.ruleVector[j];
+            const u8 len = e.tableControl[j];
+            std::cout << "    slot" << j
+                      << ": ruleIndex=" << ridx
+                      << " len=" << static_cast<u32>(len)
+                      << " ruleVector={char='" << printableOrDot(rv)
+                      << "',dec=" << static_cast<u32>(rv)
+                      << ",hex=0x" << std::hex << static_cast<u32>(rv)
+                      << std::dec
+                      << ",bin=" << u8ToBin(rv) << "}";
+            if (ridx < lits.size()) {
+                std::cout << " rule={id=" << lits[ridx].id
+                          << ",s=\"" << lits[ridx].s << "\"}";
+            }
+            std::cout << "\n";
+        }
+    }
+
+    std::cout << "========== PBE Inspect End ==========\n\n";
 }
 
 } // namespace

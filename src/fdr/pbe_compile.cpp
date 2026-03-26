@@ -9,11 +9,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
 #include <limits>
 #include <map>
+#include <sstream>
+#include <string>
 #include <unordered_set>
 #include <utility>
 
@@ -33,6 +37,146 @@ struct PBEBitCandidate {
     double score = 0.0;
     std::vector<u8> states; // 0, 1, or PBE_STATE_DONT_CARE
 };
+
+static
+bool enumerateHashKeysForLiteral(const hwlmLiteral &lit,
+                                 const std::vector<PBEBitSelector> &selectors,
+                                 std::vector<u32> *keys,
+                                 bool *truncated);
+
+static
+std::string byteToBits(u8 v) {
+    std::string s(8, '0');
+    for (u32 i = 0; i < 8; i++) {
+        if (v & (1U << (7 - i))) {
+            s[i] = '1';
+        }
+    }
+    return s;
+}
+
+static
+std::string keyToBits(u32 key, u32 width) {
+    std::string s(width, '0');
+    for (u32 i = 0; i < width; i++) {
+        if (key & (1U << (width - i - 1))) {
+            s[i] = '1';
+        }
+    }
+    return s;
+}
+
+static
+void dumpRuleBits(const std::vector<hwlmLiteral> &lits) {
+    printf("[PBE][Rules-Bits] rule_count=%zu\n", lits.size());
+    for (size_t i = 0; i < lits.size(); i++) {
+        const auto &lit = lits[i];
+        printf("  r%zu id=%u s=\"%s\" len=%zu nocase=%u noruns=%u groups=0x%llx\n",
+               i, lit.id, lit.s.c_str(), lit.s.size(), lit.nocase ? 1 : 0,
+               lit.noruns ? 1 : 0, (unsigned long long)lit.groups);
+        printf("    bytes(msb->lsb): ");
+        for (size_t j = 0; j < lit.s.size(); j++) {
+            const u8 c = verify_u8(lit.s[j]);
+            const char pc = std::isprint((unsigned char)c) ? (char)c : '.';
+            printf("[%zu:'%c' 0x%02x %s]", j, pc, c, byteToBits(c).c_str());
+            if (j + 1 != lit.s.size()) {
+                printf(" ");
+            }
+        }
+        printf("\n");
+    }
+}
+
+static
+void dumpSelectors(const std::vector<PBEBitSelector> &selectors) {
+    printf("[PBE][Selectors] count=%zu\n", selectors.size());
+    for (size_t i = 0; i < selectors.size(); i++) {
+        const auto &s = selectors[i];
+        const u32 bitIndex =
+            static_cast<u32>(s.byteOffset) * 8U + static_cast<u32>(s.bitOffset);
+        printf("  s%zu -> suffix_bit=%u (byteOffset=%u, bitOffset=%u)\n", i,
+               bitIndex, (u32)s.byteOffset, (u32)s.bitOffset);
+    }
+}
+
+static
+void dumpRuleKeys(const std::vector<hwlmLiteral> &lits,
+                  const std::vector<PBEBitSelector> &selectors,
+                  u32 keyBits) {
+    printf("[PBE][Rule->Keys] key_bits=%u\n", keyBits);
+    for (size_t i = 0; i < lits.size(); i++) {
+        std::vector<u32> keys;
+        bool truncated = false;
+        if (!enumerateHashKeysForLiteral(lits[i], selectors, &keys, &truncated)) {
+            printf("  r%zu id=%u keys=<enumerate-failed>\n", i, lits[i].id);
+            continue;
+        }
+        std::sort(keys.begin(), keys.end());
+        keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+        printf("  r%zu id=%u keys(%zu)%s: ", i, lits[i].id, keys.size(),
+               truncated ? " [TRUNCATED]" : "");
+        for (size_t k = 0; k < keys.size(); k++) {
+            const u32 key = keys[k];
+            printf("{dec=%u hex=0x%x bin=%s}", key, key,
+                   keyToBits(key, keyBits).c_str());
+            if (k + 1 != keys.size()) {
+                printf(", ");
+            }
+        }
+        printf("\n");
+    }
+}
+
+static
+void dumpHashTables(const PBECompileArtifacts &artifacts,
+                    const std::vector<hwlmLiteral> &lits) {
+    printf("[PBE][L1] size=%zu\n", artifacts.primaryHashTable.offsets.size());
+    size_t nonEmpty = 0;
+    for (u32 key = 0; key < artifacts.primaryHashTable.offsets.size(); key++) {
+        const u32 off = artifacts.primaryHashTable.offsets[key];
+        if (!off) {
+            continue;
+        }
+        nonEmpty++;
+        printf("  key={dec=%u hex=0x%x bin=%s} -> value={dec=%u hex=0x%x}\n", key,
+               key, keyToBits(key, artifacts.keyBits).c_str(), off, off);
+    }
+    printf("  non_empty=%zu\n", nonEmpty);
+
+    printf("[PBE][L2] size=%zu (entry0 is null)\n",
+           artifacts.secondaryHashTable.size());
+    for (u32 i = 1; i < artifacts.secondaryHashTable.size(); i++) {
+        const auto &e = artifacts.secondaryHashTable[i];
+        printf("  L2[%u] ruleBase=%u ruleCount=%u headMask=0x%08x tailMask=0x%08x\n",
+               i, (u32)e.ruleBase, (u32)e.ruleCount, e.headMask, e.tailMask);
+        for (u32 j = 0; j < e.ruleCount && j < 32; j++) {
+            const u16 ridx = e.ruleIndex[j];
+            const u8 rv = e.ruleVector[j];
+            const u8 len = e.tableControl[j];
+            const char pc = std::isprint((unsigned char)rv) ? (char)rv : '.';
+            printf("    slot%u: ruleIndex=%u len=%u ruleVector={'%c', dec=%u, hex=0x%02x, bin=%s}",
+                   j, (u32)ridx, (u32)len, pc, (u32)rv, (u32)rv,
+                   byteToBits(rv).c_str());
+            if (ridx < lits.size()) {
+                printf(" literal={id=%u s=\"%s\"}", lits[ridx].id,
+                       lits[ridx].s.c_str());
+            }
+            printf("\n");
+        }
+    }
+}
+
+static
+void dumpPBEArtifactsVerbose(const std::vector<hwlmLiteral> &lits,
+                             const PBECompileArtifacts &artifacts) {
+    printf("\n========== [PBE][Build-Artifacts] Begin ==========\n");
+    dumpRuleBits(lits);
+    dumpSelectors(artifacts.bitSelectors);
+    dumpRuleKeys(lits, artifacts.bitSelectors, artifacts.keyBits);
+    dumpHashTables(artifacts, lits);
+    printf("[PBE][Flags] artifacts.flags=0x%x\n", artifacts.flags);
+    printf("========== [PBE][Build-Artifacts] End ==========\n\n");
+}
 
 static
 bool normalizeMaskCmp(const hwlmLiteral &lit, std::array<u8, 8> *mskOut,
@@ -452,6 +596,9 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     buildHashTables(lits, artifacts->bitSelectors, &artifacts->primaryHashTable,
                     &artifacts->secondaryHashTable, &artifacts->flags);
     buildRuleMeta(lits, &artifacts->ruleMeta, &artifacts->literalBlob);
+
+    // Compile-time dump for selector/key/hash construction inspection.
+    dumpPBEArtifactsVerbose(lits, *artifacts);
 
     // PBE-only policy: if current artifacts cannot provide full coverage,
     // treat this literal set as not buildable by PBE.
