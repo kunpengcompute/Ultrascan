@@ -371,7 +371,6 @@ buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
 
     hs_database_t *db;
     hs_error_t err;
-
     if (loadDatabases) {
         db = loadDatabase(dbFilename(name, mode).c_str());
         if (!db) {
@@ -466,7 +465,6 @@ buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
             timer.complete();
         }
 #endif
-
         compileSecs = timer.seconds();
         peakMemorySize = getPeakHeap();
 

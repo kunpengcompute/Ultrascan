@@ -917,7 +917,7 @@ hwlm_error_t fdr_engine_exec(const struct FDR *fdr,
 typedef hwlm_error_t (*FDRFUNCTYPE)(const struct FDR *fdr,
                                     const struct FDR_Runtime_Args *a,
                                     hwlm_group_t control);
-
+#if defined(HAVE_NEON)
 static const FDRFUNCTYPE funcs[] = {
     KHSEL_FdrEngineExec, /* KHSEL_FdrEngineExec */
     KHSEL_NeoFdrEngineExec, /* KHSEL_NeoFdrEngineExec */
@@ -939,7 +939,29 @@ static const FDRFUNCTYPE funcs[] = {
     fdr_exec_teddy_msks4,
     fdr_exec_teddy_msks4_pck,
 };
-
+#else
+static const FDRFUNCTYPE funcs[] = {
+    fdr_engine_exec, /* fallback to default engine */
+    fdr_engine_exec, /* fallback to default engine */
+    NULL, /* old: fast teddy */
+    ONLY_AVX2(fdr_exec_fat_teddy_msks1),
+    ONLY_AVX2(fdr_exec_fat_teddy_msks1_pck),
+    ONLY_AVX2(fdr_exec_fat_teddy_msks2),
+    ONLY_AVX2(fdr_exec_fat_teddy_msks2_pck),
+    ONLY_AVX2(fdr_exec_fat_teddy_msks3),
+    ONLY_AVX2(fdr_exec_fat_teddy_msks3_pck),
+    ONLY_AVX2(fdr_exec_fat_teddy_msks4),
+    ONLY_AVX2(fdr_exec_fat_teddy_msks4_pck),
+    fdr_exec_teddy_msks1,
+    fdr_exec_teddy_msks1_pck,
+    fdr_exec_teddy_msks2,
+    fdr_exec_teddy_msks2_pck,
+    fdr_exec_teddy_msks3,
+    fdr_exec_teddy_msks3_pck,
+    fdr_exec_teddy_msks4,
+    fdr_exec_teddy_msks4_pck,
+};
+#endif
 #define FAKE_HISTORY_SIZE 16
 static const u8 fake_history[FAKE_HISTORY_SIZE];
 
