@@ -833,6 +833,11 @@ static
 void addIncludedInfo(
                vector<hwlmLiteral> &lits, u32 nBuckets,
                map<BucketIndex, vector<LiteralIndex>> &bucketToLits) {
+    for (auto &lit : lits) {
+        lit.included_id = INVALID_LIT_ID;
+        lit.squash = 0;
+    }
+
     vector<vector<pair<u32, u32>>> lastCharMap(256);
 
     for (BucketIndex b = 0; b < nBuckets; b++) {
@@ -856,6 +861,7 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                                             bool make_small,
                                             const target_t &target,
                                             const Grey &grey, u32 hint) {
+    static constexpr u32 PBE_ENGINE_ID = 2;
     DEBUG_PRINTF("cpu has %s\n", target.has_avx2() ? "avx2" : "no-avx2");
 
     if (grey.fdrAllowTeddy) {
@@ -869,26 +875,44 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         }
     }
 
-    if (canBuildPBE(target, lits, grey)) {
-        PBECompileArtifacts pbeArtifacts;
-        if (buildPBEArtifacts(lits, &pbeArtifacts)) {
-            auto des = (hint == HINT_INVALID)
-                           ? choosePbeEngine(target, lits, make_small)
-                           : getFdrDescription(hint);
-            if (des && des->getID() == 2) {
-                // temporary hack for unit testing
-                if (hint != HINT_INVALID) {
-                    des->bits = 9;
-                    des->stride = 1;
-                }
-
-                auto bucketToLits = assignStringsToBuckets(lits, *des);
-                addIncludedInfo(lits, des->getNumBuckets(), bucketToLits);
-                auto proto = ue2::make_unique<HWLMProto>(
-                    engType, move(des), lits, bucketToLits, make_small);
-                return proto;
-            }
+    const bool pbeHint = (hint == PBE_ENGINE_ID);
+    auto pbeDes = (hint == HINT_INVALID)
+                      ? choosePbeEngine(target, lits, make_small)
+                      : getFdrDescription(hint);
+    if (pbeDes && pbeDes->getID() == PBE_ENGINE_ID) {
+        // temporary hack for unit testing
+        if (hint != HINT_INVALID) {
+            pbeDes->bits = 9;
+            pbeDes->stride = 1;
         }
+
+        auto pbeBucketToLits = assignStringsToBuckets(lits, *pbeDes);
+        addIncludedInfo(lits, pbeDes->getNumBuckets(), pbeBucketToLits);
+
+        PBECompileArtifacts pbeArtifacts;
+        PBEFeasibilityResult pbeResult;
+        const bool pbeFeasible = analyzePBEFeasibility(target, lits, grey,
+                                                       &pbeResult,
+                                                       &pbeArtifacts);
+        DEBUG_PRINTF("PBE feasibility: canBuild=%u reason=%s flags=0x%x\n",
+                     pbeFeasible ? 1 : 0,
+                     pbeFeasibilityReasonName(pbeResult.reason),
+                     pbeResult.flags);
+
+        if (pbeFeasible) {
+            auto proto = ue2::make_unique<HWLMProto>(
+                engType, move(pbeDes), lits, pbeBucketToLits, make_small);
+            proto->pbeArtifacts =
+                ue2::make_unique<PBECompileArtifacts>(std::move(pbeArtifacts));
+            return proto;
+        }
+
+        if (pbeHint) {
+            // Explicit PBE hint but feasibility check failed.
+            return nullptr;
+        }
+    } else if (pbeHint) {
+        return nullptr;
     }
 
     if (grey.allowNeoFdr) {
@@ -949,10 +973,20 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
 
     bytecode_ptr<u8> pbeBlob = nullptr;
     if (proto.fdrEng && proto.fdrEng->getID() == 2) {
-        PBECompileArtifacts artifacts;
-        if (buildPBEArtifacts(proto.lits, &artifacts)) {
-            pbeBlob = buildPBEBlob(artifacts);
+        PBECompileArtifacts rebuiltArtifacts;
+        // Rebuild from final proto.lits at table-build time. proto.lits may be
+        // updated after proto construction (e.g. Rose program offsets), so
+        // stale cached artifacts can carry invalid rule IDs.
+        if (!buildPBEArtifacts(proto.lits, &rebuiltArtifacts, false)) {
+            return nullptr;
         }
+        const PBECompileArtifacts *artifacts = &rebuiltArtifacts;
+        if (artifacts->flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
+            // Contract violation: canBuildPBE() should have filtered this set.
+            assert(0 && "PBE feasibility mismatch: partial coverage in table build");
+            return nullptr;
+        }
+        pbeBlob = buildPBEBlob(*artifacts);
         if (!pbeBlob) {
             return nullptr;
         }

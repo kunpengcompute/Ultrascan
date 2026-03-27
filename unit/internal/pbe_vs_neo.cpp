@@ -10,7 +10,9 @@
 #include "fdr/fdr_compile.h"
 #include "fdr/fdr_compile_internal.h"
 #include "fdr/fdr_internal.h"
+#include "fdr/fdr_enhanced.h"
 #include "fdr/pbe_compile.h"
+#include "fdr/pbe_runtime.h"
 #include "hwlm/hwlm_internal.h"
 #include "scratch.h"
 #include "util/compare.h"
@@ -23,6 +25,7 @@
 #include <bitset>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <tuple>
 #include <utility>
@@ -46,6 +49,17 @@ struct Match {
     bool operator<(const Match &b) const {
         return std::tie(id, end) < std::tie(b.id, b.end);
     }
+};
+
+struct PBEInspectStats {
+    u32 nonEmptyL1 = 0;
+    u32 exactBucketCount = 0;
+    u32 multiEntryBucketCount = 0;
+    u32 maxL2EntriesPerKey = 0;
+    u32 wildcardL2Entries = 0;
+    u32 wildcardRules = 0;
+    u32 totalL2Entries = 0;
+    u32 totalRulesInL2 = 0;
 };
 
 static std::vector<Match> g_matches;
@@ -139,6 +153,29 @@ std::vector<Match> runStreaming(const FDR *fdr, const std::vector<u8> &history,
 }
 
 static
+hwlm_error_t runPbeDirect(const FDR *fdr, const std::vector<u8> &data,
+                          hwlm_group_t groups) {
+    g_matches.clear();
+
+    hs_scratch scratch = {};
+    scratch.fdr_conf = nullptr;
+
+    const FDR_Runtime_Args args = {
+        data.data(),
+        data.size(),
+        nullptr,
+        0,
+        0,
+        collectCallback,
+        &scratch,
+        nullptr,
+        0
+    };
+
+    return PbeEngineExec(fdr, &args, groups);
+}
+
+static
 void skipIfNoPbeSupport() {
     // PBE compile path is currently gated on Arm64 in canBuildPBE().
     SUCCEED() << "Skip PBE vs Neo regression on this target (PBE unavailable).";
@@ -156,6 +193,11 @@ std::string u32ToBin(u32 v, u32 width) {
 static
 std::string u8ToBin(u8 v) {
     return std::bitset<8>(v).to_string();
+}
+
+static
+std::string maskToBin(u32 mask) {
+    return u32ToBin(mask, PBE_RULE_VECTOR_BYTES);
 }
 
 static
@@ -183,31 +225,66 @@ u8 ruleBitStateNoMask(const hwlmLiteral &lit, const PBEBitSelector &sel) {
 }
 
 static
-std::vector<u32> enumerateKeysForRuleNoMask(
-    const hwlmLiteral &lit, const std::vector<PBEBitSelector> &selectors) {
-    std::vector<u32> keys;
-    keys.push_back(0);
+std::vector<hwlmLiteral> makeDuplicateLiterals(const std::string &s, bool nocase,
+                                               bool noruns, u32 baseId,
+                                               u32 count,
+                                               hwlm_group_t groups) {
+    std::vector<hwlmLiteral> lits;
+    lits.reserve(count);
+    for (u32 i = 0; i < count; i++) {
+        lits.emplace_back(s, nocase, noruns, baseId + i, groups,
+                          std::vector<u8>{}, std::vector<u8>{});
+    }
+    return lits;
+}
 
-    for (u32 i = 0; i < selectors.size(); i++) {
-        const u8 state = ruleBitStateNoMask(lit, selectors[i]);
-        if (state == 2) {
-            const size_t oldSize = keys.size();
-            keys.resize(oldSize * 2);
-            for (size_t k = 0; k < oldSize; k++) {
-                keys[oldSize + k] = keys[k] | (1U << i);
-            }
+static
+Grey makePbeGrey(bool allowPbe = true) {
+    Grey grey;
+    grey.fdrAllowTeddy = false;
+    grey.allowNeoFdr = true;
+    grey.allowPbe = allowPbe;
+    return grey;
+}
+
+static
+PBEInspectStats computeInspectStats(const PBECompileArtifacts &artifacts) {
+    PBEInspectStats stats;
+    stats.totalL2Entries = artifacts.secondaryHashTable.empty()
+                               ? 0
+                               : verify_u32(artifacts.secondaryHashTable.size() - 1);
+
+    for (const auto &entry : artifacts.secondaryHashTable) {
+        stats.totalRulesInL2 += entry.ruleCount;
+    }
+
+    for (u32 key = 0; key < artifacts.primaryHashTable.offsets.size(); key++) {
+        const u32 value = artifacts.primaryHashTable.offsets[key];
+        if (!value) {
             continue;
         }
-        if (state == 1) {
-            for (auto &k : keys) {
-                k |= (1U << i);
+
+        const u32 entryCount = value >> PBE_L1_COUNT_SHIFT;
+        const u32 offset = value & PBE_L1_OFFSET_MASK;
+        stats.nonEmptyL1++;
+        stats.maxL2EntriesPerKey = std::max(stats.maxL2EntriesPerKey, entryCount);
+        if (entryCount > 1) {
+            stats.multiEntryBucketCount++;
+        }
+
+        if (key == 0) {
+            stats.wildcardL2Entries += entryCount;
+            for (u32 i = 0; i < entryCount &&
+                            offset + i < artifacts.secondaryHashTable.size(); i++) {
+                stats.wildcardRules +=
+                    artifacts.secondaryHashTable[offset + i].ruleCount;
             }
+        } else {
+            stats.exactBucketCount++;
         }
     }
 
-    std::sort(keys.begin(), keys.end());
-    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
-    return keys;
+    return stats;
 }
 
 TEST(PBEvsNeo, BlockGroupsConsistency) {
@@ -317,10 +394,10 @@ TEST(PBEvsNeo, BlockMaskAndNoCaseConsistency) {
     EXPECT_EQ(neoMatches, pbeMatches);
 }
 
-TEST(PBEvsNeo, PartialCoverageRejectedByPbeBuild) {
+TEST(PBEvsNeo, MultiEntryCollisionAcceptedByPbeBuild) {
     std::vector<hwlmLiteral> lits;
-    lits.reserve(40);
-    for (u32 i = 0; i < 40; i++) {
+    lits.reserve(PBE_RULE_SLOTS_PER_ENTRY + 3);
+    for (u32 i = 0; i < PBE_RULE_SLOTS_PER_ENTRY + 3; i++) {
         lits.emplace_back("abcd", false, false, 100 + i, HWLM_ALL_GROUPS,
                           std::vector<u8>{}, std::vector<u8>{});
     }
@@ -333,7 +410,350 @@ TEST(PBEvsNeo, PartialCoverageRejectedByPbeBuild) {
     ASSERT_EQ(ENGINE_ID_NEO, neo->engineID);
 
     auto pbe = buildFdrWithHint(std::move(lits), ENGINE_ID_PBE);
-    EXPECT_EQ(nullptr, pbe.get());
+    ASSERT_NE(nullptr, pbe.get());
+    EXPECT_EQ(ENGINE_ID_PBE, pbe->engineID);
+}
+
+TEST(PBEvsNeo, PrimaryValueEncodesL2CountAndOffset) {
+    std::vector<hwlmLiteral> lits;
+    lits.reserve(7);
+    for (u32 i = 0; i < 7; i++) {
+        lits.emplace_back("abcd", false, false, 200 + i, HWLM_ALL_GROUPS,
+                          std::vector<u8>{}, std::vector<u8>{});
+    }
+
+    PBECompileArtifacts artifacts;
+    const bool ok = buildPBEArtifacts(lits, &artifacts, false);
+    ASSERT_TRUE(ok);
+
+    u32 foundKey = 0;
+    u32 foundValue = 0;
+    for (u32 key = 0; key < artifacts.primaryHashTable.offsets.size(); key++) {
+        const u32 value = artifacts.primaryHashTable.offsets[key];
+        if (!value) {
+            continue;
+        }
+        foundKey = key;
+        foundValue = value;
+        break;
+    }
+
+    ASSERT_NE(0U, foundValue);
+    EXPECT_EQ(2U, foundValue >> PBE_L1_COUNT_SHIFT);
+    EXPECT_EQ(1U, foundValue & PBE_L1_OFFSET_MASK);
+    EXPECT_EQ(3U, artifacts.secondaryHashTable.size());
+    (void)foundKey;
+}
+
+TEST(PBEvsNeo, BlockMultiEntryExactBucketConsistency) {
+    auto lits = makeDuplicateLiterals("abcd", false, false, 300, 7,
+                                      HWLM_ALL_GROUPS);
+
+    bytecode_ptr<FDR> neo;
+    bytecode_ptr<FDR> pbe;
+    if (!buildNeoAndPbe(lits, &neo, &pbe)) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const std::vector<u8> data = {'x','x','a','b','c','d','y','y',
+                                  'a','b','c','d'};
+
+    const auto neoMatches = runBlock(neo.get(), data, HWLM_ALL_GROUPS);
+    const auto pbeMatches = runBlock(pbe.get(), data, HWLM_ALL_GROUPS);
+    EXPECT_EQ(neoMatches, pbeMatches);
+}
+
+TEST(PBEvsNeo, StreamingMultiEntryExactBucketConsistency) {
+    auto lits = makeDuplicateLiterals("abcd", false, false, 320, 7,
+                                      HWLM_ALL_GROUPS);
+
+    bytecode_ptr<FDR> neo;
+    bytecode_ptr<FDR> pbe;
+    if (!buildNeoAndPbe(lits, &neo, &pbe)) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const std::vector<u8> history = {'x', 'a', 'b'};
+    const std::vector<u8> data = {'c', 'd', 'y', 'a', 'b', 'c', 'd'};
+
+    const auto neoMatches = runStreaming(neo.get(), history, data,
+                                         HWLM_ALL_GROUPS);
+    const auto pbeMatches = runStreaming(pbe.get(), history, data,
+                                         HWLM_ALL_GROUPS);
+    EXPECT_EQ(neoMatches, pbeMatches);
+}
+
+TEST(PBEvsNeo, BlockMultiEntryWildcardBucketConsistency) {
+    auto lits = makeDuplicateLiterals("alpha", true, false, 340, 7,
+                                      HWLM_ALL_GROUPS);
+
+    bytecode_ptr<FDR> neo;
+    bytecode_ptr<FDR> pbe;
+    if (!buildNeoAndPbe(lits, &neo, &pbe)) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const std::vector<u8> data = {'a','l','p','h','a',' ',
+                                  'A','L','P','H','A',' ',
+                                  'a','L','p','H','a'};
+
+    const auto neoMatches = runBlock(neo.get(), data, HWLM_ALL_GROUPS);
+    const auto pbeMatches = runBlock(pbe.get(), data, HWLM_ALL_GROUPS);
+    EXPECT_EQ(neoMatches, pbeMatches);
+}
+
+TEST(PBEvsNeo, WildcardBucketPrimaryValueEncodesTwoEntries) {
+    auto lits = makeDuplicateLiterals("ab", true, false, 360, 7,
+                                      HWLM_ALL_GROUPS);
+    lits.emplace_back("AB", false, false, 500, HWLM_ALL_GROUPS,
+                      std::vector<u8>{}, std::vector<u8>{});
+
+    PBECompileArtifacts artifacts;
+    const bool ok = buildPBEArtifacts(lits, &artifacts, false);
+    ASSERT_TRUE(ok);
+
+    ASSERT_LT(0U, artifacts.primaryHashTable.offsets.size());
+    const u32 wildcardValue = artifacts.primaryHashTable.offsets[0];
+    ASSERT_NE(0U, wildcardValue);
+    EXPECT_EQ(2U, wildcardValue >> PBE_L1_COUNT_SHIFT);
+    EXPECT_EQ(1U, wildcardValue & PBE_L1_OFFSET_MASK);
+    EXPECT_EQ(4U, artifacts.secondaryHashTable.size());
+}
+
+TEST(PBEvsNeo, BlockMultiEntryGroupsConsistency) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("ab", true, false, 380, 0x1, {}, {}),
+        hwlmLiteral("cd", true, false, 381, 0x2, {}, {}),
+        hwlmLiteral("ef", true, false, 382, 0x1, {}, {}),
+        hwlmLiteral("gh", true, false, 383, 0x2, {}, {}),
+        hwlmLiteral("ij", true, false, 384, 0x1, {}, {}),
+        hwlmLiteral("kl", true, false, 385, 0x2, {}, {}),
+        hwlmLiteral("mn", true, false, 386, 0x1, {}, {})
+    };
+
+    bytecode_ptr<FDR> neo;
+    bytecode_ptr<FDR> pbe;
+    if (!buildNeoAndPbe(lits, &neo, &pbe)) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const std::vector<u8> data = {'A','B',' ','C','D',' ','E','F',' ',
+                                  'G','H',' ','I','J',' ','K','L',' ',
+                                  'M','N'};
+    const auto neoMatches = runBlock(neo.get(), data, 0x2);
+    const auto pbeMatches = runBlock(pbe.get(), data, 0x2);
+    EXPECT_EQ(neoMatches, pbeMatches);
+}
+
+TEST(PBEvsNeo, BlockMultiEntryNorunsConsistency) {
+    auto lits = makeDuplicateLiterals("z", false, false, 400, 7,
+                                      HWLM_ALL_GROUPS);
+    for (size_t i = 0; i < lits.size(); i += 2) {
+        lits[i].noruns = true;
+    }
+
+    bytecode_ptr<FDR> neo;
+    bytecode_ptr<FDR> pbe;
+    if (!buildNeoAndPbe(lits, &neo, &pbe)) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const std::vector<u8> data = {'z','z','z','z','z','z'};
+    const auto neoMatches = runBlock(neo.get(), data, HWLM_ALL_GROUPS);
+    const auto pbeMatches = runBlock(pbe.get(), data, HWLM_ALL_GROUPS);
+    EXPECT_EQ(neoMatches, pbeMatches);
+}
+
+TEST(PBEvsNeo, StreamingMultiEntryMaskConsistency) {
+    const std::vector<u8> msk = {0xff, 0xf0};
+    const std::vector<u8> cmp = {'c', 0x70};
+
+    std::vector<hwlmLiteral> lits;
+    for (u32 i = 0; i < 7; i++) {
+        lits.emplace_back("abcz", false, false, 420 + i, HWLM_ALL_GROUPS, msk,
+                          cmp);
+    }
+
+    bytecode_ptr<FDR> neo;
+    bytecode_ptr<FDR> pbe;
+    if (!buildNeoAndPbe(lits, &neo, &pbe)) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const std::vector<u8> history = {'x', 'x', 'a', 'b'};
+    const std::vector<u8> data = {'c', 'z', 'y', 'a', 'b', 'c', 'z'};
+    const auto neoMatches = runStreaming(neo.get(), history, data,
+                                         HWLM_ALL_GROUPS);
+    const auto pbeMatches = runStreaming(pbe.get(), history, data,
+                                         HWLM_ALL_GROUPS);
+    EXPECT_EQ(neoMatches, pbeMatches);
+}
+
+TEST(PBEvsNeo, BlockMultiEntryExactAndWildcardConsistency) {
+    auto wildcardLits = makeDuplicateLiterals("ab", true, false, 440, 7,
+                                              HWLM_ALL_GROUPS);
+    auto exactLits = makeDuplicateLiterals("wxyz", false, false, 500, 7,
+                                           HWLM_ALL_GROUPS);
+    wildcardLits.insert(wildcardLits.end(), exactLits.begin(), exactLits.end());
+
+    bytecode_ptr<FDR> neo;
+    bytecode_ptr<FDR> pbe;
+    if (!buildNeoAndPbe(wildcardLits, &neo, &pbe)) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const std::vector<u8> data = {'A','b',' ','w','x','y','z',' ',
+                                  'a','B',' ','w','x','y','z'};
+    const auto neoMatches = runBlock(neo.get(), data, HWLM_ALL_GROUPS);
+    const auto pbeMatches = runBlock(pbe.get(), data, HWLM_ALL_GROUPS);
+    EXPECT_EQ(neoMatches, pbeMatches);
+}
+
+TEST(PBECompile, FeasibilityReasonNameMapping) {
+    EXPECT_STREQ("OK", pbeFeasibilityReasonName(PBEFeasibilityReason::OK));
+    EXPECT_STREQ("GREY_DISABLED",
+                 pbeFeasibilityReasonName(PBEFeasibilityReason::GREY_DISABLED));
+    EXPECT_STREQ("ARTIFACT_BUILD_FAILED",
+                 pbeFeasibilityReasonName(
+                     PBEFeasibilityReason::ARTIFACT_BUILD_FAILED));
+}
+
+TEST(PBECompile, AnalyzeFeasibilityGreyDisabled) {
+    auto grey = makePbeGrey(false);
+    PBEFeasibilityResult result;
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 600, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 601, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("gamma", false, false, 602, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 603, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    const bool ok = analyzePBEFeasibility(get_current_target(), lits, grey,
+                                          &result, nullptr);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(PBEFeasibilityReason::GREY_DISABLED, result.reason);
+    EXPECT_FALSE(result.canBuild);
+}
+
+TEST(PBECompile, CanBuildPbeRejectsTooFewLiterals) {
+    auto grey = makePbeGrey(true);
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("a", false, false, 620, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("b", false, false, 621, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("c", false, false, 622, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    EXPECT_FALSE(canBuildPBE(get_current_target(), lits, grey));
+}
+
+TEST(PBECompile, BuildPbeBlobHeaderMatchesArtifacts) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 640, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 641, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 642, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 643, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+
+    auto blob = buildPBEBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+
+    const auto *hdr = reinterpret_cast<const PBERuntimeHeader *>(blob.get());
+    EXPECT_EQ(PBE_RUNTIME_MAGIC, hdr->magic);
+    EXPECT_EQ(PBE_RUNTIME_VERSION, hdr->version);
+    EXPECT_EQ(artifacts.keyBits, hdr->keyBits);
+    EXPECT_EQ(artifacts.bitSelectors.size(), hdr->selectorCount);
+    EXPECT_EQ(artifacts.primaryHashTable.offsets.size(), hdr->primaryCount);
+    EXPECT_EQ(artifacts.secondaryHashTable.size(), hdr->secondaryCount);
+    EXPECT_EQ(artifacts.ruleMeta.size(), hdr->ruleMetaCount);
+    EXPECT_EQ(artifacts.literalBlob.size(), hdr->literalBlobSize);
+}
+
+TEST(PBERuntime, InvalidMagicFallsBackCleanly) {
+    auto pbe = buildFdrWithHint({
+        hwlmLiteral("alpha", false, false, 660, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 661, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 662, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 663, HWLM_ALL_GROUPS, {}, {})
+    }, ENGINE_ID_PBE);
+
+    if (!pbe || pbe->engineID != ENGINE_ID_PBE || !pbe->pbeOffset) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    auto *hdr = reinterpret_cast<PBERuntimeHeader *>(
+        reinterpret_cast<u8 *>(pbe.get()) + pbe->pbeOffset);
+    const u32 savedMagic = hdr->magic;
+    hdr->magic = 0;
+
+    const hwlm_error_t rv = runPbeDirect(
+        pbe.get(), {'a','l','p','h','a'}, HWLM_ALL_GROUPS);
+    EXPECT_EQ(HWLM_SUCCESS, rv);
+    EXPECT_TRUE(g_matches.empty());
+
+    hdr->magic = savedMagic;
+}
+
+TEST(PBERuntime, InvalidVersionFallsBackCleanly) {
+    auto pbe = buildFdrWithHint({
+        hwlmLiteral("alpha", false, false, 670, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 671, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 672, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 673, HWLM_ALL_GROUPS, {}, {})
+    }, ENGINE_ID_PBE);
+
+    if (!pbe || pbe->engineID != ENGINE_ID_PBE || !pbe->pbeOffset) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    auto *hdr = reinterpret_cast<PBERuntimeHeader *>(
+        reinterpret_cast<u8 *>(pbe.get()) + pbe->pbeOffset);
+    const u32 savedVersion = hdr->version;
+    hdr->version = savedVersion + 1;
+
+    const hwlm_error_t rv = runPbeDirect(
+        pbe.get(), {'a','l','p','h','a'}, HWLM_ALL_GROUPS);
+    EXPECT_EQ(HWLM_SUCCESS, rv);
+    EXPECT_TRUE(g_matches.empty());
+
+    hdr->version = savedVersion;
+}
+
+TEST(PBERuntime, InvalidLayoutOffsetFallsBackCleanly) {
+    auto pbe = buildFdrWithHint({
+        hwlmLiteral("alpha", false, false, 680, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 681, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 682, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 683, HWLM_ALL_GROUPS, {}, {})
+    }, ENGINE_ID_PBE);
+
+    if (!pbe || pbe->engineID != ENGINE_ID_PBE || !pbe->pbeOffset) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    auto *hdr = reinterpret_cast<PBERuntimeHeader *>(
+        reinterpret_cast<u8 *>(pbe.get()) + pbe->pbeOffset);
+    const u32 savedSecondaryOffset = hdr->secondaryOffset;
+    hdr->secondaryOffset = pbe->pbeSize;
+
+    const hwlm_error_t rv = runPbeDirect(
+        pbe.get(), {'a','l','p','h','a'}, HWLM_ALL_GROUPS);
+    EXPECT_EQ(HWLM_SUCCESS, rv);
+    EXPECT_TRUE(g_matches.empty());
+
+    hdr->secondaryOffset = savedSecondaryOffset;
 }
 
 TEST(PBEInspect, DumpSelectorsAndHashTables) {
@@ -349,6 +769,7 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
     PBECompileArtifacts artifacts;
     const bool ok = buildPBEArtifacts(lits, &artifacts);
     ASSERT_TRUE(ok);
+    const PBEInspectStats stats = computeInspectStats(artifacts);
 
     std::cout << "\n========== PBE Inspect Begin ==========\n";
     std::cout << "[Rules]\n";
@@ -386,17 +807,74 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
         std::cout << "]\n";
     }
 
-    std::cout << "\n[Rule -> Keys]\n";
+    std::cout << "\n[Build Stats]\n";
+    std::cout << "  nonEmptyL1=" << stats.nonEmptyL1
+              << " exactBucketCount=" << stats.exactBucketCount
+              << " multiEntryBucketCount=" << stats.multiEntryBucketCount
+              << " maxL2EntriesPerKey=" << stats.maxL2EntriesPerKey << "\n";
+    std::cout << "  wildcardL2Entries=" << stats.wildcardL2Entries
+              << " wildcardRules=" << stats.wildcardRules
+              << " totalL2Entries=" << stats.totalL2Entries
+              << " totalRulesInL2=" << stats.totalRulesInL2 << "\n";
+
+    std::map<u32, std::vector<u32>> offToL1Keys;
+    for (u32 key = 0; key < artifacts.primaryHashTable.offsets.size(); key++) {
+        const u32 value = artifacts.primaryHashTable.offsets[key];
+        if (value) {
+            const u32 off = value & PBE_L1_OFFSET_MASK;
+            const u32 count = value >> PBE_L1_COUNT_SHIFT;
+            for (u32 n = 0; n < count; n++) {
+                offToL1Keys[off + n].push_back(key);
+            }
+        }
+    }
+
+    struct ActualKeyInfo {
+        bool found = false;
+        u32 l2Off = 0;
+        u32 keyValue = 0;
+        u32 keyMask = 0;
+        std::vector<u32> bucketKeys;
+    };
+    std::vector<ActualKeyInfo> actual(lits.size());
+    for (u32 i = 1; i < artifacts.secondaryHashTable.size(); i++) {
+        const auto &e = artifacts.secondaryHashTable[i];
+        for (u32 j = 0; j < e.ruleCount && j < PBE_RULE_SLOTS_PER_ENTRY; j++) {
+            const u16 ridx = e.ruleIndex[j];
+            if (ridx >= actual.size()) {
+                continue;
+            }
+            actual[ridx].found = true;
+            actual[ridx].l2Off = i;
+            actual[ridx].keyValue = e.keyValue[j];
+            actual[ridx].keyMask = e.keyMask[j];
+            actual[ridx].bucketKeys = offToL1Keys[i];
+        }
+    }
+
+    std::cout << "\n[Rule -> KeyMask/Bucket (Actual Build)]\n";
     for (size_t i = 0; i < lits.size(); i++) {
-        auto keys = enumerateKeysForRuleNoMask(lits[i], artifacts.bitSelectors);
-        std::cout << "  r" << i << " id=" << lits[i].id << " keys(" << keys.size()
-                  << "): ";
-        for (size_t k = 0; k < keys.size(); k++) {
-            const u32 key = keys[k];
-            std::cout << "{dec=" << key
-                      << ",hex=0x" << std::hex << key << std::dec
-                      << ",bin=" << u32ToBin(key, artifacts.keyBits) << "}";
-            if (k + 1 != keys.size()) {
+        std::cout << "  r" << i << " id=" << lits[i].id;
+        if (!actual[i].found) {
+            std::cout << " <not_in_L2>\n";
+            continue;
+        }
+        std::cout << " l2Off=" << actual[i].l2Off
+                  << " keyValue={dec=" << actual[i].keyValue
+                  << ",hex=0x" << std::hex << actual[i].keyValue << std::dec
+                  << ",bin=" << u32ToBin(actual[i].keyValue, artifacts.keyBits)
+                  << "}"
+                  << " keyMask={dec=" << actual[i].keyMask
+                  << ",hex=0x" << std::hex << actual[i].keyMask << std::dec
+                  << ",bin=" << u32ToBin(actual[i].keyMask, artifacts.keyBits)
+                  << "}"
+                  << " bucketKeys(" << actual[i].bucketKeys.size() << ")=";
+        for (size_t k = 0; k < actual[i].bucketKeys.size(); k++) {
+            const u32 bk = actual[i].bucketKeys[k];
+            std::cout << "{dec=" << bk << ",hex=0x" << std::hex << bk
+                      << std::dec
+                      << ",bin=" << u32ToBin(bk, artifacts.keyBits) << "}";
+            if (k + 1 != actual[i].bucketKeys.size()) {
                 std::cout << ", ";
             }
         }
@@ -416,7 +894,9 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
                   << ",hex=0x" << std::hex << key << std::dec
                   << ",bin=" << u32ToBin(key, artifacts.keyBits) << "}"
                   << " -> value={dec=" << value
-                  << ",hex=0x" << std::hex << value << std::dec << "}\n";
+                  << ",hex=0x" << std::hex << value << std::dec
+                  << ",offset=" << (value & PBE_L1_OFFSET_MASK)
+                  << ",count=" << (value >> PBE_L1_COUNT_SHIFT) << "}\n";
     }
     std::cout << "  nonEmpty=" << nonEmpty << "\n";
 
@@ -426,25 +906,41 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
     for (u32 i = 1; i < artifacts.secondaryHashTable.size(); i++) {
         const auto &e = artifacts.secondaryHashTable[i];
         std::cout << "  L2[" << i << "]"
-                  << " ruleBase=" << e.ruleBase
                   << " ruleCount=" << e.ruleCount
-                  << " headMask={hex=0x" << std::hex << e.headMask
-                  << ",bin=" << u32ToBin(e.headMask, 32) << "}"
-                  << " tailMask={hex=0x" << e.tailMask << std::dec
-                  << ",bin=" << u32ToBin(e.tailMask, 32) << "}\n";
+                  << " entryCapacity=" << PBE_RULE_SLOTS_PER_ENTRY
+                  << " headMask=0x" << std::hex << e.headMask
+                  << " tailMask=0x" << e.tailMask << std::dec
+                  << " headMaskBits=" << maskToBin(e.headMask)
+                  << " tailMaskBits=" << maskToBin(e.tailMask)
+                  << "\n";
 
-        for (u32 j = 0; j < e.ruleCount && j < 32; j++) {
+        for (u32 j = 0; j < e.ruleCount && j < PBE_RULE_SLOTS_PER_ENTRY; j++) {
             const u16 ridx = e.ruleIndex[j];
-            const u8 rv = e.ruleVector[j];
-            const u8 len = e.tableControl[j];
             std::cout << "    slot" << j
                       << ": ruleIndex=" << ridx
-                      << " len=" << static_cast<u32>(len)
-                      << " ruleVector={char='" << printableOrDot(rv)
-                      << "',dec=" << static_cast<u32>(rv)
-                      << ",hex=0x" << std::hex << static_cast<u32>(rv)
-                      << std::dec
-                      << ",bin=" << u8ToBin(rv) << "}";
+                      << " keyValue=0x" << std::hex << e.keyValue[j]
+                      << " keyMask=0x" << e.keyMask[j] << std::dec
+                      << " suffix=[";
+            for (u32 k = 0; k < PBE_BYTES_PER_RULE_SLOT; k++) {
+                const u8 rv = e.ruleVector[j * PBE_BYTES_PER_RULE_SLOT + k];
+                std::cout << "{char='" << printableOrDot(rv)
+                          << "',dec=" << static_cast<u32>(rv)
+                          << ",hex=0x" << std::hex << static_cast<u32>(rv)
+                          << std::dec
+                          << ",bin=" << u8ToBin(rv) << "}";
+                if (k + 1 != PBE_BYTES_PER_RULE_SLOT) {
+                    std::cout << ", ";
+                }
+            }
+            std::cout << "] tbl=[";
+            for (u32 k = 0; k < PBE_BYTES_PER_RULE_SLOT; k++) {
+                std::cout << static_cast<u32>(
+                                 e.tableControl[j * PBE_BYTES_PER_RULE_SLOT + k]);
+                if (k + 1 != PBE_BYTES_PER_RULE_SLOT) {
+                    std::cout << ", ";
+                }
+            }
+            std::cout << "]";
             if (ridx < lits.size()) {
                 std::cout << " rule={id=" << lits[ridx].id
                           << ",s=\"" << lits[ridx].s << "\"}";

@@ -43,6 +43,7 @@
 #include "fdr/fdr_compile.h"
 #include "fdr/fdr_compile_internal.h"
 #include "fdr/fdr_engine_description.h"
+#include "fdr/pbe_compile.h"
 #include "fdr/teddy_engine_description.h"
 #include "util/compile_context.h"
 #include "util/compile_error.h"

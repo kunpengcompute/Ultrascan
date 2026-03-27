@@ -10,6 +10,19 @@
 namespace ue2 {
 
 static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE = 1U << 0;
+static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY = 1U << 1;
+static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW = 1U << 2;
+static constexpr u32 PBE_KEY_BITS = 22U;
+static constexpr u32 PBE_L1_OFFSET_BITS = 18U;
+static constexpr u32 PBE_L1_OFFSET_MASK = (1U << PBE_L1_OFFSET_BITS) - 1U;
+static constexpr u32 PBE_L1_COUNT_SHIFT = PBE_L1_OFFSET_BITS;
+static constexpr u32 PBE_RULE_SLOTS_PER_ENTRY = 4U;
+static constexpr u32 PBE_BYTES_PER_RULE_SLOT = 8U;
+static constexpr u32 PBE_RULE_VECTOR_BYTES =
+    PBE_RULE_SLOTS_PER_ENTRY * PBE_BYTES_PER_RULE_SLOT;
+static constexpr u32 PBE_TBL_CONTROL_BYTES =
+    PBE_RULE_SLOTS_PER_ENTRY * PBE_BYTES_PER_RULE_SLOT;
+static constexpr u32 PBE_RULE_SLOT_MASK_WORDS = 1U;
 
 static constexpr u16 PBE_RULE_FLAG_NOCASE = 1U << 0;
 static constexpr u16 PBE_RULE_FLAG_NORUNS = 1U << 1;
@@ -28,13 +41,15 @@ struct PBEPrimaryHashTable {
 };
 
 struct PBESecondaryHashEntry {
-    u8 ruleVector[32];
-    u8 tableControl[32];
-    u16 ruleIndex[32];
+    u8 ruleVector[PBE_RULE_VECTOR_BYTES];
+    u8 tableControl[PBE_TBL_CONTROL_BYTES];
+    u16 ruleIndex[PBE_RULE_SLOTS_PER_ENTRY];
+    u32 keyValue[PBE_RULE_SLOTS_PER_ENTRY];
+    u32 keyMask[PBE_RULE_SLOTS_PER_ENTRY];
     u32 headMask;
     u32 tailMask;
-    u16 ruleBase;
     u16 ruleCount;
+    u16 reserved;
 };
 
 struct PBERuleMeta {
@@ -59,11 +74,39 @@ struct PBECompileArtifacts {
     std::vector<u8> literalBlob;
 };
 
+enum class PBEFeasibilityReason : u32 {
+    OK = 0,
+    GREY_DISABLED,
+    ARCH_UNSUPPORTED,
+    TOO_FEW_LITERALS,
+    TOO_MANY_LITERALS,
+    UNSUPPORTED_INCLUDED_LITERAL,
+    NO_SELECTORS,
+    PARTIAL_SECONDARY_CAPACITY,
+    PARTIAL_ENTRY_OVERFLOW,
+    PARTIAL_OTHER,
+    ARTIFACT_BUILD_FAILED
+};
+
+struct PBEFeasibilityResult {
+    bool canBuild = false;
+    u32 flags = 0;
+    PBEFeasibilityReason reason = PBEFeasibilityReason::ARTIFACT_BUILD_FAILED;
+};
+
+bool analyzePBEFeasibility(const target_t &target,
+                           const std::vector<hwlmLiteral> &lits,
+                           const Grey &grey, PBEFeasibilityResult *result,
+                           PBECompileArtifacts *artifacts);
+
+const char *pbeFeasibilityReasonName(PBEFeasibilityReason reason);
+
 bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
                  const Grey &grey);
 
 bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
-                       PBECompileArtifacts *artifacts);
+                       PBECompileArtifacts *artifacts,
+                       bool enableDump = true);
 
 bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts);
 

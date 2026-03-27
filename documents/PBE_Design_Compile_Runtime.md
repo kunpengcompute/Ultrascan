@@ -238,3 +238,46 @@
 4. 回归用例调整：
    - 将 `PartialCoverageFallbackConsistency` 改为 `PartialCoverageRejectedByPbeBuild`。
    - 校验 partial 覆盖场景下 Neo 可构建而 PBE 构建失败（符合新的 PBE 条件定义）。
+## 增量更新：固定 22 位 L1 与 4 规则 L2 项
+
+当前设计目标已经调整为以下固定策略：
+
+1. 位提取位数固定为 `22` 位，由宏 `PBE_KEY_BITS` 控制。
+2. 一级哈希表 L1 的项数固定为 `2^22`。
+3. L1 的 key 为位提取结果拼出的 22 位新数值。
+4. L1 的 value 为一个 `u32` 编码值：
+   - 低 18 位：二级哈希表 L2 的起始偏移
+   - 高位：该 L1 key 对应的连续 L2 项数
+5. 二级哈希表 L2 每一项固定承载 `4` 条冲突规则，结构固定为：
+   - `32B ruleVector`
+   - `32B TBL control`
+   - `32b headMask`
+   - `32b tailMask`
+6. 如果某个 L1 key 的冲突规则数超过 4 条，则顺序分配多个连续 L2 项，
+   并把项数编码回 L1 value 的高位。
+
+### 编译期实现
+
+1. 选择最多 22 个位提取选择器，最终 `keyBits` 固定为 22。
+2. 根据规则的 `keyValue/keyMask` 进行 L1 分桶。
+3. 每个桶内按 `4` 条规则一组切分为多个连续 L2 项。
+4. 每个 L2 项内：
+   - `ruleVector` 保存每条规则最后最多 8 字节的归一化后缀
+   - `tableControl` 标记该 8 字节窗口中哪些字节有效
+   - `headMask/tailMask` 以 32 bit 表示整个 32B lane 的有效位分布
+5. L1 value 通过 `(count << 18) | offset` 编码。
+
+### 运行期实现
+
+1. 运行期先提取 22 位 key。
+2. 从 L1 读取编码值，并解码出：
+   - `secondaryOffset`
+   - `entryCount`
+3. 依次遍历 `[secondaryOffset, secondaryOffset + entryCount)` 范围内的 L2 项。
+4. 每个 L2 项内部先利用 `ruleVector + tableControl` 做 suffix 预检查。
+5. 预检查通过后，再结合 `keyValue/keyMask` 与 `ruleMeta` 做精确确认。
+
+### 当前状态说明
+
+1. 当前实现目标是先把固定 22 位 L1、4 规则 L2、多项连续扫描这条主链路打通。
+2. 运行期仍然是朴素 C 版本，后续再继续做向量化与性能优化。

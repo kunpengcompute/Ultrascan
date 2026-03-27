@@ -47,6 +47,7 @@ struct HWLM;
 namespace ue2 {
 
 class FDREngineDescription;
+struct PBECompileArtifacts;
 class TeddyEngineDescription;
 struct CompileContext;
 struct Grey;
@@ -82,6 +83,12 @@ struct HWLMProto {
      * \brief Flag to optimise matcher for small size from Rose.
      */
     bool make_small = false;
+
+    /**
+     * \brief Optional cached PBE compile artifacts, used to avoid rebuilding
+     * during table generation once feasibility has already been established.
+     */
+    std::unique_ptr<PBECompileArtifacts> pbeArtifacts;
 
     HWLMProto(u8 engType_in, std::vector<hwlmLiteral> lits_in);
 

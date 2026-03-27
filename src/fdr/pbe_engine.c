@@ -8,12 +8,14 @@
 #include "util/compare.h"
 
 static u32 pbeExtractKey(const struct PBERuntimeBitSelector *selectors,
-                         u32 selectorCount, const u8 *cur,
-                         const u8 *bufStart);
+                         u32 selectorCount,
+                         const struct FDR_Runtime_Args *a, size_t endPos);
+
+static void pbeDecodePrimaryValue(u32 encoded, u32 *offset, u32 *count);
 
 static int pbeEntryMayMatchAtPos(
-    const struct PBERuntimeSecondaryHashEntry *entry, size_t endPos,
-    size_t lenHistory, const u8 *cur);
+    const struct PBERuntimeSecondaryHashEntry *entry,
+    const struct FDR_Runtime_Args *a, size_t endPos);
 
 static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
                        const struct FDR_Runtime_Args *a,
@@ -42,6 +44,10 @@ static int pbeGetByteAt(const struct FDR_Runtime_Args *a, s64a pos, u8 *out) {
     }
     *out = a->buf_history[idx];
     return 1;
+}
+
+static u8 pbeNormalizeByte(u8 c) {
+    return ourisalpha(c) ? (u8)mytoupper((char)c) : c;
 }
 
 static int pbeRuleExactMatch(const struct PBERuntimeRuleMeta *rm,
@@ -140,25 +146,41 @@ static int pbeValidateLayout(const struct FDR *fdr,
 }
 
 static int pbeEntryMayMatchAtPos(
-    const struct PBERuntimeSecondaryHashEntry *entry, size_t endPos,
-    size_t lenHistory, const u8 *cur) {
-    if (!entry || !entry->ruleCount || !cur) {
+    const struct PBERuntimeSecondaryHashEntry *entry,
+    const struct FDR_Runtime_Args *a, size_t endPos) {
+    u32 slot;
+    if (!entry || !entry->ruleCount || !a) {
         return 0;
     }
 
-    const size_t avail = endPos + 1 + lenHistory;
-    const u8 c = *cur;
-    const u8 cUpper = (u8)mytoupper((char)c);
-    u32 i;
+    for (slot = 0; slot < entry->ruleCount &&
+                   slot < PBE_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
+        const u32 laneBase = slot * PBE_RUNTIME_BYTES_PER_RULE_SLOT;
+        int slotMatched = 1;
+        int sawValidByte = 0;
+        u32 j;
 
-    for (i = 0; i < entry->ruleCount && i < 32; i++) {
-        const u8 len = entry->tableControl[i];
-        const u8 tail = entry->ruleVector[i];
-        if (!len || avail < len) {
-            continue;
+        for (j = 0; j < PBE_RUNTIME_BYTES_PER_RULE_SLOT; j++) {
+            const u32 vecIndex = laneBase + j;
+            u8 got = 0;
+            if (!entry->tableControl[vecIndex]) {
+                continue;
+            }
+            sawValidByte = 1;
+            if (!pbeGetByteAt(a,
+                              (s64a)endPos -
+                                  (s64a)(PBE_RUNTIME_BYTES_PER_RULE_SLOT - 1U - j),
+                              &got)) {
+                slotMatched = 0;
+                break;
+            }
+            if (pbeNormalizeByte(got) != entry->ruleVector[vecIndex]) {
+                slotMatched = 0;
+                break;
+            }
         }
 
-        if (c == tail || cUpper == tail) {
+        if (sawValidByte && slotMatched) {
             return 1;
         }
     }
@@ -186,60 +208,98 @@ static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
                                             hdr->ruleMetaOffset);
     const u8 *literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
     const u32 literalBlobSize = hdr->literalBlobSize;
+    const u32 wildcardIdx = 0;
 
     size_t i;
     for (i = a->start_offset; i < a->len; i++) {
-        const u8 *cur = a->buf + i;
-        const u32 key =
-            pbeExtractKey(selectors, hdr->selectorCount, cur, a->buf);
-        const u32 idx = (hdr->primaryCount > 1) ? (key % hdr->primaryCount) : 0;
-        const u32 secOff = primaryHashTable[idx];
+        const u32 key = pbeExtractKey(selectors, hdr->selectorCount, a, i);
+        const u32 idx = (key < hdr->primaryCount) ? key : 0;
+        const u32 exactValue = primaryHashTable[idx];
+        const u32 wildcardValue = (wildcardIdx < hdr->primaryCount)
+                                      ? primaryHashTable[wildcardIdx]
+                                      : 0;
 
-        if (secOff && secOff < hdr->secondaryCount) {
-            const struct PBERuntimeSecondaryHashEntry *entry =
-                &secondaryHashTable[secOff];
-            if (pbeEntryMayMatchAtPos(entry, i, a->len_history, cur)) {
-                u32 r;
-                for (r = 0; r < entry->ruleCount && r < 32; r++) {
-                    const u8 len = entry->tableControl[r];
-                    const u16 ridx = entry->ruleIndex[r];
-                    const struct PBERuntimeRuleMeta *rm;
+#define PBE_RUN_RANGE(_encoded)                                               \
+        do {                                                                  \
+            const u32 __encoded = (_encoded);                                 \
+            u32 __offset = 0;                                                 \
+            u32 __count = 0;                                                  \
+            u32 __n;                                                          \
+            pbeDecodePrimaryValue(__encoded, &__offset, &__count);            \
+            for (__n = 0; __n < __count; __n++) {                             \
+                const u32 __off = __offset + __n;                             \
+                if (!__off || __off >= hdr->secondaryCount) {                 \
+                    break;                                                    \
+                }                                                             \
+                const struct PBERuntimeSecondaryHashEntry *entry =            \
+                    &secondaryHashTable[__off];                               \
+                if (!pbeEntryMayMatchAtPos(entry, a, i)) {                    \
+                    continue;                                                 \
+                }                                                             \
+                {                                                             \
+                    u32 r;                                                    \
+                for (r = 0;                                                   \
+                     r < entry->ruleCount &&                                  \
+                         r < PBE_RUNTIME_RULE_SLOTS_PER_ENTRY;                \
+                     r++) {                                                   \
+                    const u16 ridx = entry->ruleIndex[r];                     \
+                    const u32 kv = entry->keyValue[r];                        \
+                    const u32 km = entry->keyMask[r];                         \
+                    const struct PBERuntimeRuleMeta *rm;                      \
+                    if (ridx >= hdr->ruleMetaCount) {                         \
+                        continue;                                             \
+                    }                                                         \
+                    if (((key ^ kv) & km) != 0) {                             \
+                        continue;                                             \
+                    }                                                         \
+                    rm = &ruleMeta[ridx];                                     \
+                    if (!(rm->groups & *control)) {                           \
+                        continue;                                             \
+                    }                                                         \
+                    if (!pbeRuleExactMatch(rm, a, i, literalBlob,             \
+                                           literalBlobSize)) {                \
+                        continue;                                             \
+                    }                                                         \
+                    *control = a->cb(i, rm->id, a->scratch);                  \
+                    if (*control == HWLM_TERMINATE_MATCHING) {                \
+                        return HWLM_TERMINATED;                               \
+                    }                                                         \
+                }                                                             \
+                }                                                             \
+            }                                                                 \
+        } while (0)
 
-                    if (!len || ridx >= hdr->ruleMetaCount) {
-                        continue;
-                    }
-                    rm = &ruleMeta[ridx];
-                    if (!(rm->groups & *control)) {
-                        continue;
-                    }
-
-                    if (!pbeRuleExactMatch(rm, a, i, literalBlob,
-                                           literalBlobSize)) {
-                        continue;
-                    }
-
-                    *control = a->cb(i, rm->id, a->scratch);
-                    if (*control == HWLM_TERMINATE_MATCHING) {
-                        return HWLM_TERMINATED;
-                    }
-                }
-            }
+        PBE_RUN_RANGE(exactValue);
+        if (wildcardValue != exactValue) {
+            PBE_RUN_RANGE(wildcardValue);
         }
+#undef PBE_RUN_RANGE
     }
     return HWLM_SUCCESS;
 }
+
+static void pbeDecodePrimaryValue(u32 encoded, u32 *offset, u32 *count) {
+    if (offset) {
+        *offset = encoded & PBE_RUNTIME_L1_OFFSET_MASK;
+    }
+    if (count) {
+        *count = encoded >> PBE_RUNTIME_L1_COUNT_SHIFT;
+    }
+}
 static u32 pbeExtractKey(const struct PBERuntimeBitSelector *selectors,
-                         u32 selectorCount, const u8 *cur, const u8 *bufStart) {
+                         u32 selectorCount,
+                         const struct FDR_Runtime_Args *a, size_t endPos) {
     u32 key = 0;
     u32 i;
 
     for (i = 0; i < selectorCount && i < 32; i++) {
         const struct PBERuntimeBitSelector *s = &selectors[i];
-        const u8 *p = cur - s->byteOffset;
-        if (p < bufStart) {
+        const s64a pos = (s64a)endPos - (s64a)s->byteOffset;
+        u8 b = 0;
+        if (!pbeGetByteAt(a, pos, &b)) {
             continue;
         }
-        if ((*p >> s->bitOffset) & 0x1U) {
+        if ((b >> s->bitOffset) & 0x1U) {
             key |= (1U << i);
         }
     }
