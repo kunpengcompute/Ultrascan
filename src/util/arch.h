@@ -66,16 +66,24 @@
 #endif
 
 /*
- * HAVE_SVE/HAVE_SVE2 describe the ISA level used to compile the current
- * translation unit. They do not imply that the running CPU supports the same
- * features, nor that the whole project is configured to build dedicated
- * SVE/SVE2 variants.
+ * HAVE_SVE/HAVE_SVE2/HAVE_SVEBITPERM describe the ISA level used to compile
+ * the current translation unit. They do not imply that the running CPU
+ * supports the same features, nor that the whole project is configured to
+ * build dedicated SVE/SVE2/SVEBITPERM variants.
  */
 #if defined(__ARM_FEATURE_SVE)
 #define HAVE_SVE
 #endif
 
 #if defined(__ARM_FEATURE_SVE2)
+#define HAVE_SVE2
+#endif
+
+#if defined(__ARM_FEATURE_SVE2_BITPERM)
+#define HAVE_SVEBITPERM
+#endif
+
+#if defined(HAVE_SVEBITPERM) && !defined(HAVE_SVE2)
 #define HAVE_SVE2
 #endif
 

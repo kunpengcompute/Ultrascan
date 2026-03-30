@@ -5,7 +5,7 @@
 #include "hwlm/hwlm.h"
 
 #define PBE_RUNTIME_MAGIC 0x50424530U /* "PBE0" */
-#define PBE_RUNTIME_VERSION 4U
+#define PBE_RUNTIME_VERSION 5U
 #define PBE_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 #define PBE_RUNTIME_KEY_BITS 22U
 #define PBE_RUNTIME_L1_OFFSET_BITS 18U
@@ -18,6 +18,9 @@
 #define PBE_RUNTIME_TBL_CONTROL_BYTES \
     (PBE_RUNTIME_RULE_SLOTS_PER_ENTRY * PBE_RUNTIME_BYTES_PER_RULE_SLOT)
 #define PBE_RUNTIME_RULE_SLOT_MASK_WORDS 1U
+#define PBE_RUNTIME_MAX_SELECTORS 32U
+#define PBE_RUNTIME_EXTRACT_MODE_SCALAR 0U
+#define PBE_RUNTIME_EXTRACT_MODE_BEXT 1U
 
 #define PBE_RULE_FLAG_NOCASE (1U << 0)
 #define PBE_RULE_FLAG_NORUNS (1U << 1)
@@ -34,6 +37,10 @@ struct PBERuntimeHeader {
     u32 secondaryCount;
     u32 ruleMetaCount;
     u32 literalBlobSize;
+    u32 extractMode;
+    u32 windowBytes;
+    u64a bextMask;
+    u8 bextToKeyBit[PBE_RUNTIME_MAX_SELECTORS];
     u32 selectorsOffset;
     u32 primaryBitmapOffset;
     u32 primaryOffset;
@@ -71,5 +78,15 @@ struct PBERuntimeRuleMeta {
     u8 msk[8];
     u8 cmp[8];
 };
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // PBE_RUNTIME_H

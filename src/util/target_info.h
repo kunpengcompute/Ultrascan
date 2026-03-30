@@ -48,6 +48,8 @@ struct target_t {
 
     bool has_sve2(void) const;
 
+    bool has_sve_bitperm(void) const;
+
     bool is_atom_class(void) const;
 
     // This asks: can this target (the object) run on code that was built for

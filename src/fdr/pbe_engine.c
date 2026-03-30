@@ -5,14 +5,26 @@
 #include "fdr_enhanced.h"
 #include "fdr_internal.h"
 #include "pbe_runtime.h"
+#include "hs_compile.h"
 #include "util/compare.h"
+#include "util/cpuid_flags.h"
 
-static u32 pbeExtractKey(const struct PBERuntimeBitSelector *selectors,
-                         u32 selectorCount,
+static u32 pbeExtractKey(const struct PBERuntimeHeader *hdr,
+                         const struct PBERuntimeBitSelector *selectors,
                          const struct FDR_Runtime_Args *a, size_t endPos);
 
 static void pbeDecodePrimaryValue(u32 encoded, u32 *offset, u32 *count);
 static int pbePrimaryBitmapHasValue(const u8 *bitmap, u32 bitmapSize, u32 idx);
+static int pbeRuntimeCanUseBextFastPath(void);
+static u64a pbeLoadWindow64Normalized(const struct FDR_Runtime_Args *a,
+                                      size_t endPos, u32 windowBytes);
+static u32 pbeExtractKeyScalarFromWindow(
+    const struct PBERuntimeBitSelector *selectors, u32 selectorCount,
+    u64a window);
+static u64a pbeExtractPackedBitsFallback(u64a window, u64a mask);
+static u32 pbeRemapPackedBits(u64a packed, const u8 *bitOrder,
+                              u32 selectorCount);
+static u32 pbeExtractKeyBext(const struct PBERuntimeHeader *hdr, u64a window);
 
 static int pbeEntryMayMatchAtPos(
     const struct PBERuntimeSecondaryHashEntry *entry,
@@ -49,6 +61,107 @@ static int pbeGetByteAt(const struct FDR_Runtime_Args *a, s64a pos, u8 *out) {
 
 static u8 pbeNormalizeByte(u8 c) {
     return ourisalpha(c) ? (u8)mytoupper((char)c) : c;
+}
+
+static int pbeRuntimeCanUseBextFastPath(void) {
+    static int cached = -1;
+    if (cached != -1) {
+        return cached;
+    }
+#if defined(HS_BUILD_HAVE_SVEBITPERM)
+    cached = !!(cpuid_flags() & HS_CPU_FEATURES_SVEBITPERM);
+#else
+    cached = 0;
+#endif
+    return cached;
+}
+
+static u64a pbeLoadWindow64Normalized(const struct FDR_Runtime_Args *a,
+                                      size_t endPos, u32 windowBytes) {
+    u64a window = 0;
+    u32 i;
+
+    if (!a) {
+        return 0;
+    }
+
+    if (!windowBytes || windowBytes > PBE_RUNTIME_BYTES_PER_RULE_SLOT) {
+        windowBytes = PBE_RUNTIME_BYTES_PER_RULE_SLOT;
+    }
+
+    for (i = 0; i < windowBytes; i++) {
+        u8 b = 0;
+        if (!pbeGetByteAt(a, (s64a)endPos - (s64a)i, &b)) {
+            continue;
+        }
+        window |= ((u64a)b) << (i * 8U);
+    }
+
+    return window;
+}
+
+static u32 pbeExtractKeyScalarFromWindow(
+    const struct PBERuntimeBitSelector *selectors, u32 selectorCount,
+    u64a window) {
+    u32 key = 0;
+    u32 i;
+
+    for (i = 0; i < selectorCount && i < PBE_RUNTIME_MAX_SELECTORS; i++) {
+        const struct PBERuntimeBitSelector *s = &selectors[i];
+        const u32 bitIndex = (u32)s->byteOffset * 8U + (u32)s->bitOffset;
+        if (window & ((u64a)1 << bitIndex)) {
+            key |= (1U << i);
+        }
+    }
+
+    return key;
+}
+
+static u64a pbeExtractPackedBitsFallback(u64a window, u64a mask) {
+    u64a packed = 0;
+    u32 outBit = 0;
+
+    while (mask && outBit < PBE_RUNTIME_MAX_SELECTORS) {
+        const u64a lowest = mask & (0 - mask);
+        if (window & lowest) {
+            packed |= ((u64a)1 << outBit);
+        }
+        mask &= mask - 1;
+        outBit++;
+    }
+
+    return packed;
+}
+
+static u32 pbeRemapPackedBits(u64a packed, const u8 *bitOrder,
+                              u32 selectorCount) {
+    u32 key = 0;
+    u32 i;
+
+    if (!bitOrder) {
+        return 0;
+    }
+
+    for (i = 0; i < selectorCount && i < PBE_RUNTIME_MAX_SELECTORS; i++) {
+        const u8 keyBit = bitOrder[i];
+        if (keyBit >= PBE_RUNTIME_MAX_SELECTORS) {
+            continue;
+        }
+        if (packed & ((u64a)1 << i)) {
+            key |= (1U << keyBit);
+        }
+    }
+
+    return key;
+}
+
+static u32 pbeExtractKeyBext(const struct PBERuntimeHeader *hdr, u64a window) {
+    const u64a packed = pbeRuntimeCanUseBextFastPath()
+                            ? pbeExtractPackedBitsSveBitPerm(window,
+                                                             hdr->bextMask)
+                            : pbeExtractPackedBitsFallback(window,
+                                                           hdr->bextMask);
+    return pbeRemapPackedBits(packed, hdr->bextToKeyBit, hdr->selectorCount);
 }
 
 static int pbeRuleExactMatch(const struct PBERuntimeRuleMeta *rm,
@@ -118,6 +231,15 @@ static int pbeValidateLayout(const struct FDR *fdr,
         return 0;
     }
     if (!hdr->selectorCount || !hdr->primaryCount || !hdr->secondaryCount) {
+        return 0;
+    }
+    if (hdr->selectorCount > PBE_RUNTIME_MAX_SELECTORS) {
+        return 0;
+    }
+    if (!hdr->windowBytes || hdr->windowBytes > PBE_RUNTIME_BYTES_PER_RULE_SLOT) {
+        return 0;
+    }
+    if (hdr->extractMode > PBE_RUNTIME_EXTRACT_MODE_BEXT) {
         return 0;
     }
     if ((u64a)hdr->selectorsOffset + (u64a)hdr->selectorCount *
@@ -225,7 +347,7 @@ static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
 
     size_t i;
     for (i = a->start_offset; i < a->len; i++) {
-        const u32 key = pbeExtractKey(selectors, hdr->selectorCount, a, i);
+        const u32 key = pbeExtractKey(hdr, selectors, a, i);
         const u32 idx = (key < hdr->primaryCount) ? key : 0;
         const u32 exactValue =
             pbePrimaryBitmapHasValue(primaryBitmap, hdr->primaryBitmapSize, idx)
@@ -305,25 +427,16 @@ static void pbeDecodePrimaryValue(u32 encoded, u32 *offset, u32 *count) {
         *count = encoded >> PBE_RUNTIME_L1_COUNT_SHIFT;
     }
 }
-static u32 pbeExtractKey(const struct PBERuntimeBitSelector *selectors,
-                         u32 selectorCount,
+static u32 pbeExtractKey(const struct PBERuntimeHeader *hdr,
+                         const struct PBERuntimeBitSelector *selectors,
                          const struct FDR_Runtime_Args *a, size_t endPos) {
-    u32 key = 0;
-    u32 i;
+    const u64a window = pbeLoadWindow64Normalized(a, endPos, hdr->windowBytes);
 
-    for (i = 0; i < selectorCount && i < 32; i++) {
-        const struct PBERuntimeBitSelector *s = &selectors[i];
-        const s64a pos = (s64a)endPos - (s64a)s->byteOffset;
-        u8 b = 0;
-        if (!pbeGetByteAt(a, pos, &b)) {
-            continue;
-        }
-        if ((b >> s->bitOffset) & 0x1U) {
-            key |= (1U << i);
-        }
+    if (hdr->extractMode == PBE_RUNTIME_EXTRACT_MODE_BEXT) {
+        return pbeExtractKeyBext(hdr, window);
     }
 
-    return key;
+    return pbeExtractKeyScalarFromWindow(selectors, hdr->selectorCount, window);
 }
 
 hwlm_error_t PbeEngineExec(const struct FDR *fdr,

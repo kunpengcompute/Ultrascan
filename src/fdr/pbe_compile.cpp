@@ -93,6 +93,18 @@ std::string maskToBits(u32 mask) {
 }
 
 static
+const char *extractModeName(u32 mode) {
+    switch (mode) {
+    case PBE_EXTRACT_MODE_SCALAR:
+        return "scalar";
+    case PBE_EXTRACT_MODE_BEXT:
+        return "bext";
+    default:
+        return "unknown";
+    }
+}
+
+static
 u32 encodePrimaryValue(u32 secondaryOffset, u32 entryCount) {
     assert(secondaryOffset <= PBE_L1_OFFSET_MASK);
     assert(entryCount < (1U << (32U - PBE_L1_COUNT_SHIFT)));
@@ -107,6 +119,38 @@ u8 normalizedLiteralByte(u8 c) {
 static
 u32 pbePrimaryBitmapBytes(u32 primaryCount) {
     return (primaryCount + 7U) / 8U;
+}
+
+static
+void buildExtractDescriptor(const std::vector<PBEBitSelector> &selectors,
+                            PBECompileArtifacts *artifacts) {
+    if (!artifacts) {
+        return;
+    }
+
+    artifacts->extractMode = PBE_EXTRACT_MODE_SCALAR;
+    artifacts->windowBytes = PBE_BYTES_PER_RULE_SLOT;
+    artifacts->bextMask = 0;
+    artifacts->bextToKeyBit.fill(0xff);
+
+    if (selectors.empty() || selectors.size() > PBE_MAX_SELECTORS) {
+        return;
+    }
+
+    std::vector<std::pair<u32, u8>> bitOrder;
+    bitOrder.reserve(selectors.size());
+    for (u32 i = 0; i < selectors.size(); i++) {
+        const u32 bitIndex = static_cast<u32>(selectors[i].byteOffset) * 8U +
+                             static_cast<u32>(selectors[i].bitOffset);
+        bitOrder.emplace_back(bitIndex, verify_u8(i));
+    }
+
+    std::sort(bitOrder.begin(), bitOrder.end());
+    for (u32 i = 0; i < bitOrder.size(); i++) {
+        artifacts->bextMask |= (1ULL << bitOrder[i].first);
+        artifacts->bextToKeyBit[i] = bitOrder[i].second;
+    }
+    artifacts->extractMode = PBE_EXTRACT_MODE_BEXT;
 }
 
 static
@@ -164,6 +208,24 @@ void dumpSelectors(const std::vector<PBEBitSelector> &selectors) {
         printf("  s%zu -> suffix_bit=%u (byteOffset=%u, bitOffset=%u)\n", i,
                bitIndex, (u32)s.byteOffset, (u32)s.bitOffset);
     }
+}
+
+static
+void dumpExtractDescriptor(const PBECompileArtifacts &artifacts) {
+    printf("[PBE][Extract] mode=%s windowBytes=%u bextMask=0x%llx\n",
+           extractModeName(artifacts.extractMode), artifacts.windowBytes,
+           (unsigned long long)artifacts.bextMask);
+    if (artifacts.extractMode != PBE_EXTRACT_MODE_BEXT) {
+        return;
+    }
+    printf("  bextToKeyBit=[");
+    for (u32 i = 0; i < artifacts.bitSelectors.size() && i < PBE_MAX_SELECTORS;
+         i++) {
+        const u8 keyBit = artifacts.bextToKeyBit[i];
+        printf("%u%s", (u32)keyBit,
+               i + 1 == artifacts.bitSelectors.size() ? "" : ", ");
+    }
+    printf("]\n");
 }
 
 static
@@ -249,6 +311,7 @@ void dumpPBEArtifactsVerbose(const std::vector<hwlmLiteral> &lits,
            PBE_MAX_SECONDARY_ENTRIES, PBE_RULE_SLOTS_PER_ENTRY);
     dumpRuleBits(lits);
     dumpSelectors(artifacts.bitSelectors);
+    dumpExtractDescriptor(artifacts);
     dumpRuleKeys(lits, artifacts.bitSelectors, artifacts.keyBits);
     dumpHashTables(artifacts, lits);
     printf("[PBE][Flags] artifacts.flags=0x%x\n", artifacts.flags);
@@ -644,19 +707,17 @@ const char *pbeFeasibilityReasonName(PBEFeasibilityReason reason) {
 }
 
 bool pbeCanUseBextFastPath(const target_t &target) {
-#if defined(HS_BUILD_HAVE_SVE2)
-    (void)target;
-    /* The real SVE2 bext extraction path is not wired in yet. */
-    return false;
+#if defined(HS_BUILD_HAVE_SVEBITPERM)
+    return target.has_sve_bitperm();
 #else
     (void)target;
     return false;
 #endif
 }
 
-bool pbeHasSve2Prereq(const target_t &target) {
-#if defined(HS_BUILD_HAVE_SVE2)
-    return target.has_sve2();
+bool pbeHasSveBitPermPrereq(const target_t &target) {
+#if defined(HS_BUILD_HAVE_SVEBITPERM)
+    return target.has_sve_bitperm();
 #else
     (void)target;
     return false;
@@ -672,6 +733,10 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
 
     artifacts->keyBits = 0;
     artifacts->flags = 0;
+    artifacts->extractMode = PBE_EXTRACT_MODE_SCALAR;
+    artifacts->windowBytes = PBE_BYTES_PER_RULE_SLOT;
+    artifacts->bextMask = 0;
+    artifacts->bextToKeyBit.fill(0xff);
     artifacts->bitSelectors.clear();
     artifacts->primaryHashTable.offsets.clear();
     artifacts->primaryHashBitmap.bits.clear();
@@ -687,6 +752,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     if (artifacts->bitSelectors.empty()) {
         return false;
     }
+    buildExtractDescriptor(artifacts->bitSelectors, artifacts);
 
     buildHashTables(lits, artifacts->bitSelectors, &artifacts->primaryHashTable,
                     &artifacts->secondaryHashTable, &artifacts->flags);
@@ -842,6 +908,12 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     hdr->secondaryCount = secondaryCount;
     hdr->ruleMetaCount = ruleMetaCount;
     hdr->literalBlobSize = literalBlobSize;
+    hdr->extractMode = artifacts.extractMode;
+    hdr->windowBytes = artifacts.windowBytes;
+    hdr->bextMask = artifacts.bextMask;
+    memset(hdr->bextToKeyBit, 0xff, sizeof(hdr->bextToKeyBit));
+    memcpy(hdr->bextToKeyBit, artifacts.bextToKeyBit.data(),
+           sizeof(hdr->bextToKeyBit));
     hdr->selectorsOffset = selectorsOffset;
     hdr->primaryBitmapOffset = primaryBitmapOffset;
     hdr->primaryOffset = primaryOffset;

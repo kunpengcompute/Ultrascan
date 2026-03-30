@@ -5,6 +5,7 @@
 #include "hwlm/hwlm_literal.h"
 #include "util/bytecode_ptr.h"
 
+#include <array>
 #include <vector>
 
 namespace ue2 {
@@ -23,6 +24,9 @@ static constexpr u32 PBE_RULE_VECTOR_BYTES =
 static constexpr u32 PBE_TBL_CONTROL_BYTES =
     PBE_RULE_SLOTS_PER_ENTRY * PBE_BYTES_PER_RULE_SLOT;
 static constexpr u32 PBE_RULE_SLOT_MASK_WORDS = 1U;
+static constexpr u32 PBE_MAX_SELECTORS = 32U;
+static constexpr u32 PBE_EXTRACT_MODE_SCALAR = 0U;
+static constexpr u32 PBE_EXTRACT_MODE_BEXT = 1U;
 
 static constexpr u16 PBE_RULE_FLAG_NOCASE = 1U << 0;
 static constexpr u16 PBE_RULE_FLAG_NORUNS = 1U << 1;
@@ -71,6 +75,10 @@ struct PBERuleMeta {
 struct PBECompileArtifacts {
     u32 keyBits = 0;
     u32 flags = 0;
+    u32 extractMode = PBE_EXTRACT_MODE_SCALAR;
+    u32 windowBytes = PBE_BYTES_PER_RULE_SLOT;
+    u64a bextMask = 0;
+    std::array<u8, PBE_MAX_SELECTORS> bextToKeyBit = {};
     std::vector<PBEBitSelector> bitSelectors;
     PBEPrimaryHashTable primaryHashTable;
     PBEPrimaryHashBitmap primaryHashBitmap;
@@ -106,7 +114,7 @@ bool analyzePBEFeasibility(const target_t &target,
 
 const char *pbeFeasibilityReasonName(PBEFeasibilityReason reason);
 
-bool pbeHasSve2Prereq(const target_t &target);
+bool pbeHasSveBitPermPrereq(const target_t &target);
 
 bool pbeCanUseBextFastPath(const target_t &target);
 

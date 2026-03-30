@@ -62,6 +62,10 @@ bool target_t::can_run_on_code_built_for(const target_t &code_target) const {
         return false;
     }
 
+    if (!has_sve_bitperm() && code_target.has_sve_bitperm()) {
+        return false;
+    }
+
     return true;
 }
 
@@ -86,6 +90,10 @@ bool target_t::has_sve(void) const {
 
 bool target_t::has_sve2(void) const {
     return cpu_features & HS_CPU_FEATURES_SVE2;
+}
+
+bool target_t::has_sve_bitperm(void) const {
+    return cpu_features & HS_CPU_FEATURES_SVEBITPERM;
 }
 
 bool target_t::is_atom_class(void) const {

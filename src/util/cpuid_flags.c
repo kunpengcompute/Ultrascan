@@ -99,12 +99,25 @@ u64a cpuid_flags(void) {
     }
 #endif
 
+#ifdef HWCAP2_SVEBITPERM
+    if (hwcap2 & HWCAP2_SVEBITPERM) {
+        DEBUG_PRINTF("SVEBITPERM enabled\n");
+        cap |= HS_CPU_FEATURES_SVEBITPERM | HS_CPU_FEATURES_SVE2 |
+               HS_CPU_FEATURES_SVE;
+    }
+#endif
+
 #if !defined(FAT_RUNTIME) && !defined(HS_BUILD_HAVE_SVE)
-    cap &= ~HS_CPU_FEATURES_SVE;
+    cap &= ~(HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |
+             HS_CPU_FEATURES_SVEBITPERM);
 #endif
 
 #if !defined(FAT_RUNTIME) && !defined(HS_BUILD_HAVE_SVE2)
-    cap &= ~HS_CPU_FEATURES_SVE2;
+    cap &= ~(HS_CPU_FEATURES_SVE2 | HS_CPU_FEATURES_SVEBITPERM);
+#endif
+
+#if !defined(FAT_RUNTIME) && !defined(HS_BUILD_HAVE_SVEBITPERM)
+    cap &= ~HS_CPU_FEATURES_SVEBITPERM;
 #endif
 #endif
     return cap;

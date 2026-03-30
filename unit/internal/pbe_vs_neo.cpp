@@ -291,6 +291,79 @@ PBEInspectStats computeInspectStats(const PBECompileArtifacts &artifacts) {
     return stats;
 }
 
+static
+u64a loadWindow64NormalizedForTest(const std::vector<u8> &history,
+                                   const std::vector<u8> &data,
+                                   size_t historyLen, size_t endPos,
+                                   u32 windowBytes) {
+    const size_t totalLen = historyLen + data.size();
+    if (!windowBytes || windowBytes > PBE_BYTES_PER_RULE_SLOT) {
+        windowBytes = PBE_BYTES_PER_RULE_SLOT;
+    }
+
+    u64a window = 0;
+    for (u32 i = 0; i < windowBytes; i++) {
+        const size_t pos = endPos >= i ? endPos - i : totalLen;
+        u8 c = 0;
+        if (pos < historyLen) {
+            c = history[pos];
+        } else if (pos < totalLen) {
+            c = data[pos - historyLen];
+        }
+        window |= ((u64a)c) << (i * 8U);
+    }
+    return window;
+}
+
+static
+u32 extractScalarKeyFromWindowForTest(const PBECompileArtifacts &artifacts,
+                                      u64a window) {
+    u32 key = 0;
+    for (u32 i = 0; i < artifacts.bitSelectors.size() && i < PBE_MAX_SELECTORS;
+         i++) {
+        const auto &sel = artifacts.bitSelectors[i];
+        const u32 bitIndex = static_cast<u32>(sel.byteOffset) * 8U +
+                             static_cast<u32>(sel.bitOffset);
+        if (window & ((u64a)1 << bitIndex)) {
+            key |= (1U << i);
+        }
+    }
+    return key;
+}
+
+static
+u64a extractPackedBitsFallbackForTest(u64a window, u64a mask) {
+    u64a packed = 0;
+    u32 outBit = 0;
+
+    while (mask && outBit < PBE_MAX_SELECTORS) {
+        const u64a lowest = mask & (0 - mask);
+        if (window & lowest) {
+            packed |= ((u64a)1 << outBit);
+        }
+        mask &= mask - 1;
+        outBit++;
+    }
+
+    return packed;
+}
+
+static
+u32 remapPackedBitsForTest(const PBECompileArtifacts &artifacts, u64a packed) {
+    u32 key = 0;
+    for (u32 i = 0; i < artifacts.bitSelectors.size() && i < PBE_MAX_SELECTORS;
+         i++) {
+        const u8 keyBit = artifacts.bextToKeyBit[i];
+        if (keyBit >= PBE_MAX_SELECTORS) {
+            continue;
+        }
+        if (packed & ((u64a)1 << i)) {
+            key |= (1U << keyBit);
+        }
+    }
+    return key;
+}
+
 TEST(PBEvsNeo, BlockGroupsConsistency) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 10, 0x1, {}, {}),
@@ -681,6 +754,12 @@ TEST(PBECompile, BuildPbeBlobHeaderMatchesArtifacts) {
     EXPECT_EQ(artifacts.secondaryHashTable.size(), hdr->secondaryCount);
     EXPECT_EQ(artifacts.ruleMeta.size(), hdr->ruleMetaCount);
     EXPECT_EQ(artifacts.literalBlob.size(), hdr->literalBlobSize);
+    EXPECT_EQ(artifacts.extractMode, hdr->extractMode);
+    EXPECT_EQ(artifacts.windowBytes, hdr->windowBytes);
+    EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
+    EXPECT_TRUE(std::equal(hdr->bextToKeyBit,
+                           hdr->bextToKeyBit + PBE_MAX_SELECTORS,
+                           artifacts.bextToKeyBit.begin()));
 }
 
 TEST(PBECompile, PrimaryBitmapMatchesNonEmptyL1Entries) {
@@ -728,6 +807,15 @@ TEST(PBECompile, TargetSveFeatureMapping) {
     target_t sve2Target(sve2Info);
     EXPECT_TRUE(sve2Target.has_sve());
     EXPECT_TRUE(sve2Target.has_sve2());
+    EXPECT_FALSE(sve2Target.has_sve_bitperm());
+
+    hs_platform_info bitpermInfo = {};
+    bitpermInfo.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |
+                               HS_CPU_FEATURES_SVEBITPERM;
+    target_t bitpermTarget(bitpermInfo);
+    EXPECT_TRUE(bitpermTarget.has_sve());
+    EXPECT_TRUE(bitpermTarget.has_sve2());
+    EXPECT_TRUE(bitpermTarget.has_sve_bitperm());
 }
 
 TEST(PBECompile, TargetSveCompatibilityCheck) {
@@ -742,33 +830,46 @@ TEST(PBECompile, TargetSveCompatibilityCheck) {
     sve2Info.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2;
     target_t sve2Target(sve2Info);
 
+    hs_platform_info bitpermInfo = {};
+    bitpermInfo.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |
+                               HS_CPU_FEATURES_SVEBITPERM;
+    target_t bitpermTarget(bitpermInfo);
+
     EXPECT_FALSE(noneTarget.can_run_on_code_built_for(sveTarget));
     EXPECT_FALSE(noneTarget.can_run_on_code_built_for(sve2Target));
     EXPECT_TRUE(sve2Target.can_run_on_code_built_for(sveTarget));
     EXPECT_FALSE(sveTarget.can_run_on_code_built_for(sve2Target));
+    EXPECT_TRUE(bitpermTarget.can_run_on_code_built_for(sve2Target));
+    EXPECT_FALSE(sve2Target.can_run_on_code_built_for(bitpermTarget));
 }
 
-TEST(PBECompile, Sve2PrereqRequiresBuildAndTargetSupport) {
+TEST(PBECompile, SveBitPermPrereqRequiresBuildAndTargetSupport) {
     hs_platform_info noneInfo = {};
     target_t noneTarget(noneInfo);
-    EXPECT_FALSE(pbeHasSve2Prereq(noneTarget));
+    EXPECT_FALSE(pbeHasSveBitPermPrereq(noneTarget));
 
     hs_platform_info sveInfo = {};
     sveInfo.cpu_features = HS_CPU_FEATURES_SVE;
     target_t sveTarget(sveInfo);
-    EXPECT_FALSE(pbeHasSve2Prereq(sveTarget));
+    EXPECT_FALSE(pbeHasSveBitPermPrereq(sveTarget));
 
     hs_platform_info sve2Info = {};
     sve2Info.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2;
     target_t sve2Target(sve2Info);
-#if defined(HS_BUILD_HAVE_SVE2)
-    EXPECT_TRUE(pbeHasSve2Prereq(sve2Target));
+    EXPECT_FALSE(pbeHasSveBitPermPrereq(sve2Target));
+
+    hs_platform_info bitpermInfo = {};
+    bitpermInfo.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |
+                               HS_CPU_FEATURES_SVEBITPERM;
+    target_t bitpermTarget(bitpermInfo);
+#if defined(HS_BUILD_HAVE_SVEBITPERM)
+    EXPECT_TRUE(pbeHasSveBitPermPrereq(bitpermTarget));
 #else
-    EXPECT_FALSE(pbeHasSve2Prereq(sve2Target));
+    EXPECT_FALSE(pbeHasSveBitPermPrereq(bitpermTarget));
 #endif
 }
 
-TEST(PBECompile, BextFastPathDisabledUntilImplemented) {
+TEST(PBECompile, BextFastPathRequiresSveBitPerm) {
     hs_platform_info noneInfo = {};
     target_t noneTarget(noneInfo);
     EXPECT_FALSE(pbeCanUseBextFastPath(noneTarget));
@@ -777,6 +878,102 @@ TEST(PBECompile, BextFastPathDisabledUntilImplemented) {
     sve2Info.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2;
     target_t sve2Target(sve2Info);
     EXPECT_FALSE(pbeCanUseBextFastPath(sve2Target));
+
+    hs_platform_info bitpermInfo = {};
+    bitpermInfo.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |
+                               HS_CPU_FEATURES_SVEBITPERM;
+    target_t bitpermTarget(bitpermInfo);
+#if defined(HS_BUILD_HAVE_SVEBITPERM)
+    EXPECT_TRUE(pbeCanUseBextFastPath(bitpermTarget));
+#else
+    EXPECT_FALSE(pbeCanUseBextFastPath(bitpermTarget));
+#endif
+}
+
+TEST(PBECompile, BextMaskMatchesSelectors) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 690, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 691, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 692, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 693, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_EQ(PBE_EXTRACT_MODE_BEXT, artifacts.extractMode);
+
+    std::vector<std::pair<u32, u8>> expected;
+    for (u32 i = 0; i < artifacts.bitSelectors.size(); i++) {
+        const auto &sel = artifacts.bitSelectors[i];
+        expected.emplace_back(static_cast<u32>(sel.byteOffset) * 8U +
+                                  static_cast<u32>(sel.bitOffset),
+                              verify_u8(i));
+    }
+    std::sort(expected.begin(), expected.end());
+
+    u64a expectedMask = 0;
+    for (u32 i = 0; i < expected.size(); i++) {
+        expectedMask |= ((u64a)1 << expected[i].first);
+        EXPECT_EQ(expected[i].second, artifacts.bextToKeyBit[i]);
+    }
+    EXPECT_EQ(expectedMask, artifacts.bextMask);
+}
+
+TEST(PBEExtract, BextMatchesScalar) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 700, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 701, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 702, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 703, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+
+    const std::vector<u8> history = {'x', 'y', 'z'};
+    const std::vector<u8> data = {'a','l','p','h','a',' ',
+                                  'B','E','T','A',' ',
+                                  'd','e','l','t','a'};
+    const size_t historyLen = history.size();
+    const size_t totalLen = historyLen + data.size();
+
+    for (size_t endPos = 0; endPos < totalLen; endPos++) {
+        const u64a window = loadWindow64NormalizedForTest(
+            history, data, historyLen, endPos, artifacts.windowBytes);
+        const u32 scalarKey = extractScalarKeyFromWindowForTest(artifacts,
+                                                                window);
+        const u64a packed = extractPackedBitsFallbackForTest(window,
+                                                             artifacts.bextMask);
+        const u32 bextKey = remapPackedBitsForTest(artifacts, packed);
+        EXPECT_EQ(scalarKey, bextKey) << "endPos=" << endPos;
+    }
+}
+
+TEST(PBEExtract, BextHistoryBoundaryConsistency) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("abcz", false, false, 710, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("YY", true, false, 711, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("kappa", false, false, 712, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 713, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+
+    const std::vector<u8> history = {'x', 'x', 'a', 'b'};
+    const std::vector<u8> data = {'c', 'z', 'Y', 'Y', 'a', 'B', 'c', 'z'};
+    const size_t historyLen = history.size();
+
+    for (size_t endPos = 0; endPos < historyLen + data.size(); endPos++) {
+        const u64a window = loadWindow64NormalizedForTest(
+            history, data, historyLen, endPos, artifacts.windowBytes);
+        const u32 scalarKey = extractScalarKeyFromWindowForTest(artifacts,
+                                                                window);
+        const u64a packed = extractPackedBitsFallbackForTest(window,
+                                                             artifacts.bextMask);
+        const u32 bextKey = remapPackedBitsForTest(artifacts, packed);
+        EXPECT_EQ(scalarKey, bextKey) << "boundary endPos=" << endPos;
+    }
 }
 
 TEST(PBERuntime, InvalidMagicFallsBackCleanly) {
@@ -907,6 +1104,22 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
         }
         std::cout << "]\n";
     }
+
+    std::cout << "\n[Extract]\n";
+    std::cout << "  mode="
+              << (artifacts.extractMode == PBE_EXTRACT_MODE_BEXT ? "bext"
+                                                                  : "scalar")
+              << " windowBytes=" << artifacts.windowBytes
+              << " bextMask={dec=" << artifacts.bextMask
+              << ",hex=0x" << std::hex << artifacts.bextMask << std::dec
+              << ",bin=" << std::bitset<64>(artifacts.bextMask) << "}\n";
+    std::cout << "  bextToKeyBit=[";
+    for (size_t i = 0; i < artifacts.bitSelectors.size() && i < PBE_MAX_SELECTORS;
+         i++) {
+        std::cout << static_cast<u32>(artifacts.bextToKeyBit[i])
+                  << (i + 1 == artifacts.bitSelectors.size() ? "" : ", ");
+    }
+    std::cout << "]\n";
 
     std::cout << "\n[Build Stats]\n";
     std::cout << "  nonEmptyL1=" << stats.nonEmptyL1

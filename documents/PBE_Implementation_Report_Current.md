@@ -572,10 +572,34 @@ L2 (secondary)
    - `SVE2`
 4. 当前新增了 `pbeCanUseBextFastPath(...)` 作为未来 `bext` 快路径的统一门控入口。
 5. 该门控目前遵循以下规则：
-   - 当前新增 `pbeHasSve2Prereq(...)` 用于表达“构建能力 + 目标能力”前置条件
+   - 当前新增 `pbeHasSveBitPermPrereq(...)` 用于表达“构建能力 + 目标能力”前置条件
    - `pbeCanUseBextFastPath(...)` 目前仍固定返回 false
 6. 构建层与运行层现在已拆分为三种语义：
    - `HAVE_SVE / HAVE_SVE2`：当前翻译单元的 ISA 宏
-   - `HS_BUILD_HAVE_SVE / HS_BUILD_HAVE_SVE2`：工程构建能力
-   - `HS_CPU_FEATURES_SVE / HS_CPU_FEATURES_SVE2`：运行目标 CPU 能力
+   - `HS_BUILD_HAVE_SVE / HS_BUILD_HAVE_SVE2 / HS_BUILD_HAVE_SVEBITPERM`：工程构建能力
+   - `HS_CPU_FEATURES_SVE / HS_CPU_FEATURES_SVE2 / HS_CPU_FEATURES_SVEBITPERM`：运行目标 CPU 能力
 7. 本阶段尚未接入真正的 `bext` 位提取执行逻辑，只完成了探测与门控准备。
+
+### 15.11 SVEBITPERM 与 bext 提取实现进展
+1. 现在已经新增 `HS_CPU_FEATURES_SVEBITPERM`，用于表达 Arm `SVE2 BitPerm` 运行目标能力。
+2. 构建系统新增了 `HS_BUILD_HAVE_SVEBITPERM` 探测，并会尝试：
+   - `-march=armv9-a+sve2-bitperm`
+   - `-march=armv8.6-a+sve2-bitperm`
+3. 运行时 `cpuid_flags()` 也会在 AArch64/Linux 上额外探测 `HWCAP2_SVEBITPERM`。
+4. `target_t` 现在新增：
+   - `has_sve_bitperm()`
+5. PBE 的 bitperm 前置判断已经从原先的 `pbeHasSve2Prereq(...)` 修正为：
+   - `pbeHasSveBitPermPrereq(...)`
+6. PBE blob 头部新增 `bext` 提取描述字段：
+   - `extractMode`
+   - `windowBytes`
+   - `bextMask`
+   - `bextToKeyBit[32]`
+7. 编译期现在会把 selector 列表转换成：
+   - 一个按源 bit 升序排列的 `bextMask`
+   - 一个 packed bit 到原 key bit 的重排表
+8. 运行期提取逻辑已经改为双路径：
+   - `scalar`：从 `window64` 按 selector 逐位取值
+   - `bext`：先执行 packed bit extract，再按重排表恢复到当前 key bit 顺序
+9. 当前 `window64` 采用原始字节拼接，不做统一大写归一化；这一步是为了保持与当前编译期 `keyValue/keyMask` 语义一致。
+10. 当 `SVEBITPERM` 真正可用时，运行期会调用独立的 `pbe_extract_sve2_bitperm.c` helper；否则回退到软件 packed-extract 实现。

@@ -290,27 +290,27 @@
 2. 当前已经补充了一级哈希压缩位图的编译期与运行期框架。
 3. 运行期仍然是朴素 C 版本，后续再继续做向量化与性能优化。
 4. 下一步位提取码优化计划：
-   - 仅在检测到 `SVE2` 可用时，才允许启用 `bext` 快路径
-   - 当前阶段先补 `SVE/SVE2` 能力探测与门控
+   - 仅在检测到 `SVEBITPERM` 可用时，才允许启用 `bext` 快路径
+   - 当前阶段先补 `SVE/SVE2/SVEBITPERM` 能力探测与门控
    - 后续再使用 `bext` 指令实现并行位提取
    - 配合位图命中结果做 `compact`
    - 对非零项做 `LD1/GATHER` 访问一级哈希表
 
-### SVE2 门控补充
+### SVE2/SVEBITPERM 门控补充
 
 1. `bext` 快路径不是默认开启功能。
 2. 当前设计要求同时满足以下条件时，未来才允许进入 `bext` 位提取路径：
-   - 工程构建系统检测到具备 `SVE2` 构建能力
-   - 运行目标平台声明支持 `SVE2`
+   - 工程构建系统检测到具备 `SVEBITPERM` 构建能力
+   - 运行目标平台声明支持 `SVEBITPERM`
 3. 若任一条件不满足，则必须回退到当前标量位提取实现。
 4. 本阶段只补充能力位、平台探测和门控框架，不改变现有 PBE 运行语义。
 5. 需要区分三层概念：
-   - `HAVE_SVE / HAVE_SVE2`：当前翻译单元是否按 SVE/SVE2 ISA 编译
-   - `HS_BUILD_HAVE_SVE / HS_BUILD_HAVE_SVE2`：当前工程是否具备构建 SVE/SVE2 专用实现的能力
-   - `target.has_sve() / target.has_sve2()`：运行目标平台是否声明支持对应能力
+   - `HAVE_SVE / HAVE_SVE2 / HAVE_SVEBITPERM`：当前翻译单元是否按对应 ISA 编译
+   - `HS_BUILD_HAVE_SVE / HS_BUILD_HAVE_SVE2 / HS_BUILD_HAVE_SVEBITPERM`：当前工程是否具备构建对应专用实现的能力
+   - `target.has_sve() / target.has_sve2() / target.has_sve_bitperm()`：运行目标平台是否声明支持对应能力
 6. 当前阶段新增：
-   - `pbeHasSve2Prereq(...)`：表示未来进入 `bext` 快路径的前置条件是否成立
-   - `pbeCanUseBextFastPath(...)`：当前仍固定返回 false，等待真正 `bext` 实现接入
+   - `pbeHasSveBitPermPrereq(...)`：表示未来进入 `bext` 快路径的前置条件是否成立
+   - `pbeCanUseBextFastPath(...)`：当前根据 `SVEBITPERM` 构建能力和目标能力决定是否允许快路径
 
 ### 结构约束补充
 
@@ -319,3 +319,317 @@
 3. 编译期、blob、运行期都应将两者视为两块独立区域：
    - 一级哈希主表：保存 `u32` 编码值
    - 一级哈希压缩位图：保存表项是否非空
+
+### SVEBITPERM 与 bext 提取补充
+
+1. `bext` 快路径的真实前置条件已经从“仅检测 `SVE2`”修正为“检测 `SVEBITPERM`”。
+2. 现在需要区分四层语义：
+   - `HAVE_SVE / HAVE_SVE2 / HAVE_SVEBITPERM`：当前翻译单元是否按对应 ISA 编译
+   - `HS_BUILD_HAVE_SVE / HS_BUILD_HAVE_SVE2 / HS_BUILD_HAVE_SVEBITPERM`：当前工程是否具备构建对应专用实现的能力
+   - `HS_CPU_FEATURES_SVE / HS_CPU_FEATURES_SVE2 / HS_CPU_FEATURES_SVEBITPERM`：运行目标 CPU 能力
+   - `target.has_sve() / has_sve2() / has_sve_bitperm()`：编译期目标抽象
+3. `pbeHasSveBitPermPrereq(...)` 用来表达“工程已具备 bitperm 构建能力，且目标平台声明支持 bitperm”这一前置条件。
+4. `pbeCanUseBextFastPath(...)` 现在不再固定返回 `false`，而是跟随 `SVEBITPERM` 前置条件决定未来快路径是否允许启用。
+5. PBE blob 头部新增了 `bext` 提取描述：
+   - `extractMode`
+   - `windowBytes`
+   - `bextMask`
+   - `bextToKeyBit[32]`
+6. 编译期会把当前 `22` 个 selector 转换成：
+   - 一个 `64-bit bextMask`
+   - 一个“压缩后 bit 位 -> 原 key bit 位”的重排表
+7. 运行期提取流程现在改成：
+   - 先从当前位置装载 `8-byte window`
+   - 若 `extractMode=scalar`，则按 selector 标量提取
+   - 若 `extractMode=bext`，则先执行 packed bit extract，再按 `bextToKeyBit` 重排成最终 `22-bit key`
+8. 当前保留两条实现路径：
+   - `SVEBITPERM` 可用时，调用专用 helper
+   - 否则回退到软件 `bext` 打包实现
+9. 这里的 `window64` 采用“原始字节”拼接，不做统一大写归一化；大小写不敏感规则仍通过 `keyMask` 中的“不关心位”来消解差异。
+
+### `window64 -> bextMask -> key` 详细流程图
+
+下面给出当前 PBE 位提取路径的详细数据流。这里的核心目标是：把“当前候选结束位置附近最多 `8` 个字节”先压成一个 `64-bit window64`，再基于 selector 定义提取出最终的 `22-bit key`。
+
+#### 1. 运行期输入视图
+
+```text
+history(可选) + current buffer
+
+... h[-3]  h[-2]  h[-1] | b[0]  b[1]  b[2]  b[3]  b[4] ...
+                         ^
+                    当前扫描位置
+
+假设当前候选结束位置为 endPos
+PBE 总是以 endPos 为“后缀末尾”来观察最多 8 个字节
+```
+
+#### 2. 构造 `window64`
+
+`window64` 的构造规则是：
+
+1. 以 `endPos` 对应字节作为最低字节 `byte0`
+2. `endPos - 1` 对应 `byte1`
+3. `endPos - 2` 对应 `byte2`
+4. 依次向前，最多取 `8` 个字节
+5. 若超出 `history + current` 的可访问范围，则对应字节补 `0`
+
+对应位布局如下：
+
+```text
+window64 = [ byte7 | byte6 | byte5 | byte4 | byte3 | byte2 | byte1 | byte0 ]
+
+其中：
+byte0 = endPos
+byte1 = endPos - 1
+byte2 = endPos - 2
+...
+byte7 = endPos - 7
+```
+
+位编号方式：
+
+```text
+byte0 的 bit0..bit7  -> window64 的 bit0..bit7
+byte1 的 bit0..bit7  -> window64 的 bit8..bit15
+byte2 的 bit0..bit7  -> window64 的 bit16..bit23
+...
+byte7 的 bit0..bit7  -> window64 的 bit56..bit63
+```
+
+也就是说：
+
+```text
+windowBitIndex = byteOffset * 8 + bitOffset
+```
+
+这正好与当前 selector 的定义一致。
+
+#### 3. selector 与 `window64` 的关系
+
+编译期 selector 形式如下：
+
+```text
+selector[i] = { byteOffset, bitOffset }
+```
+
+含义：
+
+```text
+byteOffset = 0  -> 取 endPos 这个字节
+byteOffset = 1  -> 取 endPos-1 这个字节
+...
+
+bitOffset = 0..7 -> 取该字节中的具体 bit
+```
+
+因此一个 selector 实际上就是 `window64` 上的一个固定 bit 位置：
+
+```text
+selector[i] 对应的源 bit 位置
+= selector[i].byteOffset * 8 + selector[i].bitOffset
+```
+
+#### 4. 编译期生成 `bextMask`
+
+编译期会把全部 selector 变成一个 `64-bit bextMask`。
+
+流程如下：
+
+```text
+selector 列表（按当前 key bit 顺序）
+    |
+    | 取出每个 selector 对应的 windowBitIndex
+    v
+[(windowBitIndex0, keyBit0),
+ (windowBitIndex1, keyBit1),
+ ...]
+    |
+    | 按 windowBitIndex 从小到大排序
+    v
+[(srcBitA, keyBitX),
+ (srcBitB, keyBitY),
+ ...]
+    |
+    | 生成两份结果
+    v
+1. bextMask：在 srcBitA/srcBitB/... 这些位置上置 1
+2. bextToKeyBit：记录“压缩后第 j 位”应该放回哪个 keyBit
+```
+
+图示如下：
+
+```text
+原 selector 顺序（决定最终 key 的 bit 位顺序）
+
+  selector[0] -> srcBit = 11
+  selector[1] -> srcBit = 12
+  selector[2] -> srcBit = 16
+  selector[3] -> srcBit = 26
+  ...
+
+按 srcBit 升序排序后：
+
+  packedBit[0] <- srcBit 11 -> keyBit 0
+  packedBit[1] <- srcBit 12 -> keyBit 1
+  packedBit[2] <- srcBit 16 -> keyBit 2
+  packedBit[3] <- srcBit 26 -> keyBit 3
+  ...
+
+于是：
+
+  bextMask     : 在 bit11/12/16/26/... 上置 1
+  bextToKeyBit : [0, 1, 2, 3, ...]
+```
+
+注意：如果 selector 原始顺序和源 bit 升序不一致，那么 `bextToKeyBit` 就会显式记录这种“压缩顺序”和“最终 key 顺序”之间的差异。
+
+#### 5. 运行期提取总流程
+
+完整流程如下：
+
+```text
+                 +----------------------+
+                 | 当前候选结束位置 endPos |
+                 +----------+-----------+
+                            |
+                            v
+                 +----------------------+
+                 | 从 history+buf 装载   |
+                 | 最多 8 字节 -> window64|
+                 +----------+-----------+
+                            |
+                            v
+                 +----------------------+
+                 | 检查 extractMode      |
+                 +----+-------------+---+
+                      |             |
+         scalar       |             | bext
+                      |             |
+                      v             v
+      +----------------------+   +----------------------+
+      | 按 selector[i]       |   | packed = bext(window,|
+      | 逐个读取 window bit  |   |              bextMask)|
+      +----------+-----------+   +----------+-----------+
+                 |                          |
+                 |                          v
+                 |               +----------------------+
+                 |               | packed bit 按       |
+                 |               | bextToKeyBit 重排    |
+                 |               +----------+-----------+
+                 |                          |
+                 +-------------+------------+
+                               |
+                               v
+                    +-----------------------+
+                    | 最终得到 22-bit key   |
+                    +-----------+-----------+
+                                |
+                                v
+                    +-----------------------+
+                    | 先查 L1 bitmap        |
+                    +-----------+-----------+
+                                |
+                                v
+                    +-----------------------+
+                    | 再查 L1 value         |
+                    | 解码出 offset/count   |
+                    +-----------+-----------+
+                                |
+                                v
+                    +-----------------------+
+                    | 扫描对应 L2 项        |
+                    +-----------------------+
+```
+
+#### 6. `bext` 路径与 scalar 路径为什么要保持两套
+
+当前保留两套路径的原因有三个：
+
+1. 正确性对照
+   - `bext` 路径必须和现有 scalar 提取逐位置完全一致
+2. 平台回退
+   - 没有 `SVEBITPERM` 时，仍可使用软件 packed-extract 回退
+3. 调试可观测
+   - UT 可以直接比较：
+     - `window64`
+     - `scalar key`
+     - `bext packed`
+     - `重排后 key`
+
+#### 7. 具体小例子
+
+假设当前末尾 4 字节为：
+
+```text
+endPos-3   endPos-2   endPos-1   endPos
+   'A'        'B'        'C'       'D'
+```
+
+那么：
+
+```text
+window64 的低 4 个字节为：
+
+byte0 = 'D'
+byte1 = 'C'
+byte2 = 'B'
+byte3 = 'A'
+byte4..byte7 = 0
+```
+
+如果 selector 为：
+
+```text
+s0 = {byteOffset=0, bitOffset=0}
+s1 = {byteOffset=1, bitOffset=2}
+s2 = {byteOffset=3, bitOffset=6}
+```
+
+则对应源 bit 为：
+
+```text
+s0 -> srcBit 0
+s1 -> srcBit 10
+s2 -> srcBit 30
+```
+
+编译期会得到：
+
+```text
+bextMask = (1<<0) | (1<<10) | (1<<30)
+bextToKeyBit = [0, 1, 2]
+```
+
+运行期：
+
+```text
+packed = bext(window64, bextMask)
+key    = remap(packed, bextToKeyBit)
+```
+
+如果将来 selector 的逻辑顺序与 `srcBit` 升序不同，例如：
+
+```text
+selector 顺序: [srcBit30, srcBit0, srcBit10]
+```
+
+那么：
+
+```text
+bext 后 packed 顺序仍然是 [srcBit0, srcBit10, srcBit30]
+
+此时：
+bextToKeyBit = [1, 2, 0]
+```
+
+运行期就需要额外重排一次，才能恢复成当前 PBE 定义下的最终 key 顺序。
+
+#### 8. 当前语义注意点
+
+1. `window64` 现在使用的是原始字节，不做统一大写。
+2. 原因是当前编译期 `keyValue/keyMask` 的大小写不敏感语义是通过“不关心位”表达的。
+3. 如果运行期提前把字节统一转大写，会破坏当前 `key/keyMask` 兼容关系。
+4. 因此当前正确口径是：
+   - `window64` 保留原始 bit
+   - `nocase` 由 `keyMask` 和后续 exact confirm 共同处理

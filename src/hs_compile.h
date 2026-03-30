@@ -1053,6 +1053,15 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  */
 #define HS_CPU_FEATURES_SVE2             (1ULL << 6)
 
+/**
+ * CPU features flag - Arm SVE2 Bit Permute extension (SVEBITPERM)
+ *
+ * Setting this flag indicates that the target platform supports the optional
+ * SVE2 bit permute instructions. Using SVEBITPERM implies the use of SVE2
+ * and SVE.
+ */
+#define HS_CPU_FEATURES_SVEBITPERM       (1ULL << 7)
+
 /** @} */
 
 /**
