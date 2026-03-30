@@ -106,6 +106,10 @@ bool analyzePBEFeasibility(const target_t &target,
 
 const char *pbeFeasibilityReasonName(PBEFeasibilityReason reason);
 
+bool pbeHasSve2Prereq(const target_t &target);
+
+bool pbeCanUseBextFastPath(const target_t &target);
+
 bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
                  const Grey &grey);
 

@@ -385,6 +385,94 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|i386")
     include (${CMAKE_MODULE_PATH}/arch.cmake)
 endif()
 
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+    set(HS_BUILD_HAVE_SVE FALSE)
+    set(HS_BUILD_HAVE_SVE2 FALSE)
+    set(HS_SVE_C_FLAGS "")
+    set(HS_SVE2_C_FLAGS "")
+
+    set(_HS_ARM_REQUIRED_FLAGS_SAVED "${CMAKE_REQUIRED_FLAGS}")
+    set(_HS_ARM_REQUIRED_BASE_FLAGS
+        "${CMAKE_C_FLAGS} ${EXTRA_C_FLAGS} ${ARCH_C_FLAGS}")
+
+    set(_HS_SVE_FLAG_CANDIDATES
+        "-march=armv8.2-a+sve"
+        "-march=armv9-a+sve")
+    set(_HS_SVE2_FLAG_CANDIDATES
+        "-march=armv9-a+sve2"
+        "-march=armv8.6-a+sve2")
+
+    set(_HS_SVE_TEST_SOURCE
+"#include <arm_sve.h>
+#if !defined(__ARM_FEATURE_SVE)
+#error no sve
+#endif
+int main(void) {
+    return 0;
+}")
+
+    set(_HS_SVE2_TEST_SOURCE
+"#include <arm_sve.h>
+#if !defined(__ARM_FEATURE_SVE2)
+#error no sve2
+#endif
+int main(void) {
+    return 0;
+}")
+
+    list(LENGTH _HS_SVE_FLAG_CANDIDATES _HS_SVE_FLAG_COUNT)
+    if (_HS_SVE_FLAG_COUNT GREATER 0)
+        math(EXPR _HS_SVE_LAST "${_HS_SVE_FLAG_COUNT} - 1")
+        foreach(_HS_SVE_IDX RANGE 0 ${_HS_SVE_LAST})
+            list(GET _HS_SVE_FLAG_CANDIDATES ${_HS_SVE_IDX} _HS_SVE_FLAG)
+            set(CMAKE_REQUIRED_FLAGS
+                "${_HS_ARM_REQUIRED_BASE_FLAGS} ${_HS_SVE_FLAG}")
+            set(_HS_SVE_TEST_VAR "HS_SVE_TEST_${_HS_SVE_IDX}")
+            CHECK_C_SOURCE_COMPILES("${_HS_SVE_TEST_SOURCE}" ${_HS_SVE_TEST_VAR})
+            if (${_HS_SVE_TEST_VAR})
+                set(HS_BUILD_HAVE_SVE TRUE)
+                set(HS_SVE_C_FLAGS "${_HS_SVE_FLAG}")
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    list(LENGTH _HS_SVE2_FLAG_CANDIDATES _HS_SVE2_FLAG_COUNT)
+    if (_HS_SVE2_FLAG_COUNT GREATER 0)
+        math(EXPR _HS_SVE2_LAST "${_HS_SVE2_FLAG_COUNT} - 1")
+        foreach(_HS_SVE2_IDX RANGE 0 ${_HS_SVE2_LAST})
+            list(GET _HS_SVE2_FLAG_CANDIDATES ${_HS_SVE2_IDX} _HS_SVE2_FLAG)
+            set(CMAKE_REQUIRED_FLAGS
+                "${_HS_ARM_REQUIRED_BASE_FLAGS} ${_HS_SVE2_FLAG}")
+            set(_HS_SVE2_TEST_VAR "HS_SVE2_TEST_${_HS_SVE2_IDX}")
+            CHECK_C_SOURCE_COMPILES("${_HS_SVE2_TEST_SOURCE}" ${_HS_SVE2_TEST_VAR})
+            if (${_HS_SVE2_TEST_VAR})
+                set(HS_BUILD_HAVE_SVE2 TRUE)
+                set(HS_SVE2_C_FLAGS "${_HS_SVE2_FLAG}")
+                if (NOT HS_BUILD_HAVE_SVE)
+                    set(HS_BUILD_HAVE_SVE TRUE)
+                    set(HS_SVE_C_FLAGS "${_HS_SVE2_FLAG}")
+                endif()
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    set(CMAKE_REQUIRED_FLAGS "${_HS_ARM_REQUIRED_FLAGS_SAVED}")
+
+    if (HS_BUILD_HAVE_SVE)
+        message(STATUS "Building with ARM SVE toolchain support (${HS_SVE_C_FLAGS})")
+    else()
+        message(STATUS "Building without ARM SVE toolchain support")
+    endif()
+
+    if (HS_BUILD_HAVE_SVE2)
+        message(STATUS "Building with ARM SVE2 toolchain support (${HS_SVE2_C_FLAGS})")
+    else()
+        message(STATUS "Building without ARM SVE2 toolchain support")
+    endif()
+endif()
+
 # testing a builtin takes a little more work
 CHECK_C_SOURCE_COMPILES("void *aa_test(void *x) { return __builtin_assume_aligned(x, 16);}\nint main(void) { return 0; }" HAVE_CC_BUILTIN_ASSUME_ALIGNED)
 CHECK_CXX_SOURCE_COMPILES("void *aa_test(void *x) { return __builtin_assume_aligned(x, 16);}\nint main(void) { return 0; }" HAVE_CXX_BUILTIN_ASSUME_ALIGNED)

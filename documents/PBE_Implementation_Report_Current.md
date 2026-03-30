@@ -561,3 +561,21 @@ L2 (secondary)
    - 先查位图
    - 再查一级哈希主表
 5. 这样做的目的，是为后续的 `compact + gather + bext` 优化预留独立的数据布局空间。
+
+### 15.10 SVE2 门控准备
+1. 当前已经补充 `SVE` / `SVE2` CPU feature 定义。
+2. `target_t` 已新增：
+   - `has_sve()`
+   - `has_sve2()`
+3. 运行时平台探测已在 AArch64/Linux 路径上补充：
+   - `SVE`
+   - `SVE2`
+4. 当前新增了 `pbeCanUseBextFastPath(...)` 作为未来 `bext` 快路径的统一门控入口。
+5. 该门控目前遵循以下规则：
+   - 当前新增 `pbeHasSve2Prereq(...)` 用于表达“构建能力 + 目标能力”前置条件
+   - `pbeCanUseBextFastPath(...)` 目前仍固定返回 false
+6. 构建层与运行层现在已拆分为三种语义：
+   - `HAVE_SVE / HAVE_SVE2`：当前翻译单元的 ISA 宏
+   - `HS_BUILD_HAVE_SVE / HS_BUILD_HAVE_SVE2`：工程构建能力
+   - `HS_CPU_FEATURES_SVE / HS_CPU_FEATURES_SVE2`：运行目标 CPU 能力
+7. 本阶段尚未接入真正的 `bext` 位提取执行逻辑，只完成了探测与门控准备。

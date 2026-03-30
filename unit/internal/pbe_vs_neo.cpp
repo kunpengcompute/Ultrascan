@@ -4,6 +4,7 @@
 
 #include "config.h"
 
+#include "hs_compile.h"
 #include "ue2common.h"
 #include "grey.h"
 #include "fdr/fdr.h"
@@ -15,6 +16,7 @@
 #include "fdr/pbe_runtime.h"
 #include "hwlm/hwlm_internal.h"
 #include "scratch.h"
+#include "util/arch.h"
 #include "util/compare.h"
 #include "util/target_info.h"
 #include "util/verify_types.h"
@@ -707,6 +709,74 @@ TEST(PBECompile, PrimaryBitmapMatchesNonEmptyL1Entries) {
         setBits += verify_u32(std::bitset<8>(artifacts.primaryHashBitmap.bits[i]).count());
     }
     EXPECT_EQ(nonEmptyOffsets, setBits);
+}
+
+TEST(PBECompile, TargetSveFeatureMapping) {
+    hs_platform_info noneInfo = {};
+    target_t noneTarget(noneInfo);
+    EXPECT_FALSE(noneTarget.has_sve());
+    EXPECT_FALSE(noneTarget.has_sve2());
+
+    hs_platform_info sveInfo = {};
+    sveInfo.cpu_features = HS_CPU_FEATURES_SVE;
+    target_t sveTarget(sveInfo);
+    EXPECT_TRUE(sveTarget.has_sve());
+    EXPECT_FALSE(sveTarget.has_sve2());
+
+    hs_platform_info sve2Info = {};
+    sve2Info.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2;
+    target_t sve2Target(sve2Info);
+    EXPECT_TRUE(sve2Target.has_sve());
+    EXPECT_TRUE(sve2Target.has_sve2());
+}
+
+TEST(PBECompile, TargetSveCompatibilityCheck) {
+    hs_platform_info noneInfo = {};
+    target_t noneTarget(noneInfo);
+
+    hs_platform_info sveInfo = {};
+    sveInfo.cpu_features = HS_CPU_FEATURES_SVE;
+    target_t sveTarget(sveInfo);
+
+    hs_platform_info sve2Info = {};
+    sve2Info.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2;
+    target_t sve2Target(sve2Info);
+
+    EXPECT_FALSE(noneTarget.can_run_on_code_built_for(sveTarget));
+    EXPECT_FALSE(noneTarget.can_run_on_code_built_for(sve2Target));
+    EXPECT_TRUE(sve2Target.can_run_on_code_built_for(sveTarget));
+    EXPECT_FALSE(sveTarget.can_run_on_code_built_for(sve2Target));
+}
+
+TEST(PBECompile, Sve2PrereqRequiresBuildAndTargetSupport) {
+    hs_platform_info noneInfo = {};
+    target_t noneTarget(noneInfo);
+    EXPECT_FALSE(pbeHasSve2Prereq(noneTarget));
+
+    hs_platform_info sveInfo = {};
+    sveInfo.cpu_features = HS_CPU_FEATURES_SVE;
+    target_t sveTarget(sveInfo);
+    EXPECT_FALSE(pbeHasSve2Prereq(sveTarget));
+
+    hs_platform_info sve2Info = {};
+    sve2Info.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2;
+    target_t sve2Target(sve2Info);
+#if defined(HS_BUILD_HAVE_SVE2)
+    EXPECT_TRUE(pbeHasSve2Prereq(sve2Target));
+#else
+    EXPECT_FALSE(pbeHasSve2Prereq(sve2Target));
+#endif
+}
+
+TEST(PBECompile, BextFastPathDisabledUntilImplemented) {
+    hs_platform_info noneInfo = {};
+    target_t noneTarget(noneInfo);
+    EXPECT_FALSE(pbeCanUseBextFastPath(noneTarget));
+
+    hs_platform_info sve2Info = {};
+    sve2Info.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2;
+    target_t sve2Target(sve2Info);
+    EXPECT_FALSE(pbeCanUseBextFastPath(sve2Target));
 }
 
 TEST(PBERuntime, InvalidMagicFallsBackCleanly) {

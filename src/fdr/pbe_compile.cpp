@@ -3,6 +3,7 @@
 #include "grey.h"
 #include "pbe_runtime.h"
 #include "util/alloc.h"
+#include "util/arch.h"
 #include "util/target_info.h"
 #include "util/compare.h"
 #include "util/verify_types.h"
@@ -640,6 +641,26 @@ const char *pbeFeasibilityReasonName(PBEFeasibilityReason reason) {
     default:
         return "UNKNOWN";
     }
+}
+
+bool pbeCanUseBextFastPath(const target_t &target) {
+#if defined(HS_BUILD_HAVE_SVE2)
+    (void)target;
+    /* The real SVE2 bext extraction path is not wired in yet. */
+    return false;
+#else
+    (void)target;
+    return false;
+#endif
+}
+
+bool pbeHasSve2Prereq(const target_t &target) {
+#if defined(HS_BUILD_HAVE_SVE2)
+    return target.has_sve2();
+#else
+    (void)target;
+    return false;
+#endif
 }
 
 bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,

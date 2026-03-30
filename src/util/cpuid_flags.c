@@ -33,6 +33,15 @@
 #include "hs_internal.h"
 #include "util/arch.h"
 
+#if defined(__aarch64__) && defined(__linux__)
+#include <sys/auxv.h>
+#if defined(__has_include)
+#if __has_include(<asm/hwcap.h>)
+#include <asm/hwcap.h>
+#endif
+#endif
+#endif
+
 #if !defined(_WIN32) && !defined(CPUID_H_)
 #include <cpuid.h>
 #endif
@@ -67,6 +76,35 @@ u64a cpuid_flags(void) {
 #if (!defined(FAT_RUNTIME) && !defined(HAVE_AVX512VBMI)) ||                    \
     (defined(FAT_RUNTIME) && !defined(BUILD_AVX512VBMI))
     cap &= ~HS_CPU_FEATURES_AVX512VBMI;
+#endif
+#elif defined(__aarch64__) && defined(__linux__)
+    unsigned long hwcap = getauxval(AT_HWCAP);
+    unsigned long hwcap2 = 0;
+
+#ifdef AT_HWCAP2
+    hwcap2 = getauxval(AT_HWCAP2);
+#endif
+
+#ifdef HWCAP_SVE
+    if (hwcap & HWCAP_SVE) {
+        DEBUG_PRINTF("SVE enabled\n");
+        cap |= HS_CPU_FEATURES_SVE;
+    }
+#endif
+
+#ifdef HWCAP2_SVE2
+    if (hwcap2 & HWCAP2_SVE2) {
+        DEBUG_PRINTF("SVE2 enabled\n");
+        cap |= HS_CPU_FEATURES_SVE2 | HS_CPU_FEATURES_SVE;
+    }
+#endif
+
+#if !defined(FAT_RUNTIME) && !defined(HS_BUILD_HAVE_SVE)
+    cap &= ~HS_CPU_FEATURES_SVE;
+#endif
+
+#if !defined(FAT_RUNTIME) && !defined(HS_BUILD_HAVE_SVE2)
+    cap &= ~HS_CPU_FEATURES_SVE2;
 #endif
 #endif
     return cap;
