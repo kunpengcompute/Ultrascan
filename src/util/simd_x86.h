@@ -153,7 +153,7 @@ static really_inline m128 set4x32(u32 c) {
 }
 
 static really_inline m128 set2x64(u64a c) {
-    return _mm_set1_epi32(c);
+    return _mm_set1_epi64x(c);
 }
 
 static really_inline u32 movd(const m128 in) {
