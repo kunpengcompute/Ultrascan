@@ -84,6 +84,9 @@ extern "C" {
 #endif
 
 u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask);
+hwlm_error_t PbeEngineExecNaiveForTest(const struct FDR *fdr,
+                                       const struct FDR_Runtime_Args *a,
+                                       hwlm_group_t control);
 
 #ifdef __cplusplus
 }

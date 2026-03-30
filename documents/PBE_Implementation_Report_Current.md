@@ -603,3 +603,56 @@ L2 (secondary)
    - `bext`：先执行 packed bit extract，再按重排表恢复到当前 key bit 顺序
 9. 当前 `window64` 采用原始字节拼接，不做统一大写归一化；这一步是为了保持与当前编译期 `keyValue/keyMask` 语义一致。
 10. 当 `SVEBITPERM` 真正可用时，运行期会调用独立的 `pbe_extract_sve2_bitperm.c` helper；否则回退到软件 packed-extract 实现。
+
+### 15.12 Batch4 前端化进展
+1. 当前运行期主循环已经从逐位置前端推进到 `Batch4` 组织方式。
+2. 每一轮会先收集最多 `4` 个相邻 `endPos`：
+   - 分别提取 `key`
+   - 分别做 bitmap 判空
+   - 对非空 lane 做 `compact`
+   - 然后只对 compact 后的 lane 继续做 L1/L2 访问
+3. 本阶段仍然保留原有的 L2 / exact confirm 语义，不改变匹配结果。
+4. 这意味着当前已经完成的是：
+   - `window64`
+   - `bextMask`
+   - `Batch4`
+   - `bitmap`
+   - `compact`
+5. 但当前仍未完成的是：
+   - 多位置真正向量化 `window64` 装载
+   - packed L1 load / gather
+   - L2 向量化预筛
+   - confirm 向量化
+6. 因此这一阶段的性能收益预期是“前端组织优化”，还不是最终的高性能版本。
+
+### 15.13 Batch4 第二阶段：compact 后的 packed L1 load
+
+1. 当前 `pbeRunBatch4(...)` 已经从“在主循环里边提 key 边查表”的写法，继续收敛成四个独立步骤：
+   - `pbeBuildBatch4(...)`
+   - `pbeBatchBitmapMask(...)`
+   - `pbeCompactPrimaryLanes(...)`
+   - `pbeBatchLoadPrimaryValues(...)`
+2. 这意味着当前运行期前端已经显式区分：
+   - 批量构造 `endPos/key/primaryIdx`
+   - 一级哈希位图批量判空
+   - 对非空 lane 做 `compact`
+   - 对 compact 后的一级哈希索引做 packed L1 load
+3. 当前 packed L1 load 的具体实现方式是：
+   - 先 software gather
+   - 再把结果组织到连续小数组
+   - 最后按原始 lane 顺序回填成 `encodedByLane`
+4. 这一步的主要收益不是“已经实现真正 gather 指令”，而是：
+   - 跳过空 lane
+   - 让一级哈希访问数据流更规整
+   - 为下一步 L2 向量化预筛准备稳定输入
+5. 为了保证 Rose 运行期的偏移单调约束，当前实现继续保持：
+   - 同一位置 `exact` 先于 `wildcard`
+   - 不因为 compact 改变跨 lane 的原始回调顺序
+6. 本阶段新增了 3 组直接对照单测：
+   - `PBERuntime.Batch4MatchesNaiveDirect`
+   - `PBERuntime.Batch4SparseBitmapSkipsEmptyLanes`
+   - `PBERuntime.Batch4OrderStableWithWildcard`
+7. 这 3 组测试的目的，是把“当前默认 Batch4 路径”和“保留的 Naive 参考路径”直接放在同一个 PBE blob 上逐条对比，确保：
+   - 匹配结果一致
+   - 原始回调顺序一致
+   - wildcard/exact 混合场景下也不回归

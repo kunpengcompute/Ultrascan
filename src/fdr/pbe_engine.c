@@ -25,6 +25,26 @@ static u64a pbeExtractPackedBitsFallback(u64a window, u64a mask);
 static u32 pbeRemapPackedBits(u64a packed, const u8 *bitOrder,
                               u32 selectorCount);
 static u32 pbeExtractKeyBext(const struct PBERuntimeHeader *hdr, u64a window);
+static int pbeProcessEncodedRange(
+    const struct PBERuntimeHeader *hdr,
+    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
+    const struct PBERuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
+    u32 literalBlobSize, const struct FDR_Runtime_Args *a,
+    hwlm_group_t *control, size_t endPos, u32 key, u32 encoded);
+static u32 pbeBuildBatch4(const struct PBERuntimeHeader *hdr,
+                          const struct PBERuntimeBitSelector *selectors,
+                          const struct FDR_Runtime_Args *a, size_t startPos,
+                          size_t *endPos, u32 *keys, u32 *primaryIdx);
+static u32 pbeBatchBitmapMask(const u8 *bitmap, u32 bitmapSize,
+                              const u32 *primaryIdx, u32 laneCount);
+static u32 pbeCompactPrimaryLanes(const u32 *primaryIdx, u32 laneCount,
+                                  u32 activeMask, u32 *activePrimaryIdx,
+                                  u32 *activeLaneIndex);
+static void pbeBatchLoadPrimaryValues(const u32 *primaryHashTable,
+                                      const u32 *activePrimaryIdx,
+                                      const u32 *activeLaneIndex,
+                                      u32 activeCount, u32 *activeEncoded,
+                                      u32 *encodedByLane, u32 laneCapacity);
 
 static int pbeEntryMayMatchAtPos(
     const struct PBERuntimeSecondaryHashEntry *entry,
@@ -33,6 +53,11 @@ static int pbeEntryMayMatchAtPos(
 static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
                        const struct FDR_Runtime_Args *a,
                        hwlm_group_t *control);
+static int pbeRunBatch4(const struct PBERuntimeHeader *hdr,
+                        const struct FDR_Runtime_Args *a,
+                        hwlm_group_t *control);
+
+#define PBE_BATCH_WIDTH 4U
 
 static int pbeGetByteAt(const struct FDR_Runtime_Args *a, s64a pos, u8 *out) {
     if (!a || !out) {
@@ -322,7 +347,147 @@ static int pbeEntryMayMatchAtPos(
     return 0;
 }
 
-static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
+static int pbeProcessEncodedRange(
+    const struct PBERuntimeHeader *hdr,
+    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
+    const struct PBERuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
+    u32 literalBlobSize, const struct FDR_Runtime_Args *a,
+    hwlm_group_t *control, size_t endPos, u32 key, u32 encoded) {
+    u32 offset = 0;
+    u32 count = 0;
+    u32 n;
+
+    if (!encoded) {
+        return HWLM_SUCCESS;
+    }
+
+    pbeDecodePrimaryValue(encoded, &offset, &count);
+    for (n = 0; n < count; n++) {
+        const u32 off = offset + n;
+        const struct PBERuntimeSecondaryHashEntry *entry;
+        u32 r;
+
+        if (!off || off >= hdr->secondaryCount) {
+            break;
+        }
+
+        entry = &secondaryHashTable[off];
+        if (!pbeEntryMayMatchAtPos(entry, a, endPos)) {
+            continue;
+        }
+
+        for (r = 0; r < entry->ruleCount &&
+                    r < PBE_RUNTIME_RULE_SLOTS_PER_ENTRY; r++) {
+            const u16 ridx = entry->ruleIndex[r];
+            const u32 kv = entry->keyValue[r];
+            const u32 km = entry->keyMask[r];
+            const struct PBERuntimeRuleMeta *rm;
+
+            if (ridx >= hdr->ruleMetaCount) {
+                continue;
+            }
+            if (((key ^ kv) & km) != 0) {
+                continue;
+            }
+
+            rm = &ruleMeta[ridx];
+            if (!(rm->groups & *control)) {
+                continue;
+            }
+            if (!pbeRuleExactMatch(rm, a, endPos, literalBlob,
+                                   literalBlobSize)) {
+                continue;
+            }
+
+            *control = a->cb(endPos, rm->id, a->scratch);
+            if (*control == HWLM_TERMINATE_MATCHING) {
+                return HWLM_TERMINATED;
+            }
+        }
+    }
+
+    return HWLM_SUCCESS;
+}
+
+static u32 pbeBuildBatch4(const struct PBERuntimeHeader *hdr,
+                          const struct PBERuntimeBitSelector *selectors,
+                          const struct FDR_Runtime_Args *a, size_t startPos,
+                          size_t *endPos, u32 *keys, u32 *primaryIdx) {
+    u32 laneCount = 0;
+
+    while (laneCount < PBE_BATCH_WIDTH && startPos + laneCount < a->len) {
+        const size_t pos = startPos + laneCount;
+        const u32 key = pbeExtractKey(hdr, selectors, a, pos);
+
+        endPos[laneCount] = pos;
+        keys[laneCount] = key;
+        primaryIdx[laneCount] = (key < hdr->primaryCount) ? key : 0;
+        laneCount++;
+    }
+
+    return laneCount;
+}
+
+static u32 pbeBatchBitmapMask(const u8 *bitmap, u32 bitmapSize,
+                              const u32 *primaryIdx, u32 laneCount) {
+    u32 activeMask = 0;
+    u32 lane;
+
+    for (lane = 0; lane < laneCount; lane++) {
+        if (pbePrimaryBitmapHasValue(bitmap, bitmapSize, primaryIdx[lane])) {
+            activeMask |= (1U << lane);
+        }
+    }
+
+    return activeMask;
+}
+
+static u32 pbeCompactPrimaryLanes(const u32 *primaryIdx, u32 laneCount,
+                                  u32 activeMask, u32 *activePrimaryIdx,
+                                  u32 *activeLaneIndex) {
+    u32 activeCount = 0;
+    u32 lane;
+
+    for (lane = 0; lane < laneCount; lane++) {
+        if (!(activeMask & (1U << lane))) {
+            continue;
+        }
+        activePrimaryIdx[activeCount] = primaryIdx[lane];
+        activeLaneIndex[activeCount] = lane;
+        activeCount++;
+    }
+
+    return activeCount;
+}
+
+static void pbeBatchLoadPrimaryValues(const u32 *primaryHashTable,
+                                      const u32 *activePrimaryIdx,
+                                      const u32 *activeLaneIndex,
+                                      u32 activeCount, u32 *activeEncoded,
+                                      u32 *encodedByLane,
+                                      u32 laneCapacity) {
+    u32 i;
+
+    if (!primaryHashTable || !activePrimaryIdx || !activeLaneIndex ||
+        !activeEncoded || !encodedByLane) {
+        return;
+    }
+
+    for (i = 0; i < laneCapacity; i++) {
+        encodedByLane[i] = 0;
+    }
+
+    for (i = 0; i < activeCount; i++) {
+        const u32 encoded = primaryHashTable[activePrimaryIdx[i]];
+        activeEncoded[i] = encoded;
+        if (activeLaneIndex[i] < laneCapacity) {
+            encodedByLane[activeLaneIndex[i]] = encoded;
+        }
+    }
+}
+
+static UNUSED
+int pbeRunNaive(const struct PBERuntimeHeader *hdr,
                        const struct FDR_Runtime_Args *a,
                        hwlm_group_t *control) {
     if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
@@ -360,62 +525,102 @@ static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
                 ? primaryHashTable[wildcardIdx]
                 : 0;
 
-#define PBE_RUN_RANGE(_encoded)                                               \
-        do {                                                                  \
-            const u32 __encoded = (_encoded);                                 \
-            u32 __offset = 0;                                                 \
-            u32 __count = 0;                                                  \
-            u32 __n;                                                          \
-            pbeDecodePrimaryValue(__encoded, &__offset, &__count);            \
-            for (__n = 0; __n < __count; __n++) {                             \
-                const u32 __off = __offset + __n;                             \
-                if (!__off || __off >= hdr->secondaryCount) {                 \
-                    break;                                                    \
-                }                                                             \
-                const struct PBERuntimeSecondaryHashEntry *entry =            \
-                    &secondaryHashTable[__off];                               \
-                if (!pbeEntryMayMatchAtPos(entry, a, i)) {                    \
-                    continue;                                                 \
-                }                                                             \
-                {                                                             \
-                    u32 r;                                                    \
-                for (r = 0;                                                   \
-                     r < entry->ruleCount &&                                  \
-                         r < PBE_RUNTIME_RULE_SLOTS_PER_ENTRY;                \
-                     r++) {                                                   \
-                    const u16 ridx = entry->ruleIndex[r];                     \
-                    const u32 kv = entry->keyValue[r];                        \
-                    const u32 km = entry->keyMask[r];                         \
-                    const struct PBERuntimeRuleMeta *rm;                      \
-                    if (ridx >= hdr->ruleMetaCount) {                         \
-                        continue;                                             \
-                    }                                                         \
-                    if (((key ^ kv) & km) != 0) {                             \
-                        continue;                                             \
-                    }                                                         \
-                    rm = &ruleMeta[ridx];                                     \
-                    if (!(rm->groups & *control)) {                           \
-                        continue;                                             \
-                    }                                                         \
-                    if (!pbeRuleExactMatch(rm, a, i, literalBlob,             \
-                                           literalBlobSize)) {                \
-                        continue;                                             \
-                    }                                                         \
-                    *control = a->cb(i, rm->id, a->scratch);                  \
-                    if (*control == HWLM_TERMINATE_MATCHING) {                \
-                        return HWLM_TERMINATED;                               \
-                    }                                                         \
-                }                                                             \
-                }                                                             \
-            }                                                                 \
-        } while (0)
-
-        PBE_RUN_RANGE(exactValue);
-        if (wildcardValue != exactValue) {
-            PBE_RUN_RANGE(wildcardValue);
+        if (pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+                                   literalBlob, literalBlobSize, a, control, i,
+                                   key, exactValue) ==
+            HWLM_TERMINATED) {
+            return HWLM_TERMINATED;
         }
-#undef PBE_RUN_RANGE
+        if (wildcardValue != exactValue &&
+            pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+                                   literalBlob, literalBlobSize, a, control, i,
+                                   key, wildcardValue) ==
+                HWLM_TERMINATED) {
+            return HWLM_TERMINATED;
+        }
     }
+    return HWLM_SUCCESS;
+}
+
+static int pbeRunBatch4(const struct PBERuntimeHeader *hdr,
+                        const struct FDR_Runtime_Args *a,
+                        hwlm_group_t *control) {
+    const struct PBERuntimeBitSelector *selectors =
+        (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
+                                               hdr->selectorsOffset);
+    const u8 *primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
+    const u32 *primaryHashTable =
+        (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
+    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable =
+        (const struct PBERuntimeSecondaryHashEntry *)((const u8 *)hdr +
+                                                      hdr->secondaryOffset);
+    const struct PBERuntimeRuleMeta *ruleMeta =
+        (const struct PBERuntimeRuleMeta *)((const u8 *)hdr +
+                                            hdr->ruleMetaOffset);
+    const u8 *literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
+    const u32 literalBlobSize = hdr->literalBlobSize;
+    const u32 wildcardIdx = 0;
+    const u32 wildcardValue =
+        (wildcardIdx < hdr->primaryCount &&
+         pbePrimaryBitmapHasValue(primaryBitmap, hdr->primaryBitmapSize,
+                                  wildcardIdx))
+            ? primaryHashTable[wildcardIdx]
+            : 0;
+
+    size_t i;
+    for (i = a->start_offset; i < a->len; i += PBE_BATCH_WIDTH) {
+        size_t endPos[PBE_BATCH_WIDTH] = {0};
+        u32 keys[PBE_BATCH_WIDTH] = {0};
+        u32 primaryIdx[PBE_BATCH_WIDTH] = {0};
+        u32 exactEncodedByLane[PBE_BATCH_WIDTH] = {0};
+        u32 wildcardEncoded[PBE_BATCH_WIDTH] = {0};
+        u32 activePrimaryIdx[PBE_BATCH_WIDTH] = {0};
+        u32 activeEncoded[PBE_BATCH_WIDTH] = {0};
+        u32 activeLaneIndex[PBE_BATCH_WIDTH] = {0};
+        u32 laneCount = 0;
+        u32 activeCount = 0;
+        u32 activeMask = 0;
+        u32 lane;
+
+        laneCount = pbeBuildBatch4(hdr, selectors, a, i, endPos, keys,
+                                   primaryIdx);
+        activeMask = pbeBatchBitmapMask(primaryBitmap, hdr->primaryBitmapSize,
+                                        primaryIdx, laneCount);
+        activeCount = pbeCompactPrimaryLanes(primaryIdx, laneCount, activeMask,
+                                             activePrimaryIdx,
+                                             activeLaneIndex);
+        pbeBatchLoadPrimaryValues(primaryHashTable, activePrimaryIdx,
+                                  activeLaneIndex, activeCount, activeEncoded,
+                                  exactEncodedByLane, PBE_BATCH_WIDTH);
+
+        for (lane = 0; lane < laneCount; lane++) {
+            wildcardEncoded[lane] = wildcardValue;
+        }
+
+        for (lane = 0; lane < laneCount; lane++) {
+            if (exactEncodedByLane[lane] &&
+                pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+                                       literalBlob, literalBlobSize, a,
+                                       control, endPos[lane], keys[lane],
+                                       exactEncodedByLane[lane]) ==
+                    HWLM_TERMINATED) {
+                return HWLM_TERMINATED;
+            }
+
+            if (!wildcardEncoded[lane] ||
+                wildcardEncoded[lane] == exactEncodedByLane[lane]) {
+                continue;
+            }
+            if (pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+                                       literalBlob, literalBlobSize, a,
+                                       control, endPos[lane], keys[lane],
+                                       wildcardEncoded[lane]) ==
+                HWLM_TERMINATED) {
+                return HWLM_TERMINATED;
+            }
+        }
+    }
+
     return HWLM_SUCCESS;
 }
 
@@ -439,9 +644,10 @@ static u32 pbeExtractKey(const struct PBERuntimeHeader *hdr,
     return pbeExtractKeyScalarFromWindow(selectors, hdr->selectorCount, window);
 }
 
-hwlm_error_t PbeEngineExec(const struct FDR *fdr,
-                           const struct FDR_Runtime_Args *a,
-                           hwlm_group_t control) {
+static
+hwlm_error_t pbeExecWithPath(const struct FDR *fdr,
+                             const struct FDR_Runtime_Args *a,
+                             hwlm_group_t control, int useBatch4) {
     if (!fdr || !fdr->pbeOffset || !fdr->pbeSize) {
         return HWLM_SUCCESS;
     }
@@ -458,5 +664,18 @@ hwlm_error_t PbeEngineExec(const struct FDR *fdr,
         return HWLM_SUCCESS;
     }
 
-    return pbeRunNaive(hdr, a, &control);
+    return useBatch4 ? pbeRunBatch4(hdr, a, &control)
+                     : pbeRunNaive(hdr, a, &control);
+}
+
+hwlm_error_t PbeEngineExecNaiveForTest(const struct FDR *fdr,
+                                       const struct FDR_Runtime_Args *a,
+                                       hwlm_group_t control) {
+    return pbeExecWithPath(fdr, a, control, 0);
+}
+
+hwlm_error_t PbeEngineExec(const struct FDR *fdr,
+                           const struct FDR_Runtime_Args *a,
+                           hwlm_group_t control) {
+    return pbeExecWithPath(fdr, a, control, 1);
 }

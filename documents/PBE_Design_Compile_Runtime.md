@@ -633,3 +633,149 @@ bextToKeyBit = [1, 2, 0]
 4. 因此当前正确口径是：
    - `window64` 保留原始 bit
    - `nocase` 由 `keyMask` 和后续 exact confirm 共同处理
+
+### Batch4 前端化阶段
+
+在完成 `window64 + bext` 提取描述之后，运行期前端继续推进到 `Batch4` 批量化阶段。
+
+#### 1. 当前批量化范围
+
+本阶段只处理前端：
+
+1. 批量 key 提取
+2. 批量 bitmap 判空
+3. `compact`
+4. 批量 L1 value 访问
+
+本阶段**不修改**以下语义：
+
+1. L2 扫描方式
+2. L2 suffix 预检查方式
+3. exact confirm 方式
+
+#### 2. `Batch4` 数据流
+
+```text
+for 每 4 个相邻 endPos:
+
+    [pos0, pos1, pos2, pos3]
+             |
+             v
+    构造 4 个 window64
+             |
+             v
+    提取 4 个 key
+             |
+             v
+    先查 4 个 bitmap 位
+             |
+             v
+    生成 activeMask
+             |
+             v
+    compact 非空 lane
+             |
+             v
+    仅对 compact 后的 lane 访问 L1 / L2
+```
+
+#### 3. 当前实现特点
+
+1. 目前 `Batch4` 仍然是“批量组织 + 标量执行”的第一阶段版本。
+2. 也就是说：
+   - 已经按 4 个位置一组组织运行期前端
+   - 但尚未把 `window64` 构造本身做成真正的向量装载
+   - 也尚未把 L1 访问做成真正的硬件 gather
+3. 当前 `compact` 的作用主要是：
+   - 跳过 bitmap 判空后的空 lane
+   - 减少无意义的 L1 / L2 访问
+4. 这一步的目标是先把“前端批量数据流”固定下来，为下一阶段真正的向量化做准备。
+
+#### 4. 与后续阶段的边界
+
+当前状态：
+
+1. `window64` 已经建立
+2. `bextMask` / `bextToKeyBit` 已经建立
+3. `Batch4 + bitmap + compact` 已经建立
+
+尚未完成：
+
+1. 多位置并行 `window64` 装载
+2. 多位置真正硬件 `bext` 向量化提取
+3. `compact` 后的 packed load / gather 优化
+4. L2 `ruleVector/tableControl` 向量化预筛
+5. confirm 向量化
+
+### Batch4 第二阶段：compact 后的 packed L1 load
+
+在 `Batch4 + bitmap + compact` 的第一阶段基础上，运行期前端继续推进到第二阶段。当前这一步的目标不是修改匹配语义，而是把 `Batch4` 主循环内部的数据流进一步拆清楚，便于后续继续接 L2 向量化预筛。
+
+#### 1. 本阶段新增的内部步骤
+
+当前 `pbeRunBatch4(...)` 已经拆成以下几步：
+
+1. `pbeBuildBatch4(...)`
+   - 构造一批最多 `4` 个相邻 `endPos`
+   - 为每个位置提取 `key`
+   - 计算对应的一级哈希索引 `primaryIdx`
+2. `pbeBatchBitmapMask(...)`
+   - 针对这一批 `primaryIdx`
+   - 先查询一级哈希压缩位图
+   - 生成 `activeMask`
+3. `pbeCompactPrimaryLanes(...)`
+   - 只保留位图命中的 lane
+   - 把对应 `primaryIdx` 压缩成连续数组
+4. `pbeBatchLoadPrimaryValues(...)`
+   - 对 compact 后的 `primaryIdx` 做 software gather
+   - 把一级哈希值装入连续数组
+   - 同时再按原始 lane 顺序回填到 `encodedByLane`
+
+#### 2. 当前 packed L1 load 的实现口径
+
+这里的 “packed L1 load” 目前采用的是：
+
+1. 先 `compact`
+2. 再对非空 lane 做 software gather
+3. 把 gather 结果组织成连续的小数组
+
+当前还没有使用真正的硬件 gather 指令。这样做的原因是：
+
+1. 可以先稳定 `Batch4` 的前端组织方式
+2. 可以明显减少空 lane 的一级哈希访问
+3. 不会破坏当前已经通过的回调顺序与匹配语义
+
+#### 3. 为什么仍然要按原始 lane 顺序回放
+
+虽然一级哈希访问已经变成 “compact 后集中处理”，但真正进入 `L2` 和回调时，仍然必须恢复为原始 lane 顺序，并保持：
+
+1. 同一位置 `exact` 先于 `wildcard`
+2. 全局 `offset` 单调不下降
+
+这是为了满足 Rose 运行期关于回调顺序的约束，避免出现：
+
+1. 较晚位置的 `exact`
+2. 早于较早位置的 `wildcard`
+
+从而触发最小匹配偏移的断言问题。
+
+#### 4. 本阶段完成后，前端已经具备的能力
+
+当前前端已经具备：
+
+1. `window64`
+2. `bextMask / bextToKeyBit`
+3. `Batch4`
+4. 一级哈希位图判空
+5. `compact`
+6. compact 后的 packed L1 load
+7. 保序的 exact/wildcard 回放
+
+#### 5. 仍未完成的部分
+
+本阶段之后，尚未完成的是：
+
+1. 多位置真正向量化 `window64` 装载
+2. 多位置真正硬件 `bext` 并行提取
+3. `L2 ruleVector/tableControl` 向量化预筛
+4. exact confirm 向量化

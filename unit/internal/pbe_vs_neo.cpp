@@ -138,6 +138,21 @@ std::vector<Match> runBlock(const FDR *fdr, const std::vector<u8> &data,
 }
 
 static
+std::vector<Match> runBlockInOrder(const FDR *fdr, const std::vector<u8> &data,
+                                   hwlm_group_t groups) {
+    g_matches.clear();
+
+    hs_scratch scratch = {};
+    scratch.fdr_conf = nullptr;
+
+    hwlm_error_t rv = fdrExec(fdr, data.data(), data.size(), 0, collectCallback,
+                              &scratch, groups);
+    EXPECT_EQ(HWLM_SUCCESS, rv);
+
+    return g_matches;
+}
+
+static
 std::vector<Match> runStreaming(const FDR *fdr, const std::vector<u8> &history,
                                 const std::vector<u8> &data,
                                 hwlm_group_t groups) {
@@ -176,6 +191,34 @@ hwlm_error_t runPbeDirect(const FDR *fdr, const std::vector<u8> &data,
     };
 
     return PbeEngineExec(fdr, &args, groups);
+}
+
+static
+std::vector<Match> runPbeDirectInOrder(const FDR *fdr,
+                                       const std::vector<u8> &data,
+                                       hwlm_group_t groups, bool useNaive) {
+    g_matches.clear();
+
+    hs_scratch scratch = {};
+    scratch.fdr_conf = nullptr;
+
+    const FDR_Runtime_Args args = {
+        data.data(),
+        data.size(),
+        nullptr,
+        0,
+        0,
+        collectCallback,
+        &scratch,
+        nullptr,
+        0
+    };
+
+    const hwlm_error_t rv = useNaive ? PbeEngineExecNaiveForTest(fdr, &args,
+                                                                 groups)
+                                     : PbeEngineExec(fdr, &args, groups);
+    EXPECT_EQ(HWLM_SUCCESS, rv);
+    return g_matches;
 }
 
 static
@@ -693,6 +736,32 @@ TEST(PBEvsNeo, BlockMultiEntryExactAndWildcardConsistency) {
     EXPECT_EQ(neoMatches, pbeMatches);
 }
 
+TEST(PBEvsNeo, BlockCallbackOrderMonotonicAcrossExactAndWildcard) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("ab", true, false, 520, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("wxyz", false, false, 521, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("mnop", false, false, 522, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("qrst", false, false, 523, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    bytecode_ptr<FDR> neo;
+    bytecode_ptr<FDR> pbe;
+    if (!buildNeoAndPbe(lits, &neo, &pbe)) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const std::vector<u8> data = {'A','b','x','w','x','y','z'};
+
+    const auto neoMatches = runBlockInOrder(neo.get(), data, HWLM_ALL_GROUPS);
+    const auto pbeMatches = runBlockInOrder(pbe.get(), data, HWLM_ALL_GROUPS);
+
+    ASSERT_EQ(2U, neoMatches.size());
+    ASSERT_EQ(2U, pbeMatches.size());
+    EXPECT_EQ(neoMatches, pbeMatches);
+    EXPECT_LE(pbeMatches[0].end, pbeMatches[1].end);
+}
+
 TEST(PBECompile, FeasibilityReasonNameMapping) {
     EXPECT_STREQ("OK", pbeFeasibilityReasonName(PBEFeasibilityReason::OK));
     EXPECT_STREQ("GREY_DISABLED",
@@ -973,6 +1042,81 @@ TEST(PBEExtract, BextHistoryBoundaryConsistency) {
                                                              artifacts.bextMask);
         const u32 bextKey = remapPackedBitsForTest(artifacts, packed);
         EXPECT_EQ(scalarKey, bextKey) << "boundary endPos=" << endPos;
+    }
+}
+
+TEST(PBERuntime, Batch4MatchesNaiveDirect) {
+    auto pbe = buildFdrWithHint({
+        hwlmLiteral("alpha", false, false, 730, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 731, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 732, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", true, false, 733, HWLM_ALL_GROUPS, {}, {})
+    }, ENGINE_ID_PBE);
+
+    if (!pbe || pbe->engineID != ENGINE_ID_PBE || !pbe->pbeOffset) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const std::vector<u8> data = {'a','l','p','h','a',' ',
+                                  'B','E','T','A',' ',
+                                  'T','H','E','T','A',' ',
+                                  'A','L','P','H','A'};
+
+    const auto naiveMatches = runPbeDirectInOrder(pbe.get(), data,
+                                                  HWLM_ALL_GROUPS, true);
+    const auto batchMatches = runPbeDirectInOrder(pbe.get(), data,
+                                                  HWLM_ALL_GROUPS, false);
+    EXPECT_EQ(naiveMatches, batchMatches);
+}
+
+TEST(PBERuntime, Batch4SparseBitmapSkipsEmptyLanes) {
+    auto pbe = buildFdrWithHint({
+        hwlmLiteral("alpha", false, false, 740, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 741, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 742, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 743, HWLM_ALL_GROUPS, {}, {})
+    }, ENGINE_ID_PBE);
+
+    if (!pbe || pbe->engineID != ENGINE_ID_PBE || !pbe->pbeOffset) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const std::vector<u8> data = {'x','x','x','x','x','x','x','x',
+                                  'a','l','p','h','a','x','x','x',
+                                  'd','e','l','t','a','x','x','x',
+                                  'o','m','e','g','a','x','x','x'};
+
+    const auto naiveMatches = runPbeDirectInOrder(pbe.get(), data,
+                                                  HWLM_ALL_GROUPS, true);
+    const auto batchMatches = runPbeDirectInOrder(pbe.get(), data,
+                                                  HWLM_ALL_GROUPS, false);
+    EXPECT_EQ(naiveMatches, batchMatches);
+}
+
+TEST(PBERuntime, Batch4OrderStableWithWildcard) {
+    auto pbe = buildFdrWithHint({
+        hwlmLiteral("ab", true, false, 750, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("wxyz", false, false, 751, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("mnop", false, false, 752, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("qrst", false, false, 753, HWLM_ALL_GROUPS, {}, {})
+    }, ENGINE_ID_PBE);
+
+    if (!pbe || pbe->engineID != ENGINE_ID_PBE || !pbe->pbeOffset) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const std::vector<u8> data = {'A','b','x','w','x','y','z'};
+    const auto naiveMatches = runPbeDirectInOrder(pbe.get(), data,
+                                                  HWLM_ALL_GROUPS, true);
+    const auto batchMatches = runPbeDirectInOrder(pbe.get(), data,
+                                                  HWLM_ALL_GROUPS, false);
+
+    ASSERT_EQ(naiveMatches, batchMatches);
+    for (size_t i = 1; i < batchMatches.size(); i++) {
+        EXPECT_LE(batchMatches[i - 1].end, batchMatches[i].end);
     }
 }
 
