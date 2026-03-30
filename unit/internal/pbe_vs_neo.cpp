@@ -53,6 +53,7 @@ struct Match {
 
 struct PBEInspectStats {
     u32 nonEmptyL1 = 0;
+    u32 bitmapBytes = 0;
     u32 exactBucketCount = 0;
     u32 multiEntryBucketCount = 0;
     u32 maxL2EntriesPerKey = 0;
@@ -250,6 +251,7 @@ Grey makePbeGrey(bool allowPbe = true) {
 static
 PBEInspectStats computeInspectStats(const PBECompileArtifacts &artifacts) {
     PBEInspectStats stats;
+    stats.bitmapBytes = verify_u32(artifacts.primaryHashBitmap.bits.size());
     stats.totalL2Entries = artifacts.secondaryHashTable.empty()
                                ? 0
                                : verify_u32(artifacts.secondaryHashTable.size() - 1);
@@ -673,9 +675,38 @@ TEST(PBECompile, BuildPbeBlobHeaderMatchesArtifacts) {
     EXPECT_EQ(artifacts.keyBits, hdr->keyBits);
     EXPECT_EQ(artifacts.bitSelectors.size(), hdr->selectorCount);
     EXPECT_EQ(artifacts.primaryHashTable.offsets.size(), hdr->primaryCount);
+    EXPECT_EQ(artifacts.primaryHashBitmap.bits.size(), hdr->primaryBitmapSize);
     EXPECT_EQ(artifacts.secondaryHashTable.size(), hdr->secondaryCount);
     EXPECT_EQ(artifacts.ruleMeta.size(), hdr->ruleMetaCount);
     EXPECT_EQ(artifacts.literalBlob.size(), hdr->literalBlobSize);
+}
+
+TEST(PBECompile, PrimaryBitmapMatchesNonEmptyL1Entries) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 650, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 651, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 652, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 653, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+
+    const u32 expectedBitmapBytes =
+        verify_u32((artifacts.primaryHashTable.offsets.size() + 7U) / 8U);
+    EXPECT_EQ(expectedBitmapBytes, artifacts.primaryHashBitmap.bits.size());
+
+    u32 nonEmptyOffsets = 0;
+    u32 setBits = 0;
+    for (u32 i = 0; i < artifacts.primaryHashTable.offsets.size(); i++) {
+        if (artifacts.primaryHashTable.offsets[i]) {
+            nonEmptyOffsets++;
+        }
+    }
+    for (u32 i = 0; i < artifacts.primaryHashBitmap.bits.size(); i++) {
+        setBits += verify_u32(std::bitset<8>(artifacts.primaryHashBitmap.bits[i]).count());
+    }
+    EXPECT_EQ(nonEmptyOffsets, setBits);
 }
 
 TEST(PBERuntime, InvalidMagicFallsBackCleanly) {
@@ -809,6 +840,7 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
 
     std::cout << "\n[Build Stats]\n";
     std::cout << "  nonEmptyL1=" << stats.nonEmptyL1
+              << " bitmapBytes=" << stats.bitmapBytes
               << " exactBucketCount=" << stats.exactBucketCount
               << " multiEntryBucketCount=" << stats.multiEntryBucketCount
               << " maxL2EntriesPerKey=" << stats.maxL2EntriesPerKey << "\n";

@@ -407,200 +407,157 @@ L2 (secondary)
 
 ---
 
-## 13. Incremental Update (PBE Runtime v3, L2 128 Slots)
+## 13. 增量更新（历史阶段：PBE Runtime v3 与 128 槽 L2）
 
-This section records the latest implementation change set.
+这一节保留为历史记录，用于说明曾经尝试过的 `128` 槽 L2 方案。
 
-### 13.1 Runtime Version and Compatibility
-1. `PBE_RUNTIME_VERSION` is upgraded from `2` to `3`.
-2. Current runtime only accepts v3 PBE blobs (`PbeEngineExec` layout validation checks v3).
-3. v2 blob compatibility is not provided in this stage.
+### 13.1 Runtime 版本与兼容性
+1. 当时 `PBE_RUNTIME_VERSION` 从 `2` 升级到 `3`。
+2. 当时运行期仅接受 v3 PBE blob。
+3. 当前实现已经不再以这套 `128` 槽方案为主线。
 
-### 13.2 L2 Entry Capacity and Mask Width
-1. L2 per-entry slot capacity is upgraded from `32` to `128`.
-2. The following arrays are now `128` slots in both compile/runtime structures:
+### 13.2 历史方案的 L2 结构
+1. 当时 L2 单项容量从 `32` 扩到 `128`。
+2. 当时以下数组都扩到 `128` 槽：
    - `ruleVector[]`
    - `tableControl[]`
    - `ruleIndex[]`
    - `keyValue[]`
    - `keyMask[]`
-3. `headMask/tailMask` are upgraded from single `u32` to `u32[4]` (128-bit total coverage).
-4. `PARTIAL_ENTRY_OVERFLOW` threshold changes from `>32` to `>128` rules per L2 bucket.
-
-### 13.3 Compile-Time and Runtime Path Alignment
-1. Build-time overflow detection now uses `PBE_RULE_SLOTS_PER_ENTRY=128`.
-2. Blob serialization/deserialization is aligned with the new v3 L2 layout.
-3. Runtime candidate loops now scan up to `entry->ruleCount` with upper bound `128`.
-
-### 13.4 Observability / Dump Changes
-1. Build artifact dump now prints `entry_capacity=128`.
-2. L2 mask dump now prints:
-   - `headMaskWords={w0,w1,w2,w3}`
-   - `tailMaskWords={w0,w1,w2,w3}`
-   - full 128-bit binary string for both masks.
-3. Inspect unit test output is updated with the same 128-bit mask presentation.
-
-### 13.5 Unit Test Updates
-1. Existing PBE-vs-Neo consistency tests remain.
-2. Overflow rejection case now uses `>128` colliding literals (previously `>32`).
-3. Added acceptance test for dense collision bucket within capacity (`<=128`) to ensure PBE build still succeeds.
+3. 当时 `headMask/tailMask` 也扩成了 `u32[4]`。
+4. 当前实现已回到“单项 4 规则”的方案，这一节仅作为历史留档。
 
 ---
 
-## 14. Incremental Update (Dynamic keyBits Selection)
+## 14. 增量更新（历史阶段：动态 keyBits）
 
-To reduce oversized PBE databases on small and medium literal sets, `keyBits`
-is no longer treated as a fixed `22`-bit width. The compile path now keeps the
-existing selector-ranking logic, but chooses the final active prefix of
-selectors dynamically.
+这一节同样保留为历史记录。
 
-### 14.1 Goal
-1. Keep L1 size under control for small/medium rule sets.
-2. Reduce collision hot spots, especially the wildcard bucket.
-3. Preserve current PBE blob/runtime format without changing runtime logic.
+### 14.1 历史目标
+1. 曾尝试根据规则规模动态调整 `keyBits`。
+2. 目标是减少小规则集上的 L1 体积膨胀。
+3. 该方向当前已经暂停，现阶段重新固定为 `22` 位。
 
-### 14.2 Current Selection Strategy
-1. First, build a ranked selector candidate list with the existing rules:
-   - prefer cared bits,
-   - prefer discriminative bits,
-   - deduplicate identical state columns.
-2. Then evaluate `k = 1..limit` using the first `k` selectors.
-3. Choose the `k` with the best score and truncate the selector list to that
-   final `keyBits`.
-
-### 14.3 Evaluation Inputs
-For each candidate `k`, the compiler computes:
-1. `l1Bytes = (1 << k) * sizeof(u32)`
-2. `nonEmptyBuckets`
-3. `maxBucketSize`
-4. `wildcardBucketSize`
-5. `collisionCost = sum(bucketSize^2)`
-
-### 14.4 Score Function
-The current scoring model is:
-
-```text
-score =
-    1    * l1Bytes +
-    256  * collisionCost +
-    4096 * maxBucketSize +
-    8192 * wildcardBucketSize
-```
-
-This intentionally penalizes wildcard concentration more heavily because the
-current runtime probes both the exact bucket and the wildcard bucket.
-
-### 14.5 Upper Bounds
-`keyBits` is additionally capped by:
-1. selector count,
-2. runtime key-width limit (`<= 32`),
-3. default upper bound (`<= 22`),
-4. literal-count heuristic:
-   - `<= 64 -> 12`
-   - `<= 256 -> 14`
-   - `<= 1024 -> 16`
-   - `> 1024 -> 18`
-5. L1 size budget:
-   - `PBE_KEY_BITS_L1_MAX_BYTES = 256 KB`
-
-With `u32` L1 entries, the current L1 budget corresponds to an effective
-bit-width upper bound of `16`.
-
-### 14.6 Observability
-Compile-time dump now prints a `KeyBits-Eval` table showing:
-1. each evaluated `k`,
-2. `l1Bytes`,
-3. `nonEmptyBuckets`,
-4. `maxBucketSize`,
-5. `wildcardBucketSize`,
-6. `collisionCost`,
-7. `score`,
-8. the selected `keyBits`.
+### 14.2 历史说明
+1. 当时保留了 selector 排序逻辑。
+2. 当时会对不同 `k` 做评分，动态选择最终 `keyBits`。
+3. 当前实现不再采用这套策略，这一节仅保留背景说明。
 
 ---
 
-## 15. Incremental Update (Fixed 22-bit L1 + 4-Rule L2 Chunks)
+## 15. 增量更新（当前主线：固定 22 位 L1 + 4 规则 L2 分块）
 
-This section supersedes the previous dynamic-keyBits direction for the current
-implementation baseline.
+这一节描述当前生效的实现方案。
 
-### 15.1 Current Strategy
-1. `keyBits` is now fixed to `22` (`PBE_KEY_BITS=22`).
-2. L1 table size is fixed to `2^22`.
-3. L1 key is the value composed from the extracted selector bits.
-4. L1 value is a packed `u32`:
-   - low `18` bits: L2 base offset
-   - high bits: number of consecutive L2 entries for this L1 key
+### 15.1 当前策略
+1. `keyBits` 固定为 `22`（`PBE_KEY_BITS=22`）。
+2. L1 大小固定为 `2^22`。
+3. L1 key 是位提取结果拼出的 22 位数值。
+4. L1 value 是一个打包后的 `u32`：
+   - 低 `18` 位：L2 起始偏移
+   - 高位：该 L1 key 对应的连续 L2 项数
 
-### 15.2 L2 Entry Shape
-Each L2 entry now represents up to `4` colliding rules:
+### 15.2 L2 表项结构
+每个 L2 项最多表示 `4` 条冲突规则：
 1. `32B ruleVector`
-   - `4` lanes
-   - each lane stores the normalized trailing `8`-byte window of one rule
+   - 由 `4` 个 lane 组成
+   - 每个 lane 保存一条规则最后最多 `8` 字节的归一化后缀
 2. `32B tableControl`
-   - `4` lanes
-   - each lane uses `8` control bytes to mark which bytes in the ruleVector
-     lane are valid
+   - 同样由 `4` 个 lane 组成
+   - 每个 lane 的 `8` 个控制字节表示该位置是否有效
 3. `32b headMask`
 4. `32b tailMask`
 
-### 15.3 Multi-Entry Collision Handling
-1. If one L1 key has `<= 4` rules, it uses one L2 entry.
-2. If one L1 key has `> 4` rules, the compiler allocates multiple consecutive
-   L2 entries.
-3. The number of required L2 entries is encoded into the high bits of the L1
-   value.
-4. Runtime decodes `(offset, count)` from L1 and scans that L2 range in order.
+### 15.3 多项 L2 冲突处理
+1. 如果一个 L1 key 只有 `<= 4` 条规则，则只分配一个 L2 项。
+2. 如果超过 `4` 条规则，则顺序分配多个连续 L2 项。
+3. 所需 L2 项数编码到 L1 value 的高位中。
+4. 运行期会从 L1 解码出 `(offset, count)`，然后顺序扫描对应范围。
 
-### 15.4 Current Runtime Behavior
-1. Runtime first extracts the fixed-width 22-bit key.
-2. It decodes the L1 value into:
+### 15.4 一级哈希压缩位图
+1. 当前在 L1 之外新增了一级哈希压缩位图：
+   - 每个 L1 表项对应 1 bit
+   - bit 为 `1` 表示该 L1 key 存在非空 value
+   - bit 为 `0` 表示该 L1 key 一定为空
+2. 运行期在读取 L1 value 之前，先查询独立压缩位图。
+3. 如果位图判定为空，则直接跳过该 key，不再访问 L1 主表。
+4. 当前这一步先落成标量预检查路径；后续可在此基础上继续做：
+   - 位图命中结果的 `compact`
+   - 非零单元的 `LD1/GATHER`
+   - 向量化一级哈希访问
+
+### 15.5 当前运行期行为
+1. 运行期先提取固定 22 位 key。
+2. 先查一级哈希压缩位图，判断该 key 是否可能非空。
+3. 如果位图命中，再读取 L1 value，并解码出：
    - `secondaryOffset`
    - `entryCount`
-3. It scans each consecutive L2 entry in that range.
-4. Within each L2 entry, it performs a suffix-window precheck using the
-   `32B ruleVector + 32B tableControl`.
-5. Exact confirm is still done by `PBERuntimeRuleMeta + literalBlob`.
+4. 顺序扫描 `[secondaryOffset, secondaryOffset + entryCount)` 范围内的 L2 项。
+5. 每个 L2 项内部先做 `32B ruleVector + 32B tableControl` 的 suffix 预检查。
+6. 预检查通过后，再结合 `keyValue/keyMask` 与 `ruleMeta` 做精确确认。
 
-### 15.5 Notes
-1. The older “128 slots per L2 entry” layout is no longer the active target.
-2. The previous dynamic `keyBits` section is retained as history only and is
-   not the current implementation policy.
-
-### 15.6 Current Regression Coverage
-The current unit coverage is organized into three groups:
+### 15.6 当前回归覆盖
+当前单测覆盖分成三组：
 
 1. `PBEvsNeo.*`
-   - block consistency
-   - streaming consistency
+   - block 一致性
+   - streaming 一致性
    - `groups / noruns / mask / nocase`
    - multi-entry exact bucket
    - multi-entry wildcard bucket
-   - mixed exact + wildcard
-   - L1 `count|offset` encoding checks
+   - exact + wildcard 混合路径
+   - L1 `count|offset` 编码校验
 2. `PBECompile.*`
-   - feasibility reason name mapping
-   - grey-disabled feasibility rejection
-   - too-few-literals rejection
-   - blob header / artifact serialization consistency
+   - feasibility reason 名称映射
+   - grey 关闭时的拒绝路径
+   - 规则数过少时的拒绝路径
+   - blob header 与 artifacts 的序列化一致性
 3. `PBERuntime.*`
-   - invalid `magic`
-   - invalid `version`
-   - invalid layout offset
-   - all required to fall back cleanly without matches or crashes
+   - `magic` 非法
+   - `version` 非法
+   - layout offset 非法
+   - 要求全部能安静回退，不产生误匹配，也不崩溃
 
-### 15.7 Inspect Statistics
-`PBEInspect` now prints a compact build-statistics summary in addition to the
-full selector/L1/L2 dump. The summary includes:
+### 15.7 Inspect 统计项
+`PBEInspect` 现在除了完整的 selector/L1/L2 dump 之外，还会额外输出一组构建统计摘要：
 
 1. `nonEmptyL1`
-2. `exactBucketCount`
-3. `multiEntryBucketCount`
-4. `maxL2EntriesPerKey`
-5. `wildcardL2Entries`
-6. `wildcardRules`
-7. `totalL2Entries`
-8. `totalRulesInL2`
+2. `bitmapBytes`
+3. `exactBucketCount`
+4. `multiEntryBucketCount`
+5. `maxL2EntriesPerKey`
+6. `wildcardL2Entries`
+7. `wildcardRules`
+8. `totalL2Entries`
+9. `totalRulesInL2`
 
-This is intended to make real-rule-set distribution analysis easier before
-starting performance optimization work.
+这些统计项主要用于真实规则集分析，帮助我们在进入性能优化前判断：
+1. L1 实际使用率如何；
+2. wildcard 桶压力是否过大；
+3. 多项 L2 是否过多；
+4. 当前结构分布是否合理。
+
+### 15.8 下一步规划
+下一阶段会继续沿当前框架推进两项工作：
+
+1. 一级哈希访问优化
+   - 利用压缩位图先判空
+   - 再对命中的 key 做 `compact`
+   - 对非零项做 `LD1/GATHER`
+2. 位提取码优化
+   - 下一步位提取实现计划采用 `bext` 指令
+   - 目标是实现并行向量化位提取
+   - 在不改变当前语义的前提下，把“提取 22 位 key”从标量路径升级为并行路径
+
+### 15.9 一级哈希位图独立化
+1. 当前实现中，一级哈希压缩位图已经从一级哈希主表中拆分出来。
+2. 编译期 artifacts 现在分别保存：
+   - `primaryHashTable.offsets`
+   - `primaryHashBitmap.bits`
+3. blob 中也分别使用独立区域描述：
+   - `primaryBitmapOffset / primaryBitmapSize`
+   - `primaryOffset / primaryCount`
+4. 运行期访问顺序保持为：
+   - 先查位图
+   - 再查一级哈希主表
+5. 这样做的目的，是为后续的 `compact + gather + bext` 优化预留独立的数据布局空间。

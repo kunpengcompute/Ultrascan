@@ -40,6 +40,10 @@ struct PBEPrimaryHashTable {
     std::vector<u32> offsets;
 };
 
+struct PBEPrimaryHashBitmap {
+    std::vector<u8> bits;
+};
+
 struct PBESecondaryHashEntry {
     u8 ruleVector[PBE_RULE_VECTOR_BYTES];
     u8 tableControl[PBE_TBL_CONTROL_BYTES];
@@ -69,6 +73,7 @@ struct PBECompileArtifacts {
     u32 flags = 0;
     std::vector<PBEBitSelector> bitSelectors;
     PBEPrimaryHashTable primaryHashTable;
+    PBEPrimaryHashBitmap primaryHashBitmap;
     std::vector<PBESecondaryHashEntry> secondaryHashTable;
     std::vector<PBERuleMeta> ruleMeta;
     std::vector<u8> literalBlob;

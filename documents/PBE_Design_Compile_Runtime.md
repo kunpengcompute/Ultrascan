@@ -261,23 +261,43 @@
 1. 选择最多 22 个位提取选择器，最终 `keyBits` 固定为 22。
 2. 根据规则的 `keyValue/keyMask` 进行 L1 分桶。
 3. 每个桶内按 `4` 条规则一组切分为多个连续 L2 项。
-4. 每个 L2 项内：
+4. 同时构建一级哈希压缩位图：
+   - 每个 L1 表项对应 1 bit
+   - bit=1 表示该 L1 key 非空
+   - bit=0 表示该 L1 key 为空
+5. 当前编译期会把压缩位图与 L1 主表作为两块独立区域分别写入 PBE blob。
+6. 每个 L2 项内：
    - `ruleVector` 保存每条规则最后最多 8 字节的归一化后缀
    - `tableControl` 标记该 8 字节窗口中哪些字节有效
    - `headMask/tailMask` 以 32 bit 表示整个 32B lane 的有效位分布
-5. L1 value 通过 `(count << 18) | offset` 编码。
+7. L1 value 通过 `(count << 18) | offset` 编码。
 
 ### 运行期实现
 
 1. 运行期先提取 22 位 key。
-2. 从 L1 读取编码值，并解码出：
+2. 在读取 L1 主表之前，先查询一级哈希压缩位图。
+3. 如果位图显示该 key 为空，则直接跳过该次 L1 访问。
+4. 如果位图命中，再从 L1 读取编码值，并解码出：
    - `secondaryOffset`
    - `entryCount`
-3. 依次遍历 `[secondaryOffset, secondaryOffset + entryCount)` 范围内的 L2 项。
-4. 每个 L2 项内部先利用 `ruleVector + tableControl` 做 suffix 预检查。
-5. 预检查通过后，再结合 `keyValue/keyMask` 与 `ruleMeta` 做精确确认。
+5. 依次遍历 `[secondaryOffset, secondaryOffset + entryCount)` 范围内的 L2 项。
+6. 每个 L2 项内部先利用 `ruleVector + tableControl` 做 suffix 预检查。
+7. 预检查通过后，再结合 `keyValue/keyMask` 与 `ruleMeta` 做精确确认。
 
 ### 当前状态说明
 
 1. 当前实现目标是先把固定 22 位 L1、4 规则 L2、多项连续扫描这条主链路打通。
-2. 运行期仍然是朴素 C 版本，后续再继续做向量化与性能优化。
+2. 当前已经补充了一级哈希压缩位图的编译期与运行期框架。
+3. 运行期仍然是朴素 C 版本，后续再继续做向量化与性能优化。
+4. 下一步位提取码优化计划：
+   - 使用 `bext` 指令实现并行位提取
+   - 配合位图命中结果做 `compact`
+   - 对非零项做 `LD1/GATHER` 访问一级哈希表
+
+### 结构约束补充
+
+1. 一级哈希压缩位图必须独立于一级哈希主表放置。
+2. 位图不能作为 `PBEPrimaryHashTable` 的内嵌成员使用。
+3. 编译期、blob、运行期都应将两者视为两块独立区域：
+   - 一级哈希主表：保存 `u32` 编码值
+   - 一级哈希压缩位图：保存表项是否非空

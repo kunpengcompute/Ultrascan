@@ -12,6 +12,7 @@ static u32 pbeExtractKey(const struct PBERuntimeBitSelector *selectors,
                          const struct FDR_Runtime_Args *a, size_t endPos);
 
 static void pbeDecodePrimaryValue(u32 encoded, u32 *offset, u32 *count);
+static int pbePrimaryBitmapHasValue(const u8 *bitmap, u32 bitmapSize, u32 idx);
 
 static int pbeEntryMayMatchAtPos(
     const struct PBERuntimeSecondaryHashEntry *entry,
@@ -124,6 +125,10 @@ static int pbeValidateLayout(const struct FDR *fdr,
         (u64a)fdr->pbeSize) {
         return 0;
     }
+    if ((u64a)hdr->primaryBitmapOffset + (u64a)hdr->primaryBitmapSize >
+        (u64a)fdr->pbeSize) {
+        return 0;
+    }
     if ((u64a)hdr->primaryOffset + (u64a)hdr->primaryCount * sizeof(u32) >
         (u64a)fdr->pbeSize) {
         return 0;
@@ -143,6 +148,13 @@ static int pbeValidateLayout(const struct FDR *fdr,
         return 0;
     }
     return 1;
+}
+
+static int pbePrimaryBitmapHasValue(const u8 *bitmap, u32 bitmapSize, u32 idx) {
+    if (!bitmap || idx / 8U >= bitmapSize) {
+        return 0;
+    }
+    return !!(bitmap[idx / 8U] & (1U << (idx % 8U)));
 }
 
 static int pbeEntryMayMatchAtPos(
@@ -198,6 +210,7 @@ static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
     const struct PBERuntimeBitSelector *selectors =
         (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
                                                hdr->selectorsOffset);
+    const u8 *primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
     const u32 *primaryHashTable =
         (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable =
@@ -214,10 +227,16 @@ static int pbeRunNaive(const struct PBERuntimeHeader *hdr,
     for (i = a->start_offset; i < a->len; i++) {
         const u32 key = pbeExtractKey(selectors, hdr->selectorCount, a, i);
         const u32 idx = (key < hdr->primaryCount) ? key : 0;
-        const u32 exactValue = primaryHashTable[idx];
-        const u32 wildcardValue = (wildcardIdx < hdr->primaryCount)
-                                      ? primaryHashTable[wildcardIdx]
-                                      : 0;
+        const u32 exactValue =
+            pbePrimaryBitmapHasValue(primaryBitmap, hdr->primaryBitmapSize, idx)
+                ? primaryHashTable[idx]
+                : 0;
+        const u32 wildcardValue =
+            (wildcardIdx < hdr->primaryCount &&
+             pbePrimaryBitmapHasValue(primaryBitmap, hdr->primaryBitmapSize,
+                                      wildcardIdx))
+                ? primaryHashTable[wildcardIdx]
+                : 0;
 
 #define PBE_RUN_RANGE(_encoded)                                               \
         do {                                                                  \

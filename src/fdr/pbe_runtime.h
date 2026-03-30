@@ -5,7 +5,7 @@
 #include "hwlm/hwlm.h"
 
 #define PBE_RUNTIME_MAGIC 0x50424530U /* "PBE0" */
-#define PBE_RUNTIME_VERSION 3U
+#define PBE_RUNTIME_VERSION 4U
 #define PBE_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 #define PBE_RUNTIME_KEY_BITS 22U
 #define PBE_RUNTIME_L1_OFFSET_BITS 18U
@@ -30,10 +30,12 @@ struct PBERuntimeHeader {
     u32 keyBits;
     u32 selectorCount;
     u32 primaryCount;
+    u32 primaryBitmapSize;
     u32 secondaryCount;
     u32 ruleMetaCount;
     u32 literalBlobSize;
     u32 selectorsOffset;
+    u32 primaryBitmapOffset;
     u32 primaryOffset;
     u32 secondaryOffset;
     u32 ruleMetaOffset;

@@ -104,6 +104,35 @@ u8 normalizedLiteralByte(u8 c) {
 }
 
 static
+u32 pbePrimaryBitmapBytes(u32 primaryCount) {
+    return (primaryCount + 7U) / 8U;
+}
+
+static
+void pbePrimaryBitmapSet(std::vector<u8> *bitmap, u32 idx) {
+    if (!bitmap || idx / 8U >= bitmap->size()) {
+        return;
+    }
+    (*bitmap)[idx / 8U] |= verify_u8(1U << (idx % 8U));
+}
+
+static
+void buildPrimaryBitmap(const PBEPrimaryHashTable &primaryHashTable,
+                        PBEPrimaryHashBitmap *primaryHashBitmap) {
+    if (!primaryHashBitmap) {
+        return;
+    }
+    primaryHashBitmap->bits.clear();
+    const u32 primaryCount = verify_u32(primaryHashTable.offsets.size());
+    primaryHashBitmap->bits.assign(pbePrimaryBitmapBytes(primaryCount), 0);
+    for (u32 i = 0; i < primaryCount; i++) {
+        if (primaryHashTable.offsets[i]) {
+            pbePrimaryBitmapSet(&primaryHashBitmap->bits, i);
+        }
+    }
+}
+
+static
 void dumpRuleBits(const std::vector<hwlmLiteral> &lits) {
     printf("[PBE][Rules-Bits] rule_count=%zu\n", lits.size());
     for (size_t i = 0; i < lits.size(); i++) {
@@ -156,6 +185,8 @@ static
 void dumpHashTables(const PBECompileArtifacts &artifacts,
                     const std::vector<hwlmLiteral> &lits) {
     printf("[PBE][L1] size=%zu\n", artifacts.primaryHashTable.offsets.size());
+    printf("[PBE][L1-Bitmap] bytes=%zu\n",
+           artifacts.primaryHashBitmap.bits.size());
     size_t nonEmpty = 0;
     for (u32 key = 0; key < artifacts.primaryHashTable.offsets.size(); key++) {
         const u32 off = artifacts.primaryHashTable.offsets[key];
@@ -622,6 +653,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     artifacts->flags = 0;
     artifacts->bitSelectors.clear();
     artifacts->primaryHashTable.offsets.clear();
+    artifacts->primaryHashBitmap.bits.clear();
     artifacts->secondaryHashTable.clear();
     artifacts->ruleMeta.clear();
     artifacts->literalBlob.clear();
@@ -637,6 +669,8 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
 
     buildHashTables(lits, artifacts->bitSelectors, &artifacts->primaryHashTable,
                     &artifacts->secondaryHashTable, &artifacts->flags);
+    buildPrimaryBitmap(artifacts->primaryHashTable,
+                       &artifacts->primaryHashBitmap);
     buildRuleMeta(lits, &artifacts->ruleMeta, &artifacts->literalBlob);
 
     // Compile-time dump for selector/key/hash construction inspection.
@@ -742,12 +776,14 @@ bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
 bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     const u32 selectorCount = verify_u32(artifacts.bitSelectors.size());
     const u32 primaryCount = verify_u32(artifacts.primaryHashTable.offsets.size());
+    const u32 primaryBitmapSize = verify_u32(artifacts.primaryHashBitmap.bits.size());
     const u32 secondaryCount = verify_u32(artifacts.secondaryHashTable.size());
     const u32 ruleMetaCount = verify_u32(artifacts.ruleMeta.size());
     const u32 literalBlobSize = verify_u32(artifacts.literalBlob.size());
 
     const size_t selectorBytes =
         sizeof(PBERuntimeBitSelector) * artifacts.bitSelectors.size();
+    const size_t primaryBitmapBytes = artifacts.primaryHashBitmap.bits.size();
     const size_t primaryBytes = sizeof(u32) * artifacts.primaryHashTable.offsets.size();
     const size_t secondaryBytes = sizeof(PBERuntimeSecondaryHashEntry) *
                                   artifacts.secondaryHashTable.size();
@@ -758,6 +794,8 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     size_t totalSize = ROUNDUP_N(sizeof(PBERuntimeHeader), alignof(u32));
     const u32 selectorsOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(selectorBytes, alignof(u32));
+    const u32 primaryBitmapOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(primaryBitmapBytes, alignof(u32));
     const u32 primaryOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(primaryBytes, alignof(u32));
     const u32 secondaryOffset = verify_u32(totalSize);
@@ -779,10 +817,12 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     hdr->keyBits = artifacts.keyBits;
     hdr->selectorCount = selectorCount;
     hdr->primaryCount = primaryCount;
+    hdr->primaryBitmapSize = primaryBitmapSize;
     hdr->secondaryCount = secondaryCount;
     hdr->ruleMetaCount = ruleMetaCount;
     hdr->literalBlobSize = literalBlobSize;
     hdr->selectorsOffset = selectorsOffset;
+    hdr->primaryBitmapOffset = primaryBitmapOffset;
     hdr->primaryOffset = primaryOffset;
     hdr->secondaryOffset = secondaryOffset;
     hdr->ruleMetaOffset = ruleMetaOffset;
@@ -795,6 +835,11 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
         selectorsOut[i].byteOffset = artifacts.bitSelectors[i].byteOffset;
         selectorsOut[i].bitOffset = artifacts.bitSelectors[i].bitOffset;
         selectorsOut[i].reserved = 0;
+    }
+
+    if (!artifacts.primaryHashBitmap.bits.empty()) {
+        memcpy(base + primaryBitmapOffset, artifacts.primaryHashBitmap.bits.data(),
+               artifacts.primaryHashBitmap.bits.size());
     }
 
     auto *primaryOut = reinterpret_cast<u32 *>(base + primaryOffset);
