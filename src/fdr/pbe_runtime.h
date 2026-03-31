@@ -79,6 +79,9 @@ struct PBERuntimeRuleMeta {
     u8 cmp[8];
 };
 
+struct FDR;
+struct FDR_Runtime_Args;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -87,6 +90,9 @@ u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask);
 hwlm_error_t PbeEngineExecNaiveForTest(const struct FDR *fdr,
                                        const struct FDR_Runtime_Args *a,
                                        hwlm_group_t control);
+u32 PbeRuntimeEntryMatchMaskForTest(
+    const struct PBERuntimeSecondaryHashEntry *entry,
+    const struct FDR_Runtime_Args *a, size_t endPos, int useVector);
 
 #ifdef __cplusplus
 }

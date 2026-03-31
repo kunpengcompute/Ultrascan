@@ -656,3 +656,60 @@ L2 (secondary)
    - 匹配结果一致
    - 原始回调顺序一致
    - wildcard/exact 混合场景下也不回归
+
+### 15.14 L2 预筛向量化
+
+1. 当前运行期热点已经从前端 `key` 提取和 L1 访问，继续收敛到 L2 entry 的预筛逻辑。
+2. 因此本阶段把原先的“entry 是否可能命中”的标量 bool 判断，升级成了“entry 中哪些 slot 可能命中”的 `laneMask` 判断。
+3. 当前运行期新增了：
+   - `pbeBuildLaneWindow32(...)`
+   - `pbeEntryMatchMaskAtPosScalar(...)`
+   - `pbeEntryMatchMaskAtPosVector(...)`
+   - `pbeEntryLaneMaskFromByteMatches(...)`
+4. 其中：
+   - 标量版作为参考基线
+   - 向量版负责用两段 `16B` compare 生成 `32-bit` 字节匹配位图
+   - 再归约成 `4-bit laneMask`
+5. 当前 `headMask/tailMask` 已经真正参与运行期快速剪枝：
+   - `tailOnlyMask = tailMask & ~headMask`
+   - 先用最后一个关键字节粗筛
+   - 再用 `headMask` 补齐其余有效字节判断
+6. `pbeProcessEncodedRange(...)` 现在只会继续处理 `laneMask` 里命中的 slot，而不会再对整个 entry 的全部 slot 逐个尝试。
+7. 本阶段新增了 3 组直接对照单测：
+   - `PBEPrefilter.EntryLaneMaskMatchesScalar`
+   - `PBEPrefilter.EntryLaneMaskHistoryBoundaryConsistency`
+   - `PBEPrefilter.HeadTailMaskRejectsSameAsScalarForPartialSlots`
+8. 这 3 组测试用来确保：
+   - 向量化 laneMask 与标量 laneMask 完全一致
+   - history 边界不出错
+   - 短规则、partial slot、wildcard 场景下也不误判
+### 15.15 按位置缓存预筛上下文与单槽快路径
+
+1. 当前已经确认，上一轮把 `L2 laneMask` 预筛直接接入运行期后，虽然功能正确，但在部分规则集上会出现性能反而更差的情况。
+2. 主要原因不是 `laneMask` 语义有问题，而是运行期组织方式还有重复开销：
+   - 同一个 `endPos` 在 exact / wildcard / 多个 L2 entry 上重复构造 `laneWindow32`
+   - 很多 `ruleCount == 1` 的 entry 仍然走了完整的 `32B` 向量预筛
+3. 因此本阶段继续把运行期改成“按位置缓存上下文”：
+   - `window64`
+   - `laneWindow32[32]`
+   - `validMask32`
+   - `key`
+   - `primaryIdx`
+   - `exactEncoded / wildcardEncoded`
+   都提升为 `PBEPositionContext` 的字段，并在位置级别只构造一次。
+4. `Batch4` 路径当前已调整为：
+   - `pbeBuildBatch4Contexts(...)`
+   - `pbeFillBatch4EncodedValues(...)`
+   - 按原始 lane 顺序回放 exact / wildcard
+5. `pbeProcessEncodedRange(...)` 现在不再自己准备输入窗口，而是直接消费 `PBEPositionContext`。
+6. 对于 `ruleCount == 1` 的 L2 entry，当前已经新增单槽快路径：
+   - 先检查 `tailOnlyMask`
+   - 再检查 `headMask`
+   - 不再进入完整的 `32B` 向量 compare
+7. 对于 `ruleCount >= 2` 的 L2 entry，继续使用当前的 `laneMask` 预筛路径。
+8. 本阶段补充了一条针对单槽 entry 的直接回归：
+   - `PBEPrefilter.SingleSlotFastPathMatchesScalar`
+9. 这一步的预期收益主要来自：
+   - 复用同一位置的输入视图
+   - 避免单槽 entry 走重型向量预筛
+10. 这一步仍然没有优化 `pbeRuleExactMatch(...)`，因此如果后续性能仍不够，下一热点就会进一步收敛到 exact confirm。

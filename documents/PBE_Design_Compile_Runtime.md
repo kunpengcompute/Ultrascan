@@ -779,3 +779,172 @@ for 每 4 个相邻 endPos:
 2. 多位置真正硬件 `bext` 并行提取
 3. `L2 ruleVector/tableControl` 向量化预筛
 4. exact confirm 向量化
+
+### L2 预筛向量化阶段
+
+在完成 `Batch4 + bitmap + compact + packed L1 load` 之后，运行期热点已经集中到 L2 entry 的“是否可能命中”判断。因此这一阶段开始把 L2 预筛从标量逐字节循环升级为 `laneMask` 版本。
+
+#### 1. 当前 L2 预筛的目标
+
+对一个 `PBESecondaryHashEntry`，不再只回答：
+
+1. 这个 entry 是否可能命中
+
+而是改为回答：
+
+1. 这个 entry 的哪几个 slot 可能命中
+
+也就是返回一个 `4-bit laneMask`：
+
+1. bit0 -> slot0
+2. bit1 -> slot1
+3. bit2 -> slot2
+4. bit3 -> slot3
+
+#### 2. 输入视图：32B lane window
+
+运行期现在会先基于当前 `endPos` 构造一个归一化后的 `8-byte` suffix window，然后把这 `8` 个字节复制成 `4` 份，形成 `32B` 输入视图：
+
+```text
+[win8][win8][win8][win8]
+```
+
+它与 L2 中的：
+
+1. `ruleVector[32]`
+2. `tableControl[32]`
+
+在布局上是一一对应的，因此可以直接做 32 字节级别的 compare。
+
+#### 3. headMask / tailMask 的运行期用途
+
+编译期当前的语义是：
+
+1. `tailMask`
+   - 覆盖该 entry 中全部有效字节
+2. `headMask`
+   - 覆盖除最后一个有效字节以外的其余有效字节
+
+因此运行期可以先把：
+
+1. `tailOnlyMask = tailMask & ~headMask`
+
+理解为“每个 slot 的最后一个关键字节”，再按两段筛选：
+
+1. 先检查 `tailOnlyMask`
+2. 再检查 `headMask`
+
+这样可以更快地剪掉不可能命中的 slot。
+
+#### 4. 当前实现方式
+
+当前实现已经拆成：
+
+1. `pbeBuildLaneWindow32(...)`
+   - 构造 `32B` 输入窗口
+   - 同时给出哪些输入字节有效
+2. `pbeEntryMatchMaskAtPosScalar(...)`
+   - 标量参考实现
+3. `pbeEntryMatchMaskAtPosVector(...)`
+   - 基于两段 `16B` compare 的向量化实现
+4. `pbeEntryLaneMaskFromByteMatches(...)`
+   - 把 32 个字节级 compare 结果归约成 `4-bit laneMask`
+
+#### 5. 主流程上的变化
+
+当前 `pbeProcessEncodedRange(...)` 已经不再：
+
+1. 先做一个 entry 级别的 bool 预判断
+2. 然后再把 4 个 slot 全扫一遍
+
+而是改成：
+
+1. 先得到 `laneMask`
+2. `laneMask == 0` 则直接跳过整个 entry
+3. 只对 `laneMask` 里命中的 slot 做：
+   - `keyValue/keyMask`
+   - group 过滤
+   - exact confirm
+
+#### 6. 与下一阶段的关系
+
+这一步完成后，L2 已经具备：
+
+1. 32B 输入视图
+2. `laneMask` 预筛
+3. 基于 `headMask/tailMask` 的快速剪枝
+
+下一步最自然的继续方向就是：
+
+1. exact confirm 优化
+2. 让命中的 slot 尽量直接利用已构造的 suffix/window 数据，减少再次按字节回读
+
+### 按位置缓存预筛上下文与单槽快路径
+
+上一轮把 `laneMask` 预筛直接接入运行期后，虽然语义正确，但性能可能反而变差，根因主要有两点：
+
+1. 同一个 `endPos` 在遍历 exact bucket、wildcard bucket 以及同 key 下多个 L2 entry 时，会重复构造 `32B laneWindow + validMask32`。
+2. 很多 L2 entry 实际只有 `1` 条规则，但仍然走了完整的 `32B` 向量预筛路径，额外开销偏大。
+
+因此，当前运行期又向前推进了一步，改成“按位置缓存上下文 + 单槽快路径”的结构。
+
+#### 1. 按位置缓存的上下文
+
+当前在 `pbe_engine.c` 内部新增了 `PBEPositionContext`，核心字段包括：
+
+1. `endPos`
+2. `key`
+3. `primaryIdx`
+4. `exactEncoded`
+5. `wildcardEncoded`
+6. `window64`
+7. `laneWindow32[32]`
+8. `validMask32`
+
+它的作用是：
+
+1. 同一个位置只装载一次 `window64`
+2. 同一个位置只展开一次 `laneWindow32`
+3. 同一个位置只构造一次 `validMask32`
+4. exact / wildcard / 多个 L2 entry 共享这一份输入视图
+
+#### 2. 新的数据流
+
+当前 `Batch4` 路径已调整为：
+
+1. `pbeBuildBatch4Contexts(...)`
+   - 为 4 个相邻位置各自构造 `PBEPositionContext`
+2. `pbeFillBatch4EncodedValues(...)`
+   - 基于独立的 L1 bitmap 和 L1 主表填充 `exactEncoded`
+3. 按原始 lane 顺序回放
+   - 先 exact
+   - 再 wildcard
+4. 每次进入 L2 时，不再重新构造 `laneWindow32`
+   - 直接从 `ctx` 里取
+
+#### 3. 单槽快路径
+
+当前 `pbeEntryMatchMaskFromContextVector(...)` 已加入分流：
+
+1. `entry->ruleCount == 1`
+   - 走 `pbeEntrySingleSlotMatchMaskFromContext(...)`
+   - 先查 `tailOnlyMask`
+   - 再补查 `headMask`
+   - 不再走完整的 `32B` 向量 compare
+2. `entry->ruleCount >= 2`
+   - 继续走 `laneMask` 向量预筛
+
+这样做的目的，是把当前 L2 分布中大量“单规则 entry”的成本降下来。
+
+#### 4. 当前收益边界
+
+这一轮优化的重点是“减少重复准备输入视图”和“避免单槽 entry 走重型预筛”，因此预期收益主要集中在：
+
+1. exact + wildcard 同时存在时
+2. 同一 key 对应多个 L2 entry 时
+3. L2 中单槽 entry 比例较高时
+
+但它仍然没有动到最终的 `exact confirm` 慢路径，因此：
+
+1. 吞吐应该比上一轮纯 `laneMask` 版本更稳
+2. 真正更大的性能提升，仍然要等下一阶段去优化 confirm

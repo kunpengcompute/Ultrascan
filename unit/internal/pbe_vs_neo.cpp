@@ -194,6 +194,33 @@ hwlm_error_t runPbeDirect(const FDR *fdr, const std::vector<u8> &data,
 }
 
 static
+const PBERuntimeHeader *getPbeRuntimeHeader(const FDR *fdr) {
+    if (!fdr || !fdr->pbeOffset) {
+        return nullptr;
+    }
+    return reinterpret_cast<const PBERuntimeHeader *>(
+        reinterpret_cast<const u8 *>(fdr) + fdr->pbeOffset);
+}
+
+static
+FDR_Runtime_Args makeRuntimeArgs(const std::vector<u8> &data,
+                                 const std::vector<u8> &history,
+                                 hs_scratch *scratch) {
+    const FDR_Runtime_Args args = {
+        data.data(),
+        data.size(),
+        history.empty() ? nullptr : history.data(),
+        history.size(),
+        0,
+        collectCallback,
+        scratch,
+        nullptr,
+        0
+    };
+    return args;
+}
+
+static
 std::vector<Match> runPbeDirectInOrder(const FDR *fdr,
                                        const std::vector<u8> &data,
                                        hwlm_group_t groups, bool useNaive) {
@@ -1043,6 +1070,163 @@ TEST(PBEExtract, BextHistoryBoundaryConsistency) {
         const u32 bextKey = remapPackedBitsForTest(artifacts, packed);
         EXPECT_EQ(scalarKey, bextKey) << "boundary endPos=" << endPos;
     }
+}
+
+TEST(PBEPrefilter, EntryLaneMaskMatchesScalar) {
+    auto pbe = buildFdrWithHint({
+        hwlmLiteral("alpha", false, false, 720, 0x1, {}, {}),
+        hwlmLiteral("ALPHA", true,  false, 721, 0x3, {}, {}),
+        hwlmLiteral("beta",  false, false, 722, 0x1, {}, {}),
+        hwlmLiteral("delta", false, true,  723, 0x2, {}, {}),
+        hwlmLiteral("gamma", false, false, 724, 0x4, {}, {}),
+        hwlmLiteral("theta", true,  false, 725, 0x7, {}, {})
+    }, ENGINE_ID_PBE);
+
+    if (!pbe || pbe->engineID != ENGINE_ID_PBE || !pbe->pbeOffset) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const auto *hdr = getPbeRuntimeHeader(pbe.get());
+    ASSERT_NE(nullptr, hdr);
+    const auto *secondary = reinterpret_cast<const PBERuntimeSecondaryHashEntry *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
+
+    const std::vector<u8> data = {'a','l','p','h','a',' ',
+                                  'B','E','T','A',' ',
+                                  'd','e','l','t','a',' ',
+                                  'T','H','E','T','A'};
+    hs_scratch scratch = {};
+    scratch.fdr_conf = nullptr;
+    const auto args = makeRuntimeArgs(data, {}, &scratch);
+
+    for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
+        for (size_t endPos = 0; endPos < data.size(); endPos++) {
+            const u32 scalarMask = PbeRuntimeEntryMatchMaskForTest(
+                &secondary[entry], &args, endPos, 0);
+            const u32 vectorMask = PbeRuntimeEntryMatchMaskForTest(
+                &secondary[entry], &args, endPos, 1);
+            EXPECT_EQ(scalarMask, vectorMask)
+                << "entry=" << entry << " endPos=" << endPos;
+        }
+    }
+}
+
+TEST(PBEPrefilter, EntryLaneMaskHistoryBoundaryConsistency) {
+    auto pbe = buildFdrWithHint({
+        hwlmLiteral("abcz", false, false, 726, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("YY", true, false, 727, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("kappa", false, false, 728, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 729, HWLM_ALL_GROUPS, {}, {})
+    }, ENGINE_ID_PBE);
+
+    if (!pbe || pbe->engineID != ENGINE_ID_PBE || !pbe->pbeOffset) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const auto *hdr = getPbeRuntimeHeader(pbe.get());
+    ASSERT_NE(nullptr, hdr);
+    const auto *secondary = reinterpret_cast<const PBERuntimeSecondaryHashEntry *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
+
+    const std::vector<u8> history = {'x', 'x', 'a', 'b'};
+    const std::vector<u8> data = {'c', 'z', 'Y', 'Y', 'a', 'B', 'c', 'z'};
+    hs_scratch scratch = {};
+    scratch.fdr_conf = nullptr;
+    const auto args = makeRuntimeArgs(data, history, &scratch);
+
+    for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
+        for (size_t endPos = 0; endPos < data.size(); endPos++) {
+            const u32 scalarMask = PbeRuntimeEntryMatchMaskForTest(
+                &secondary[entry], &args, endPos, 0);
+            const u32 vectorMask = PbeRuntimeEntryMatchMaskForTest(
+                &secondary[entry], &args, endPos, 1);
+            EXPECT_EQ(scalarMask, vectorMask)
+                << "entry=" << entry << " endPos=" << endPos;
+        }
+    }
+}
+
+TEST(PBEPrefilter, HeadTailMaskRejectsSameAsScalarForPartialSlots) {
+    auto pbe = buildFdrWithHint({
+        hwlmLiteral("ab", true, false, 760, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("abc", false, false, 761, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 762, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("z", false, false, 763, HWLM_ALL_GROUPS, {}, {})
+    }, ENGINE_ID_PBE);
+
+    if (!pbe || pbe->engineID != ENGINE_ID_PBE || !pbe->pbeOffset) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const auto *hdr = getPbeRuntimeHeader(pbe.get());
+    ASSERT_NE(nullptr, hdr);
+    const auto *secondary = reinterpret_cast<const PBERuntimeSecondaryHashEntry *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
+
+    const std::vector<u8> data = {'A','b',' ','a','b','c',' ',
+                                  'b','e','t','a',' ','z','z'};
+    hs_scratch scratch = {};
+    scratch.fdr_conf = nullptr;
+    const auto args = makeRuntimeArgs(data, {}, &scratch);
+
+    for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
+        for (size_t endPos = 0; endPos < data.size(); endPos++) {
+            const u32 scalarMask = PbeRuntimeEntryMatchMaskForTest(
+                &secondary[entry], &args, endPos, 0);
+            const u32 vectorMask = PbeRuntimeEntryMatchMaskForTest(
+                &secondary[entry], &args, endPos, 1);
+            EXPECT_EQ(scalarMask, vectorMask)
+                << "entry=" << entry << " endPos=" << endPos;
+        }
+    }
+}
+
+TEST(PBEPrefilter, SingleSlotFastPathMatchesScalar) {
+    auto pbe = buildFdrWithHint({
+        hwlmLiteral("alpha", false, false, 770, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 771, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("gamma", false, false, 772, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 773, HWLM_ALL_GROUPS, {}, {})
+    }, ENGINE_ID_PBE);
+
+    if (!pbe || pbe->engineID != ENGINE_ID_PBE || !pbe->pbeOffset) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    const auto *hdr = getPbeRuntimeHeader(pbe.get());
+    ASSERT_NE(nullptr, hdr);
+    const auto *secondary = reinterpret_cast<const PBERuntimeSecondaryHashEntry *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
+
+    const std::vector<u8> data = {'x','x','a','l','p','h','a','x',
+                                  'd','e','l','t','a','x',
+                                  'g','a','m','m','a','x',
+                                  'o','m','e','g','a'};
+    hs_scratch scratch = {};
+    scratch.fdr_conf = nullptr;
+    const auto args = makeRuntimeArgs(data, {}, &scratch);
+    bool sawSingleSlot = false;
+
+    for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
+        if (secondary[entry].ruleCount != 1) {
+            continue;
+        }
+        sawSingleSlot = true;
+        for (size_t endPos = 0; endPos < data.size(); endPos++) {
+            const u32 scalarMask = PbeRuntimeEntryMatchMaskForTest(
+                &secondary[entry], &args, endPos, 0);
+            const u32 vectorMask = PbeRuntimeEntryMatchMaskForTest(
+                &secondary[entry], &args, endPos, 1);
+            EXPECT_EQ(scalarMask, vectorMask)
+                << "entry=" << entry << " endPos=" << endPos;
+        }
+    }
+
+    EXPECT_TRUE(sawSingleSlot);
 }
 
 TEST(PBERuntime, Batch4MatchesNaiveDirect) {
