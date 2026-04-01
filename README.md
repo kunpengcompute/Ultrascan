@@ -9,7 +9,13 @@
 
 ## 项目介绍<a name="ZH-CN_TOPIC_0000002549772085"></a>
 
-Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的大部分语法的前提下，增加了特定的语法和工作模式来保证其在真实网络场景下的实用性。Hyperscan针对不同使用场景设计了多种高效匹配算法，以及结合SIMD指令，实现了正则表达式的高性能匹配。Hyperscan适用于部署在诸如DPI/IPS/IDS/FW等场景中。在鲲鹏平台上，华为基于NEON指令集对Hyperscan进行了改造，以适配AAarch64架构，同时针对算法进行了优化。
+Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的大部分语法的前提下，增加了特定的语法和工作模式来保证其在真实网络场景下的实用性。Hyperscan针对不同使用场景设计了短规则旁路、假阳性阻断等高效匹配算法，以及结合SIMD指令，实现了正则表达式的高性能匹配。Hyperscan适用于部署在诸如DPI/IPS/IDS/FW等场景中。在鲲鹏平台上，华为基于NEON指令集对Hyperscan进行了改造，以适配AAarch64架构，同时针对算法进行了优化。
+
+## 特性介绍
+|特性名称|特性介绍
+|--|--|
+| 短规则旁路技术 | 短规则旁路技术特性包括单字节短规则算法和2~4字节短规则算法，通过将导致性能瓶颈的短规则从常规规则中分离，用旁路规则算法消除冗余操作，从而大幅提升整体匹配性能。 |
+| 假阳性阻断技术 | 假阳性阻断技术特性能够减少解释器大量无用的调用，进而大幅提高Hyperscan匹配性能。  |
 
 ## 目录结构<a name="ZH-CN_TOPIC_0000002549772081"></a>
 
@@ -29,7 +35,8 @@ Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │       ├── release_notes.md                                  # 版本说明书
 │       ├── compilation_guide.md                              # 编译指南
 │       ├── developer_guide.md                                # 开发指南
-│       ├── user_guide.md                                     # 使用指南
+│       ├── user_guide.md                                     # 用户指南
+│       ├── api_reference.md                                  # API参考
 ├── examples                                                   # 示例代码目录
 │   ├── CMakeLists.txt                                        # 示例代码构建配置
 │   ├── README.md                                             # 示例代码说明文档
@@ -107,8 +114,8 @@ Hyperscan的快速入门通过使用Hyperscan官方提供的性能Benchmark工�
 |《[版本说明书](docs/zh/release_notes.md)》|提供Hyperscan每个发布版本的基础信息和特性更新信息。|
 |《[安装指南](./docs/zh/installation_guide.md)》|指导用户如何安装部署及编译软件。|
 |《[开发指南](./docs/zh/developer_guide.md)》|提供Hyperscan特性相关接口说明及定义等。|
-|《[使用指南](./docs/zh/user_guide.md)》|提供Hyperscan特性使用指导。|
-
+|《[用户指南](./docs/zh/user_guide.md)》|提供Hyperscan特性使用指导。|
+|《[API参考](./docs/zh/api_reference.md)》|提供Hyperscan静态库接口说明及使用指导。|
 
 
 ## 贡献声明<a name="ZH-CN_TOPIC_0000002518412216"></a>
