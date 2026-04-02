@@ -25,6 +25,7 @@ static constexpr u32 PBE_TBL_CONTROL_BYTES =
     PBE_RULE_SLOTS_PER_ENTRY * PBE_BYTES_PER_RULE_SLOT;
 static constexpr u32 PBE_RULE_SLOT_MASK_WORDS = 1U;
 static constexpr u32 PBE_MAX_SELECTORS = 32U;
+static constexpr u32 PBE_MAX_MASK_CLASSES = 32U;
 static constexpr u32 PBE_EXTRACT_MODE_SCALAR = 0U;
 static constexpr u32 PBE_EXTRACT_MODE_BEXT = 1U;
 
@@ -46,6 +47,16 @@ struct PBEPrimaryHashTable {
 
 struct PBEPrimaryHashBitmap {
     std::vector<u8> bits;
+};
+
+struct PBEMaskClassArtifacts {
+    u32 classId = 0;
+    u32 classMask = 0;
+    u32 classKeyBits = 0;
+    u32 secondaryOffset = 0;
+    u32 secondaryCount = 0;
+    PBEPrimaryHashTable primaryHashTable;
+    PBEPrimaryHashBitmap primaryHashBitmap;
 };
 
 struct PBESecondaryHashEntry {
@@ -79,6 +90,7 @@ struct PBECompileArtifacts {
     u32 windowBytes = PBE_BYTES_PER_RULE_SLOT;
     u64a bextMask = 0;
     std::vector<PBEBitSelector> bitSelectors;
+    std::vector<PBEMaskClassArtifacts> maskClasses;
     PBEPrimaryHashTable primaryHashTable;
     PBEPrimaryHashBitmap primaryHashBitmap;
     std::vector<PBESecondaryHashEntry> secondaryHashTable;

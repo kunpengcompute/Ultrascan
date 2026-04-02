@@ -4,6 +4,7 @@
 #include "pbe_runtime.h"
 #include "util/alloc.h"
 #include "util/arch.h"
+#include "util/bitutils.h"
 #include "util/target_info.h"
 #include "util/compare.h"
 #include "util/verify_types.h"
@@ -30,6 +31,8 @@ static constexpr u32 PBE_MAX_SUFFIX_BYTES = 8;
 static constexpr u32 PBE_MAX_CANDIDATE_BITS = PBE_MAX_SUFFIX_BYTES * 8;
 static constexpr u32 PBE_SECONDARY_KEY_BITS = 18;
 static constexpr u32 PBE_MAX_SECONDARY_ENTRIES = 1U << PBE_SECONDARY_KEY_BITS;
+static constexpr u64a PBE_MAX_TOTAL_PRIMARY_FOOTPRINT =
+    128ULL * 1024ULL * 1024ULL;
 static constexpr u8 PBE_STATE_DONT_CARE = 2;
 
 struct PBEBitCandidate {
@@ -125,6 +128,31 @@ u8 normalizedLiteralByte(u8 c) {
 static
 u32 pbePrimaryBitmapBytes(u32 primaryCount) {
     return (primaryCount + 7U) / 8U;
+}
+
+static
+u32 pbePackedKeyBits(u32 classMask) {
+    return classMask ? popcount32(classMask) : 0;
+}
+
+static
+u32 pbePrimaryCountForKeyBits(u32 keyBits) {
+    if (!keyBits) {
+        return 1U;
+    }
+    assert(keyBits <= PBE_KEY_BITS);
+    return 1U << keyBits;
+}
+
+static
+u32 pbeFullKeyMask(u32 keyBits) {
+    if (!keyBits) {
+        return 0;
+    }
+    if (keyBits >= 32U) {
+        return 0xffffffffU;
+    }
+    return (1U << keyBits) - 1U;
 }
 
 static
@@ -230,23 +258,30 @@ void dumpRuleKeys(const std::vector<hwlmLiteral> &lits,
 static
 void dumpHashTables(const PBECompileArtifacts &artifacts,
                     const std::vector<hwlmLiteral> &lits) {
-    printf("[PBE][L1] size=%zu\n", artifacts.primaryHashTable.offsets.size());
-    printf("[PBE][L1-Bitmap] bytes=%zu\n",
-           artifacts.primaryHashBitmap.bits.size());
-    size_t nonEmpty = 0;
-    for (u32 key = 0; key < artifacts.primaryHashTable.offsets.size(); key++) {
-        const u32 off = artifacts.primaryHashTable.offsets[key];
-        if (!off) {
-            continue;
+    printf("[PBE][Mask-Classes] count=%zu\n", artifacts.maskClasses.size());
+    for (const auto &klass : artifacts.maskClasses) {
+        printf("  classId=%u classMask={dec=%u hex=0x%x bin=%s} classKeyBits=%u secondaryOffset=%u secondaryCount=%u\n",
+               klass.classId, klass.classMask, klass.classMask,
+               keyToBits(klass.classMask, artifacts.keyBits).c_str(),
+               klass.classKeyBits, klass.secondaryOffset,
+               klass.secondaryCount);
+        printf("    [L1] size=%zu\n", klass.primaryHashTable.offsets.size());
+        printf("    [L1-Bitmap] bytes=%zu\n", klass.primaryHashBitmap.bits.size());
+        size_t nonEmpty = 0;
+        for (u32 key = 0; key < klass.primaryHashTable.offsets.size(); key++) {
+            const u32 off = klass.primaryHashTable.offsets[key];
+            if (!off) {
+                continue;
+            }
+            nonEmpty++;
+            const u32 secondaryOffset = off & PBE_L1_OFFSET_MASK;
+            const u32 entryCount = off >> PBE_L1_COUNT_SHIFT;
+            printf("      key={dec=%u hex=0x%x bin=%s} -> value={dec=%u hex=0x%x offset=%u count=%u}\n",
+                   key, key, keyToBits(key, klass.classKeyBits).c_str(), off, off,
+                   secondaryOffset, entryCount);
         }
-        nonEmpty++;
-        const u32 secondaryOffset = off & PBE_L1_OFFSET_MASK;
-        const u32 entryCount = off >> PBE_L1_COUNT_SHIFT;
-        printf("  key={dec=%u hex=0x%x bin=%s} -> value={dec=%u hex=0x%x offset=%u count=%u}\n",
-               key, key, keyToBits(key, artifacts.keyBits).c_str(), off, off,
-               secondaryOffset, entryCount);
+        printf("      non_empty=%zu\n", nonEmpty);
     }
-    printf("  non_empty=%zu\n", nonEmpty);
 
     printf("[PBE][L2] size=%zu (entry0 is null)\n",
            artifacts.secondaryHashTable.size());
@@ -289,8 +324,9 @@ static
 void dumpPBEArtifactsVerbose(const std::vector<hwlmLiteral> &lits,
                              const PBECompileArtifacts &artifacts) {
     printf("\n========== [PBE][Build-Artifacts] Begin ==========\n");
-    printf("[PBE][Params] key_bits(fixed=%u, selector_count=%zu) secondary_key_bits=%u secondary_capacity=%u entry_capacity=%u\n",
-           artifacts.keyBits, artifacts.bitSelectors.size(), PBE_SECONDARY_KEY_BITS,
+    printf("[PBE][Params] key_bits(fixed=%u, selector_count=%zu, mask_classes=%zu) secondary_key_bits=%u secondary_capacity=%u entry_capacity=%u\n",
+           artifacts.keyBits, artifacts.bitSelectors.size(),
+           artifacts.maskClasses.size(), PBE_SECONDARY_KEY_BITS,
            PBE_MAX_SECONDARY_ENTRIES, PBE_RULE_SLOTS_PER_ENTRY);
     dumpRuleBits(lits);
     dumpSelectors(artifacts.bitSelectors);
@@ -519,102 +555,172 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
 static
 void buildHashTables(const std::vector<hwlmLiteral> &lits,
                      const std::vector<PBEBitSelector> &selectors,
-                     PBEPrimaryHashTable *primaryHashTable,
+                     std::vector<PBEMaskClassArtifacts> *maskClasses,
+                     PBEPrimaryHashTable *legacyPrimaryHashTable,
+                     PBEPrimaryHashBitmap *legacyPrimaryHashBitmap,
                      std::vector<PBESecondaryHashEntry> *secondaryHashTable,
                      u32 *flags) {
-    primaryHashTable->offsets.clear();
+    if (maskClasses) {
+        maskClasses->clear();
+    }
+    legacyPrimaryHashTable->offsets.clear();
+    legacyPrimaryHashBitmap->bits.clear();
     secondaryHashTable->clear();
 
     if (selectors.empty()) {
         return;
     }
 
-    const u32 tableSize = 1U << PBE_KEY_BITS;
-    primaryHashTable->offsets.assign(tableSize, 0);
-
     // secondaryHashTable[0] stays empty as a null target.
     secondaryHashTable->push_back(PBESecondaryHashEntry{});
 
-    std::map<u32, std::vector<u32>> keyToLiteralIndexes;
     std::vector<u32> litKeyValue(lits.size(), 0);
-    std::vector<u32> litKeyMask(lits.size(), 0);
-    const u32 fullMask = selectors.size() >= 32
-                             ? 0xffffffffU
-                             : ((1U << verify_u32(selectors.size())) - 1U);
+    std::map<u32, std::vector<u32>> maskToLiteralIndexes;
+    const u32 fullMask = pbeFullKeyMask(verify_u32(selectors.size()));
     for (u32 i = 0; i < lits.size(); i++) {
         u32 keyValue = 0;
         u32 keyMask = 0;
         computeKeyValueMaskForLiteral(lits[i], selectors, &keyValue, &keyMask);
         litKeyValue[i] = keyValue;
-        litKeyMask[i] = keyMask;
-        // Single-key policy:
-        // - fully cared key uses exact bucket keyValue.
-        // - masked key (contains don't-care bits) goes to wildcard bucket 0.
-        const u32 bucketKey = (keyMask == fullMask) ? keyValue : 0U;
-        keyToLiteralIndexes[bucketKey].push_back(i);
+        maskToLiteralIndexes[keyMask].push_back(i);
     }
 
-    for (const auto &it : keyToLiteralIndexes) {
-        const u32 key = it.first;
-        const auto &idxes = it.second;
-        if (idxes.empty()) {
+    std::vector<u32> orderedMasks;
+    orderedMasks.reserve(maskToLiteralIndexes.size());
+    for (const auto &it : maskToLiteralIndexes) {
+        orderedMasks.push_back(it.first);
+    }
+    std::sort(orderedMasks.begin(), orderedMasks.end(),
+              [fullMask](u32 a, u32 b) {
+                  const bool aFull = a == fullMask;
+                  const bool bFull = b == fullMask;
+                  if (aFull != bFull) {
+                      return aFull;
+                  }
+                  const u32 aBits = pbePackedKeyBits(a);
+                  const u32 bBits = pbePackedKeyBits(b);
+                  if (aBits != bBits) {
+                      return aBits > bBits;
+                  }
+                  return a < b;
+              });
+
+    if (orderedMasks.size() > PBE_MAX_MASK_CLASSES) {
+        if (flags) {
+            *flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+        }
+        return;
+    }
+
+    u64a totalPrimaryFootprint = 0;
+    u32 classId = 0;
+    bool stop = false;
+    for (u32 classMask : orderedMasks) {
+        if (stop) {
+            break;
+        }
+        const auto &idxes = maskToLiteralIndexes[classMask];
+        if (idxes.empty() || !maskClasses) {
             continue;
         }
 
-        const u32 entryCount = verify_u32((idxes.size() + PBE_RULE_SLOTS_PER_ENTRY - 1) /
-                                          PBE_RULE_SLOTS_PER_ENTRY);
-        if (secondaryHashTable->size() + entryCount > PBE_MAX_SECONDARY_ENTRIES) {
+        PBEMaskClassArtifacts klass = {};
+        klass.classId = classId++;
+        klass.classMask = classMask;
+        klass.classKeyBits = pbePackedKeyBits(classMask);
+        klass.secondaryOffset = verify_u32(secondaryHashTable->size());
+
+        const u32 primaryCount = pbePrimaryCountForKeyBits(klass.classKeyBits);
+        totalPrimaryFootprint +=
+            (u64a)primaryCount * sizeof(u32) + pbePrimaryBitmapBytes(primaryCount);
+        if (totalPrimaryFootprint > PBE_MAX_TOTAL_PRIMARY_FOOTPRINT) {
             if (flags) {
                 *flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
-                *flags |= PBE_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY;
             }
             break;
         }
+        klass.primaryHashTable.offsets.assign(primaryCount, 0);
 
-        if (entryCount >= (1U << (32U - PBE_L1_COUNT_SHIFT))) {
-            if (flags) {
-                *flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
-                *flags |= PBE_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW;
-            }
-            break;
+        std::map<u32, std::vector<u32>> keyToLiteralIndexes;
+        for (u32 ridx : idxes) {
+            const u32 bucketKey = compress32(litKeyValue[ridx], classMask);
+            keyToLiteralIndexes[bucketKey].push_back(ridx);
         }
 
-        const u32 secondaryOffset = verify_u32(secondaryHashTable->size());
-        primaryHashTable->offsets[key] = encodePrimaryValue(secondaryOffset,
-                                                            entryCount);
+        const u32 packedMask = pbeFullKeyMask(klass.classKeyBits);
+        for (const auto &it : keyToLiteralIndexes) {
+            const u32 key = it.first;
+            const auto &bucketIdxes = it.second;
+            const u32 entryCount = verify_u32(
+                (bucketIdxes.size() + PBE_RULE_SLOTS_PER_ENTRY - 1) /
+                PBE_RULE_SLOTS_PER_ENTRY);
 
-        for (u32 chunk = 0; chunk < entryCount; chunk++) {
-            PBESecondaryHashEntry entry = {};
-            const size_t begin = chunk * PBE_RULE_SLOTS_PER_ENTRY;
-            const size_t end = std::min(idxes.size(),
-                                        begin + PBE_RULE_SLOTS_PER_ENTRY);
-            entry.ruleCount = verify_u16(end - begin);
+            if (secondaryHashTable->size() + entryCount > PBE_MAX_SECONDARY_ENTRIES) {
+                if (flags) {
+                    *flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+                    *flags |= PBE_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY;
+                }
+                stop = true;
+                break;
+            }
 
-            for (size_t slot = begin; slot < end; slot++) {
-                const u32 localSlot = verify_u32(slot - begin);
-                const auto &lit = lits[idxes[slot]];
-                const u32 len = verify_u32(lit.s.size());
-                const u32 suffixLen = std::min<u32>(len, PBE_BYTES_PER_RULE_SLOT);
-                const u32 laneBase = localSlot * PBE_BYTES_PER_RULE_SLOT;
+            if (entryCount >= (1U << (32U - PBE_L1_COUNT_SHIFT))) {
+                if (flags) {
+                    *flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+                    *flags |= PBE_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW;
+                }
+                stop = true;
+                break;
+            }
 
-                entry.ruleIndex[localSlot] = verify_u16(idxes[slot]);
-                entry.keyValue[localSlot] = litKeyValue[idxes[slot]];
-                entry.keyMask[localSlot] = litKeyMask[idxes[slot]];
+            const u32 secondaryOffset = verify_u32(secondaryHashTable->size());
+            klass.primaryHashTable.offsets[key] =
+                encodePrimaryValue(secondaryOffset, entryCount);
 
-                for (u32 j = 0; j < suffixLen; j++) {
-                    const u32 vecIndex = laneBase + (PBE_BYTES_PER_RULE_SLOT - suffixLen + j);
-                    const u8 c = verify_u8(lit.s[len - suffixLen + j]);
-                    entry.ruleVector[vecIndex] = normalizedLiteralByte(c);
-                    entry.tableControl[vecIndex] = 1;
-                    entry.tailMask |= (1U << vecIndex);
-                    if (j + 1 != suffixLen) {
-                        entry.headMask |= (1U << vecIndex);
+            for (u32 chunk = 0; chunk < entryCount; chunk++) {
+                PBESecondaryHashEntry entry = {};
+                const size_t begin = chunk * PBE_RULE_SLOTS_PER_ENTRY;
+                const size_t end = std::min(bucketIdxes.size(),
+                                            begin + PBE_RULE_SLOTS_PER_ENTRY);
+                entry.ruleCount = verify_u16(end - begin);
+
+                for (size_t slot = begin; slot < end; slot++) {
+                    const u32 localSlot = verify_u32(slot - begin);
+                    const auto &lit = lits[bucketIdxes[slot]];
+                    const u32 len = verify_u32(lit.s.size());
+                    const u32 suffixLen =
+                        std::min<u32>(len, PBE_BYTES_PER_RULE_SLOT);
+                    const u32 laneBase = localSlot * PBE_BYTES_PER_RULE_SLOT;
+
+                    entry.ruleIndex[localSlot] = verify_u16(bucketIdxes[slot]);
+                    entry.keyValue[localSlot] = key;
+                    entry.keyMask[localSlot] = packedMask;
+
+                    for (u32 j = 0; j < suffixLen; j++) {
+                        const u32 vecIndex = laneBase +
+                            (PBE_BYTES_PER_RULE_SLOT - suffixLen + j);
+                        const u8 c = verify_u8(lit.s[len - suffixLen + j]);
+                        entry.ruleVector[vecIndex] = normalizedLiteralByte(c);
+                        entry.tableControl[vecIndex] = 1;
+                        entry.tailMask |= (1U << vecIndex);
+                        if (j + 1 != suffixLen) {
+                            entry.headMask |= (1U << vecIndex);
+                        }
                     }
                 }
-            }
 
-            secondaryHashTable->push_back(entry);
+                secondaryHashTable->push_back(entry);
+                klass.secondaryCount++;
+            }
         }
+
+        buildPrimaryBitmap(klass.primaryHashTable, &klass.primaryHashBitmap);
+        maskClasses->push_back(std::move(klass));
+    }
+
+    if (maskClasses && !maskClasses->empty()) {
+        *legacyPrimaryHashTable = (*maskClasses)[0].primaryHashTable;
+        *legacyPrimaryHashBitmap = (*maskClasses)[0].primaryHashBitmap;
     }
 }
 
@@ -725,6 +831,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     artifacts->windowBytes = PBE_BYTES_PER_RULE_SLOT;
     artifacts->bextMask = 0;
     artifacts->bitSelectors.clear();
+    artifacts->maskClasses.clear();
     artifacts->primaryHashTable.offsets.clear();
     artifacts->primaryHashBitmap.bits.clear();
     artifacts->secondaryHashTable.clear();
@@ -741,10 +848,9 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     }
     buildExtractDescriptor(artifacts->bitSelectors, artifacts);
 
-    buildHashTables(lits, artifacts->bitSelectors, &artifacts->primaryHashTable,
+    buildHashTables(lits, artifacts->bitSelectors, &artifacts->maskClasses,
+                    &artifacts->primaryHashTable, &artifacts->primaryHashBitmap,
                     &artifacts->secondaryHashTable, &artifacts->flags);
-    buildPrimaryBitmap(artifacts->primaryHashTable,
-                       &artifacts->primaryHashBitmap);
     buildRuleMeta(lits, &artifacts->ruleMeta, &artifacts->literalBlob);
 
     // Compile-time dump for selector/key/hash construction inspection.
@@ -849,6 +955,7 @@ bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
 
 bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     const u32 selectorCount = verify_u32(artifacts.bitSelectors.size());
+    const u32 classCount = verify_u32(artifacts.maskClasses.size());
     const u32 primaryCount = verify_u32(artifacts.primaryHashTable.offsets.size());
     const u32 primaryBitmapSize = verify_u32(artifacts.primaryHashBitmap.bits.size());
     const u32 secondaryCount = verify_u32(artifacts.secondaryHashTable.size());
@@ -857,21 +964,48 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
 
     const size_t selectorBytes =
         sizeof(PBERuntimeBitSelector) * artifacts.bitSelectors.size();
-    const size_t primaryBitmapBytes = artifacts.primaryHashBitmap.bits.size();
-    const size_t primaryBytes = sizeof(u32) * artifacts.primaryHashTable.offsets.size();
+    const size_t classTableBytes =
+        sizeof(PBERuntimeMaskClass) * artifacts.maskClasses.size();
     const size_t secondaryBytes = sizeof(PBERuntimeSecondaryHashEntry) *
                                   artifacts.secondaryHashTable.size();
     const size_t ruleMetaBytes =
         sizeof(PBERuntimeRuleMeta) * artifacts.ruleMeta.size();
     const size_t literalBlobBytes = artifacts.literalBlob.size();
 
+    struct PBEMaskClassLayout {
+        u32 classMask;
+        u32 classKeyBits;
+        u32 primaryCount;
+        u32 primaryBitmapSize;
+        u32 primaryBitmapOffset;
+        u32 primaryOffset;
+        u32 secondaryOffset;
+        u32 secondaryCount;
+    };
+    std::vector<PBEMaskClassLayout> classLayouts;
+    classLayouts.reserve(artifacts.maskClasses.size());
+
     size_t totalSize = ROUNDUP_N(sizeof(PBERuntimeHeader), alignof(u32));
     const u32 selectorsOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(selectorBytes, alignof(u32));
-    const u32 primaryBitmapOffset = verify_u32(totalSize);
-    totalSize += ROUNDUP_N(primaryBitmapBytes, alignof(u32));
-    const u32 primaryOffset = verify_u32(totalSize);
-    totalSize += ROUNDUP_N(primaryBytes, alignof(u32));
+    const u32 classTableOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(classTableBytes, alignof(u32));
+    for (const auto &klass : artifacts.maskClasses) {
+        PBEMaskClassLayout layout = {};
+        layout.classMask = klass.classMask;
+        layout.classKeyBits = klass.classKeyBits;
+        layout.primaryCount = verify_u32(klass.primaryHashTable.offsets.size());
+        layout.primaryBitmapSize =
+            verify_u32(klass.primaryHashBitmap.bits.size());
+        layout.primaryBitmapOffset = verify_u32(totalSize);
+        totalSize += ROUNDUP_N(klass.primaryHashBitmap.bits.size(), alignof(u32));
+        layout.primaryOffset = verify_u32(totalSize);
+        totalSize += ROUNDUP_N(sizeof(u32) * klass.primaryHashTable.offsets.size(),
+                               alignof(u32));
+        layout.secondaryOffset = klass.secondaryOffset;
+        layout.secondaryCount = klass.secondaryCount;
+        classLayouts.push_back(layout);
+    }
     const u32 secondaryOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(secondaryBytes, alignof(u32));
     const u32 ruleMetaOffset = verify_u32(totalSize);
@@ -890,6 +1024,7 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     hdr->flags = artifacts.flags;
     hdr->keyBits = artifacts.keyBits;
     hdr->selectorCount = selectorCount;
+    hdr->classCount = classCount;
     hdr->primaryCount = primaryCount;
     hdr->primaryBitmapSize = primaryBitmapSize;
     hdr->secondaryCount = secondaryCount;
@@ -899,8 +1034,9 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     hdr->windowBytes = artifacts.windowBytes;
     hdr->bextMask = artifacts.bextMask;
     hdr->selectorsOffset = selectorsOffset;
-    hdr->primaryBitmapOffset = primaryBitmapOffset;
-    hdr->primaryOffset = primaryOffset;
+    hdr->classTableOffset = classTableOffset;
+    hdr->primaryBitmapOffset = classLayouts.empty() ? 0 : classLayouts[0].primaryBitmapOffset;
+    hdr->primaryOffset = classLayouts.empty() ? 0 : classLayouts[0].primaryOffset;
     hdr->secondaryOffset = secondaryOffset;
     hdr->ruleMetaOffset = ruleMetaOffset;
     hdr->literalBlobOffset = literalBlobOffset;
@@ -914,14 +1050,32 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
         selectorsOut[i].reserved = 0;
     }
 
-    if (!artifacts.primaryHashBitmap.bits.empty()) {
-        memcpy(base + primaryBitmapOffset, artifacts.primaryHashBitmap.bits.data(),
-               artifacts.primaryHashBitmap.bits.size());
+    auto *classOut =
+        reinterpret_cast<PBERuntimeMaskClass *>(base + classTableOffset);
+    for (u32 i = 0; i < classCount; i++) {
+        classOut[i].classMask = classLayouts[i].classMask;
+        classOut[i].classKeyBits = classLayouts[i].classKeyBits;
+        classOut[i].primaryCount = classLayouts[i].primaryCount;
+        classOut[i].primaryBitmapSize = classLayouts[i].primaryBitmapSize;
+        classOut[i].primaryBitmapOffset = classLayouts[i].primaryBitmapOffset;
+        classOut[i].primaryOffset = classLayouts[i].primaryOffset;
+        classOut[i].secondaryOffset = classLayouts[i].secondaryOffset;
+        classOut[i].secondaryCount = classLayouts[i].secondaryCount;
     }
 
-    auto *primaryOut = reinterpret_cast<u32 *>(base + primaryOffset);
-    for (u32 i = 0; i < primaryCount; i++) {
-        primaryOut[i] = artifacts.primaryHashTable.offsets[i];
+    for (u32 i = 0; i < classCount; i++) {
+        const auto &klass = artifacts.maskClasses[i];
+        if (!klass.primaryHashBitmap.bits.empty()) {
+            memcpy(base + classLayouts[i].primaryBitmapOffset,
+                   klass.primaryHashBitmap.bits.data(),
+                   klass.primaryHashBitmap.bits.size());
+        }
+
+        auto *primaryOut =
+            reinterpret_cast<u32 *>(base + classLayouts[i].primaryOffset);
+        for (u32 j = 0; j < classLayouts[i].primaryCount; j++) {
+            primaryOut[j] = klass.primaryHashTable.offsets[j];
+        }
     }
 
     auto *secondaryOut =

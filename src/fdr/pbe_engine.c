@@ -75,7 +75,10 @@ static int pbeValidateLayout(const struct FDR *fdr,
         hdr->version != PBE_RUNTIME_VERSION) {
         return 0;
     }
-    if (!hdr->selectorCount || !hdr->primaryCount || !hdr->secondaryCount) {
+    if (!hdr->selectorCount || !hdr->classCount || !hdr->secondaryCount) {
+        return 0;
+    }
+    if (hdr->classCount > PBE_RUNTIME_MAX_MASK_CLASSES) {
         return 0;
     }
     if (hdr->selectorCount > PBE_RUNTIME_MAX_SELECTORS) {
@@ -92,11 +95,8 @@ static int pbeValidateLayout(const struct FDR *fdr,
         (u64a)fdr->pbeSize) {
         return 0;
     }
-    if ((u64a)hdr->primaryBitmapOffset + (u64a)hdr->primaryBitmapSize >
-        (u64a)fdr->pbeSize) {
-        return 0;
-    }
-    if ((u64a)hdr->primaryOffset + (u64a)hdr->primaryCount * sizeof(u32) >
+    if ((u64a)hdr->classTableOffset + (u64a)hdr->classCount *
+            sizeof(struct PBERuntimeMaskClass) >
         (u64a)fdr->pbeSize) {
         return 0;
     }
@@ -114,6 +114,33 @@ static int pbeValidateLayout(const struct FDR *fdr,
         (u64a)fdr->pbeSize) {
         return 0;
     }
+    {
+        const struct PBERuntimeMaskClass *classes =
+            (const struct PBERuntimeMaskClass *)((const u8 *)hdr +
+                                                 hdr->classTableOffset);
+        u32 i;
+        for (i = 0; i < hdr->classCount; i++) {
+            const struct PBERuntimeMaskClass *klass = &classes[i];
+            if (klass->classKeyBits > hdr->keyBits) {
+                return 0;
+            }
+            if ((u64a)klass->primaryBitmapOffset + (u64a)klass->primaryBitmapSize >
+                (u64a)fdr->pbeSize) {
+                return 0;
+            }
+            if ((u64a)klass->primaryOffset + (u64a)klass->primaryCount * sizeof(u32) >
+                (u64a)fdr->pbeSize) {
+                return 0;
+            }
+            if (klass->secondaryOffset >= hdr->secondaryCount) {
+                return 0;
+            }
+            if ((u64a)klass->secondaryOffset + (u64a)klass->secondaryCount >
+                (u64a)hdr->secondaryCount) {
+                return 0;
+            }
+        }
+    }
     return 1;
 }
 
@@ -122,7 +149,8 @@ static int pbeProcessEncodedRange(
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
     const struct PBERuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
     u32 literalBlobSize, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, const struct PBEPositionContext *ctx, u32 encoded) {
+    hwlm_group_t *control, const struct PBEPositionContext *ctx, u32 classKey,
+    u32 encoded) {
     u32 offset = 0;
     u32 count = 0;
     u32 n;
@@ -161,7 +189,7 @@ static int pbeProcessEncodedRange(
             if (!(laneMask & (1U << r))) {
                 continue;
             }
-            if (((ctx->key ^ kv) & km) != 0) {
+            if (((classKey ^ kv) & km) != 0) {
                 continue;
             }
 
@@ -184,6 +212,83 @@ static int pbeProcessEncodedRange(
     return HWLM_SUCCESS;
 }
 
+static int pbeProcessMaskClassesForContext(
+    const struct PBERuntimeHeader *hdr,
+    const struct PBERuntimeMaskClass *classes,
+    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
+    const struct PBERuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
+    u32 literalBlobSize, const struct FDR_Runtime_Args *a,
+    hwlm_group_t *control, const struct PBEPositionContext *ctx) {
+    u32 classIdx;
+
+    for (classIdx = 0; classIdx < hdr->classCount; classIdx++) {
+        const struct PBERuntimeMaskClass *klass = &classes[classIdx];
+        const u8 *primaryBitmap =
+            (const u8 *)hdr + klass->primaryBitmapOffset;
+        const u32 *primaryHashTable =
+            (const u32 *)((const u8 *)hdr + klass->primaryOffset);
+        const u32 classKey = pbeProjectKeyToClass(ctx->key, klass->classMask);
+
+        if (classKey >= klass->primaryCount) {
+            continue;
+        }
+        if (!pbePrimaryBitmapHasValue(primaryBitmap, klass->primaryBitmapSize,
+                                      classKey)) {
+            continue;
+        }
+        if (pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+                                   literalBlob, literalBlobSize, a, control,
+                                   ctx, classKey,
+                                   primaryHashTable[classKey]) ==
+            HWLM_TERMINATED) {
+            return HWLM_TERMINATED;
+        }
+    }
+
+    return HWLM_SUCCESS;
+}
+
+static int pbeReplayMaskClassBatchState(
+    const struct PBERuntimeHeader *hdr,
+    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
+    const struct PBERuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
+    u32 literalBlobSize, const struct FDR_Runtime_Args *a,
+    hwlm_group_t *control, const struct PBEPositionContext *ctxs,
+    const struct PBEMaskClassBatchState *batchState) {
+    u32 lane;
+
+    if (!hdr || !secondaryHashTable || !ruleMeta || !literalBlob || !a ||
+        !control || !ctxs || !batchState) {
+        return HWLM_SUCCESS;
+    }
+
+    for (lane = 0; lane < batchState->laneCount; lane++) {
+        const struct PBEPositionContext *ctx = &ctxs[lane];
+        u32 activeClass;
+
+        for (activeClass = 0; activeClass < batchState->activeClassCount;
+             activeClass++) {
+            const u32 classIdx = batchState->activeClassIndex[activeClass];
+            const u32 laneBit = 1U << lane;
+            const u32 encoded = batchState->classEncoded[classIdx][lane];
+
+            if (!(batchState->classActiveMask[classIdx] & laneBit) || !encoded) {
+                continue;
+            }
+
+            if (pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+                                       literalBlob, literalBlobSize, a,
+                                       control, ctx,
+                                       batchState->classKeys[classIdx][lane],
+                                       encoded) == HWLM_TERMINATED) {
+                return HWLM_TERMINATED;
+            }
+        }
+    }
+
+    return HWLM_SUCCESS;
+}
+
 static UNUSED
 int pbeRunNaive(const struct PBERuntimeHeader *hdr,
                        const struct FDR_Runtime_Args *a,
@@ -195,9 +300,9 @@ int pbeRunNaive(const struct PBERuntimeHeader *hdr,
     const struct PBERuntimeBitSelector *selectors =
         (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
                                                hdr->selectorsOffset);
-    const u8 *primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
-    const u32 *primaryHashTable =
-        (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
+    const struct PBERuntimeMaskClass *classes =
+        (const struct PBERuntimeMaskClass *)((const u8 *)hdr +
+                                             hdr->classTableOffset);
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable =
         (const struct PBERuntimeSecondaryHashEntry *)((const u8 *)hdr +
                                                       hdr->secondaryOffset);
@@ -206,36 +311,16 @@ int pbeRunNaive(const struct PBERuntimeHeader *hdr,
                                             hdr->ruleMetaOffset);
     const u8 *literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
     const u32 literalBlobSize = hdr->literalBlobSize;
-    const u32 wildcardIdx = 0;
-    const u32 wildcardValue =
-        (wildcardIdx < hdr->primaryCount &&
-         pbePrimaryBitmapHasValue(primaryBitmap, hdr->primaryBitmapSize,
-                                  wildcardIdx))
-            ? primaryHashTable[wildcardIdx]
-            : 0;
 
     size_t i;
     for (i = a->start_offset; i < a->len; i++) {
         struct PBEPositionContext ctx;
 
-        pbeBuildPositionContext(hdr, selectors, a, i, wildcardValue, &ctx, 1);
-        ctx.exactEncoded =
-            pbePrimaryBitmapHasValue(primaryBitmap, hdr->primaryBitmapSize,
-                                     ctx.primaryIdx)
-                ? primaryHashTable[ctx.primaryIdx]
-                : 0;
-
-        if (pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
-                                   literalBlob, literalBlobSize, a, control,
-                                   &ctx, ctx.exactEncoded) ==
-            HWLM_TERMINATED) {
-            return HWLM_TERMINATED;
-        }
-        if (ctx.wildcardEncoded != ctx.exactEncoded &&
-            pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
-                                   literalBlob, literalBlobSize, a, control,
-                                   &ctx, ctx.wildcardEncoded) ==
-                HWLM_TERMINATED) {
+        pbeBuildPositionContext(hdr, selectors, a, i, &ctx, 1);
+        if (pbeProcessMaskClassesForContext(hdr, classes, secondaryHashTable,
+                                            ruleMeta, literalBlob,
+                                            literalBlobSize, a, control,
+                                            &ctx) == HWLM_TERMINATED) {
             return HWLM_TERMINATED;
         }
     }
@@ -248,9 +333,9 @@ static int pbeRunBatch4(const struct PBERuntimeHeader *hdr,
     const struct PBERuntimeBitSelector *selectors =
         (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
                                                hdr->selectorsOffset);
-    const u8 *primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
-    const u32 *primaryHashTable =
-        (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
+    const struct PBERuntimeMaskClass *classes =
+        (const struct PBERuntimeMaskClass *)((const u8 *)hdr +
+                                             hdr->classTableOffset);
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable =
         (const struct PBERuntimeSecondaryHashEntry *)((const u8 *)hdr +
                                                       hdr->secondaryOffset);
@@ -259,44 +344,35 @@ static int pbeRunBatch4(const struct PBERuntimeHeader *hdr,
                                             hdr->ruleMetaOffset);
     const u8 *literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
     const u32 literalBlobSize = hdr->literalBlobSize;
-    const u32 wildcardIdx = 0;
-    const u32 wildcardValue =
-        (wildcardIdx < hdr->primaryCount &&
-         pbePrimaryBitmapHasValue(primaryBitmap, hdr->primaryBitmapSize,
-                                  wildcardIdx))
-            ? primaryHashTable[wildcardIdx]
-            : 0;
 
     const u32 batchWidth = pbeSuggestedBatchWidth(hdr);
     size_t i;
     for (i = a->start_offset; i < a->len; i += batchWidth) {
         struct PBEPositionContext ctxs[PBE_BATCH_MAX_WIDTH];
         u32 laneCount = 0;
-        u32 lane;
 
-        memset(ctxs, 0, sizeof(ctxs));
-        laneCount = pbeBuildBatchContexts(hdr, selectors, a, i, wildcardValue,
-                                          batchWidth, ctxs);
-        pbeFillBatchEncodedValues(primaryBitmap, hdr->primaryBitmapSize,
-                                  primaryHashTable, ctxs, laneCount,
-                                  batchWidth);
+        laneCount = pbeBuildBatchContexts(hdr, selectors, a, i, batchWidth,
+                                          ctxs);
 
-        for (lane = 0; lane < laneCount; lane++) {
-            if (ctxs[lane].exactEncoded &&
-                pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
-                                       literalBlob, literalBlobSize, a, control,
-                                       &ctxs[lane], ctxs[lane].exactEncoded) ==
+        if (hdr->classCount <= 2) {
+            u32 lane;
+            for (lane = 0; lane < laneCount; lane++) {
+                if (pbeProcessMaskClassesForContext(hdr, classes,
+                                                    secondaryHashTable,
+                                                    ruleMeta, literalBlob,
+                                                    literalBlobSize, a, control,
+                                                    &ctxs[lane]) ==
                     HWLM_TERMINATED) {
-                return HWLM_TERMINATED;
+                    return HWLM_TERMINATED;
+                }
             }
-
-            if (!ctxs[lane].wildcardEncoded ||
-                ctxs[lane].wildcardEncoded == ctxs[lane].exactEncoded) {
-                continue;
-            }
-            if (pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
-                                       literalBlob, literalBlobSize, a, control,
-                                       &ctxs[lane], ctxs[lane].wildcardEncoded) ==
+        } else {
+            struct PBEMaskClassBatchState batchState;
+            pbeBuildMaskClassBatchState(hdr, classes, ctxs, laneCount,
+                                        &batchState);
+            if (pbeReplayMaskClassBatchState(hdr, secondaryHashTable, ruleMeta,
+                                             literalBlob, literalBlobSize, a,
+                                             control, ctxs, &batchState) ==
                 HWLM_TERMINATED) {
                 return HWLM_TERMINATED;
             }
