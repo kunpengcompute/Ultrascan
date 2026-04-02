@@ -47,6 +47,12 @@ SET(hsbench_SOURCES
     timer.h
 )
 
+set(hsbench_INTERNAL_OBJECTS)
+if (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS)
+    list(APPEND hsbench_INTERNAL_OBJECTS $<TARGET_OBJECTS:hs_compile_shared>)
+    list(APPEND hsbench_INTERNAL_OBJECTS $<TARGET_OBJECTS:hs_exec_shared>)
+endif()
+
 if (BUILD_CHIMERA)
     add_definitions(-DHS_HYBRID)
     SET(hsbench_SOURCES
@@ -56,7 +62,7 @@ if (BUILD_CHIMERA)
         engine_pcre.cpp
         engine_pcre.h
     )
-    add_executable(hsbench ${hsbench_SOURCES})
+    add_executable(hsbench ${hsbench_SOURCES} ${hsbench_INTERNAL_OBJECTS})
     include_directories(${PCRE_INCLUDE_DIRS})
     if(NOT WIN32)
         target_link_libraries(hsbench hs chimera ${PCRE_LDFLAGS} databaseutil
@@ -66,11 +72,7 @@ if (BUILD_CHIMERA)
             expressionutil ${SQLITE3_LDFLAGS} ${CMAKE_THREAD_LIBS_INIT})
     endif()
 else()
-    if(WIN32 AND (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS))
-        add_executable(hsbench ${hsbench_SOURCES} $<TARGET_OBJECTS:hs_compile_shared> $<TARGET_OBJECTS:hs_exec_shared>)
-    else()
-        add_executable(hsbench ${hsbench_SOURCES})
-    endif()
+    add_executable(hsbench ${hsbench_SOURCES} ${hsbench_INTERNAL_OBJECTS})
     target_link_libraries(hsbench hs databaseutil expressionutil
         ${SQLITE3_LDFLAGS} ${CMAKE_THREAD_LIBS_INIT})
 endif()
