@@ -5,7 +5,7 @@
 #include "hwlm/hwlm.h"
 
 #define PBE_RUNTIME_MAGIC 0x50424530U /* "PBE0" */
-#define PBE_RUNTIME_VERSION 5U
+#define PBE_RUNTIME_VERSION 6U
 #define PBE_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 #define PBE_RUNTIME_KEY_BITS 22U
 #define PBE_RUNTIME_L1_OFFSET_BITS 18U
@@ -40,7 +40,6 @@ struct PBERuntimeHeader {
     u32 extractMode;
     u32 windowBytes;
     u64a bextMask;
-    u8 bextToKeyBit[PBE_RUNTIME_MAX_SELECTORS];
     u32 selectorsOffset;
     u32 primaryBitmapOffset;
     u32 primaryOffset;
@@ -87,6 +86,8 @@ extern "C" {
 #endif
 
 u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask);
+void pbeExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
+                                         u64a mask, u64a *packedOut);
 hwlm_error_t PbeEngineExecNaiveForTest(const struct FDR *fdr,
                                        const struct FDR_Runtime_Args *a,
                                        hwlm_group_t control);

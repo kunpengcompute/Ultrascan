@@ -215,13 +215,12 @@ PBE 的前置条件由 `analyzePBEFeasibility(...)` / `canBuildPBE(...)` 统一�
    - `extractMode`
    - `windowBytes`
    - `bextMask`
-   - `bextToKeyBit`
 
 为什么要这样设计：
 
 1. 运行期不能每次重新理解 selector 列表。
 2. `bextMask` 用于把 selector 映射成“位压缩提取”的描述。
-3. `bextToKeyBit` 用于解决 `bext` 压缩结果与当前 key bit 顺序不一致的问题。
+3. 当前主线已经把 selector 顺序重排为源 bit 升序，因此 `BEXT` 的 packed 结果可以直接作为最终 key，不再需要额外 remap 表。
 
 ### 5.6 `buildHashTables(...)`
 位置：`src/fdr/pbe_compile.cpp`
@@ -460,7 +459,7 @@ PBE 的前置条件由 `analyzePBEFeasibility(...)` / `canBuildPBE(...)` 统一�
 职责：
 
 1. 根据 `bextMask` 压缩抽取 window 中的指定 bit
-2. 根据 `bextToKeyBit` 重排到最终 key bit 位置
+2. 由于编译期已经把 key 位顺序对齐到 packed 顺序，压缩结果可直接作为最终 key
 
 #### 6.7.5 `pbeExtractPackedBitsSveBitPerm(...)`
 位置：`src/fdr/pbe_extract_sve2_bitperm.c`
@@ -651,7 +650,6 @@ PBE 的前置条件由 `analyzePBEFeasibility(...)` / `canBuildPBE(...)` 统一�
 | `extractMode` | 提取模式 | scalar / bext |
 | `windowBytes` | key 提取窗口大小 | 当前固定 8 |
 | `bextMask` | bext 位提取掩码 | 运行期直接使用 |
-| `bextToKeyBit` | packed bit 到 key bit 的重映射 | 保持 key 位顺序一致 |
 | `bitSelectors` | selector 列表 | 编译期/inspect 使用 |
 | `primaryHashTable` | L1 主表 | 路由结构 |
 | `primaryHashBitmap` | L1 位图 | 判空辅助结构 |
@@ -703,7 +701,6 @@ PBE 的前置条件由 `analyzePBEFeasibility(...)` / `canBuildPBE(...)` 统一�
 | `extractMode` | key 提取模式 | scalar / bext 分派 |
 | `windowBytes` | 提取窗口大小 | 当前为 8 |
 | `bextMask` | 硬件/软件 packed extract 描述 | bext 提取关键参数 |
-| `bextToKeyBit[32]` | packed bit 到 key bit 的映射 | 保持 key 语义一致 |
 | `selectorsOffset` | selectors 段偏移 | blob 内定位 |
 | `primaryBitmapOffset` | bitmap 段偏移 | blob 内定位 |
 | `primaryOffset` | L1 主表偏移 | blob 内定位 |
@@ -819,7 +816,7 @@ PBE 的前置条件由 `analyzePBEFeasibility(...)` / `canBuildPBE(...)` 统一�
 
 ### 提取描述相关
 1. `buildExtractDescriptor(...)`
-   - 生成 `bextMask/bextToKeyBit/extractMode`
+   - 生成 `bextMask/extractMode`
 
 ### 哈希表构建相关
 1. `encodePrimaryValue(...)`

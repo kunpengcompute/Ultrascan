@@ -66,6 +66,12 @@ void computeKeyValueMaskForLiteral(const hwlmLiteral &lit,
 }
 
 static
+u32 selectorBitIndex(const PBEBitSelector &selector) {
+    return static_cast<u32>(selector.byteOffset) * 8U +
+           static_cast<u32>(selector.bitOffset);
+}
+
+static
 std::string byteToBits(u8 v) {
     std::string s(8, '0');
     for (u32 i = 0; i < 8; i++) {
@@ -131,24 +137,13 @@ void buildExtractDescriptor(const std::vector<PBEBitSelector> &selectors,
     artifacts->extractMode = PBE_EXTRACT_MODE_SCALAR;
     artifacts->windowBytes = PBE_BYTES_PER_RULE_SLOT;
     artifacts->bextMask = 0;
-    artifacts->bextToKeyBit.fill(0xff);
 
     if (selectors.empty() || selectors.size() > PBE_MAX_SELECTORS) {
         return;
     }
 
-    std::vector<std::pair<u32, u8>> bitOrder;
-    bitOrder.reserve(selectors.size());
-    for (u32 i = 0; i < selectors.size(); i++) {
-        const u32 bitIndex = static_cast<u32>(selectors[i].byteOffset) * 8U +
-                             static_cast<u32>(selectors[i].bitOffset);
-        bitOrder.emplace_back(bitIndex, verify_u8(i));
-    }
-
-    std::sort(bitOrder.begin(), bitOrder.end());
-    for (u32 i = 0; i < bitOrder.size(); i++) {
-        artifacts->bextMask |= (1ULL << bitOrder[i].first);
-        artifacts->bextToKeyBit[i] = bitOrder[i].second;
+    for (const auto &selector : selectors) {
+        artifacts->bextMask |= (1ULL << selectorBitIndex(selector));
     }
     artifacts->extractMode = PBE_EXTRACT_MODE_BEXT;
 }
@@ -203,8 +198,7 @@ void dumpSelectors(const std::vector<PBEBitSelector> &selectors) {
     printf("[PBE][Selectors] count=%zu\n", selectors.size());
     for (size_t i = 0; i < selectors.size(); i++) {
         const auto &s = selectors[i];
-        const u32 bitIndex =
-            static_cast<u32>(s.byteOffset) * 8U + static_cast<u32>(s.bitOffset);
+        const u32 bitIndex = selectorBitIndex(s);
         printf("  s%zu -> suffix_bit=%u (byteOffset=%u, bitOffset=%u)\n", i,
                bitIndex, (u32)s.byteOffset, (u32)s.bitOffset);
     }
@@ -215,17 +209,6 @@ void dumpExtractDescriptor(const PBECompileArtifacts &artifacts) {
     printf("[PBE][Extract] mode=%s windowBytes=%u bextMask=0x%llx\n",
            extractModeName(artifacts.extractMode), artifacts.windowBytes,
            (unsigned long long)artifacts.bextMask);
-    if (artifacts.extractMode != PBE_EXTRACT_MODE_BEXT) {
-        return;
-    }
-    printf("  bextToKeyBit=[");
-    for (u32 i = 0; i < artifacts.bitSelectors.size() && i < PBE_MAX_SELECTORS;
-         i++) {
-        const u8 keyBit = artifacts.bextToKeyBit[i];
-        printf("%u%s", (u32)keyBit,
-               i + 1 == artifacts.bitSelectors.size() ? "" : ", ");
-    }
-    printf("]\n");
 }
 
 static
@@ -523,8 +506,13 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
         }
     }
 
+    std::sort(selectors->begin(), selectors->end(),
+              [](const PBEBitSelector &a, const PBEBitSelector &b) {
+                  return selectorBitIndex(a) < selectorBitIndex(b);
+              });
+
     if (keyBitsOut) {
-        *keyBitsOut = PBE_KEY_BITS;
+        *keyBitsOut = verify_u32(selectors->size());
     }
 }
 
@@ -736,7 +724,6 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     artifacts->extractMode = PBE_EXTRACT_MODE_SCALAR;
     artifacts->windowBytes = PBE_BYTES_PER_RULE_SLOT;
     artifacts->bextMask = 0;
-    artifacts->bextToKeyBit.fill(0xff);
     artifacts->bitSelectors.clear();
     artifacts->primaryHashTable.offsets.clear();
     artifacts->primaryHashBitmap.bits.clear();
@@ -911,9 +898,6 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     hdr->extractMode = artifacts.extractMode;
     hdr->windowBytes = artifacts.windowBytes;
     hdr->bextMask = artifacts.bextMask;
-    memset(hdr->bextToKeyBit, 0xff, sizeof(hdr->bextToKeyBit));
-    memcpy(hdr->bextToKeyBit, artifacts.bextToKeyBit.data(),
-           sizeof(hdr->bextToKeyBit));
     hdr->selectorsOffset = selectorsOffset;
     hdr->primaryBitmapOffset = primaryBitmapOffset;
     hdr->primaryOffset = primaryOffset;

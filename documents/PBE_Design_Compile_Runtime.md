@@ -346,18 +346,21 @@
    - `extractMode`
    - `windowBytes`
    - `bextMask`
-   - `bextToKeyBit[32]`
-6. 编译期会把当前 `22` 个 selector 转换成：
-   - 一个 `64-bit bextMask`
-   - 一个“压缩后 bit 位 -> 原 key bit 位”的重排表
+6. 编译期会把当前 `22` 个 selector 转换成一个 `64-bit bextMask`。
 7. 运行期提取流程现在改成：
    - 先从当前位置装载 `8-byte window`
    - 若 `extractMode=scalar`，则按 selector 标量提取
-   - 若 `extractMode=bext`，则先执行 packed bit extract，再按 `bextToKeyBit` 重排成最终 `22-bit key`
+   - 若 `extractMode=bext`，则直接执行 packed bit extract 生成最终 `key`
 8. 当前保留两条实现路径：
    - `SVEBITPERM` 可用时，调用专用 helper
    - 否则回退到软件 `bext` 打包实现
 9. 这里的 `window64` 采用“原始字节”拼接，不做统一大写归一化；大小写不敏感规则仍通过 `keyMask` 中的“不关心位”来消解差异。
+
+补充说明：
+
+1. 当前主线已经把 selector 的逻辑顺序重排为源 bit 升序。
+2. 因此 `BEXT` 的 packed bit 顺序与最终 key 位顺序一致。
+3. 旧版文档里关于 `bextToKeyBit` 的描述仅代表历史设计，不再代表当前实现。
 
 ### `window64 -> bextMask -> key` 详细流程图
 

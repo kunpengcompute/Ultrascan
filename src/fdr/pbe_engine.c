@@ -28,9 +28,11 @@ static u32 pbeExtractKeyScalarFromWindow(
     const struct PBERuntimeBitSelector *selectors, u32 selectorCount,
     u64a window);
 static u64a pbeExtractPackedBitsFallback(u64a window, u64a mask);
-static u32 pbeRemapPackedBits(u64a packed, const u8 *bitOrder,
-                              u32 selectorCount);
 static u32 pbeExtractKeyBext(const struct PBERuntimeHeader *hdr, u64a window);
+static void pbeExtractKeysFromWindows(
+    const struct PBERuntimeHeader *hdr,
+    const struct PBERuntimeBitSelector *selectors, const u64a *windows,
+    u32 count, u32 *keys);
 static u32 pbeComputeValidMask8(const struct FDR_Runtime_Args *a, size_t endPos);
 static void pbeBuildLaneWindow32FromWindow(u64a window, u32 validMask8,
                                            u8 *window32, u32 *validMask32);
@@ -38,7 +40,7 @@ static void pbeBuildPositionContext(
     const struct PBERuntimeHeader *hdr,
     const struct PBERuntimeBitSelector *selectors,
     const struct FDR_Runtime_Args *a, size_t endPos, u32 wildcardEncoded,
-    struct PBEPositionContext *ctx);
+    struct PBEPositionContext *ctx, int fillKey);
 static int pbeProcessEncodedRange(
     const struct PBERuntimeHeader *hdr,
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
@@ -237,26 +239,14 @@ static u64a pbeExtractPackedBitsFallback(u64a window, u64a mask) {
     return packed;
 }
 
-static u32 pbeRemapPackedBits(u64a packed, const u8 *bitOrder,
-                              u32 selectorCount) {
-    u32 key = 0;
-    u32 i;
-
-    if (!bitOrder) {
+static u32 pbePackedKeyMask(u32 selectorCount) {
+    if (!selectorCount) {
         return 0;
     }
-
-    for (i = 0; i < selectorCount && i < PBE_RUNTIME_MAX_SELECTORS; i++) {
-        const u8 keyBit = bitOrder[i];
-        if (keyBit >= PBE_RUNTIME_MAX_SELECTORS) {
-            continue;
-        }
-        if (packed & ((u64a)1 << i)) {
-            key |= (1U << keyBit);
-        }
+    if (selectorCount >= 32U) {
+        return 0xffffffffU;
     }
-
-    return key;
+    return (1U << selectorCount) - 1U;
 }
 
 static u32 pbeExtractKeyBext(const struct PBERuntimeHeader *hdr, u64a window) {
@@ -264,8 +254,45 @@ static u32 pbeExtractKeyBext(const struct PBERuntimeHeader *hdr, u64a window) {
                             ? pbeExtractPackedBitsSveBitPerm(window,
                                                              hdr->bextMask)
                             : pbeExtractPackedBitsFallback(window,
-                                                           hdr->bextMask);
-    return pbeRemapPackedBits(packed, hdr->bextToKeyBit, hdr->selectorCount);
+                                                            hdr->bextMask);
+    return (u32)(packed & pbePackedKeyMask(hdr->selectorCount));
+}
+
+static void pbeExtractKeysFromWindows(
+    const struct PBERuntimeHeader *hdr,
+    const struct PBERuntimeBitSelector *selectors, const u64a *windows,
+    u32 count, u32 *keys) {
+    u32 i;
+
+    if (!hdr || !windows || !keys) {
+        return;
+    }
+
+    if (hdr->extractMode == PBE_RUNTIME_EXTRACT_MODE_BEXT) {
+        u64a packed[PBE_BATCH_WIDTH] = {0};
+        const u32 keyMask = pbePackedKeyMask(hdr->selectorCount);
+
+        assert(count <= PBE_BATCH_WIDTH);
+        if (pbeRuntimeCanUseBextFastPath()) {
+            pbeExtractPackedBitsSveBitPermBatch(windows, count, hdr->bextMask,
+                                                packed);
+        } else {
+            for (i = 0; i < count; i++) {
+                packed[i] = pbeExtractPackedBitsFallback(windows[i],
+                                                         hdr->bextMask);
+            }
+        }
+
+        for (i = 0; i < count; i++) {
+            keys[i] = (u32)(packed[i] & keyMask);
+        }
+        return;
+    }
+
+    for (i = 0; i < count; i++) {
+        keys[i] = pbeExtractKeyScalarFromWindow(selectors, hdr->selectorCount,
+                                                windows[i]);
+    }
 }
 
 static u32 pbeExtractKeyFromWindow(
@@ -282,21 +309,22 @@ static void pbeBuildPositionContext(
     const struct PBERuntimeHeader *hdr,
     const struct PBERuntimeBitSelector *selectors,
     const struct FDR_Runtime_Args *a, size_t endPos, u32 wildcardEncoded,
-    struct PBEPositionContext *ctx) {
+    struct PBEPositionContext *ctx, int fillKey) {
     const u64a window64 =
         pbeLoadWindow64Normalized(a, endPos, PBE_RUNTIME_BYTES_PER_RULE_SLOT);
-    const u32 key = pbeExtractKeyFromWindow(hdr, selectors, window64);
     const u32 validMask8 = pbeComputeValidMask8(a, endPos);
 
     assert(ctx);
     memset(ctx, 0, sizeof(*ctx));
     ctx->endPos = endPos;
-    ctx->key = key;
-    ctx->primaryIdx = (key < hdr->primaryCount) ? key : 0;
     ctx->wildcardEncoded = wildcardEncoded;
     ctx->window64 = window64;
     pbeBuildLaneWindow32FromWindow(window64, validMask8, ctx->laneWindow32,
                                    &ctx->validMask32);
+    if (fillKey) {
+        ctx->key = pbeExtractKeyFromWindow(hdr, selectors, window64);
+        ctx->primaryIdx = (ctx->key < hdr->primaryCount) ? ctx->key : 0;
+    }
 }
 
 static int pbeRuleExactMatch(const struct PBERuntimeRuleMeta *rm,
@@ -600,13 +628,22 @@ static u32 pbeBuildBatch4Contexts(const struct PBERuntimeHeader *hdr,
                                   const struct FDR_Runtime_Args *a,
                                   size_t startPos, u32 wildcardEncoded,
                                   struct PBEPositionContext *ctxs) {
+    u64a windows[PBE_BATCH_WIDTH] = {0};
+    u32 keys[PBE_BATCH_WIDTH] = {0};
     u32 laneCount = 0;
 
     while (laneCount < PBE_BATCH_WIDTH && startPos + laneCount < a->len) {
         const size_t pos = startPos + laneCount;
         pbeBuildPositionContext(hdr, selectors, a, pos, wildcardEncoded,
-                                &ctxs[laneCount]);
+                                &ctxs[laneCount], 0);
+        windows[laneCount] = ctxs[laneCount].window64;
         laneCount++;
+    }
+
+    pbeExtractKeysFromWindows(hdr, selectors, windows, laneCount, keys);
+    for (u32 lane = 0; lane < laneCount; lane++) {
+        ctxs[lane].key = keys[lane];
+        ctxs[lane].primaryIdx = (keys[lane] < hdr->primaryCount) ? keys[lane] : 0;
     }
 
     return laneCount;
@@ -739,7 +776,7 @@ int pbeRunNaive(const struct PBERuntimeHeader *hdr,
     for (i = a->start_offset; i < a->len; i++) {
         struct PBEPositionContext ctx;
 
-        pbeBuildPositionContext(hdr, selectors, a, i, wildcardValue, &ctx);
+        pbeBuildPositionContext(hdr, selectors, a, i, wildcardValue, &ctx, 1);
         ctx.exactEncoded =
             pbePrimaryBitmapHasValue(primaryBitmap, hdr->primaryBitmapSize,
                                      ctx.primaryIdx)

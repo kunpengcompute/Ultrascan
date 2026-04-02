@@ -419,19 +419,14 @@ u64a extractPackedBitsFallbackForTest(u64a window, u64a mask) {
 }
 
 static
-u32 remapPackedBitsForTest(const PBECompileArtifacts &artifacts, u64a packed) {
-    u32 key = 0;
-    for (u32 i = 0; i < artifacts.bitSelectors.size() && i < PBE_MAX_SELECTORS;
-         i++) {
-        const u8 keyBit = artifacts.bextToKeyBit[i];
-        if (keyBit >= PBE_MAX_SELECTORS) {
-            continue;
-        }
-        if (packed & ((u64a)1 << i)) {
-            key |= (1U << keyBit);
-        }
+u32 packedBitsToKeyForTest(const PBECompileArtifacts &artifacts, u64a packed) {
+    if (artifacts.bitSelectors.empty()) {
+        return 0;
     }
-    return key;
+    if (artifacts.bitSelectors.size() >= 32) {
+        return (u32)packed;
+    }
+    return (u32)(packed & ((1ULL << artifacts.bitSelectors.size()) - 1ULL));
 }
 
 TEST(PBEvsNeo, BlockGroupsConsistency) {
@@ -853,9 +848,6 @@ TEST(PBECompile, BuildPbeBlobHeaderMatchesArtifacts) {
     EXPECT_EQ(artifacts.extractMode, hdr->extractMode);
     EXPECT_EQ(artifacts.windowBytes, hdr->windowBytes);
     EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
-    EXPECT_TRUE(std::equal(hdr->bextToKeyBit,
-                           hdr->bextToKeyBit + PBE_MAX_SELECTORS,
-                           artifacts.bextToKeyBit.begin()));
 }
 
 TEST(PBECompile, PrimaryBitmapMatchesNonEmptyL1Entries) {
@@ -998,19 +990,19 @@ TEST(PBECompile, BextMaskMatchesSelectors) {
     ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
     ASSERT_EQ(PBE_EXTRACT_MODE_BEXT, artifacts.extractMode);
 
-    std::vector<std::pair<u32, u8>> expected;
+    std::vector<u32> expectedBits;
     for (u32 i = 0; i < artifacts.bitSelectors.size(); i++) {
         const auto &sel = artifacts.bitSelectors[i];
-        expected.emplace_back(static_cast<u32>(sel.byteOffset) * 8U +
-                                  static_cast<u32>(sel.bitOffset),
-                              verify_u8(i));
+        expectedBits.push_back(static_cast<u32>(sel.byteOffset) * 8U +
+                               static_cast<u32>(sel.bitOffset));
     }
-    std::sort(expected.begin(), expected.end());
 
     u64a expectedMask = 0;
-    for (u32 i = 0; i < expected.size(); i++) {
-        expectedMask |= ((u64a)1 << expected[i].first);
-        EXPECT_EQ(expected[i].second, artifacts.bextToKeyBit[i]);
+    for (u32 i = 0; i < expectedBits.size(); i++) {
+        expectedMask |= ((u64a)1 << expectedBits[i]);
+        if (i) {
+            EXPECT_LT(expectedBits[i - 1], expectedBits[i]);
+        }
     }
     EXPECT_EQ(expectedMask, artifacts.bextMask);
 }
@@ -1040,7 +1032,7 @@ TEST(PBEExtract, BextMatchesScalar) {
                                                                 window);
         const u64a packed = extractPackedBitsFallbackForTest(window,
                                                              artifacts.bextMask);
-        const u32 bextKey = remapPackedBitsForTest(artifacts, packed);
+        const u32 bextKey = packedBitsToKeyForTest(artifacts, packed);
         EXPECT_EQ(scalarKey, bextKey) << "endPos=" << endPos;
     }
 }
@@ -1067,7 +1059,7 @@ TEST(PBEExtract, BextHistoryBoundaryConsistency) {
                                                                 window);
         const u64a packed = extractPackedBitsFallbackForTest(window,
                                                              artifacts.bextMask);
-        const u32 bextKey = remapPackedBitsForTest(artifacts, packed);
+        const u32 bextKey = packedBitsToKeyForTest(artifacts, packed);
         EXPECT_EQ(scalarKey, bextKey) << "boundary endPos=" << endPos;
     }
 }
@@ -1441,13 +1433,6 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
               << " bextMask={dec=" << artifacts.bextMask
               << ",hex=0x" << std::hex << artifacts.bextMask << std::dec
               << ",bin=" << std::bitset<64>(artifacts.bextMask) << "}\n";
-    std::cout << "  bextToKeyBit=[";
-    for (size_t i = 0; i < artifacts.bitSelectors.size() && i < PBE_MAX_SELECTORS;
-         i++) {
-        std::cout << static_cast<u32>(artifacts.bextToKeyBit[i])
-                  << (i + 1 == artifacts.bitSelectors.size() ? "" : ", ");
-    }
-    std::cout << "]\n";
 
     std::cout << "\n[Build Stats]\n";
     std::cout << "  nonEmptyL1=" << stats.nonEmptyL1

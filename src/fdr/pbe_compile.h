@@ -78,7 +78,6 @@ struct PBECompileArtifacts {
     u32 extractMode = PBE_EXTRACT_MODE_SCALAR;
     u32 windowBytes = PBE_BYTES_PER_RULE_SLOT;
     u64a bextMask = 0;
-    std::array<u8, PBE_MAX_SELECTORS> bextToKeyBit = {};
     std::vector<PBEBitSelector> bitSelectors;
     PBEPrimaryHashTable primaryHashTable;
     PBEPrimaryHashBitmap primaryHashBitmap;
