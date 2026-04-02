@@ -18,6 +18,10 @@ u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask) {
     return (u64a)lanes[0];
 }
 
+u32 pbeExtractPackedBitsSveBitPermLaneCount(void) {
+    return (u32)svcntd();
+}
+
 void pbeExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
                                          u64a mask, u64a *packedOut) {
     u32 i = 0;
@@ -52,6 +56,10 @@ u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask) {
     }
 
     return packed;
+}
+
+u32 pbeExtractPackedBitsSveBitPermLaneCount(void) {
+    return 1;
 }
 
 void pbeExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,

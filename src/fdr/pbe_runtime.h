@@ -88,6 +88,7 @@ extern "C" {
 u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask);
 void pbeExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
                                          u64a mask, u64a *packedOut);
+u32 pbeExtractPackedBitsSveBitPermLaneCount(void);
 hwlm_error_t PbeEngineExecNaiveForTest(const struct FDR *fdr,
                                        const struct FDR_Runtime_Args *a,
                                        hwlm_group_t control);
