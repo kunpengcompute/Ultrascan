@@ -14,6 +14,7 @@
 
 #define PBE_BATCH_FALLBACK_WIDTH 4U
 #define PBE_BATCH_MAX_WIDTH 32U
+#define PBE_BITMAP_GROUPED_BYTES 4U
 
 struct PBEPositionContext {
     size_t endPos;
@@ -24,6 +25,18 @@ struct PBEPositionContext {
     u64a window64;
     u8 laneWindow32[PBE_RUNTIME_RULE_VECTOR_BYTES];
     u32 validMask32;
+};
+
+struct PBEBitmapProbeState {
+    u32 laneCount;
+    u32 byteIndex[PBE_BATCH_MAX_WIDTH];
+    u8 bitShift[PBE_BATCH_MAX_WIDTH];
+    u8 bitMask[PBE_BATCH_MAX_WIDTH];
+    u8 gatheredBytes[PBE_BATCH_MAX_WIDTH];
+    u32 activeMask;
+    u32 activeLaneIndex[PBE_BATCH_MAX_WIDTH];
+    u32 activePrimaryIdx[PBE_BATCH_MAX_WIDTH];
+    u32 activeEncoded[PBE_BATCH_MAX_WIDTH];
 };
 
 static really_inline
@@ -461,13 +474,55 @@ u32 pbeBuildBatchContexts(const struct PBERuntimeHeader *hdr,
 }
 
 static really_inline
-u32 pbeBatchBitmapMask(const u8 *bitmap, u32 bitmapSize,
-                       const u32 *primaryIdx, u32 laneCount) {
+void pbePrepareBitmapProbeStateFromPrimaryIdx(const u32 *primaryIdx,
+                                              u32 laneCount,
+                                              struct PBEBitmapProbeState *state) {
+    u32 lane;
+
+    if (!primaryIdx || !state || laneCount > PBE_BATCH_MAX_WIDTH) {
+        return;
+    }
+
+    memset(state, 0, sizeof(*state));
+    state->laneCount = laneCount;
+    for (lane = 0; lane < laneCount; lane++) {
+        state->activePrimaryIdx[lane] = primaryIdx[lane];
+        state->byteIndex[lane] = primaryIdx[lane] >> 3;
+        state->bitShift[lane] = (u8)(primaryIdx[lane] & 7U);
+        state->bitMask[lane] = (u8)(1U << state->bitShift[lane]);
+    }
+}
+
+static really_inline
+void pbePrepareBitmapProbeState(const struct PBEPositionContext *ctxs,
+                                u32 laneCount,
+                                struct PBEBitmapProbeState *state) {
+    u32 primaryIdx[PBE_BATCH_MAX_WIDTH] = {0};
+    u32 lane;
+
+    if (!ctxs || !state || laneCount > PBE_BATCH_MAX_WIDTH) {
+        return;
+    }
+
+    for (lane = 0; lane < laneCount; lane++) {
+        primaryIdx[lane] = ctxs[lane].primaryIdx;
+    }
+    pbePrepareBitmapProbeStateFromPrimaryIdx(primaryIdx, laneCount, state);
+}
+
+static really_inline
+u32 pbeProbeBitmapScalar(const u8 *bitmap, u32 bitmapSize,
+                         const struct PBEBitmapProbeState *state) {
     u32 activeMask = 0;
     u32 lane;
 
-    for (lane = 0; lane < laneCount; lane++) {
-        if (pbePrimaryBitmapHasValue(bitmap, bitmapSize, primaryIdx[lane])) {
+    if (!state) {
+        return 0;
+    }
+
+    for (lane = 0; lane < state->laneCount; lane++) {
+        if (pbePrimaryBitmapHasValue(bitmap, bitmapSize,
+                                     state->activePrimaryIdx[lane])) {
             activeMask |= (1U << lane);
         }
     }
@@ -476,18 +531,110 @@ u32 pbeBatchBitmapMask(const u8 *bitmap, u32 bitmapSize,
 }
 
 static really_inline
-u32 pbeCompactPrimaryLanes(const u32 *primaryIdx, u32 laneCount,
-                           u32 activeMask, u32 *activePrimaryIdx,
-                           u32 *activeLaneIndex) {
+int pbeProbeBitmapGrouped(const u8 *bitmap, u32 bitmapSize,
+                          const struct PBEBitmapProbeState *state,
+                          u32 *activeMaskOut) {
+    u32 lane;
+    u32 minByte;
+    u32 maxByte;
+    u32 activeMask = 0;
+
+    if (!bitmap || !state || !state->laneCount || !activeMaskOut) {
+        return 0;
+    }
+
+    minByte = state->byteIndex[0];
+    maxByte = state->byteIndex[0];
+    for (lane = 0; lane < state->laneCount; lane++) {
+        const u32 idx = state->byteIndex[lane];
+        if (idx >= bitmapSize) {
+            return 0;
+        }
+        if (idx < minByte) {
+            minByte = idx;
+        }
+        if (idx > maxByte) {
+            maxByte = idx;
+        }
+    }
+
+    if (maxByte - minByte + 1 > PBE_BITMAP_GROUPED_BYTES) {
+        return 0;
+    }
+
+    for (lane = 0; lane < state->laneCount; lane++) {
+        const u8 byte = bitmap[state->byteIndex[lane]];
+        if (byte & state->bitMask[lane]) {
+            activeMask |= (1U << lane);
+        }
+    }
+
+    *activeMaskOut = activeMask;
+    return 1;
+}
+
+static really_inline
+u32 pbeProbeBitmapPacked(const u8 *bitmap, u32 bitmapSize,
+                         struct PBEBitmapProbeState *state) {
+    u32 activeMask = 0;
+    u32 lane;
+
+    if (!state) {
+        return 0;
+    }
+
+    if (pbeProbeBitmapGrouped(bitmap, bitmapSize, state, &activeMask)) {
+        state->activeMask = activeMask;
+        return activeMask;
+    }
+
+    for (lane = 0; lane < state->laneCount; lane++) {
+        const u32 idx = state->byteIndex[lane];
+        state->gatheredBytes[lane] = idx < bitmapSize ? bitmap[idx] : 0;
+    }
+
+#if defined(HAVE_NEON) || defined(HAVE_SSE2)
+    for (lane = 0; lane < state->laneCount; lane += 16U) {
+        const u32 lanesThisRound = MIN(16U, state->laneCount - lane);
+        const u32 laneMask = lanesThisRound == 16U
+                                 ? 0xffffU
+                                 : ((1U << lanesThisRound) - 1U);
+        const m128 gathered = loadu128(state->gatheredBytes + lane);
+        const m128 masks = loadu128(state->bitMask + lane);
+        const m128 masked = and128(gathered, masks);
+        const u32 zeroMask = movemask128(eq128(masked, zeroes128()));
+        activeMask |= ((~zeroMask) & laneMask) << lane;
+    }
+#else
+    for (lane = 0; lane < state->laneCount; lane++) {
+        if (state->gatheredBytes[lane] & state->bitMask[lane]) {
+            activeMask |= (1U << lane);
+        }
+    }
+#endif
+
+    state->activeMask = activeMask;
+    return activeMask;
+}
+
+static really_inline
+u32 pbeCompactAndLoadPrimary(const u32 *primaryHashTable,
+                             struct PBEBitmapProbeState *state) {
     u32 activeCount = 0;
     u32 lane;
 
-    for (lane = 0; lane < laneCount; lane++) {
-        if (!(activeMask & (1U << lane))) {
+    if (!primaryHashTable || !state) {
+        return 0;
+    }
+
+    for (lane = 0; lane < state->laneCount; lane++) {
+        if (!(state->activeMask & (1U << lane))) {
             continue;
         }
-        activePrimaryIdx[activeCount] = primaryIdx[lane];
-        activeLaneIndex[activeCount] = lane;
+        state->activePrimaryIdx[activeCount] = state->activePrimaryIdx[lane];
+        state->activeLaneIndex[activeCount] = lane;
+        state->activeEncoded[activeCount] =
+            primaryHashTable[state->activePrimaryIdx[lane]];
         activeCount++;
     }
 
@@ -495,63 +642,30 @@ u32 pbeCompactPrimaryLanes(const u32 *primaryIdx, u32 laneCount,
 }
 
 static really_inline
-void pbeBatchLoadPrimaryValues(const u32 *primaryHashTable,
-                               const u32 *activePrimaryIdx,
-                               const u32 *activeLaneIndex, u32 activeCount,
-                               u32 *activeEncoded, u32 *encodedByLane,
-                               u32 laneCapacity) {
-    u32 i;
-
-    if (!primaryHashTable || !activePrimaryIdx || !activeLaneIndex ||
-        !activeEncoded || !encodedByLane) {
-        return;
-    }
-
-    for (i = 0; i < laneCapacity; i++) {
-        encodedByLane[i] = 0;
-    }
-
-    for (i = 0; i < activeCount; i++) {
-        const u32 encoded = primaryHashTable[activePrimaryIdx[i]];
-        activeEncoded[i] = encoded;
-        if (activeLaneIndex[i] < laneCapacity) {
-            encodedByLane[activeLaneIndex[i]] = encoded;
-        }
-    }
-}
-
-static really_inline
 void pbeFillBatchEncodedValues(const u8 *primaryBitmap, u32 bitmapSize,
                                const u32 *primaryHashTable,
                                struct PBEPositionContext *ctxs, u32 laneCount,
                                u32 laneCapacity) {
-    u32 primaryIdx[PBE_BATCH_MAX_WIDTH] = {0};
-    u32 activePrimaryIdx[PBE_BATCH_MAX_WIDTH] = {0};
-    u32 activeLaneIndex[PBE_BATCH_MAX_WIDTH] = {0};
-    u32 activeEncoded[PBE_BATCH_MAX_WIDTH] = {0};
-    u32 encodedByLane[PBE_BATCH_MAX_WIDTH] = {0};
-    u32 activeMask;
+    struct PBEBitmapProbeState probe;
     u32 activeCount;
-    u32 lane;
+    u32 i;
 
     if (!ctxs || laneCount > laneCapacity || laneCapacity > PBE_BATCH_MAX_WIDTH) {
         return;
     }
 
-    for (lane = 0; lane < laneCount; lane++) {
-        primaryIdx[lane] = ctxs[lane].primaryIdx;
+    for (i = 0; i < laneCount; i++) {
+        ctxs[i].exactEncoded = 0;
     }
 
-    activeMask = pbeBatchBitmapMask(primaryBitmap, bitmapSize, primaryIdx,
-                                    laneCount);
-    activeCount = pbeCompactPrimaryLanes(primaryIdx, laneCount, activeMask,
-                                         activePrimaryIdx, activeLaneIndex);
-    pbeBatchLoadPrimaryValues(primaryHashTable, activePrimaryIdx,
-                              activeLaneIndex, activeCount, activeEncoded,
-                              encodedByLane, laneCapacity);
+    pbePrepareBitmapProbeState(ctxs, laneCount, &probe);
+    pbeProbeBitmapPacked(primaryBitmap, bitmapSize, &probe);
+    activeCount = pbeCompactAndLoadPrimary(primaryHashTable, &probe);
 
-    for (lane = 0; lane < laneCount; lane++) {
-        ctxs[lane].exactEncoded = encodedByLane[lane];
+    for (i = 0; i < activeCount; i++) {
+        if (probe.activeLaneIndex[i] < laneCapacity) {
+            ctxs[probe.activeLaneIndex[i]].exactEncoded = probe.activeEncoded[i];
+        }
     }
 }
 

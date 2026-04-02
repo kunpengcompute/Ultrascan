@@ -352,6 +352,18 @@ u32 PbeRuntimeEntryMatchMaskForTest(
                      : pbeEntryMatchMaskFromContextScalar(entry, &ctx);
 }
 
+u32 PbeRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
+                                     const u32 *primaryIdx, u32 laneCount,
+                                     int usePacked) {
+    struct PBEBitmapProbeState probe;
+
+    memset(&probe, 0, sizeof(probe));
+    pbePrepareBitmapProbeStateFromPrimaryIdx(primaryIdx, laneCount, &probe);
+
+    return usePacked ? pbeProbeBitmapPacked(bitmap, bitmapSize, &probe)
+                     : pbeProbeBitmapScalar(bitmap, bitmapSize, &probe);
+}
+
 hwlm_error_t PbeEngineExec(const struct FDR *fdr,
                            const struct FDR_Runtime_Args *a,
                            hwlm_group_t control) {

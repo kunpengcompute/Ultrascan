@@ -95,6 +95,9 @@ hwlm_error_t PbeEngineExecNaiveForTest(const struct FDR *fdr,
 u32 PbeRuntimeEntryMatchMaskForTest(
     const struct PBERuntimeSecondaryHashEntry *entry,
     const struct FDR_Runtime_Args *a, size_t endPos, int useVector);
+u32 PbeRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
+                                     const u32 *primaryIdx, u32 laneCount,
+                                     int usePacked);
 
 #ifdef __cplusplus
 }

@@ -1246,6 +1246,40 @@ TEST(PBERuntime, Batch4MatchesNaiveDirect) {
     EXPECT_EQ(naiveMatches, batchMatches);
 }
 
+TEST(PBERuntime, BitmapProbePackedMatchesScalar) {
+    const std::vector<u8> bitmap = {
+        0x96, // idx 1,2,4,7
+        0x21, // idx 8,13
+        0x00,
+        0x80  // idx 31
+    };
+    const u32 primaryIdx[] = {1, 2, 3, 4, 7, 8, 13, 14, 31, 99};
+    const u32 laneCount = verify_u32(sizeof(primaryIdx) / sizeof(primaryIdx[0]));
+
+    const u32 scalarMask = PbeRuntimeBitmapProbeMaskForTest(
+        bitmap.data(), verify_u32(bitmap.size()), primaryIdx, laneCount, 0);
+    const u32 packedMask = PbeRuntimeBitmapProbeMaskForTest(
+        bitmap.data(), verify_u32(bitmap.size()), primaryIdx, laneCount, 1);
+
+    EXPECT_EQ(scalarMask, packedMask);
+}
+
+TEST(PBERuntime, BitmapProbeHandlesSharedBitmapByte) {
+    const std::vector<u8> bitmap = {
+        0x96 // idx 1,2,4,7
+    };
+    const u32 primaryIdx[] = {1, 2, 3, 4, 7};
+    const u32 laneCount = verify_u32(sizeof(primaryIdx) / sizeof(primaryIdx[0]));
+
+    const u32 scalarMask = PbeRuntimeBitmapProbeMaskForTest(
+        bitmap.data(), verify_u32(bitmap.size()), primaryIdx, laneCount, 0);
+    const u32 packedMask = PbeRuntimeBitmapProbeMaskForTest(
+        bitmap.data(), verify_u32(bitmap.size()), primaryIdx, laneCount, 1);
+
+    EXPECT_EQ(0x1bU, scalarMask);
+    EXPECT_EQ(scalarMask, packedMask);
+}
+
 TEST(PBERuntime, Batch4SparseBitmapSkipsEmptyLanes) {
     auto pbe = buildFdrWithHint({
         hwlmLiteral("alpha", false, false, 740, HWLM_ALL_GROUPS, {}, {}),
