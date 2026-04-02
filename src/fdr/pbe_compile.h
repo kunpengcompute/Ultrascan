@@ -26,8 +26,12 @@ static constexpr u32 PBE_TBL_CONTROL_BYTES =
 static constexpr u32 PBE_RULE_SLOT_MASK_WORDS = 1U;
 static constexpr u32 PBE_MAX_SELECTORS = 32U;
 static constexpr u32 PBE_MAX_MASK_CLASSES = 32U;
+static constexpr u32 PBE_MAX_HOT_MASK_CLASSES = 4U;
+static constexpr u32 PBE_HOT_MASK_CLASS_COVERAGE_PCT = 80U;
 static constexpr u32 PBE_EXTRACT_MODE_SCALAR = 0U;
 static constexpr u32 PBE_EXTRACT_MODE_BEXT = 1U;
+
+static constexpr u32 PBE_MASK_CLASS_FLAG_HOT = 1U << 0;
 
 static constexpr u16 PBE_RULE_FLAG_NOCASE = 1U << 0;
 static constexpr u16 PBE_RULE_FLAG_NORUNS = 1U << 1;
@@ -53,6 +57,8 @@ struct PBEMaskClassArtifacts {
     u32 classId = 0;
     u32 classMask = 0;
     u32 classKeyBits = 0;
+    u32 ruleCount = 0;
+    u32 flags = 0;
     u32 secondaryOffset = 0;
     u32 secondaryCount = 0;
     PBEPrimaryHashTable primaryHashTable;

@@ -1114,6 +1114,43 @@ TEST(PBECompile, MaskClassCountWithinRuntimeLimit) {
     EXPECT_LE(hdr->classCount, PBE_RUNTIME_MAX_MASK_CLASSES);
 }
 
+TEST(PBECompile, HotMaskClassesPreferHigherRuleCoverage) {
+    auto partialLits = makeDuplicateLiterals("ab", true, false, 705, 8,
+                                             HWLM_ALL_GROUPS);
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 713, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 714, HWLM_ALL_GROUPS, {}, {})
+    };
+    lits.insert(lits.end(), partialLits.begin(), partialLits.end());
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+
+    bool sawHotPartialClass = false;
+    const u32 fullMask = fullKeyMaskForArtifacts(artifacts);
+    for (const auto &klass : artifacts.maskClasses) {
+        if ((klass.flags & PBE_MASK_CLASS_FLAG_HOT) &&
+            klass.classMask != fullMask) {
+            sawHotPartialClass = true;
+        }
+    }
+    EXPECT_TRUE(sawHotPartialClass);
+
+    auto blob = buildPBEBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+    const auto *hdr = reinterpret_cast<const PBERuntimeHeader *>(blob.get());
+    const auto *classTable = reinterpret_cast<const PBERuntimeMaskClass *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->classTableOffset);
+    bool sawHotRuntimeClass = false;
+    for (u32 i = 0; i < hdr->classCount; i++) {
+        if (classTable[i].flags & PBE_RUNTIME_MASK_CLASS_FLAG_HOT) {
+            sawHotRuntimeClass = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(sawHotRuntimeClass);
+}
+
 TEST(PBEExtract, BextMatchesScalar) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 700, HWLM_ALL_GROUPS, {}, {}),

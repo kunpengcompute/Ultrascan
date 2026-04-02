@@ -19,8 +19,10 @@
 struct PBEPositionContext {
     size_t endPos;
     u32 key;
-    u32 primaryIdx;
-    u32 exactEncoded;
+    u32 validMask8;
+    u8 laneWindowReady;
+    u8 reserved0;
+    u16 reserved1;
     u64a window64;
     u8 laneWindow32[PBE_RUNTIME_RULE_VECTOR_BYTES];
     u32 validMask32;
@@ -252,6 +254,11 @@ u32 pbeProjectKeyToClass(u32 fullKey, u32 classMask) {
 }
 
 static really_inline
+int pbeMaskClassIsHot(const struct PBERuntimeMaskClass *klass) {
+    return klass && (klass->flags & PBE_RUNTIME_MASK_CLASS_FLAG_HOT);
+}
+
+static really_inline
 u32 pbeExtractKeyBext(const struct PBERuntimeHeader *hdr, u64a window) {
     const u64a packed = pbeRuntimeCanUseBextFastPath()
                             ? pbeExtractPackedBitsSveBitPerm(window,
@@ -322,12 +329,21 @@ void pbeBuildPositionContext(const struct PBERuntimeHeader *hdr,
     memset(ctx, 0, sizeof(*ctx));
     ctx->endPos = endPos;
     ctx->window64 = window64;
-    pbeBuildLaneWindow32FromWindow(window64, validMask8, ctx->laneWindow32,
-                                   &ctx->validMask32);
+    ctx->validMask8 = validMask8;
     if (fillKey) {
         ctx->key = pbeExtractKeyFromWindow(hdr, selectors, window64);
-        ctx->primaryIdx = (ctx->key < hdr->primaryCount) ? ctx->key : 0;
     }
+}
+
+static really_inline
+void pbeEnsureLaneWindowContext(struct PBEPositionContext *ctx) {
+    if (!ctx || ctx->laneWindowReady) {
+        return;
+    }
+
+    pbeBuildLaneWindow32FromWindow(ctx->window64, ctx->validMask8,
+                                   ctx->laneWindow32, &ctx->validMask32);
+    ctx->laneWindowReady = 1;
 }
 
 static really_inline
@@ -370,13 +386,15 @@ u32 pbeEntryLaneMaskFromByteMatches(
 static really_inline
 u32 pbeEntryMatchMaskFromContextScalar(
     const struct PBERuntimeSecondaryHashEntry *entry,
-    const struct PBEPositionContext *ctx) {
+    struct PBEPositionContext *ctx) {
     u32 byteMatchMask = 0;
     u32 i;
 
     if (!entry || !entry->ruleCount || !ctx) {
         return 0;
     }
+
+    pbeEnsureLaneWindowContext(ctx);
 
     for (i = 0; i < PBE_RUNTIME_RULE_VECTOR_BYTES; i++) {
         const u32 bit = 1U << i;
@@ -394,13 +412,15 @@ u32 pbeEntryMatchMaskFromContextScalar(
 static really_inline
 u32 pbeEntrySingleSlotMatchMaskFromContext(
     const struct PBERuntimeSecondaryHashEntry *entry,
-    const struct PBEPositionContext *ctx) {
+    struct PBEPositionContext *ctx) {
     const u32 tailOnlyMask = entry->tailMask & ~entry->headMask;
     u32 mask = tailOnlyMask;
 
     if (!entry || !ctx || !entry->ruleCount) {
         return 0;
     }
+
+    pbeEnsureLaneWindowContext(ctx);
 
     while (mask) {
         const u32 bit = mask & (0U - mask);
@@ -429,10 +449,12 @@ u32 pbeEntrySingleSlotMatchMaskFromContext(
 static really_inline
 u32 pbeEntryMatchMaskFromContextVector(
     const struct PBERuntimeSecondaryHashEntry *entry,
-    const struct PBEPositionContext *ctx) {
+    struct PBEPositionContext *ctx) {
     if (!entry || !entry->ruleCount || !ctx) {
         return 0;
     }
+
+    pbeEnsureLaneWindowContext(ctx);
 
     if (entry->ruleCount == 1) {
         return pbeEntrySingleSlotMatchMaskFromContext(entry, ctx);
@@ -522,23 +544,6 @@ void pbePrepareBitmapProbeStateFromPrimaryIdx(const u32 *primaryIdx,
         state->bitShift[lane] = (u8)(primaryIdx[lane] & 7U);
         state->bitMask[lane] = (u8)(1U << state->bitShift[lane]);
     }
-}
-
-static really_inline
-void pbePrepareBitmapProbeState(const struct PBEPositionContext *ctxs,
-                                u32 laneCount,
-                                struct PBEBitmapProbeState *state) {
-    u32 primaryIdx[PBE_BATCH_MAX_WIDTH] = {0};
-    u32 lane;
-
-    if (!ctxs || !state || laneCount > PBE_BATCH_MAX_WIDTH) {
-        return;
-    }
-
-    for (lane = 0; lane < laneCount; lane++) {
-        primaryIdx[lane] = ctxs[lane].primaryIdx;
-    }
-    pbePrepareBitmapProbeStateFromPrimaryIdx(primaryIdx, laneCount, state);
 }
 
 static really_inline
@@ -724,6 +729,10 @@ void pbeBuildMaskClassBatchState(const struct PBERuntimeHeader *hdr,
         const u32 *primaryHashTable =
             (const u32 *)((const u8 *)hdr + klass->primaryOffset);
 
+        if (!pbeMaskClassIsHot(klass)) {
+            continue;
+        }
+
         pbeProjectBatchKeysToClass(ctxs, laneCount, klass->classMask,
                                    fullKeyMask,
                                    state->classKeys[classIdx]);
@@ -738,35 +747,6 @@ void pbeBuildMaskClassBatchState(const struct PBERuntimeHeader *hdr,
     }
 }
 
-static really_inline
-void pbeFillBatchEncodedValues(const u8 *primaryBitmap, u32 bitmapSize,
-                               const u32 *primaryHashTable,
-                               struct PBEPositionContext *ctxs, u32 laneCount,
-                               u32 laneCapacity) {
-    struct PBEBitmapProbeState probe;
-    u32 activeCount;
-    u32 i;
-
-    if (!ctxs || laneCount > laneCapacity || laneCapacity > PBE_BATCH_MAX_WIDTH) {
-        return;
-    }
-
-    for (i = 0; i < laneCount; i++) {
-        ctxs[i].exactEncoded = 0;
-    }
-
-    pbePrepareBitmapProbeState(ctxs, laneCount, &probe);
-    pbeProbeBitmapPacked(primaryBitmap, bitmapSize, &probe);
-    activeCount = pbeCompactAndLoadPrimary(primaryHashTable, &probe);
-
-    for (i = 0; i < activeCount; i++) {
-        if (probe.activeLaneIndex[i] < laneCapacity) {
-            ctxs[probe.activeLaneIndex[i]].exactEncoded = probe.activeEncoded[i];
-        }
-    }
-}
-
-static really_inline
 void pbeDecodePrimaryValue(u32 encoded, u32 *offset, u32 *count) {
     if (offset) {
         *offset = encoded & PBE_RUNTIME_L1_OFFSET_MASK;

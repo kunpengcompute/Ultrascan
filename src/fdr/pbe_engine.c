@@ -149,7 +149,7 @@ static int pbeProcessEncodedRange(
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
     const struct PBERuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
     u32 literalBlobSize, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, const struct PBEPositionContext *ctx, u32 classKey,
+    hwlm_group_t *control, struct PBEPositionContext *ctx, u32 classKey,
     u32 encoded) {
     u32 offset = 0;
     u32 count = 0;
@@ -218,7 +218,7 @@ static int pbeProcessMaskClassesForContext(
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
     const struct PBERuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
     u32 literalBlobSize, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, const struct PBEPositionContext *ctx) {
+    hwlm_group_t *control, struct PBEPositionContext *ctx) {
     u32 classIdx;
 
     for (classIdx = 0; classIdx < hdr->classCount; classIdx++) {
@@ -248,41 +248,51 @@ static int pbeProcessMaskClassesForContext(
     return HWLM_SUCCESS;
 }
 
-static int pbeReplayMaskClassBatchState(
+static int pbeProcessMaskClassesForLaneWithBatchState(
     const struct PBERuntimeHeader *hdr,
+    const struct PBERuntimeMaskClass *classes,
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
     const struct PBERuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
     u32 literalBlobSize, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, const struct PBEPositionContext *ctxs,
-    const struct PBEMaskClassBatchState *batchState) {
-    u32 lane;
+    hwlm_group_t *control, struct PBEPositionContext *ctx,
+    const struct PBEMaskClassBatchState *batchState, u32 lane) {
+    u32 classIdx;
 
-    if (!hdr || !secondaryHashTable || !ruleMeta || !literalBlob || !a ||
-        !control || !ctxs || !batchState) {
-        return HWLM_SUCCESS;
-    }
+    for (classIdx = 0; classIdx < hdr->classCount; classIdx++) {
+        const struct PBERuntimeMaskClass *klass = &classes[classIdx];
+        u32 classKey = 0;
+        u32 encoded = 0;
 
-    for (lane = 0; lane < batchState->laneCount; lane++) {
-        const struct PBEPositionContext *ctx = &ctxs[lane];
-        u32 activeClass;
-
-        for (activeClass = 0; activeClass < batchState->activeClassCount;
-             activeClass++) {
-            const u32 classIdx = batchState->activeClassIndex[activeClass];
-            const u32 laneBit = 1U << lane;
-            const u32 encoded = batchState->classEncoded[classIdx][lane];
-
-            if (!(batchState->classActiveMask[classIdx] & laneBit) || !encoded) {
+        if (batchState && lane < batchState->laneCount && pbeMaskClassIsHot(klass)) {
+            encoded = batchState->classEncoded[classIdx][lane];
+            if (!encoded) {
                 continue;
             }
+            classKey = batchState->classKeys[classIdx][lane];
+        } else {
+            const u8 *primaryBitmap =
+                (const u8 *)hdr + klass->primaryBitmapOffset;
+            const u32 *primaryHashTable =
+                (const u32 *)((const u8 *)hdr + klass->primaryOffset);
 
-            if (pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
-                                       literalBlob, literalBlobSize, a,
-                                       control, ctx,
-                                       batchState->classKeys[classIdx][lane],
-                                       encoded) == HWLM_TERMINATED) {
-                return HWLM_TERMINATED;
+            classKey = pbeProjectKeyToClass(ctx->key, klass->classMask);
+
+            if (classKey >= klass->primaryCount) {
+                continue;
             }
+            if (!pbePrimaryBitmapHasValue(primaryBitmap, klass->primaryBitmapSize,
+                                          classKey)) {
+                continue;
+            }
+            encoded = primaryHashTable[classKey];
+        }
+
+        if (pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+                                   literalBlob, literalBlobSize, a, control,
+                                   ctx, classKey,
+                                   encoded) ==
+            HWLM_TERMINATED) {
+            return HWLM_TERMINATED;
         }
     }
 
@@ -368,13 +378,17 @@ static int pbeRunBatch4(const struct PBERuntimeHeader *hdr,
             }
         } else {
             struct PBEMaskClassBatchState batchState;
+            u32 lane;
             pbeBuildMaskClassBatchState(hdr, classes, ctxs, laneCount,
                                         &batchState);
-            if (pbeReplayMaskClassBatchState(hdr, secondaryHashTable, ruleMeta,
-                                             literalBlob, literalBlobSize, a,
-                                             control, ctxs, &batchState) ==
-                HWLM_TERMINATED) {
-                return HWLM_TERMINATED;
+
+            for (lane = 0; lane < laneCount; lane++) {
+                if (pbeProcessMaskClassesForLaneWithBatchState(
+                        hdr, classes, secondaryHashTable, ruleMeta,
+                        literalBlob, literalBlobSize, a, control, &ctxs[lane],
+                        &batchState, lane) == HWLM_TERMINATED) {
+                    return HWLM_TERMINATED;
+                }
             }
         }
     }
@@ -421,8 +435,7 @@ u32 PbeRuntimeEntryMatchMaskForTest(
     ctx.endPos = endPos;
     ctx.window64 = pbeLoadWindow64Normalized(a, endPos,
                                              PBE_RUNTIME_BYTES_PER_RULE_SLOT);
-    pbeBuildLaneWindow32FromWindow(ctx.window64, pbeComputeValidMask8(a, endPos),
-                                   ctx.laneWindow32, &ctx.validMask32);
+    ctx.validMask8 = pbeComputeValidMask8(a, endPos);
 
     return useVector ? pbeEntryMatchMaskFromContextVector(entry, &ctx)
                      : pbeEntryMatchMaskFromContextScalar(entry, &ctx);

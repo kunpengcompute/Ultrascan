@@ -260,10 +260,11 @@ void dumpHashTables(const PBECompileArtifacts &artifacts,
                     const std::vector<hwlmLiteral> &lits) {
     printf("[PBE][Mask-Classes] count=%zu\n", artifacts.maskClasses.size());
     for (const auto &klass : artifacts.maskClasses) {
-        printf("  classId=%u classMask={dec=%u hex=0x%x bin=%s} classKeyBits=%u secondaryOffset=%u secondaryCount=%u\n",
+        printf("  classId=%u classMask={dec=%u hex=0x%x bin=%s} classKeyBits=%u ruleCount=%u flags=0x%x secondaryOffset=%u secondaryCount=%u\n",
                klass.classId, klass.classMask, klass.classMask,
                keyToBits(klass.classMask, artifacts.keyBits).c_str(),
-               klass.classKeyBits, klass.secondaryOffset,
+               klass.classKeyBits, klass.ruleCount, klass.flags,
+               klass.secondaryOffset,
                klass.secondaryCount);
         printf("    [L1] size=%zu\n", klass.primaryHashTable.offsets.size());
         printf("    [L1-Bitmap] bytes=%zu\n", klass.primaryHashBitmap.bits.size());
@@ -628,6 +629,7 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
         klass.classId = classId++;
         klass.classMask = classMask;
         klass.classKeyBits = pbePackedKeyBits(classMask);
+        klass.ruleCount = verify_u32(idxes.size());
         klass.secondaryOffset = verify_u32(secondaryHashTable->size());
 
         const u32 primaryCount = pbePrimaryCountForKeyBits(klass.classKeyBits);
@@ -716,6 +718,50 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
 
         buildPrimaryBitmap(klass.primaryHashTable, &klass.primaryHashBitmap);
         maskClasses->push_back(std::move(klass));
+    }
+
+    if (maskClasses && !maskClasses->empty()) {
+        std::vector<u32> hotOrder(maskClasses->size(), 0);
+        u32 hotCount = 0;
+        u64a coveredRules = 0;
+        u64a totalRules = 0;
+
+        for (u32 i = 0; i < maskClasses->size(); i++) {
+            hotOrder[i] = i;
+            totalRules += (*maskClasses)[i].ruleCount;
+            (*maskClasses)[i].flags = 0;
+        }
+
+        std::stable_sort(hotOrder.begin(), hotOrder.end(),
+                         [&maskClasses](u32 a, u32 b) {
+                             const auto &ka = (*maskClasses)[a];
+                             const auto &kb = (*maskClasses)[b];
+                             if (ka.ruleCount != kb.ruleCount) {
+                                 return ka.ruleCount > kb.ruleCount;
+                             }
+                             if (ka.secondaryCount != kb.secondaryCount) {
+                                 return ka.secondaryCount > kb.secondaryCount;
+                             }
+                             if (ka.classKeyBits != kb.classKeyBits) {
+                                 return ka.classKeyBits > kb.classKeyBits;
+                             }
+                             return ka.classId < kb.classId;
+                         });
+
+        for (u32 idx : hotOrder) {
+            auto &klass = (*maskClasses)[idx];
+            if (!klass.ruleCount || hotCount >= PBE_MAX_HOT_MASK_CLASSES) {
+                break;
+            }
+            klass.flags |= PBE_MASK_CLASS_FLAG_HOT;
+            hotCount++;
+            coveredRules += klass.ruleCount;
+            if (totalRules &&
+                coveredRules * 100 >=
+                    totalRules * PBE_HOT_MASK_CLASS_COVERAGE_PCT) {
+                break;
+            }
+        }
     }
 
     if (maskClasses && !maskClasses->empty()) {
@@ -975,6 +1021,7 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     struct PBEMaskClassLayout {
         u32 classMask;
         u32 classKeyBits;
+        u32 flags;
         u32 primaryCount;
         u32 primaryBitmapSize;
         u32 primaryBitmapOffset;
@@ -994,6 +1041,7 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
         PBEMaskClassLayout layout = {};
         layout.classMask = klass.classMask;
         layout.classKeyBits = klass.classKeyBits;
+        layout.flags = klass.flags;
         layout.primaryCount = verify_u32(klass.primaryHashTable.offsets.size());
         layout.primaryBitmapSize =
             verify_u32(klass.primaryHashBitmap.bits.size());
@@ -1055,6 +1103,7 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     for (u32 i = 0; i < classCount; i++) {
         classOut[i].classMask = classLayouts[i].classMask;
         classOut[i].classKeyBits = classLayouts[i].classKeyBits;
+        classOut[i].flags = classLayouts[i].flags;
         classOut[i].primaryCount = classLayouts[i].primaryCount;
         classOut[i].primaryBitmapSize = classLayouts[i].primaryBitmapSize;
         classOut[i].primaryBitmapOffset = classLayouts[i].primaryBitmapOffset;

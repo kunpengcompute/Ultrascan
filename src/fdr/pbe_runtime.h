@@ -5,7 +5,7 @@
 #include "hwlm/hwlm.h"
 
 #define PBE_RUNTIME_MAGIC 0x50424530U /* "PBE0" */
-#define PBE_RUNTIME_VERSION 7U
+#define PBE_RUNTIME_VERSION 8U
 #define PBE_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 #define PBE_RUNTIME_KEY_BITS 22U
 #define PBE_RUNTIME_L1_OFFSET_BITS 18U
@@ -22,6 +22,8 @@
 #define PBE_RUNTIME_MAX_MASK_CLASSES 32U
 #define PBE_RUNTIME_EXTRACT_MODE_SCALAR 0U
 #define PBE_RUNTIME_EXTRACT_MODE_BEXT 1U
+
+#define PBE_RUNTIME_MASK_CLASS_FLAG_HOT (1U << 0)
 
 #define PBE_RULE_FLAG_NOCASE (1U << 0)
 #define PBE_RULE_FLAG_NORUNS (1U << 1)
@@ -60,6 +62,7 @@ struct PBERuntimeBitSelector {
 struct PBERuntimeMaskClass {
     u32 classMask;
     u32 classKeyBits;
+    u32 flags;
     u32 primaryCount;
     u32 primaryBitmapSize;
     u32 primaryBitmapOffset;
