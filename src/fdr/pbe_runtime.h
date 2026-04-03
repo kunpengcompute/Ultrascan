@@ -25,10 +25,32 @@
 
 #define PBE_RUNTIME_MASK_CLASS_FLAG_HOT (1U << 0)
 
+/* HAO v2 与编译期共享的调参宏。当前 runtime 还未完全切到 HAO v2，
+ * 但这些宏已经作为新的设计约束进入公共头。 */
+#ifndef HAO_KEY_BITS
+#define HAO_KEY_BITS 22U
+#endif
+#ifndef HAO_MAX_KEY_AMBIG_BITS
+#define HAO_MAX_KEY_AMBIG_BITS 2U
+#endif
+#ifndef HAO_MAX_KEY_EXPANSION
+#define HAO_MAX_KEY_EXPANSION (1U << HAO_MAX_KEY_AMBIG_BITS)
+#endif
+#ifndef HAO_MAX_SMALL_CLASS_EXPANSION
+#define HAO_MAX_SMALL_CLASS_EXPANSION 16U
+#endif
+#ifndef HAO_MAX_TOTAL_EXPANDED_KEYS
+#define HAO_MAX_TOTAL_EXPANDED_KEYS (1U << 20)
+#endif
+#ifndef HAO_MIN_FAST_RULE_COVERAGE_PCT
+#define HAO_MIN_FAST_RULE_COVERAGE_PCT 80U
+#endif
+
 #define PBE_RULE_FLAG_NOCASE (1U << 0)
 #define PBE_RULE_FLAG_NORUNS (1U << 1)
 #define PBE_RULE_FLAG_HAS_MASK (1U << 2)
 
+/* 当前仍是 HAO v1/PBE runtime layout。后续 HAO v2 会去掉 class table。 */
 struct PBERuntimeHeader {
     u32 magic;
     u32 version;

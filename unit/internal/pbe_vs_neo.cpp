@@ -1151,6 +1151,109 @@ TEST(PBECompile, HotMaskClassesPreferHigherRuleCoverage) {
     EXPECT_TRUE(sawHotRuntimeClass);
 }
 
+TEST(PBECompile, HaoRulePlansRespectExpansionLimit) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 714, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 715, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 716, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("mask", false, false, 717, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'s', 0x60})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_EQ(lits.size(), artifacts.haoRulePlans.size());
+
+    u32 countedExpandedKeys = 0;
+    for (const auto &plan : artifacts.haoRulePlans) {
+        if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
+            EXPECT_GT(plan.keyExpansion.selectedAmbigBits,
+                      HAO_MAX_KEY_AMBIG_BITS);
+            EXPECT_EQ(0U, plan.keyExpansion.expandedKeyCount);
+            continue;
+        }
+
+        EXPECT_LE(plan.keyExpansion.selectedAmbigBits,
+                  HAO_MAX_KEY_AMBIG_BITS);
+        EXPECT_EQ(1U << plan.keyExpansion.selectedAmbigBits,
+                  plan.keyExpansion.expandedKeyCount);
+        countedExpandedKeys += plan.keyExpansion.expandedKeyCount;
+    }
+
+    EXPECT_EQ(countedExpandedKeys, artifacts.haoSummary.totalExpandedKeys);
+}
+
+TEST(PBECompile, HaoNocasePlanIsNormalized) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 718, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 719, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 720, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("gamma", false, false, 721, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_EQ(lits.size(), artifacts.haoRulePlans.size());
+
+    const auto &plan = artifacts.haoRulePlans[1];
+    EXPECT_EQ(HAORuleCategory::HAO_RULE_NOCASE, plan.category);
+    EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
+    EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
+    EXPECT_FALSE(plan.needFullConfirm);
+}
+
+TEST(PBECompile, HaoMaskRulesBecomeAnchorConfirm) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 722, HWLM_ALL_GROUPS, {}, {}),
+        // 使用 8 字节规则，避免因为规则过短导致 selected-bit 模糊位超限，
+        // 这样这条用例更稳定地覆盖 supplementary-mask -> anchor-confirm 路径。
+        hwlmLiteral("maskrule", false, false, 723, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("delta", false, false, 724, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 725, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_EQ(lits.size(), artifacts.haoRulePlans.size());
+
+    const auto &plan = artifacts.haoRulePlans[1];
+    EXPECT_EQ(HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM, plan.category);
+    EXPECT_TRUE(plan.needFullConfirm);
+    EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM);
+    EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK);
+    EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT);
+}
+
+TEST(PBECompile, HaoSummaryTracksCoverageAndAnchors) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 726, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 727, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("maskrule", false, false, 728, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("theta", false, false, 729, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+
+    EXPECT_EQ(lits.size(), artifacts.haoSummary.totalRules);
+    EXPECT_EQ(artifacts.haoSummary.fastPathRules +
+              artifacts.haoSummary.unsupportedRules,
+              artifacts.haoSummary.totalRules);
+
+    u32 anchorCount = 0;
+    for (const auto &plan : artifacts.haoRulePlans) {
+        if (plan.category == HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM) {
+            anchorCount++;
+        }
+    }
+    EXPECT_EQ(anchorCount, artifacts.haoSummary.anchorConfirmRules);
+}
+
 TEST(PBEExtract, BextMatchesScalar) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 700, HWLM_ALL_GROUPS, {}, {}),

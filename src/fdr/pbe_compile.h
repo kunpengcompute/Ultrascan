@@ -8,6 +8,31 @@
 #include <array>
 #include <vector>
 
+/* HAO v2 顶层调参宏：后续编译期展开预算与准入都依赖这些参数。 */
+#ifndef HAO_KEY_BITS
+#define HAO_KEY_BITS 22U
+#endif
+
+#ifndef HAO_MAX_KEY_AMBIG_BITS
+#define HAO_MAX_KEY_AMBIG_BITS 2U
+#endif
+
+#ifndef HAO_MAX_KEY_EXPANSION
+#define HAO_MAX_KEY_EXPANSION (1U << HAO_MAX_KEY_AMBIG_BITS)
+#endif
+
+#ifndef HAO_MAX_SMALL_CLASS_EXPANSION
+#define HAO_MAX_SMALL_CLASS_EXPANSION 16U
+#endif
+
+#ifndef HAO_MAX_TOTAL_EXPANDED_KEYS
+#define HAO_MAX_TOTAL_EXPANDED_KEYS (1U << 20)
+#endif
+
+#ifndef HAO_MIN_FAST_RULE_COVERAGE_PCT
+#define HAO_MIN_FAST_RULE_COVERAGE_PCT 80U
+#endif
+
 namespace ue2 {
 
 static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE = 1U << 0;
@@ -36,6 +61,14 @@ static constexpr u32 PBE_MASK_CLASS_FLAG_HOT = 1U << 0;
 static constexpr u16 PBE_RULE_FLAG_NOCASE = 1U << 0;
 static constexpr u16 PBE_RULE_FLAG_NORUNS = 1U << 1;
 static constexpr u16 PBE_RULE_FLAG_HAS_MASK = 1U << 2;
+
+static constexpr u32 HAO_RULE_PLAN_FLAG_KEY_EXPANDED = 1U << 0;
+static constexpr u32 HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM = 1U << 1;
+static constexpr u32 HAO_RULE_PLAN_FLAG_NORMALIZED = 1U << 2;
+static constexpr u32 HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK = 1U << 3;
+static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_AMBIG_LIMIT = 1U << 4;
+static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_EXPANSION_BUDGET = 1U << 5;
+static constexpr u32 HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT = 1U << 6;
 
 struct Grey;
 struct target_t;
@@ -89,6 +122,59 @@ struct PBERuleMeta {
     u8 cmp[8];
 };
 
+/* HAO v2 中每条规则在编译期都会被归入一个明确类别。 */
+enum class HAORuleCategory : u8 {
+    HAO_RULE_EXACT = 0,
+    HAO_RULE_NOCASE = 1,
+    HAO_RULE_SMALL_CLASS_EXPAND = 2,
+    HAO_RULE_ANCHOR_CONFIRM = 3,
+    HAO_RULE_UNSUPPORTED = 4
+};
+
+/* 单条规则在一级 key 空间展开后的一个确定 key 变体。 */
+struct HAOExpandedKey {
+    u32 keyValue = 0;
+    u32 ambiguousSelectorMask = 0;
+    u32 variantIndex = 0;
+};
+
+/* 记录 selected bits 上的模糊信息以及受控展开结果。 */
+struct HAOKeyExpansionInfo {
+    u32 selectedAmbigBits = 0;
+    u32 ambiguousSelectorMask = 0;
+    u32 expandedKeyCount = 0;
+    std::vector<HAOExpandedKey> expandedKeys;
+};
+
+/* verifier fragment 是后续 L2 向量校验真正消费的确定性片段。 */
+struct HAOVerifierFragment {
+    std::array<u8, PBE_BYTES_PER_RULE_SLOT> bytes = {};
+    u8 validByteMask = 0;
+    u8 anchorOffset = 0;
+    u8 anchorLength = 0;
+    u8 flags = 0;
+};
+
+/* HAO 编译期规则计划：后续构表应以它为核心，而不是 Mask-Class。 */
+struct HAOCompiledRulePlan {
+    u32 ruleIndex = 0;
+    HAORuleCategory category = HAORuleCategory::HAO_RULE_UNSUPPORTED;
+    u32 flags = 0;
+    bool needFullConfirm = false;
+    HAOKeyExpansionInfo keyExpansion;
+    HAOVerifierFragment verifier;
+};
+
+/* HAO 编译期汇总信息，用于 feasibility 和后续调优。 */
+struct HAOCompileSummary {
+    u32 totalRules = 0;
+    u32 fastPathRules = 0;
+    u32 unsupportedRules = 0;
+    u32 anchorConfirmRules = 0;
+    u32 totalExpandedKeys = 0;
+    u32 maxSelectedAmbigBits = 0;
+};
+
 struct PBECompileArtifacts {
     u32 keyBits = 0;
     u32 flags = 0;
@@ -96,6 +182,9 @@ struct PBECompileArtifacts {
     u32 windowBytes = PBE_BYTES_PER_RULE_SLOT;
     u64a bextMask = 0;
     std::vector<PBEBitSelector> bitSelectors;
+    /* HAO v2 新增：规则计划层和汇总信息。 */
+    std::vector<HAOCompiledRulePlan> haoRulePlans;
+    HAOCompileSummary haoSummary;
     std::vector<PBEMaskClassArtifacts> maskClasses;
     PBEPrimaryHashTable primaryHashTable;
     PBEPrimaryHashBitmap primaryHashBitmap;

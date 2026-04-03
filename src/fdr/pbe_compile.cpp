@@ -155,6 +155,188 @@ u32 pbeFullKeyMask(u32 keyBits) {
     return (1U << keyBits) - 1U;
 }
 
+/* 辅助判断一条规则是否带 supplementary msk/cmp 语义。
+ * 当前 HAO v2 第一轮先把这类规则归入 anchor-confirm。 */
+static
+bool haoLiteralHasSupplementaryMask(const hwlmLiteral &lit) {
+    return !lit.msk.empty() || !lit.cmp.empty();
+}
+
+/* 根据 selected bits 计算一条规则在一级 key 空间中的受控展开结果。
+ * 如果 selected 模糊位数量超过 HAO_MAX_KEY_AMBIG_BITS，调用方应将其排除出 fast path。 */
+static
+HAOKeyExpansionInfo haoEnumerateExpandedKeysForLiteral(
+    const hwlmLiteral &lit, const std::vector<PBEBitSelector> &selectors) {
+    HAOKeyExpansionInfo info;
+    u32 baseKeyValue = 0;
+    std::vector<u32> ambiguousBits;
+    ambiguousBits.reserve(selectors.size());
+
+    for (u32 i = 0; i < selectors.size(); i++) {
+        const auto &sel = selectors[i];
+        const u32 bitIndex = selectorBitIndex(sel);
+        u8 state = PBE_STATE_DONT_CARE;
+        getBitState(lit, bitIndex, &state);
+        if (state == PBE_STATE_DONT_CARE) {
+            ambiguousBits.push_back(i);
+            info.ambiguousSelectorMask |= (1U << i);
+            continue;
+        }
+        if (state) {
+            baseKeyValue |= (1U << i);
+        }
+    }
+
+    info.selectedAmbigBits = verify_u32(ambiguousBits.size());
+    if (info.selectedAmbigBits > HAO_MAX_KEY_AMBIG_BITS) {
+        return info;
+    }
+
+    const u32 variantCount = info.selectedAmbigBits ?
+                             (1U << info.selectedAmbigBits) : 1U;
+    info.expandedKeys.reserve(variantCount);
+    for (u32 variant = 0; variant < variantCount; variant++) {
+        u32 keyValue = baseKeyValue;
+        for (u32 j = 0; j < ambiguousBits.size(); j++) {
+            const u32 bit = ambiguousBits[j];
+            if (variant & (1U << j)) {
+                keyValue |= (1U << bit);
+            } else {
+                keyValue &= ~(1U << bit);
+            }
+        }
+
+        HAOExpandedKey expanded = {};
+        expanded.keyValue = keyValue;
+        expanded.ambiguousSelectorMask = info.ambiguousSelectorMask;
+        expanded.variantIndex = variant;
+        info.expandedKeys.push_back(expanded);
+    }
+    info.expandedKeyCount = verify_u32(info.expandedKeys.size());
+    return info;
+}
+
+/* 当前第一轮的规则分类还是保守版本：
+ * exact / nocase / anchor-confirm / unsupported。
+ * 后续还会继续细化 small-class-expand 等类别。 */
+static
+HAORuleCategory haoClassifyLiteral(const hwlmLiteral &lit,
+                                   const HAOKeyExpansionInfo &expansion) {
+    if (expansion.selectedAmbigBits > HAO_MAX_KEY_AMBIG_BITS) {
+        return HAORuleCategory::HAO_RULE_UNSUPPORTED;
+    }
+
+    if (haoLiteralHasSupplementaryMask(lit)) {
+        return HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM;
+    }
+
+    if (lit.nocase) {
+        return HAORuleCategory::HAO_RULE_NOCASE;
+    }
+
+    return HAORuleCategory::HAO_RULE_EXACT;
+}
+
+/* 为后续 L2 verifier 预先生成确定性片段。
+ * 当前先生成 suffix fragment、valid mask 和 anchor 信息，runtime 还未完全消费。 */
+static
+HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
+                                             HAORuleCategory category) {
+    HAOVerifierFragment fragment = {};
+    const u32 len = verify_u32(lit.s.size());
+    const u32 suffixLen = std::min<u32>(len, PBE_BYTES_PER_RULE_SLOT);
+    const u32 laneStart = PBE_BYTES_PER_RULE_SLOT - suffixLen;
+
+    fragment.anchorOffset = verify_u8(len - suffixLen);
+    fragment.anchorLength = verify_u8(suffixLen);
+    for (u32 j = 0; j < suffixLen; j++) {
+        const u8 c = verify_u8(lit.s[len - suffixLen + j]);
+        const u32 idx = laneStart + j;
+        fragment.bytes[idx] =
+            lit.nocase ? normalizedLiteralByte(c) : c;
+        fragment.validByteMask |= verify_u8(1U << idx);
+    }
+
+    if (category == HAORuleCategory::HAO_RULE_NOCASE) {
+        fragment.flags |= verify_u8(HAO_RULE_PLAN_FLAG_NORMALIZED);
+    }
+    if (category == HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM) {
+        fragment.flags |= verify_u8(HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT);
+    }
+    return fragment;
+}
+
+/* 生成 HAO 编译期规则计划层。
+ * 第一轮的目标是先把“规则怎么处理”显式化，后续构表将改为直接消费这些计划。 */
+static
+void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
+                       const std::vector<PBEBitSelector> &selectors,
+                       std::vector<HAOCompiledRulePlan> *rulePlans,
+                       HAOCompileSummary *summary) {
+    if (!rulePlans || !summary) {
+        return;
+    }
+
+    rulePlans->clear();
+    rulePlans->reserve(lits.size());
+    *summary = {};
+    summary->totalRules = verify_u32(lits.size());
+
+    for (u32 i = 0; i < lits.size(); i++) {
+        HAOCompiledRulePlan plan = {};
+        plan.ruleIndex = i;
+        plan.keyExpansion = haoEnumerateExpandedKeysForLiteral(lits[i], selectors);
+        plan.category = haoClassifyLiteral(lits[i], plan.keyExpansion);
+        plan.verifier = haoBuildVerifierFragment(lits[i], plan.category);
+
+        if (plan.keyExpansion.selectedAmbigBits) {
+            plan.flags |= HAO_RULE_PLAN_FLAG_KEY_EXPANDED;
+        }
+        if (lits[i].nocase) {
+            plan.flags |= HAO_RULE_PLAN_FLAG_NORMALIZED;
+        }
+        if (haoLiteralHasSupplementaryMask(lits[i])) {
+            plan.flags |= HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK;
+        }
+        if (plan.keyExpansion.selectedAmbigBits > HAO_MAX_KEY_AMBIG_BITS) {
+            plan.flags |= HAO_RULE_PLAN_FLAG_OVER_AMBIG_LIMIT;
+        }
+
+        if (plan.category == HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM) {
+            plan.needFullConfirm = true;
+            plan.flags |= HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM;
+            summary->anchorConfirmRules++;
+        }
+
+        if (summary->maxSelectedAmbigBits < plan.keyExpansion.selectedAmbigBits) {
+            summary->maxSelectedAmbigBits = plan.keyExpansion.selectedAmbigBits;
+        }
+
+        if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
+            summary->unsupportedRules++;
+            plan.keyExpansion.expandedKeys.clear();
+            plan.keyExpansion.expandedKeyCount = 0;
+            rulePlans->push_back(std::move(plan));
+            continue;
+        }
+
+        if ((u64a)summary->totalExpandedKeys + plan.keyExpansion.expandedKeyCount >
+            HAO_MAX_TOTAL_EXPANDED_KEYS) {
+            plan.category = HAORuleCategory::HAO_RULE_UNSUPPORTED;
+            plan.flags |= HAO_RULE_PLAN_FLAG_OVER_EXPANSION_BUDGET;
+            plan.keyExpansion.expandedKeys.clear();
+            plan.keyExpansion.expandedKeyCount = 0;
+            summary->unsupportedRules++;
+            rulePlans->push_back(std::move(plan));
+            continue;
+        }
+
+        summary->fastPathRules++;
+        summary->totalExpandedKeys += plan.keyExpansion.expandedKeyCount;
+        rulePlans->push_back(std::move(plan));
+    }
+}
+
 static
 void buildExtractDescriptor(const std::vector<PBEBitSelector> &selectors,
                             PBECompileArtifacts *artifacts) {
@@ -877,6 +1059,8 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     artifacts->windowBytes = PBE_BYTES_PER_RULE_SLOT;
     artifacts->bextMask = 0;
     artifacts->bitSelectors.clear();
+    artifacts->haoRulePlans.clear();
+    artifacts->haoSummary = {};
     artifacts->maskClasses.clear();
     artifacts->primaryHashTable.offsets.clear();
     artifacts->primaryHashBitmap.bits.clear();
@@ -893,6 +1077,8 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
         return false;
     }
     buildExtractDescriptor(artifacts->bitSelectors, artifacts);
+    buildHAORulePlans(lits, artifacts->bitSelectors, &artifacts->haoRulePlans,
+                      &artifacts->haoSummary);
 
     buildHashTables(lits, artifacts->bitSelectors, &artifacts->maskClasses,
                     &artifacts->primaryHashTable, &artifacts->primaryHashBitmap,
