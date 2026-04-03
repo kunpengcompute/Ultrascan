@@ -8,7 +8,7 @@
 #include <array>
 #include <vector>
 
-/* HAO v2 顶层调参宏：后续编译期展开预算与准入都依赖这些参数。 */
+/* HAO v2 顶层调参宏：后续编译期展开预算与准入判断都依赖这些参数。 */
 #ifndef HAO_KEY_BITS
 #define HAO_KEY_BITS 22U
 #endif
@@ -131,7 +131,7 @@ enum class HAORuleCategory : u8 {
     HAO_RULE_UNSUPPORTED = 4
 };
 
-/* 单条规则在一级 key 空间展开后的一个确定 key 变体。 */
+/* 单条规则在一级 key 空间展开后得到的一个确定 key 变体。 */
 struct HAOExpandedKey {
     u32 keyValue = 0;
     u32 ambiguousSelectorMask = 0;
@@ -165,7 +165,7 @@ struct HAOCompiledRulePlan {
     HAOVerifierFragment verifier;
 };
 
-/* HAO 编译期汇总信息，用于 feasibility 和后续调优。 */
+/* HAO 编译期汇总信息，用于 feasibility 判断和后续调优。 */
 struct HAOCompileSummary {
     u32 totalRules = 0;
     u32 fastPathRules = 0;
@@ -173,6 +173,28 @@ struct HAOCompileSummary {
     u32 anchorConfirmRules = 0;
     u32 totalExpandedKeys = 0;
     u32 maxSelectedAmbigBits = 0;
+};
+
+/* HAO v2 全局单表构建的统计信息，用于跟踪是否已经收束到单一 22-bit
+ * 键空间。 */
+struct HAOGlobalHashStats {
+    u32 nonEmptyPrimary = 0;
+    u32 totalRulesInBuckets = 0;
+    u32 totalExpandedKeysInBuckets = 0;
+    u32 totalSecondaryEntries = 0;
+    u32 maxEntriesPerKey = 0;
+};
+
+/* HAO v2 第一轮并行接入的全局单表结果。 */
+struct HAOGlobalHashArtifacts {
+    bool valid = false;
+    u32 flags = 0;
+    u32 keyBits = 0;
+    u32 fullKeyMask = 0;
+    PBEPrimaryHashTable primaryHashTable;
+    PBEPrimaryHashBitmap primaryHashBitmap;
+    std::vector<PBESecondaryHashEntry> secondaryHashTable;
+    HAOGlobalHashStats stats;
 };
 
 struct PBECompileArtifacts {
@@ -185,6 +207,8 @@ struct PBECompileArtifacts {
     /* HAO v2 新增：规则计划层和汇总信息。 */
     std::vector<HAOCompiledRulePlan> haoRulePlans;
     HAOCompileSummary haoSummary;
+    /* HAO v2 全局单表结果：当前先和 HAO v1 旧结果并存。 */
+    HAOGlobalHashArtifacts haoGlobalHash;
     std::vector<PBEMaskClassArtifacts> maskClasses;
     PBEPrimaryHashTable primaryHashTable;
     PBEPrimaryHashBitmap primaryHashBitmap;

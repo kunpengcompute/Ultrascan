@@ -1254,6 +1254,68 @@ TEST(PBECompile, HaoSummaryTracksCoverageAndAnchors) {
     EXPECT_EQ(anchorCount, artifacts.haoSummary.anchorConfirmRules);
 }
 
+TEST(PBECompile, HaoGlobalHashBuildsSinglePrimarySpace) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 730, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 731, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("maskrule", false, false, 732, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("theta", false, false, 733, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    const u32 primaryCount = 1U << artifacts.keyBits;
+    EXPECT_EQ(artifacts.keyBits, artifacts.haoGlobalHash.keyBits);
+    EXPECT_EQ(primaryCount,
+              artifacts.haoGlobalHash.primaryHashTable.offsets.size());
+    EXPECT_EQ((primaryCount + 7U) / 8U,
+              artifacts.haoGlobalHash.primaryHashBitmap.bits.size());
+    EXPECT_EQ(artifacts.haoSummary.totalExpandedKeys,
+              artifacts.haoGlobalHash.stats.totalExpandedKeysInBuckets);
+    EXPECT_GT(artifacts.haoGlobalHash.stats.nonEmptyPrimary, 0U);
+}
+
+TEST(PBECompile, HaoGlobalHashStoresVerifierFragments) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 734, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("maskrule", false, false, 735, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("theta", false, false, 736, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 737, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    const auto &plan = artifacts.haoRulePlans[1];
+    bool found = false;
+    for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
+        const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
+        for (u32 slot = 0; slot < entry.ruleCount; slot++) {
+            if (entry.ruleIndex[slot] != plan.ruleIndex) {
+                continue;
+            }
+            found = true;
+            const u32 laneBase = slot * PBE_BYTES_PER_RULE_SLOT;
+            for (u32 j = 0; j < PBE_BYTES_PER_RULE_SLOT; j++) {
+                if (plan.verifier.validByteMask & (1U << j)) {
+                    EXPECT_EQ(plan.verifier.bytes[j],
+                              entry.ruleVector[laneBase + j]);
+                    EXPECT_EQ(1U, entry.tableControl[laneBase + j]);
+                }
+            }
+        }
+    }
+
+    EXPECT_TRUE(found);
+}
+
 TEST(PBEExtract, BextMatchesScalar) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 700, HWLM_ALL_GROUPS, {}, {}),

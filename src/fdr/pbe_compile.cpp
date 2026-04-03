@@ -131,6 +131,10 @@ u32 pbePrimaryBitmapBytes(u32 primaryCount) {
 }
 
 static
+void buildPrimaryBitmap(const PBEPrimaryHashTable &primaryHashTable,
+                        PBEPrimaryHashBitmap *primaryHashBitmap);
+
+static
 u32 pbePackedKeyBits(u32 classMask) {
     return classMask ? popcount32(classMask) : 0;
 }
@@ -337,6 +341,135 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
     }
 }
 
+/* 将 HAO verifier fragment 写入 L2 entry 的某个 slot。
+ * 当前阶段先把“可向量校验的确定性片段”落入全局单表，后续 runtime v2
+ * 会直接消费这些 fragment。 */
+static
+void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan, u32 keyValue,
+                                  u32 fullKeyMask, u32 localSlot,
+                                  PBESecondaryHashEntry *entry) {
+    assert(entry);
+    const u32 laneBase = localSlot * PBE_BYTES_PER_RULE_SLOT;
+    const u8 validMask = plan.verifier.validByteMask;
+    u32 lastValidBit = PBE_BYTES_PER_RULE_SLOT;
+
+    for (u32 i = 0; i < PBE_BYTES_PER_RULE_SLOT; i++) {
+        if (validMask & (1U << i)) {
+            lastValidBit = i;
+        }
+    }
+
+    entry->ruleIndex[localSlot] = verify_u16(plan.ruleIndex);
+    entry->keyValue[localSlot] = keyValue;
+    entry->keyMask[localSlot] = fullKeyMask;
+
+    for (u32 i = 0; i < PBE_BYTES_PER_RULE_SLOT; i++) {
+        if (!(validMask & (1U << i))) {
+            continue;
+        }
+        const u32 vecIndex = laneBase + i;
+        entry->ruleVector[vecIndex] = plan.verifier.bytes[i];
+        /* 当前阶段 tableControl 仍先作为“有效字节位置”占位信息。 */
+        entry->tableControl[vecIndex] = 1;
+        entry->tailMask |= (1U << vecIndex);
+        if (i != lastValidBit) {
+            entry->headMask |= (1U << vecIndex);
+        }
+    }
+}
+
+/* 基于 HAO rule plans 构建一张全局单表。
+ * 这里不再按 Mask-Class 分层，而是把 expanded keys 直接落入全局 22-bit
+ * 键空间。当前结果先并行存入 compile artifacts，供下一轮 runtime 切换使用。 */
+static
+void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
+                              u32 keyBits, HAOGlobalHashArtifacts *out) {
+    if (!out) {
+        return;
+    }
+
+    out->valid = false;
+    out->flags = 0;
+    out->keyBits = keyBits;
+    out->fullKeyMask = pbeFullKeyMask(keyBits);
+    out->primaryHashTable.offsets.clear();
+    out->primaryHashBitmap.bits.clear();
+    out->secondaryHashTable.clear();
+    out->stats = {};
+
+    if (!keyBits) {
+        return;
+    }
+
+    const u32 primaryCount = pbePrimaryCountForKeyBits(keyBits);
+    out->primaryHashTable.offsets.assign(primaryCount, 0);
+
+    /* secondary[0] 保留为空，和现有 runtime null target 约定保持一致。 */
+    out->secondaryHashTable.push_back(PBESecondaryHashEntry{});
+
+    std::map<u32, std::vector<u32>> keyToRuleIndexes;
+    for (const auto &plan : rulePlans) {
+        if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
+            continue;
+        }
+        for (const auto &expanded : plan.keyExpansion.expandedKeys) {
+            keyToRuleIndexes[expanded.keyValue].push_back(plan.ruleIndex);
+            out->stats.totalExpandedKeysInBuckets++;
+        }
+    }
+
+    for (const auto &it : keyToRuleIndexes) {
+        const u32 key = it.first;
+        const auto &bucketRules = it.second;
+        const u32 entryCount = verify_u32(
+            (bucketRules.size() + PBE_RULE_SLOTS_PER_ENTRY - 1) /
+            PBE_RULE_SLOTS_PER_ENTRY);
+
+        if (out->secondaryHashTable.size() + entryCount >
+            PBE_MAX_SECONDARY_ENTRIES) {
+            out->flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+            out->flags |= PBE_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY;
+            return;
+        }
+        if (entryCount >= (1U << (32U - PBE_L1_COUNT_SHIFT))) {
+            out->flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+            out->flags |= PBE_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW;
+            return;
+        }
+
+        const u32 secondaryOffset = verify_u32(out->secondaryHashTable.size());
+        out->primaryHashTable.offsets[key] =
+            encodePrimaryValue(secondaryOffset, entryCount);
+        out->stats.nonEmptyPrimary++;
+        out->stats.totalRulesInBuckets += verify_u32(bucketRules.size());
+        out->stats.totalSecondaryEntries += entryCount;
+        out->stats.maxEntriesPerKey =
+            std::max(out->stats.maxEntriesPerKey, entryCount);
+
+        for (u32 chunk = 0; chunk < entryCount; chunk++) {
+            PBESecondaryHashEntry entry = {};
+            const size_t begin = chunk * PBE_RULE_SLOTS_PER_ENTRY;
+            const size_t end = std::min(bucketRules.size(),
+                                        begin + PBE_RULE_SLOTS_PER_ENTRY);
+            entry.ruleCount = verify_u16(end - begin);
+
+            for (size_t slot = begin; slot < end; slot++) {
+                const u32 localSlot = verify_u32(slot - begin);
+                const u32 ruleIndex = bucketRules[slot];
+                assert(ruleIndex < rulePlans.size());
+                haoFillSecondarySlotFromPlan(rulePlans[ruleIndex], key,
+                                             out->fullKeyMask, localSlot,
+                                             &entry);
+            }
+
+            out->secondaryHashTable.push_back(entry);
+        }
+    }
+
+    buildPrimaryBitmap(out->primaryHashTable, &out->primaryHashBitmap);
+    out->valid = true;
+}
+
 static
 void buildExtractDescriptor(const std::vector<PBEBitSelector> &selectors,
                             PBECompileArtifacts *artifacts) {
@@ -440,6 +573,17 @@ void dumpRuleKeys(const std::vector<hwlmLiteral> &lits,
 static
 void dumpHashTables(const PBECompileArtifacts &artifacts,
                     const std::vector<hwlmLiteral> &lits) {
+    if (artifacts.haoGlobalHash.valid) {
+        printf("[PBE][HAO-Global] keyBits=%u nonEmptyL1=%u expandedKeys=%u totalRulesInBuckets=%u totalSecondaryEntries=%u maxEntriesPerKey=%u flags=0x%x\n",
+               artifacts.haoGlobalHash.keyBits,
+               artifacts.haoGlobalHash.stats.nonEmptyPrimary,
+               artifacts.haoGlobalHash.stats.totalExpandedKeysInBuckets,
+               artifacts.haoGlobalHash.stats.totalRulesInBuckets,
+               artifacts.haoGlobalHash.stats.totalSecondaryEntries,
+               artifacts.haoGlobalHash.stats.maxEntriesPerKey,
+               artifacts.haoGlobalHash.flags);
+    }
+
     printf("[PBE][Mask-Classes] count=%zu\n", artifacts.maskClasses.size());
     for (const auto &klass : artifacts.maskClasses) {
         printf("  classId=%u classMask={dec=%u hex=0x%x bin=%s} classKeyBits=%u ruleCount=%u flags=0x%x secondaryOffset=%u secondaryCount=%u\n",
@@ -1061,6 +1205,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     artifacts->bitSelectors.clear();
     artifacts->haoRulePlans.clear();
     artifacts->haoSummary = {};
+    artifacts->haoGlobalHash = {};
     artifacts->maskClasses.clear();
     artifacts->primaryHashTable.offsets.clear();
     artifacts->primaryHashBitmap.bits.clear();
@@ -1079,6 +1224,8 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     buildExtractDescriptor(artifacts->bitSelectors, artifacts);
     buildHAORulePlans(lits, artifacts->bitSelectors, &artifacts->haoRulePlans,
                       &artifacts->haoSummary);
+    buildHAOGlobalHashTables(artifacts->haoRulePlans, artifacts->keyBits,
+                             &artifacts->haoGlobalHash);
 
     buildHashTables(lits, artifacts->bitSelectors, &artifacts->maskClasses,
                     &artifacts->primaryHashTable, &artifacts->primaryHashBitmap,
