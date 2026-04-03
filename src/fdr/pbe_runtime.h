@@ -23,6 +23,9 @@
 #define PBE_RUNTIME_EXTRACT_MODE_SCALAR 0U
 #define PBE_RUNTIME_EXTRACT_MODE_BEXT 1U
 
+#define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
+#define HAO_RUNTIME_VERSION 1U
+
 #define PBE_RUNTIME_MASK_CLASS_FLAG_HOT (1U << 0)
 
 /* HAO v2 与编译期共享的调参宏。当前 runtime 还未完全切到 HAO v2，
@@ -111,6 +114,55 @@ struct PBERuntimeRuleMeta {
     u16 len;
     u16 flags;
     u8 maskLen;
+    u32 litOffset;
+    u8 lit[8];
+    u8 msk[8];
+    u8 cmp[8];
+};
+
+/* HAO v2 新布局：去掉 class table，直接面向全局单表。 */
+struct HAORuntimeHeader {
+    u32 magic;
+    u32 version;
+    u32 flags;
+    u32 keyBits;
+    u32 selectorCount;
+    u32 primaryCount;
+    u32 primaryBitmapSize;
+    u32 secondaryCount;
+    u32 ruleMetaCount;
+    u32 literalBlobSize;
+    u32 extractMode;
+    u32 windowBytes;
+    u64a bextMask;
+    u32 selectorsOffset;
+    u32 primaryBitmapOffset;
+    u32 primaryOffset;
+    u32 secondaryOffset;
+    u32 ruleMetaOffset;
+    u32 literalBlobOffset;
+};
+
+struct HAORuntimeBitSelector {
+    u8 byteOffset;
+    u8 bitOffset;
+    u16 reserved;
+};
+
+/* HAO v2 rule meta 同时保留原始规则确认信息和 verifier 片段信息。 */
+struct HAORuntimeRuleMeta {
+    u32 id;
+    hwlm_group_t groups;
+    u16 len;
+    u16 flags;
+    u8 category;
+    u8 verifierValidByteMask;
+    u8 anchorOffset;
+    u8 anchorLength;
+    u8 verifierFlags;
+    u8 reserved0;
+    u16 reserved1;
+    u32 planFlags;
     u32 litOffset;
     u8 lit[8];
     u8 msk[8];

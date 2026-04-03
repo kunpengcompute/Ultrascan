@@ -891,6 +891,80 @@ TEST(PBECompile, BuildPbeBlobHeaderMatchesArtifacts) {
     EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
 }
 
+TEST(PBECompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 644, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 645, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("maskrule", false, false, 646, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("delta", false, false, 647, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    auto blob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+
+    const auto *hdr = reinterpret_cast<const HAORuntimeHeader *>(blob.get());
+    EXPECT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
+    EXPECT_EQ(HAO_RUNTIME_VERSION, hdr->version);
+    EXPECT_EQ(artifacts.haoGlobalHash.flags, hdr->flags);
+    EXPECT_EQ(artifacts.haoGlobalHash.keyBits, hdr->keyBits);
+    EXPECT_EQ(artifacts.bitSelectors.size(), hdr->selectorCount);
+    EXPECT_EQ(artifacts.haoGlobalHash.primaryHashTable.offsets.size(),
+              hdr->primaryCount);
+    EXPECT_EQ(artifacts.haoGlobalHash.primaryHashBitmap.bits.size(),
+              hdr->primaryBitmapSize);
+    EXPECT_EQ(artifacts.haoGlobalHash.secondaryHashTable.size(),
+              hdr->secondaryCount);
+    EXPECT_EQ(artifacts.ruleMeta.size(), hdr->ruleMetaCount);
+    EXPECT_EQ(artifacts.literalBlob.size(), hdr->literalBlobSize);
+    EXPECT_EQ(artifacts.extractMode, hdr->extractMode);
+    EXPECT_EQ(artifacts.windowBytes, hdr->windowBytes);
+    EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
+}
+
+TEST(PBECompile, BuildHaoGlobalBlobStoresRulePlanMeta) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 648, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("maskrule", false, false, 649, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("ALPHA", true, false, 650, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 651, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    auto blob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+
+    const auto *hdr = reinterpret_cast<const HAORuntimeHeader *>(blob.get());
+    const auto *meta = reinterpret_cast<const HAORuntimeRuleMeta *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->ruleMetaOffset);
+
+    const auto &plan = artifacts.haoRulePlans[1];
+    const auto &srcMeta = artifacts.ruleMeta[1];
+
+    EXPECT_EQ(static_cast<u8>(plan.category), meta[1].category);
+    EXPECT_EQ(plan.flags, meta[1].planFlags);
+    EXPECT_EQ(plan.verifier.validByteMask, meta[1].verifierValidByteMask);
+    EXPECT_EQ(plan.verifier.anchorOffset, meta[1].anchorOffset);
+    EXPECT_EQ(plan.verifier.anchorLength, meta[1].anchorLength);
+    EXPECT_EQ(plan.verifier.flags, meta[1].verifierFlags);
+    EXPECT_EQ(srcMeta.litOffset, meta[1].litOffset);
+    for (u32 i = 0; i < 8; i++) {
+        EXPECT_EQ(srcMeta.lit[i], meta[1].lit[i]);
+        EXPECT_EQ(srcMeta.msk[i], meta[1].msk[i]);
+        EXPECT_EQ(srcMeta.cmp[i], meta[1].cmp[i]);
+    }
+}
+
 TEST(PBECompile, PrimaryBitmapMatchesNonEmptyL1Entries) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 650, HWLM_ALL_GROUPS, {}, {}),

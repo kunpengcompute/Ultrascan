@@ -1501,4 +1501,144 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     return blob;
 }
 
+bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
+    if (!artifacts.haoGlobalHash.valid) {
+        return nullptr;
+    }
+    if (artifacts.haoRulePlans.size() != artifacts.ruleMeta.size()) {
+        return nullptr;
+    }
+
+    const u32 selectorCount = verify_u32(artifacts.bitSelectors.size());
+    const u32 primaryCount =
+        verify_u32(artifacts.haoGlobalHash.primaryHashTable.offsets.size());
+    const u32 primaryBitmapSize =
+        verify_u32(artifacts.haoGlobalHash.primaryHashBitmap.bits.size());
+    const u32 secondaryCount =
+        verify_u32(artifacts.haoGlobalHash.secondaryHashTable.size());
+    const u32 ruleMetaCount = verify_u32(artifacts.ruleMeta.size());
+    const u32 literalBlobSize = verify_u32(artifacts.literalBlob.size());
+
+    const size_t selectorBytes =
+        sizeof(HAORuntimeBitSelector) * artifacts.bitSelectors.size();
+    const size_t primaryBitmapBytes =
+        artifacts.haoGlobalHash.primaryHashBitmap.bits.size();
+    const size_t primaryBytes =
+        sizeof(u32) * artifacts.haoGlobalHash.primaryHashTable.offsets.size();
+    const size_t secondaryBytes =
+        sizeof(PBERuntimeSecondaryHashEntry) *
+        artifacts.haoGlobalHash.secondaryHashTable.size();
+    const size_t ruleMetaBytes =
+        sizeof(HAORuntimeRuleMeta) * artifacts.ruleMeta.size();
+    const size_t literalBlobBytes = artifacts.literalBlob.size();
+
+    size_t totalSize = ROUNDUP_N(sizeof(HAORuntimeHeader), alignof(u32));
+    const u32 selectorsOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(selectorBytes, alignof(u32));
+    const u32 primaryBitmapOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(primaryBitmapBytes, alignof(u32));
+    const u32 primaryOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(primaryBytes, alignof(u32));
+    const u32 secondaryOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(secondaryBytes, alignof(u32));
+    const u32 ruleMetaOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(ruleMetaBytes, alignof(u32));
+    const u32 literalBlobOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(literalBlobBytes, alignof(u32));
+
+    auto blob = make_zeroed_bytecode_ptr<u8>(totalSize, 64);
+    if (!blob) {
+        return nullptr;
+    }
+
+    auto *hdr = reinterpret_cast<HAORuntimeHeader *>(blob.get());
+    hdr->magic = HAO_RUNTIME_MAGIC;
+    hdr->version = HAO_RUNTIME_VERSION;
+    hdr->flags = artifacts.haoGlobalHash.flags;
+    hdr->keyBits = artifacts.haoGlobalHash.keyBits;
+    hdr->selectorCount = selectorCount;
+    hdr->primaryCount = primaryCount;
+    hdr->primaryBitmapSize = primaryBitmapSize;
+    hdr->secondaryCount = secondaryCount;
+    hdr->ruleMetaCount = ruleMetaCount;
+    hdr->literalBlobSize = literalBlobSize;
+    hdr->extractMode = artifacts.extractMode;
+    hdr->windowBytes = artifacts.windowBytes;
+    hdr->bextMask = artifacts.bextMask;
+    hdr->selectorsOffset = selectorsOffset;
+    hdr->primaryBitmapOffset = primaryBitmapOffset;
+    hdr->primaryOffset = primaryOffset;
+    hdr->secondaryOffset = secondaryOffset;
+    hdr->ruleMetaOffset = ruleMetaOffset;
+    hdr->literalBlobOffset = literalBlobOffset;
+
+    u8 *base = blob.get();
+    auto *selectorsOut =
+        reinterpret_cast<HAORuntimeBitSelector *>(base + selectorsOffset);
+    for (u32 i = 0; i < selectorCount; i++) {
+        selectorsOut[i].byteOffset = artifacts.bitSelectors[i].byteOffset;
+        selectorsOut[i].bitOffset = artifacts.bitSelectors[i].bitOffset;
+        selectorsOut[i].reserved = 0;
+    }
+
+    if (primaryBitmapBytes) {
+        memcpy(base + primaryBitmapOffset,
+               artifacts.haoGlobalHash.primaryHashBitmap.bits.data(),
+               primaryBitmapBytes);
+    }
+    if (primaryBytes) {
+        memcpy(base + primaryOffset,
+               artifacts.haoGlobalHash.primaryHashTable.offsets.data(),
+               primaryBytes);
+    }
+    if (secondaryBytes) {
+        auto *secondaryOut =
+            reinterpret_cast<PBERuntimeSecondaryHashEntry *>(base + secondaryOffset);
+        for (u32 i = 0; i < secondaryCount; i++) {
+            const auto &src = artifacts.haoGlobalHash.secondaryHashTable[i];
+            auto &dst = secondaryOut[i];
+            memcpy(dst.ruleVector, src.ruleVector, sizeof(dst.ruleVector));
+            memcpy(dst.tableControl, src.tableControl, sizeof(dst.tableControl));
+            memcpy(dst.ruleIndex, src.ruleIndex, sizeof(dst.ruleIndex));
+            memcpy(dst.keyValue, src.keyValue, sizeof(dst.keyValue));
+            memcpy(dst.keyMask, src.keyMask, sizeof(dst.keyMask));
+            dst.headMask = src.headMask;
+            dst.tailMask = src.tailMask;
+            dst.ruleCount = src.ruleCount;
+            dst.reserved = 0;
+        }
+    }
+
+    auto *ruleMetaOut =
+        reinterpret_cast<HAORuntimeRuleMeta *>(base + ruleMetaOffset);
+    for (u32 i = 0; i < ruleMetaCount; i++) {
+        const auto &srcMeta = artifacts.ruleMeta[i];
+        const auto &plan = artifacts.haoRulePlans[i];
+        auto &dst = ruleMetaOut[i];
+        dst.id = srcMeta.id;
+        dst.groups = srcMeta.groups;
+        dst.len = srcMeta.len;
+        dst.flags = srcMeta.flags;
+        dst.category = static_cast<u8>(plan.category);
+        dst.verifierValidByteMask = plan.verifier.validByteMask;
+        dst.anchorOffset = plan.verifier.anchorOffset;
+        dst.anchorLength = plan.verifier.anchorLength;
+        dst.verifierFlags = plan.verifier.flags;
+        dst.reserved0 = 0;
+        dst.reserved1 = 0;
+        dst.planFlags = plan.flags;
+        dst.litOffset = srcMeta.litOffset;
+        memcpy(dst.lit, srcMeta.lit, sizeof(dst.lit));
+        memcpy(dst.msk, srcMeta.msk, sizeof(dst.msk));
+        memcpy(dst.cmp, srcMeta.cmp, sizeof(dst.cmp));
+    }
+
+    if (literalBlobBytes) {
+        memcpy(base + literalBlobOffset, artifacts.literalBlob.data(),
+               literalBlobBytes);
+    }
+
+    return blob;
+}
+
 } // namespace ue2

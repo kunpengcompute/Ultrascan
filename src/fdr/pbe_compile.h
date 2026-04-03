@@ -256,6 +256,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
                        bool enableDump = true);
 
 bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts);
+bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts);
 
 } // namespace ue2
 
