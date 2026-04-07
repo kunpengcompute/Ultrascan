@@ -169,6 +169,19 @@ struct HAORuntimeRuleMeta {
     u8 cmp[8];
 };
 
+/* HAO v2 runtime 只读校验阶段返回的摘要信息。 */
+struct HAORuntimeInspectSummary {
+    u32 selectorCount;
+    u32 primaryCount;
+    u32 primaryBitmapSize;
+    u32 secondaryCount;
+    u32 ruleMetaCount;
+    u32 nonEmptyPrimary;
+    u32 multiEntryBucketCount;
+    u32 maxEntriesPerKey;
+    u32 totalRulesInL2;
+};
+
 struct FDR;
 struct FDR_Runtime_Args;
 
@@ -189,6 +202,9 @@ u32 PbeRuntimeEntryMatchMaskForTest(
 u32 PbeRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
                                      const u32 *primaryIdx, u32 laneCount,
                                      int usePacked);
+int HaoRuntimeValidateLayoutForTest(const void *blob, u32 blobSize);
+int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
+                                 struct HAORuntimeInspectSummary *summary);
 
 #ifdef __cplusplus
 }

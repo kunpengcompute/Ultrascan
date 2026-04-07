@@ -1206,6 +1206,65 @@ TEST(PBECompile, BuildHaoGlobalBlobSecondaryEntriesMatchArtifacts) {
     }
 }
 
+TEST(PBECompile, HaoRuntimeValidateLayoutAcceptsGeneratedBlob) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 668, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("maskrule", false, false, 669, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("ALPHA", true, false, 670, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 671, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    auto blob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+    EXPECT_TRUE(HaoRuntimeValidateLayoutForTest(blob.get(),
+                                                verify_u32(blob.size())));
+
+    HAORuntimeInspectSummary summary = {};
+    ASSERT_TRUE(HaoRuntimeInspectBlobForTest(blob.get(),
+                                            verify_u32(blob.size()),
+                                            &summary));
+    EXPECT_EQ(artifacts.haoGlobalHash.stats.nonEmptyPrimary,
+              summary.nonEmptyPrimary);
+    EXPECT_EQ(artifacts.haoGlobalHash.stats.totalSecondaryEntries + 1U,
+              summary.secondaryCount);
+    EXPECT_EQ(artifacts.haoGlobalHash.stats.maxEntriesPerKey,
+              summary.maxEntriesPerKey);
+    EXPECT_EQ(artifacts.ruleMeta.size(), summary.ruleMetaCount);
+}
+
+TEST(PBECompile, HaoRuntimeValidateLayoutRejectsBrokenSecondaryOffset) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 672, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("maskrule", false, false, 673, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("ALPHA", true, false, 674, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 675, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    auto blob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+
+    auto *hdr = reinterpret_cast<HAORuntimeHeader *>(blob.get());
+    const u32 savedSecondaryOffset = hdr->secondaryOffset;
+    hdr->secondaryOffset = verify_u32(blob.size());
+    EXPECT_FALSE(HaoRuntimeValidateLayoutForTest(blob.get(),
+                                                 verify_u32(blob.size())));
+    hdr->secondaryOffset = savedSecondaryOffset;
+    EXPECT_TRUE(HaoRuntimeValidateLayoutForTest(blob.get(),
+                                                verify_u32(blob.size())));
+}
+
 TEST(PBECompile, PrimaryBitmapMatchesNonEmptyL1Entries) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 650, HWLM_ALL_GROUPS, {}, {}),

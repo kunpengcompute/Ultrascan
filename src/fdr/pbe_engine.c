@@ -144,6 +144,110 @@ static int pbeValidateLayout(const struct FDR *fdr,
     return 1;
 }
 
+/* HAO v2 当前还未切到正式执行路径，这里先提供 runtime 侧的只读布局校验。
+ * 后续切换执行主路径时，可以直接复用这层边界检查。 */
+static int haoValidateLayout(const void *blob, u32 blobSize,
+                             const struct HAORuntimeHeader **outHdr) {
+    const struct HAORuntimeHeader *hdr;
+
+    if (!blob || blobSize < sizeof(struct HAORuntimeHeader)) {
+        return 0;
+    }
+
+    hdr = (const struct HAORuntimeHeader *)blob;
+    if (hdr->magic != HAO_RUNTIME_MAGIC ||
+        hdr->version != HAO_RUNTIME_VERSION) {
+        return 0;
+    }
+    if (!hdr->selectorCount || !hdr->primaryCount || !hdr->secondaryCount) {
+        return 0;
+    }
+    if (hdr->selectorCount > PBE_RUNTIME_MAX_SELECTORS) {
+        return 0;
+    }
+    if (!hdr->windowBytes || hdr->windowBytes > PBE_RUNTIME_BYTES_PER_RULE_SLOT) {
+        return 0;
+    }
+    if (hdr->extractMode > PBE_RUNTIME_EXTRACT_MODE_BEXT) {
+        return 0;
+    }
+    if ((u64a)hdr->selectorsOffset + (u64a)hdr->selectorCount *
+            sizeof(struct HAORuntimeBitSelector) >
+        (u64a)blobSize) {
+        return 0;
+    }
+    if ((u64a)hdr->primaryBitmapOffset + (u64a)hdr->primaryBitmapSize >
+        (u64a)blobSize) {
+        return 0;
+    }
+    if ((u64a)hdr->primaryOffset + (u64a)hdr->primaryCount * sizeof(u32) >
+        (u64a)blobSize) {
+        return 0;
+    }
+    if ((u64a)hdr->secondaryOffset + (u64a)hdr->secondaryCount *
+            sizeof(struct PBERuntimeSecondaryHashEntry) >
+        (u64a)blobSize) {
+        return 0;
+    }
+    if ((u64a)hdr->ruleMetaOffset + (u64a)hdr->ruleMetaCount *
+            sizeof(struct HAORuntimeRuleMeta) >
+        (u64a)blobSize) {
+        return 0;
+    }
+    if ((u64a)hdr->literalBlobOffset + (u64a)hdr->literalBlobSize >
+        (u64a)blobSize) {
+        return 0;
+    }
+
+    if (outHdr) {
+        *outHdr = hdr;
+    }
+    return 1;
+}
+
+/* 先提供一个 runtime 侧摘要统计，帮助我们在不切执行链的前提下校验 HAO v2 blob。 */
+static void haoInspectLayout(const struct HAORuntimeHeader *hdr,
+                             struct HAORuntimeInspectSummary *summary) {
+    const u32 *primary;
+    const struct PBERuntimeSecondaryHashEntry *secondary;
+    u32 i;
+
+    if (!hdr || !summary) {
+        return;
+    }
+
+    memset(summary, 0, sizeof(*summary));
+    summary->selectorCount = hdr->selectorCount;
+    summary->primaryCount = hdr->primaryCount;
+    summary->primaryBitmapSize = hdr->primaryBitmapSize;
+    summary->secondaryCount = hdr->secondaryCount;
+    summary->ruleMetaCount = hdr->ruleMetaCount;
+
+    primary = (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
+    secondary = (const struct PBERuntimeSecondaryHashEntry *)(
+        (const u8 *)hdr + hdr->secondaryOffset);
+
+    for (i = 0; i < hdr->primaryCount; i++) {
+        if (!primary[i]) {
+            continue;
+        }
+        {
+            const u32 entryCount = primary[i] >> PBE_RUNTIME_L1_COUNT_SHIFT;
+            summary->nonEmptyPrimary++;
+            if (entryCount > 1) {
+                summary->multiEntryBucketCount++;
+            }
+            if (summary->maxEntriesPerKey < entryCount) {
+                summary->maxEntriesPerKey = entryCount;
+            }
+        }
+    }
+
+    for (i = 0; i < hdr->secondaryCount; i++) {
+        summary->totalRulesInL2 += secondary[i].ruleCount;
+    }
+}
+
 static int pbeProcessEncodedRange(
     const struct PBERuntimeHeader *hdr,
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
@@ -451,6 +555,24 @@ u32 PbeRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
 
     return usePacked ? pbeProbeBitmapPacked(bitmap, bitmapSize, &probe)
                      : pbeProbeBitmapScalar(bitmap, bitmapSize, &probe);
+}
+
+int HaoRuntimeValidateLayoutForTest(const void *blob, u32 blobSize) {
+    return haoValidateLayout(blob, blobSize, NULL);
+}
+
+int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
+                                 struct HAORuntimeInspectSummary *summary) {
+    const struct HAORuntimeHeader *hdr = NULL;
+
+    if (!summary) {
+        return 0;
+    }
+    if (!haoValidateLayout(blob, blobSize, &hdr)) {
+        return 0;
+    }
+    haoInspectLayout(hdr, summary);
+    return 1;
 }
 
 hwlm_error_t PbeEngineExec(const struct FDR *fdr,
