@@ -197,12 +197,20 @@ struct HAOGlobalHashArtifacts {
     HAOGlobalHashStats stats;
 };
 
+/* HAO v2 还没切 runtime 之前，编译期需要显式记录当前希望输出哪种 blob 布局。 */
+enum class HAOBlobLayoutMode : u8 {
+    HAO_BLOB_LAYOUT_V1_COMPAT = 0,
+    HAO_BLOB_LAYOUT_V2_GLOBAL = 1
+};
+
 struct PBECompileArtifacts {
     u32 keyBits = 0;
     u32 flags = 0;
     u32 extractMode = PBE_EXTRACT_MODE_SCALAR;
     u32 windowBytes = PBE_BYTES_PER_RULE_SLOT;
     u64a bextMask = 0;
+    HAOBlobLayoutMode haoBlobLayoutMode =
+        HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
     std::vector<PBEBitSelector> bitSelectors;
     /* HAO v2 新增：规则计划层和汇总信息。 */
     std::vector<HAOCompiledRulePlan> haoRulePlans;

@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <limits>
 #include <map>
+#include <memory>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -1202,6 +1203,8 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     artifacts->extractMode = PBE_EXTRACT_MODE_SCALAR;
     artifacts->windowBytes = PBE_BYTES_PER_RULE_SLOT;
     artifacts->bextMask = 0;
+    artifacts->haoBlobLayoutMode =
+        HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
     artifacts->bitSelectors.clear();
     artifacts->haoRulePlans.clear();
     artifacts->haoSummary = {};
@@ -1285,8 +1288,14 @@ bool analyzePBEFeasibility(const target_t &target,
         return false;
     }
 
-    PBECompileArtifacts temp;
-    PBECompileArtifacts *out = artifacts ? artifacts : &temp;
+    /* 这里只在调用方没有提供 artifacts 时才构造临时对象。
+     * 这样可以避免在常见路径里无意义地创建/析构一个大型 STL 聚合对象。 */
+    std::unique_ptr<PBECompileArtifacts> tempStorage;
+    PBECompileArtifacts *out = artifacts;
+    if (!out) {
+        tempStorage.reset(new PBECompileArtifacts());
+        out = tempStorage.get();
+    }
     if (!buildPBEArtifacts(lits, out, false)) {
         local.reason = PBEFeasibilityReason::ARTIFACT_BUILD_FAILED;
         if (result) {
@@ -1333,6 +1342,11 @@ bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
 }
 
 bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
+    /* 过渡阶段统一走这个入口，具体输出 HAO v1 还是 HAO v2 布局由模式字段决定。 */
+    if (artifacts.haoBlobLayoutMode == HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V2_GLOBAL) {
+        return buildHAOGlobalBlob(artifacts);
+    }
+
     const u32 selectorCount = verify_u32(artifacts.bitSelectors.size());
     const u32 classCount = verify_u32(artifacts.maskClasses.size());
     const u32 primaryCount = verify_u32(artifacts.primaryHashTable.offsets.size());

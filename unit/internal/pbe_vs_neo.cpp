@@ -67,6 +67,15 @@ struct PBEInspectStats {
     u32 totalRulesInL2 = 0;
 };
 
+struct HAOInspectStats {
+    u32 nonEmptyL1 = 0;
+    u32 bitmapBytes = 0;
+    u32 multiEntryBucketCount = 0;
+    u32 maxL2EntriesPerKey = 0;
+    u32 totalL2Entries = 0;
+    u32 totalRulesInL2 = 0;
+};
+
 static std::vector<Match> g_matches;
 
 extern "C" {
@@ -202,6 +211,61 @@ const PBERuntimeHeader *getPbeRuntimeHeader(const FDR *fdr) {
     }
     return reinterpret_cast<const PBERuntimeHeader *>(
         reinterpret_cast<const u8 *>(fdr) + fdr->pbeOffset);
+}
+
+/* HAO v2 blob 当前还没有 runtime 主路径消费，这里先提供测试侧的只读解析入口。 */
+static
+const HAORuntimeHeader *getHaoRuntimeHeader(const bytecode_ptr<u8> &blob) {
+    if (!blob.get()) {
+        return nullptr;
+    }
+    return reinterpret_cast<const HAORuntimeHeader *>(blob.get());
+}
+
+static
+const HAORuntimeBitSelector *getHaoSelectors(const HAORuntimeHeader *hdr) {
+    if (!hdr) {
+        return nullptr;
+    }
+    return reinterpret_cast<const HAORuntimeBitSelector *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->selectorsOffset);
+}
+
+static
+const u8 *getHaoPrimaryBitmap(const HAORuntimeHeader *hdr) {
+    if (!hdr) {
+        return nullptr;
+    }
+    return reinterpret_cast<const u8 *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->primaryBitmapOffset);
+}
+
+static
+const u32 *getHaoPrimaryTable(const HAORuntimeHeader *hdr) {
+    if (!hdr) {
+        return nullptr;
+    }
+    return reinterpret_cast<const u32 *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->primaryOffset);
+}
+
+static
+const PBERuntimeSecondaryHashEntry *getHaoSecondaryTable(
+    const HAORuntimeHeader *hdr) {
+    if (!hdr) {
+        return nullptr;
+    }
+    return reinterpret_cast<const PBERuntimeSecondaryHashEntry *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
+}
+
+static
+const HAORuntimeRuleMeta *getHaoRuleMetaTable(const HAORuntimeHeader *hdr) {
+    if (!hdr) {
+        return nullptr;
+    }
+    return reinterpret_cast<const HAORuntimeRuleMeta *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->ruleMetaOffset);
 }
 
 static
@@ -360,6 +424,47 @@ PBEInspectStats computeInspectStats(const PBECompileArtifacts &artifacts) {
             }
         }
     }
+
+    return stats;
+}
+
+static
+HAOInspectStats computeHaoInspectStats(const bytecode_ptr<u8> &blob) {
+    HAOInspectStats stats;
+    const auto *hdr = getHaoRuntimeHeader(blob);
+    if (!hdr) {
+        return stats;
+    }
+
+    const auto *primary = getHaoPrimaryTable(hdr);
+    const auto *bitmap = getHaoPrimaryBitmap(hdr);
+    const auto *secondary = getHaoSecondaryTable(hdr);
+
+    stats.bitmapBytes = hdr->primaryBitmapSize;
+    stats.totalL2Entries = hdr->secondaryCount ? hdr->secondaryCount - 1 : 0;
+
+    for (u32 i = 0; i < hdr->secondaryCount; i++) {
+        stats.totalRulesInL2 += secondary[i].ruleCount;
+    }
+
+    /* 只读解析 HAO 全局单表，用于后续 runtime 切换前的校验基线。 */
+    for (u32 i = 0; i < hdr->primaryCount; i++) {
+        if (!primary[i]) {
+            continue;
+        }
+        const u32 entryCount = primary[i] >> PBE_L1_COUNT_SHIFT;
+        stats.nonEmptyL1++;
+        stats.maxL2EntriesPerKey = std::max(stats.maxL2EntriesPerKey, entryCount);
+        if (entryCount > 1) {
+            stats.multiEntryBucketCount++;
+        }
+    }
+
+    u32 setBits = 0;
+    for (u32 i = 0; i < hdr->primaryBitmapSize; i++) {
+        setBits += verify_u32(std::bitset<8>(bitmap[i]).count());
+    }
+    EXPECT_EQ(setBits, stats.nonEmptyL1);
 
     return stats;
 }
@@ -891,6 +996,56 @@ TEST(PBECompile, BuildPbeBlobHeaderMatchesArtifacts) {
     EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
 }
 
+TEST(PBECompile, BuildPbeBlobDefaultsToV1CompatLayout) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 660, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 661, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 662, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 663, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    EXPECT_EQ(HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT,
+              artifacts.haoBlobLayoutMode);
+
+    auto blob = buildPBEBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+
+    const auto *hdr = reinterpret_cast<const PBERuntimeHeader *>(blob.get());
+    EXPECT_EQ(PBE_RUNTIME_MAGIC, hdr->magic);
+    EXPECT_EQ(PBE_RUNTIME_VERSION, hdr->version);
+}
+
+TEST(PBECompile, BuildPbeBlobCanDispatchToHaoGlobalLayout) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 664, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("maskrule", false, false, 665, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("ALPHA", true, false, 666, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 667, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    // 这里显式切到 HAO v2 布局，但仍然复用统一的 buildPBEBlob() 入口。
+    artifacts.haoBlobLayoutMode = HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V2_GLOBAL;
+
+    auto blob = buildPBEBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+
+    const auto *hdr = getHaoRuntimeHeader(blob);
+    ASSERT_NE(nullptr, hdr);
+    EXPECT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
+    EXPECT_EQ(HAO_RUNTIME_VERSION, hdr->version);
+    EXPECT_EQ(artifacts.haoGlobalHash.keyBits, hdr->keyBits);
+    EXPECT_EQ(artifacts.haoGlobalHash.primaryHashTable.offsets.size(),
+              hdr->primaryCount);
+}
+
 TEST(PBECompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 644, HWLM_ALL_GROUPS, {}, {}),
@@ -962,6 +1117,92 @@ TEST(PBECompile, BuildHaoGlobalBlobStoresRulePlanMeta) {
         EXPECT_EQ(srcMeta.lit[i], meta[1].lit[i]);
         EXPECT_EQ(srcMeta.msk[i], meta[1].msk[i]);
         EXPECT_EQ(srcMeta.cmp[i], meta[1].cmp[i]);
+    }
+}
+
+TEST(PBECompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 652, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 653, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("maskrule", false, false, 654, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("theta", false, false, 655, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    auto blob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+
+    const auto *hdr = getHaoRuntimeHeader(blob);
+    ASSERT_NE(nullptr, hdr);
+    const auto *selectors = getHaoSelectors(hdr);
+    const auto *primary = getHaoPrimaryTable(hdr);
+    const auto *bitmap = getHaoPrimaryBitmap(hdr);
+
+    for (u32 i = 0; i < hdr->selectorCount; i++) {
+        EXPECT_EQ(artifacts.bitSelectors[i].byteOffset, selectors[i].byteOffset);
+        EXPECT_EQ(artifacts.bitSelectors[i].bitOffset, selectors[i].bitOffset);
+    }
+    for (u32 i = 0; i < hdr->primaryCount; i++) {
+        EXPECT_EQ(artifacts.haoGlobalHash.primaryHashTable.offsets[i], primary[i]);
+    }
+    for (u32 i = 0; i < hdr->primaryBitmapSize; i++) {
+        EXPECT_EQ(artifacts.haoGlobalHash.primaryHashBitmap.bits[i], bitmap[i]);
+    }
+
+    const HAOInspectStats stats = computeHaoInspectStats(blob);
+    EXPECT_EQ(artifacts.haoGlobalHash.stats.nonEmptyPrimary, stats.nonEmptyL1);
+    EXPECT_EQ(artifacts.haoGlobalHash.stats.totalSecondaryEntries,
+              stats.totalL2Entries);
+}
+
+TEST(PBECompile, BuildHaoGlobalBlobSecondaryEntriesMatchArtifacts) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 656, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("maskrule", false, false, 657, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("ALPHA", true, false, 658, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 659, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    auto blob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+
+    const auto *hdr = getHaoRuntimeHeader(blob);
+    ASSERT_NE(nullptr, hdr);
+    const auto *secondary = getHaoSecondaryTable(hdr);
+
+    ASSERT_EQ(artifacts.haoGlobalHash.secondaryHashTable.size(),
+              static_cast<size_t>(hdr->secondaryCount));
+    for (u32 i = 0; i < hdr->secondaryCount; i++) {
+        const auto &src = artifacts.haoGlobalHash.secondaryHashTable[i];
+        const auto &dst = secondary[i];
+        EXPECT_EQ(src.ruleCount, dst.ruleCount) << "entry=" << i;
+        EXPECT_EQ(src.headMask, dst.headMask) << "entry=" << i;
+        EXPECT_EQ(src.tailMask, dst.tailMask) << "entry=" << i;
+        for (u32 j = 0; j < PBE_RUNTIME_RULE_VECTOR_BYTES; j++) {
+            EXPECT_EQ(src.ruleVector[j], dst.ruleVector[j])
+                << "entry=" << i << " byte=" << j;
+            EXPECT_EQ(src.tableControl[j], dst.tableControl[j])
+                << "entry=" << i << " tbl=" << j;
+        }
+        for (u32 slot = 0; slot < PBE_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
+            EXPECT_EQ(src.ruleIndex[slot], dst.ruleIndex[slot])
+                << "entry=" << i << " slot=" << slot;
+            EXPECT_EQ(src.keyValue[slot], dst.keyValue[slot])
+                << "entry=" << i << " keyValue slot=" << slot;
+            EXPECT_EQ(src.keyMask[slot], dst.keyMask[slot])
+                << "entry=" << i << " keyMask slot=" << slot;
+        }
     }
 }
 
