@@ -318,7 +318,7 @@ std::vector<Match> runPbeDirectInOrder(const FDR *fdr,
 static
 std::vector<Match> runHaoBlobDirectInOrder(const bytecode_ptr<u8> &blob,
                                            const std::vector<u8> &data,
-                                           hwlm_group_t groups) {
+                                           hwlm_group_t groups, bool useNaive) {
     g_matches.clear();
 
     hs_scratch scratch = {};
@@ -336,8 +336,13 @@ std::vector<Match> runHaoBlobDirectInOrder(const bytecode_ptr<u8> &blob,
         0
     };
 
-    const hwlm_error_t rv = HaoEngineExecBlobNaiveForTest(
-        blob.get(), verify_u32(blob.size()), &args, groups);
+    const hwlm_error_t rv = useNaive
+                                ? HaoEngineExecBlobNaiveForTest(
+                                      blob.get(), verify_u32(blob.size()),
+                                      &args, groups)
+                                : HaoEngineExecBlobBatchForTest(
+                                      blob.get(), verify_u32(blob.size()),
+                                      &args, groups);
     EXPECT_EQ(HWLM_SUCCESS, rv);
     return g_matches;
 }
@@ -1322,7 +1327,7 @@ TEST(PBERuntime, HaoBlobNaiveExecMatchesPbeDirectForSimpleRules) {
     const auto pbeMatches =
         runPbeDirectInOrder(pbe.get(), data, HWLM_ALL_GROUPS, true);
     const auto haoMatches =
-        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS);
+        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, true);
     EXPECT_EQ(pbeMatches, haoMatches);
 }
 
@@ -1365,6 +1370,34 @@ TEST(PBERuntime, HaoBlobNaiveExecRejectsBrokenLayoutCleanly) {
     EXPECT_TRUE(g_matches.empty());
 
     hdr->primaryOffset = savedPrimaryOffset;
+}
+
+TEST(PBERuntime, HaoBlobBatchExecMatchesNaiveForSimpleRules) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 692, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 693, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 694, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 695, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts));
+    auto haoBlob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, haoBlob.get());
+
+    const std::vector<u8> data = {
+        'x','a','l','p','h','a','-',
+        'A','l','P','h','A','-',
+        't','h','e','t','a','-',
+        'o','m','e','g','a','-',
+        'a','l','p','h','a'
+    };
+
+    const auto naiveMatches =
+        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, true);
+    const auto batchMatches =
+        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, false);
+    EXPECT_EQ(naiveMatches, batchMatches);
 }
 
 TEST(PBECompile, PrimaryBitmapMatchesNonEmptyL1Entries) {

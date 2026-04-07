@@ -747,6 +747,7 @@ void pbeBuildMaskClassBatchState(const struct PBERuntimeHeader *hdr,
     }
 }
 
+static really_inline
 void pbeDecodePrimaryValue(u32 encoded, u32 *offset, u32 *count) {
     if (offset) {
         *offset = encoded & PBE_RUNTIME_L1_OFFSET_MASK;

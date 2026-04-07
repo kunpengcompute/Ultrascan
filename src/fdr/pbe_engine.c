@@ -442,6 +442,76 @@ static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
     return HWLM_SUCCESS;
 }
 
+/* HAO v2 第二步先接一个“全局单表 batch 前端骨架”。
+ * 当前仍然复用 PBE 的 batch context/bitmap/compact helper，但不再走 Mask-Class，
+ * 而是直接对全局 key 空间做 bitmap probe 与 primary gather。 */
+static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
+                           const struct FDR_Runtime_Args *a,
+                           hwlm_group_t *control) {
+    struct PBERuntimeHeader shim;
+    const struct PBERuntimeBitSelector *selectors;
+    const u8 *primaryBitmap;
+    const u32 *primaryHashTable;
+    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable;
+    const struct HAORuntimeRuleMeta *ruleMeta;
+    const u8 *literalBlob;
+    size_t i;
+
+    if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
+        return HWLM_SUCCESS;
+    }
+
+    haoBuildShimHeader(hdr, &shim);
+    selectors = (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
+                                                       hdr->selectorsOffset);
+    primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
+    primaryHashTable = (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
+    secondaryHashTable = (const struct PBERuntimeSecondaryHashEntry *)(
+        (const u8 *)hdr + hdr->secondaryOffset);
+    ruleMeta = (const struct HAORuntimeRuleMeta *)((const u8 *)hdr +
+                                                   hdr->ruleMetaOffset);
+    literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
+    const u32 batchWidth = pbeSuggestedBatchWidth(&shim);
+
+    for (i = a->start_offset; i < a->len; i += batchWidth) {
+        struct PBEPositionContext ctxs[PBE_BATCH_MAX_WIDTH];
+        struct PBEBitmapProbeState probe;
+        u32 primaryIdx[PBE_BATCH_MAX_WIDTH] = {0};
+        u32 laneCount = 0;
+        u32 activeCount = 0;
+        u32 active;
+
+        laneCount = pbeBuildBatchContexts(&shim, selectors, a, i, batchWidth,
+                                          ctxs);
+        if (!laneCount) {
+            continue;
+        }
+
+        for (u32 lane = 0; lane < laneCount; lane++) {
+            primaryIdx[lane] = ctxs[lane].key;
+        }
+
+        pbePrepareBitmapProbeStateFromPrimaryIdx(primaryIdx, laneCount, &probe);
+        probe.activeMask = pbeProbeBitmapPacked(primaryBitmap,
+                                                hdr->primaryBitmapSize, &probe);
+        activeCount = pbeCompactAndLoadPrimary(primaryHashTable, &probe);
+
+        for (active = 0; active < activeCount; active++) {
+            const u32 lane = probe.activeLaneIndex[active];
+            const u32 encoded = probe.activeEncoded[active];
+
+            if (haoProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+                                       literalBlob, hdr->literalBlobSize, a,
+                                       control, &ctxs[lane], ctxs[lane].key,
+                                       encoded) == HWLM_TERMINATED) {
+                return HWLM_TERMINATED;
+            }
+        }
+    }
+
+    return HWLM_SUCCESS;
+}
+
 static hwlm_error_t haoExecBlobWithPath(const void *blob, u32 blobSize,
                                         const struct FDR_Runtime_Args *a,
                                         hwlm_group_t control, int useBatch4) {
@@ -455,7 +525,8 @@ static hwlm_error_t haoExecBlobWithPath(const void *blob, u32 blobSize,
         return HWLM_SUCCESS;
     }
 
-    return haoRunNaiveBlob(hdr, a, &control);
+    return useBatch4 ? haoRunBatchBlob(hdr, a, &control)
+                     : haoRunNaiveBlob(hdr, a, &control);
 }
 
 /* 统一用安全拷贝读取 blob magic，避免直接解引用未对齐地址。 */
@@ -814,6 +885,12 @@ hwlm_error_t HaoEngineExecBlobNaiveForTest(const void *blob, u32 blobSize,
                                            const struct FDR_Runtime_Args *a,
                                            hwlm_group_t control) {
     return haoExecBlobWithPath(blob, blobSize, a, control, 0);
+}
+
+hwlm_error_t HaoEngineExecBlobBatchForTest(const void *blob, u32 blobSize,
+                                           const struct FDR_Runtime_Args *a,
+                                           hwlm_group_t control) {
+    return haoExecBlobWithPath(blob, blobSize, a, control, 1);
 }
 
 hwlm_error_t PbeEngineExec(const struct FDR *fdr,

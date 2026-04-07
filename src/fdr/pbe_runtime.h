@@ -208,6 +208,9 @@ int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
 hwlm_error_t HaoEngineExecBlobNaiveForTest(const void *blob, u32 blobSize,
                                            const struct FDR_Runtime_Args *a,
                                            hwlm_group_t control);
+hwlm_error_t HaoEngineExecBlobBatchForTest(const void *blob, u32 blobSize,
+                                           const struct FDR_Runtime_Args *a,
+                                           hwlm_group_t control);
 
 #ifdef __cplusplus
 }
