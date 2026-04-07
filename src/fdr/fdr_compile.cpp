@@ -900,6 +900,11 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                      pbeResult.flags);
 
         if (pbeFeasible) {
+            /* Limit HAO v2 to the explicit PBE-hint experimental path for now. */
+            const bool useHaoV2Layout = grey.allowHaoV2 && pbeHint;
+            pbeArtifacts.haoBlobLayoutMode = useHaoV2Layout
+                                                 ? HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V2_GLOBAL
+                                                 : HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
             auto proto = ue2::make_unique<HWLMProto>(
                 engType, move(pbeDes), lits, pbeBucketToLits, make_small);
             proto->pbeArtifacts =
@@ -980,6 +985,10 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
         if (!buildPBEArtifacts(proto.lits, &rebuiltArtifacts, false)) {
             return nullptr;
         }
+        /* Reuse the layout chosen during proto build so config changes do not retarget normal PBE builds. */
+        rebuiltArtifacts.haoBlobLayoutMode = proto.pbeArtifacts
+                                                 ? proto.pbeArtifacts->haoBlobLayoutMode
+                                                 : HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
         const PBECompileArtifacts *artifacts = &rebuiltArtifacts;
         if (artifacts->flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
             // Contract violation: canBuildPBE() should have filtered this set.
@@ -1020,3 +1029,4 @@ size_t fdrSize(const FDR *fdr) {
 }
 
 } // namespace ue2
+

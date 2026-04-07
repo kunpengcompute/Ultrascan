@@ -59,6 +59,7 @@ Grey::Grey(bool applyOverrides) :
                    allowMcSheng(true),
                    allowNeoFdr(false),
                    allowPbe(false),
+                   allowHaoV2(false),
                    allowPuff(true),
                    allowLiteral(true),
                    allowViolet(true),
@@ -295,6 +296,7 @@ void applyGreyOverrides(Grey *g, const string &s) {
         G_UPDATE(allowMcSheng);
         G_UPDATE(allowNeoFdr);
         G_UPDATE(allowPbe);
+        G_UPDATE(allowHaoV2);
         G_UPDATE(allowPuff);
         G_UPDATE(allowLiteral);
         G_UPDATE(allowLily);
