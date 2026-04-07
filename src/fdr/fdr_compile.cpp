@@ -77,6 +77,31 @@ namespace ue2 {
 
 namespace {
 
+static
+bool haoV2LayoutCanPreserveCoverage(const PBECompileArtifacts &artifacts) {
+    const HAOCompileSummary &summary = artifacts.haoSummary;
+    /* HAO v2 currently preserves correctness via two paths:
+     * 1) global single-table fast path
+     * 2) residual sidecar full-confirm path
+     * So coverage should be judged on whether the build produced a valid
+     * HAO blob without partial-capacity loss, rather than only on fast-path
+     * rule count. */
+    const u32 coveredPct = summary.totalRules ? 100U : 0U;
+
+    if (!artifacts.haoGlobalHash.valid) {
+        return false;
+    }
+    if (artifacts.haoGlobalHash.flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
+        return false;
+    }
+
+    if (coveredPct < HAO_MIN_FAST_RULE_COVERAGE_PCT) {
+        return false;
+    }
+
+    return true;
+}
+
 class FDRCompiler : noncopyable {
 private:
     const FDREngineDescription &eng;
@@ -900,8 +925,11 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                      pbeResult.flags);
 
         if (pbeFeasible) {
-            /* Limit HAO v2 to the explicit PBE-hint experimental path for now. */
-            const bool useHaoV2Layout = grey.allowHaoV2 && pbeHint;
+            /* HAO v2 can follow any build that actually selects the PBE path,
+             * but only while the current v2 runtime can preserve full rule
+             * coverage for this compiled rule set. */
+            const bool useHaoV2Layout =
+                grey.allowHaoV2 && haoV2LayoutCanPreserveCoverage(pbeArtifacts);
             pbeArtifacts.haoBlobLayoutMode = useHaoV2Layout
                                                  ? HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V2_GLOBAL
                                                  : HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;

@@ -242,6 +242,17 @@ HAORuleCategory haoClassifyLiteral(const hwlmLiteral &lit,
     return HAORuleCategory::HAO_RULE_EXACT;
 }
 
+static
+bool haoPlanRequiresResidualEval(const HAOCompiledRulePlan &plan) {
+    if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
+        return true;
+    }
+    if (plan.flags & HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM) {
+        return true;
+    }
+    return false;
+}
+
 /* 为后续 L2 verifier 预先生成确定性片段。
  * 注意：当前 HAO v2 runtime 仍复用 PBE 的归一化窗口预筛，因此这里无论 exact 还是
  * nocase，都先写入归一化后的 verifier bytes，最终 exact/nocase 语义差异交给
@@ -411,7 +422,7 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
 
     std::map<u32, std::vector<u32>> keyToRuleIndexes;
     for (const auto &plan : rulePlans) {
-        if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
+        if (haoPlanRequiresResidualEval(plan)) {
             continue;
         }
         for (const auto &expanded : plan.keyExpansion.expandedKeys) {
@@ -1517,11 +1528,20 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
 }
 
 bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
+    std::vector<u32> residualRuleIndexes;
+
     if (!artifacts.haoGlobalHash.valid) {
         return nullptr;
     }
     if (artifacts.haoRulePlans.size() != artifacts.ruleMeta.size()) {
         return nullptr;
+    }
+
+    residualRuleIndexes.reserve(artifacts.haoRulePlans.size());
+    for (u32 i = 0; i < artifacts.haoRulePlans.size(); i++) {
+        if (haoPlanRequiresResidualEval(artifacts.haoRulePlans[i])) {
+            residualRuleIndexes.push_back(i);
+        }
     }
 
     const u32 selectorCount = verify_u32(artifacts.bitSelectors.size());
@@ -1533,6 +1553,7 @@ bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
         verify_u32(artifacts.haoGlobalHash.secondaryHashTable.size());
     const u32 ruleMetaCount = verify_u32(artifacts.ruleMeta.size());
     const u32 literalBlobSize = verify_u32(artifacts.literalBlob.size());
+    const u32 residualRuleCount = verify_u32(residualRuleIndexes.size());
 
     const size_t selectorBytes =
         sizeof(HAORuntimeBitSelector) * artifacts.bitSelectors.size();
@@ -1546,6 +1567,7 @@ bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
     const size_t ruleMetaBytes =
         sizeof(HAORuntimeRuleMeta) * artifacts.ruleMeta.size();
     const size_t literalBlobBytes = artifacts.literalBlob.size();
+    const size_t residualRuleBytes = sizeof(u32) * residualRuleIndexes.size();
 
     size_t totalSize = ROUNDUP_N(sizeof(HAORuntimeHeader), alignof(u32));
     const u32 selectorsOffset = verify_u32(totalSize);
@@ -1560,6 +1582,8 @@ bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
     totalSize += ROUNDUP_N(ruleMetaBytes, alignof(u32));
     const u32 literalBlobOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(literalBlobBytes, alignof(u32));
+    const u32 residualRuleIndexOffset = verify_u32(totalSize);
+    totalSize += ROUNDUP_N(residualRuleBytes, alignof(u32));
 
     auto blob = make_zeroed_bytecode_ptr<u8>(totalSize, 64);
     if (!blob) {
@@ -1586,6 +1610,8 @@ bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
     hdr->secondaryOffset = secondaryOffset;
     hdr->ruleMetaOffset = ruleMetaOffset;
     hdr->literalBlobOffset = literalBlobOffset;
+    hdr->residualRuleCount = residualRuleCount;
+    hdr->residualRuleIndexOffset = residualRuleIndexOffset;
 
     u8 *base = blob.get();
     auto *selectorsOut =
@@ -1651,6 +1677,10 @@ bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
     if (literalBlobBytes) {
         memcpy(base + literalBlobOffset, artifacts.literalBlob.data(),
                literalBlobBytes);
+    }
+    if (residualRuleBytes) {
+        memcpy(base + residualRuleIndexOffset, residualRuleIndexes.data(),
+               residualRuleBytes);
     }
 
     return blob;

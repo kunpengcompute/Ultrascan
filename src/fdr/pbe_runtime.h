@@ -24,7 +24,8 @@
 #define PBE_RUNTIME_EXTRACT_MODE_BEXT 1U
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 1U
+#define HAO_RUNTIME_VERSION 2U
+#define HAO_RUNTIME_BLOCK_BYTES 32U
 
 #define PBE_RUNTIME_MASK_CLASS_FLAG_HOT (1U << 0)
 
@@ -141,6 +142,8 @@ struct HAORuntimeHeader {
     u32 secondaryOffset;
     u32 ruleMetaOffset;
     u32 literalBlobOffset;
+    u32 residualRuleCount;
+    u32 residualRuleIndexOffset;
 };
 
 struct HAORuntimeBitSelector {
@@ -176,6 +179,7 @@ struct HAORuntimeInspectSummary {
     u32 primaryBitmapSize;
     u32 secondaryCount;
     u32 ruleMetaCount;
+    u32 residualRuleCount;
     u32 nonEmptyPrimary;
     u32 multiEntryBucketCount;
     u32 maxEntriesPerKey;
