@@ -160,8 +160,8 @@ struct HAORuntimeRuleMeta {
     u8 anchorOffset;
     u8 anchorLength;
     u8 verifierFlags;
-    u8 reserved0;
-    u16 reserved1;
+    u8 maskLen;
+    u16 reserved0;
     u32 planFlags;
     u32 litOffset;
     u8 lit[8];
@@ -205,6 +205,9 @@ u32 PbeRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
 int HaoRuntimeValidateLayoutForTest(const void *blob, u32 blobSize);
 int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
                                  struct HAORuntimeInspectSummary *summary);
+hwlm_error_t HaoEngineExecBlobNaiveForTest(const void *blob, u32 blobSize,
+                                           const struct FDR_Runtime_Args *a,
+                                           hwlm_group_t control);
 
 #ifdef __cplusplus
 }

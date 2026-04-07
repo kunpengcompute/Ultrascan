@@ -314,6 +314,34 @@ std::vector<Match> runPbeDirectInOrder(const FDR *fdr,
     return g_matches;
 }
 
+/* HAO v2 还没有接入通用 FDR 执行入口，这里先提供 blob 级别的直接执行对照。 */
+static
+std::vector<Match> runHaoBlobDirectInOrder(const bytecode_ptr<u8> &blob,
+                                           const std::vector<u8> &data,
+                                           hwlm_group_t groups) {
+    g_matches.clear();
+
+    hs_scratch scratch = {};
+    scratch.fdr_conf = nullptr;
+
+    const FDR_Runtime_Args args = {
+        data.data(),
+        data.size(),
+        nullptr,
+        0,
+        0,
+        collectCallback,
+        &scratch,
+        nullptr,
+        0
+    };
+
+    const hwlm_error_t rv = HaoEngineExecBlobNaiveForTest(
+        blob.get(), verify_u32(blob.size()), &args, groups);
+    EXPECT_EQ(HWLM_SUCCESS, rv);
+    return g_matches;
+}
+
 static
 void skipIfNoPbeSupport() {
     // PBE compile path is currently gated on Arm64 in canBuildPBE().
@@ -1263,6 +1291,80 @@ TEST(PBECompile, HaoRuntimeValidateLayoutRejectsBrokenSecondaryOffset) {
     hdr->secondaryOffset = savedSecondaryOffset;
     EXPECT_TRUE(HaoRuntimeValidateLayoutForTest(blob.get(),
                                                 verify_u32(blob.size())));
+}
+
+TEST(PBERuntime, HaoBlobNaiveExecMatchesPbeDirectForSimpleRules) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 684, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 685, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 686, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 687, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    auto pbe = buildFdrWithHint(lits, ENGINE_ID_PBE);
+    if (!pbe || pbe->engineID != ENGINE_ID_PBE || !pbe->pbeOffset) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts));
+    auto haoBlob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, haoBlob.get());
+
+    const std::vector<u8> data = {
+        'x','a','l','p','h','a','-',
+        'A','l','P','h','A','-',
+        't','h','e','t','a','-',
+        'o','m','e','g','a'
+    };
+
+    const auto pbeMatches =
+        runPbeDirectInOrder(pbe.get(), data, HWLM_ALL_GROUPS, true);
+    const auto haoMatches =
+        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS);
+    EXPECT_EQ(pbeMatches, haoMatches);
+}
+
+TEST(PBERuntime, HaoBlobNaiveExecRejectsBrokenLayoutCleanly) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 688, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 689, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 690, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 691, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts));
+    auto haoBlob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, haoBlob.get());
+
+    auto *hdr = reinterpret_cast<HAORuntimeHeader *>(haoBlob.get());
+    const u32 savedPrimaryOffset = hdr->primaryOffset;
+    hdr->primaryOffset = verify_u32(haoBlob.size());
+
+    g_matches.clear();
+    hs_scratch scratch = {};
+    scratch.fdr_conf = nullptr;
+    const std::vector<u8> data = {'a', 'l', 'p', 'h', 'a'};
+    const FDR_Runtime_Args args = {
+        data.data(),
+        data.size(),
+        nullptr,
+        0,
+        0,
+        collectCallback,
+        &scratch,
+        nullptr,
+        0
+    };
+
+    EXPECT_EQ(HWLM_SUCCESS, HaoEngineExecBlobNaiveForTest(
+                                haoBlob.get(), verify_u32(haoBlob.size()),
+                                &args, HWLM_ALL_GROUPS));
+    EXPECT_TRUE(g_matches.empty());
+
+    hdr->primaryOffset = savedPrimaryOffset;
 }
 
 TEST(PBECompile, PrimaryBitmapMatchesNonEmptyL1Entries) {

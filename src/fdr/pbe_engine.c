@@ -248,6 +248,226 @@ static void haoInspectLayout(const struct HAORuntimeHeader *hdr,
     }
 }
 
+/* HAO v2 运行期当前先复用 PBE 的位置上下文与 L2 预筛 helper，
+ * 通过一个轻量 shim 头把全局单表 layout 接入现有公共小函数。 */
+static void haoBuildShimHeader(const struct HAORuntimeHeader *hdr,
+                               struct PBERuntimeHeader *shim) {
+    memset(shim, 0, sizeof(*shim));
+    shim->keyBits = hdr->keyBits;
+    shim->selectorCount = hdr->selectorCount;
+    shim->primaryCount = hdr->primaryCount;
+    shim->primaryBitmapSize = hdr->primaryBitmapSize;
+    shim->secondaryCount = hdr->secondaryCount;
+    shim->ruleMetaCount = hdr->ruleMetaCount;
+    shim->literalBlobSize = hdr->literalBlobSize;
+    shim->extractMode = hdr->extractMode;
+    shim->windowBytes = hdr->windowBytes;
+    shim->bextMask = hdr->bextMask;
+}
+
+/* HAO v2 的 confirm 当前仍然沿用原始 literal + mask/cmp 做最终确认。
+ * 后续真正的 HAO confirm 优化会在 block kernel 稳定后再推进。 */
+static int haoRuleExactMatch(const struct HAORuntimeRuleMeta *rm,
+                             const struct FDR_Runtime_Args *a, size_t endPos,
+                             const u8 *literalBlob, u32 literalBlobSize) {
+    if (!rm || !a || !literalBlob) {
+        return 0;
+    }
+    if (!rm->len) {
+        return 0;
+    }
+    if (rm->litOffset > literalBlobSize ||
+        (u64a)rm->litOffset + rm->len > literalBlobSize) {
+        return 0;
+    }
+    if ((u64a)rm->len > (u64a)endPos + 1 + a->len_history) {
+        return 0;
+    }
+
+    {
+        const s64a startPos = (s64a)endPos - (s64a)rm->len + 1;
+        const u8 *pat = literalBlob + rm->litOffset;
+        const int nocase = (rm->flags & PBE_RULE_FLAG_NOCASE) ? 1 : 0;
+        u16 i;
+
+        for (i = 0; i < rm->len; i++) {
+            u8 got;
+            if (!pbeGetByteAt(a, startPos + i, &got)) {
+                return 0;
+            }
+            if (nocase) {
+                if ((u8)mytoupper((char)got) != pat[i]) {
+                    return 0;
+                }
+            } else if (got != pat[i]) {
+                return 0;
+            }
+        }
+
+        if ((rm->flags & PBE_RULE_FLAG_HAS_MASK) && rm->maskLen) {
+            const u8 mlen = rm->maskLen;
+            const s64a maskStart = startPos + (s64a)rm->len - (s64a)mlen;
+            for (i = 0; i < mlen && i < sizeof(rm->msk); i++) {
+                u8 got;
+                if (!pbeGetByteAt(a, maskStart + i, &got)) {
+                    return 0;
+                }
+                if ((got & rm->msk[i]) != rm->cmp[i]) {
+                    return 0;
+                }
+            }
+        }
+    }
+
+    return 1;
+}
+
+static int haoProcessEncodedRange(
+    const struct HAORuntimeHeader *hdr,
+    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
+    const struct HAORuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
+    u32 literalBlobSize, const struct FDR_Runtime_Args *a,
+    hwlm_group_t *control, struct PBEPositionContext *ctx, u32 fullKey,
+    u32 encoded) {
+    u32 offset = 0;
+    u32 count = 0;
+    u32 n;
+
+    if (!encoded || !ctx) {
+        return HWLM_SUCCESS;
+    }
+
+    pbeDecodePrimaryValue(encoded, &offset, &count);
+    for (n = 0; n < count; n++) {
+        const u32 off = offset + n;
+        const struct PBERuntimeSecondaryHashEntry *entry;
+        u32 laneMask;
+        u32 r;
+
+        if (!off || off >= hdr->secondaryCount) {
+            break;
+        }
+
+        entry = &secondaryHashTable[off];
+        laneMask = pbeEntryMatchMaskFromContextVector(entry, ctx);
+        if (!laneMask) {
+            continue;
+        }
+
+        for (r = 0; r < entry->ruleCount &&
+                    r < PBE_RUNTIME_RULE_SLOTS_PER_ENTRY; r++) {
+            const u16 ridx = entry->ruleIndex[r];
+            const u32 kv = entry->keyValue[r];
+            const u32 km = entry->keyMask[r];
+            const struct HAORuntimeRuleMeta *rm;
+
+            if (ridx >= hdr->ruleMetaCount) {
+                continue;
+            }
+            if (!(laneMask & (1U << r))) {
+                continue;
+            }
+            if (((fullKey ^ kv) & km) != 0) {
+                continue;
+            }
+
+            rm = &ruleMeta[ridx];
+            if (!(rm->groups & *control)) {
+                continue;
+            }
+            if (!haoRuleExactMatch(rm, a, ctx->endPos, literalBlob,
+                                   literalBlobSize)) {
+                continue;
+            }
+
+            *control = a->cb(ctx->endPos, rm->id, a->scratch);
+            if (*control == HWLM_TERMINATE_MATCHING) {
+                return HWLM_TERMINATED;
+            }
+        }
+    }
+
+    return HWLM_SUCCESS;
+}
+
+/* HAO v2 执行骨架先走全局单表 naive 路径。
+ * 这里的目标是先把新 layout 真正跑起来，后续再替换成 32B block kernel。 */
+static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
+                           const struct FDR_Runtime_Args *a,
+                           hwlm_group_t *control) {
+    struct PBERuntimeHeader shim;
+    const struct PBERuntimeBitSelector *selectors;
+    const u8 *primaryBitmap;
+    const u32 *primaryHashTable;
+    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable;
+    const struct HAORuntimeRuleMeta *ruleMeta;
+    const u8 *literalBlob;
+    size_t i;
+
+    if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
+        return HWLM_SUCCESS;
+    }
+
+    haoBuildShimHeader(hdr, &shim);
+    selectors = (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
+                                                       hdr->selectorsOffset);
+    primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
+    primaryHashTable = (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
+    secondaryHashTable = (const struct PBERuntimeSecondaryHashEntry *)(
+        (const u8 *)hdr + hdr->secondaryOffset);
+    ruleMeta = (const struct HAORuntimeRuleMeta *)((const u8 *)hdr +
+                                                   hdr->ruleMetaOffset);
+    literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
+
+    for (i = a->start_offset; i < a->len; i++) {
+        struct PBEPositionContext ctx;
+
+        pbeBuildPositionContext(&shim, selectors, a, i, &ctx, 1);
+        if (ctx.key >= hdr->primaryCount) {
+            continue;
+        }
+        if (!pbePrimaryBitmapHasValue(primaryBitmap, hdr->primaryBitmapSize,
+                                      ctx.key)) {
+            continue;
+        }
+        if (haoProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+                                   literalBlob, hdr->literalBlobSize, a,
+                                   control, &ctx, ctx.key,
+                                   primaryHashTable[ctx.key]) ==
+            HWLM_TERMINATED) {
+            return HWLM_TERMINATED;
+        }
+    }
+
+    return HWLM_SUCCESS;
+}
+
+static hwlm_error_t haoExecBlobWithPath(const void *blob, u32 blobSize,
+                                        const struct FDR_Runtime_Args *a,
+                                        hwlm_group_t control, int useBatch4) {
+    const struct HAORuntimeHeader *hdr = NULL;
+
+    (void)useBatch4;
+    if (!haoValidateLayout(blob, blobSize, &hdr)) {
+        return HWLM_SUCCESS;
+    }
+    if (!a) {
+        return HWLM_SUCCESS;
+    }
+
+    return haoRunNaiveBlob(hdr, a, &control);
+}
+
+/* 统一用安全拷贝读取 blob magic，避免直接解引用未对齐地址。 */
+static int pbeReadBlobMagic(const void *blob, u32 blobSize, u32 *magic) {
+    if (!blob || !magic || blobSize < sizeof(*magic)) {
+        return 0;
+    }
+
+    memcpy(magic, blob, sizeof(*magic));
+    return 1;
+}
+
 static int pbeProcessEncodedRange(
     const struct PBERuntimeHeader *hdr,
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
@@ -527,6 +747,21 @@ hwlm_error_t pbeExecWithPath(const struct FDR *fdr,
 hwlm_error_t PbeEngineExecNaiveForTest(const struct FDR *fdr,
                                        const struct FDR_Runtime_Args *a,
                                        hwlm_group_t control) {
+    if (!fdr || !fdr->pbeOffset || !fdr->pbeSize) {
+        return HWLM_SUCCESS;
+    }
+
+    {
+        const u8 *base = (const u8 *)fdr;
+        const void *blob = base + fdr->pbeOffset;
+        u32 magic = 0;
+
+        if (pbeReadBlobMagic(blob, fdr->pbeSize, &magic) &&
+            magic == HAO_RUNTIME_MAGIC) {
+            return haoExecBlobWithPath(blob, fdr->pbeSize, a, control, 0);
+        }
+    }
+
     return pbeExecWithPath(fdr, a, control, 0);
 }
 
@@ -575,8 +810,30 @@ int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
     return 1;
 }
 
+hwlm_error_t HaoEngineExecBlobNaiveForTest(const void *blob, u32 blobSize,
+                                           const struct FDR_Runtime_Args *a,
+                                           hwlm_group_t control) {
+    return haoExecBlobWithPath(blob, blobSize, a, control, 0);
+}
+
 hwlm_error_t PbeEngineExec(const struct FDR *fdr,
                            const struct FDR_Runtime_Args *a,
                            hwlm_group_t control) {
+    if (!fdr || !fdr->pbeOffset || !fdr->pbeSize) {
+        return HWLM_SUCCESS;
+    }
+
+    {
+        const u8 *base = (const u8 *)fdr;
+        const void *blob = base + fdr->pbeOffset;
+        u32 magic = 0;
+
+        if (pbeReadBlobMagic(blob, fdr->pbeSize, &magic) &&
+            magic == HAO_RUNTIME_MAGIC) {
+            return haoExecBlobWithPath(blob, fdr->pbeSize, a,
+                                       control, 1);
+        }
+    }
+
     return pbeExecWithPath(fdr, a, control, 1);
 }

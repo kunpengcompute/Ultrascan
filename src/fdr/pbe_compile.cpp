@@ -243,7 +243,9 @@ HAORuleCategory haoClassifyLiteral(const hwlmLiteral &lit,
 }
 
 /* 为后续 L2 verifier 预先生成确定性片段。
- * 当前先生成 suffix fragment、valid mask 和 anchor 信息，runtime 还未完全消费。 */
+ * 注意：当前 HAO v2 runtime 仍复用 PBE 的归一化窗口预筛，因此这里无论 exact 还是
+ * nocase，都先写入归一化后的 verifier bytes，最终 exact/nocase 语义差异交给
+ * final confirm 判定。这样可以避免在 L2 预筛阶段把 exact 小写规则误拒掉。 */
 static
 HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
                                              HAORuleCategory category) {
@@ -257,8 +259,7 @@ HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
     for (u32 j = 0; j < suffixLen; j++) {
         const u8 c = verify_u8(lit.s[len - suffixLen + j]);
         const u32 idx = laneStart + j;
-        fragment.bytes[idx] =
-            lit.nocase ? normalizedLiteralByte(c) : c;
+        fragment.bytes[idx] = normalizedLiteralByte(c);
         fragment.validByteMask |= verify_u8(1U << idx);
     }
 
@@ -1638,8 +1639,8 @@ bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
         dst.anchorOffset = plan.verifier.anchorOffset;
         dst.anchorLength = plan.verifier.anchorLength;
         dst.verifierFlags = plan.verifier.flags;
+        dst.maskLen = srcMeta.maskLen;
         dst.reserved0 = 0;
-        dst.reserved1 = 0;
         dst.planFlags = plan.flags;
         dst.litOffset = srcMeta.litOffset;
         memcpy(dst.lit, srcMeta.lit, sizeof(dst.lit));
