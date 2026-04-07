@@ -96,6 +96,8 @@
 #include "util/report_manager.h"
 #include "util/ue2string.h"
 #include "util/verify_types.h"
+#include "src/fdr/fdr_internal.h"
+#include "src/fdr/teddy_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -106,6 +108,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <iostream>
 
 #include <boost/range/adaptor/map.hpp>
 
@@ -3188,7 +3191,7 @@ set<ReportID> findEngineReports(const RoseBuildImpl &build) {
 
     for (const auto &it : build.lily) {
         std::set<ReportID> set_t;
-        set_t.insert(it.second.ReportID);
+        set_t.insert(it.second.internal_id);
         insert(&reports, set_t);
     }
 
@@ -3529,10 +3532,10 @@ bytecode_ptr<RoseEngine> addSmallWriteEngine(const RoseBuildImpl &build,
 
 static
 bytecode_ptr<RoseEngine> addLily(vector<u8> mask, vector<u32> reportVec, vector<u32> ekeyVec,
-                                bytecode_ptr<RoseEngine> rose) {
+                                u8 flagsQuiet, bytecode_ptr<RoseEngine> rose) {
     assert(rose);
     const size_t mainSize = rose.size();
-    const size_t lilySize = mask.size() + LILY_VEC_LEN * 4 + LILY_VEC_LEN * 4;
+    const size_t lilySize = mask.size() + LILY_VEC_LEN * 4 + LILY_VEC_LEN * 4 + sizeof(u8); // flagsQuiet uses sizeof(u8) bytes
     DEBUG_PRINTF("adding lily engine, size=%zu\n", lilySize);
 
     const size_t lilyOffset = ROUNDUP_CL(mainSize);
@@ -3544,10 +3547,33 @@ bytecode_ptr<RoseEngine> addLily(vector<u8> mask, vector<u32> reportVec, vector<
     memcpy(ptr + lilyOffset, &mask[0], mask.size());
     memcpy(ptr + lilyOffset + mask.size(), &reportVec[0], LILY_VEC_LEN * 4);
     memcpy(ptr + lilyOffset + mask.size() + LILY_VEC_LEN * 4, &ekeyVec[0], LILY_VEC_LEN * 4);
+    memcpy(ptr + lilyOffset + mask.size() + LILY_VEC_LEN * 4 + LILY_VEC_LEN * 4, &flagsQuiet, sizeof(u8));
 
     rose2->lilyOffset = verify_u32(lilyOffset);
     rose2->size = verify_u32(newSize);
     
+    return rose2;
+}
+
+static
+bytecode_ptr<RoseEngine> addLilyForTeddy(bytecode_ptr<lilyTeddy> fdr,
+                                         bytecode_ptr<RoseEngine> rose) {
+    assert(rose);
+    const size_t mainSize = rose.size();
+    const size_t lilySize = fdr.size();
+    DEBUG_PRINTF("adding lily engine for teddy, size=%zu\n", lilySize);
+
+    const size_t lilyForTeddyOffset = ROUNDUP_CL(mainSize);
+    const size_t newSize = lilyForTeddyOffset + lilySize;
+
+    auto rose2 = make_zeroed_bytecode_ptr<RoseEngine>(newSize, 64);
+    char *ptr = (char *)rose2.get();
+    memcpy(ptr, rose.get(), mainSize);
+    memcpy(ptr + lilyForTeddyOffset, fdr.get(), fdr.size());
+
+    rose2->lilyForTeddyOffset = verify_u32(lilyForTeddyOffset);
+    rose2->size = verify_u32(newSize);
+
     return rose2;
 }
 
@@ -3676,9 +3702,18 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::buildFinalEngine(u32 minWidth) {
 
     vector<u32> reportVec(LILY_VEC_LEN);
     vector<u32> ekeyVec(LILY_VEC_LEN);
+    u8 flagsQuiet = 0;
     bool lilyRun = false;
     u8 maskZero[32] = {0};
-    vector<u8> maskLily = KHSEL_BuildLily((*this).lily, reportVec, ekeyVec);
+    vector<u8> maskLily = KHSEL_BuildLily((*this).lily, reportVec, ekeyVec, flagsQuiet);
+
+    vector<u32> reportVecLilyForTeddy(LILY_VEC_LEN);
+    vector<u32> ekeyVecLilyForTeddy(LILY_VEC_LEN);
+    vector<u32> lenVecLilyForTeddy(LILY_VEC_LEN);
+    bytecode_ptr<lilyTeddy> lilyForTeddyFdr;
+    if ((*this).lilyForTeddyPQ.size() > 0) {
+        lilyForTeddyFdr = KHSEL_BuildLilyForTeddy((*this).lilyForTeddy, (*this).lilyForTeddyPQ, reportVecLilyForTeddy, ekeyVecLilyForTeddy, lenVecLilyForTeddy);
+    }
 
     // Build NFAs
     bool mpv_as_outfix;
@@ -3888,6 +3923,9 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::buildFinalEngine(u32 minWidth) {
     proto.floatingMinLiteralMatchOffset = floatingMinLiteralMatchOffset;
 
     proto.maxBiAnchoredWidth = findMaxBAWidth(*this);
+    if ((*this).lilyForTeddy.size() > 0) {
+        proto.maxBiAnchoredWidth = ROSE_BOUND_INF;
+    }
     if (memcmp(maskLily.data(), maskZero, 32) != 0) {
         proto.maxBiAnchoredWidth = ROSE_BOUND_INF;
         lilyRun = true;
@@ -3927,9 +3965,13 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::buildFinalEngine(u32 minWidth) {
 
     // Add a lily engine
     if (lilyRun) {
-        engine = addLily(maskLily, reportVec, ekeyVec, move(engine));
+        engine = addLily(maskLily, reportVec, ekeyVec, flagsQuiet, move(engine));
     }
 
+    // Add a lily teddy engine
+    if ((*this).lilyForTeddy.size() > 0) {
+        engine = addLilyForTeddy(move(lilyForTeddyFdr), move(engine));
+    }
 
     DEBUG_PRINTF("rose done %p\n", engine.get());
 

@@ -69,6 +69,26 @@ struct queue_match {
     u32 queue; /**< queue index. */
 };
 
+#define LILY_REPORT_INDEX_BITS    3U
+#define LILY_TO_OFFSET_BITS       (64U - LILY_REPORT_INDEX_BITS)
+// LilyMatchItem结构体（8字节位域）
+
+struct LilyMatchItem {
+    unsigned long long onmatch_index : LILY_REPORT_INDEX_BITS; // 低3bit：ReportID索引(0~7)
+    unsigned long long toOffset      : LILY_TO_OFFSET_BITS;    // 剩余61bit：toOffset值
+};
+typedef struct LilyMatchItem LilyMatchItem;
+
+struct LilyEngineCtx {
+    struct LilyMatchItem *items;    // 数组指针
+    size_t start;                   // 未上报的起始下标
+    size_t size;                    // 当前元素数
+    size_t capacity;                // 预分配容量
+};
+typedef struct LilyEngineCtx LilyEngineCtx;
+
+#define LILY_MATCH_ITEMS_PER_CACHELINE (64 / sizeof(struct LilyMatchItem))
+
 struct catchup_pq {
     struct queue_match *qm;
     u32 qm_size; /**< current size of the priority queue */
@@ -179,6 +199,8 @@ struct KHSEL_ALIGN_CL_DIRECTIVE hs_scratch {
     char *scratch_alloc;
     u64a *fdr_conf;
     u8 fdr_conf_offset;
+    struct LilyEngineCtx lily_ctx;
+    struct LilyEngineCtx lily_for_teddy_ctx;
 };
 
 #ifdef __cplusplus

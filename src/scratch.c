@@ -99,6 +99,9 @@ hs_error_t alloc_scratch(const hs_scratch_t *proto, hs_scratch_t **scratch) {
     size_t delay_region_size =
         fatbit_array_size(DELAY_SLOT_COUNT, proto->delay_fatbit_size);
 
+    size_t lily_items_store_size = proto->lily_ctx.capacity * sizeof(LilyMatchItem);
+    size_t lily_for_teddy_items_store_size = proto->lily_for_teddy_ctx.capacity * sizeof(LilyMatchItem);
+
     // the size is all the allocated stuff, not including the struct itself
     size_t size = queue_size + 63
                   + bStateSize + tStateSize
@@ -113,7 +116,9 @@ hs_error_t alloc_scratch(const hs_scratch_t *proto, hs_scratch_t **scratch) {
                   + som_store_size
                   + som_now_size
                   + som_attempted_size
-                  + som_attempted_store_size + 15;
+                  + som_attempted_store_size + 15 /* 原始冗余 */
+                  + lily_items_store_size + 15
+                  + lily_for_teddy_items_store_size + 15; /* 每次16字节对齐需要预留15字节 */
 
     /* the struct plus the allocated stuff plus padding for cacheline
      * alignment */
@@ -226,6 +231,24 @@ hs_error_t alloc_scratch(const hs_scratch_t *proto, hs_scratch_t **scratch) {
     s->fullState = (char *)current;
     s->fullStateSize = fullStateSize;
     current += fullStateSize;
+
+    current = ROUNDUP_PTR(current, 16);
+    s->lily_ctx.items = (struct LilyMatchItem *)current;
+    if (s->lily_ctx.capacity == 0) {
+        s->lily_ctx.items = NULL;
+    }
+    s->lily_ctx.size = 0;
+    s->lily_ctx.start = 0;
+    current += s->lily_ctx.capacity * sizeof(struct LilyMatchItem);
+
+    current = ROUNDUP_PTR(current, 16);
+    s->lily_for_teddy_ctx.items = (struct LilyMatchItem *)current;
+    if (s->lily_for_teddy_ctx.capacity == 0) {
+        s->lily_for_teddy_ctx.items = NULL;
+    }
+    s->lily_for_teddy_ctx.size = 0;
+    s->lily_for_teddy_ctx.start = 0;
+    current += s->lily_for_teddy_ctx.capacity * sizeof(struct LilyMatchItem);
 
     *scratch = s;
 
@@ -366,6 +389,16 @@ hs_error_t HS_CDECL hs_alloc_scratch(const hs_database_t *db,
         resize = 1;
         proto->deduper.dkey_count = rose->dkeyCount;
         proto->deduper.log_size = rose->dkeyLogSize;
+    }
+
+    if (LILY_ITEMS_COUNT > proto->lily_ctx.capacity) { // 理应取自rose属性，依据规则推导出
+        resize = 1;
+        proto->lily_ctx.capacity = LILY_ITEMS_COUNT;
+    }
+
+    if (LILY_ITEMS_COUNT > proto->lily_for_teddy_ctx.capacity) { // 理应取自rose属性，依据规则推导出
+        resize = 1;
+        proto->lily_for_teddy_ctx.capacity = LILY_ITEMS_COUNT;
     }
 
     if (resize) {

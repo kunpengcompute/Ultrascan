@@ -68,6 +68,12 @@ static REALLY_INLINE m128 zeroes128(void) {
     return rst;
 }
 
+static REALLY_INLINE m128 ones128(void) {
+    m128 result;
+    result.vectS32 = vdupq_n_s32(0xFFFFFFFF);
+    return result;
+}
+
 static REALLY_INLINE m128 Or128(m128 a, m128 b) {
     m128 rst;
     rst.vectS32 = vorrq_s32(a.vectS32, b.vectS32);
@@ -85,6 +91,17 @@ static REALLY_INLINE m128 Set16x8(u8 c)
     m128 rst;
     rst.vectS8 = vdupq_n_s8(c);
     return rst;
+}
+
+static REALLY_INLINE u8 Compare128(m128 a, m128 b) {
+    u8 result = 0xF;
+    uint8x16_t mask = vceqq_u8(a.vectU8, b.vectU8);
+    u8 res[16];
+    vst1q_u8(res, mask);
+    for (int i = 0;i < 16;i++) {
+        result &= res[i];
+    }
+    return result;
 }
 
 /// Perform an unaligned 64-bit load
@@ -181,7 +198,91 @@ static REALLY_INLINE m128 Rshift8_m128(m128 a, int imm8) {
     return result;
 }
 
+static REALLY_INLINE m128 Rshift64_m128(m128 a, int imm8) {
+    assert(imm8 >= 0 && imm8 <= 63);
+    if (unlikely(imm8 == 0)) {
+        return a;
+    }
+    m128 result;
+    result.vectU64 = vshrq_n_u64(a.vectU64, imm8);
+    return result;
+}
+
+static REALLY_INLINE m128 Extbyte_m128(m128 a, m128 b, int imm8) {
+    assert(imm8 >= 0 && imm8 <= 15);
+    m128 result;
+    switch (imm8) {
+        case 0:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 0);
+            break;
+        case 1:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 1);
+            break;
+        case 2:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 2);
+            break;
+        case 3:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 3);
+            break;
+        case 4:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 4);
+            break;
+        case 5:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 5);
+            break;
+        case 6:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 6);
+            break;
+        case 7:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 7);
+            break;
+        case 8:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 8);
+            break;
+        case 9:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 9);
+            break;
+        case 10:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 10);
+            break;
+        case 11:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 11);
+            break;
+        case 12:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 12);
+            break;
+        case 13:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 13);
+            break;
+        case 14:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 14);
+            break;
+        case 15:
+            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 15);
+            break;
+        default:
+            break;
+    }
+    return result;
+}
+
+static REALLY_INLINE m128 Palignr(m128 a, m128 b, int count) {
+    m128 result;
+    count = count & 0xff;
+    if (likely(count < 16)) {
+        result = Extbyte_m128(b, a, count);
+    } else if (count < 32) {
+        m128 zeroVect;
+        zeroVect.vectS8 = vdupq_n_s8(0x0);
+        result = Extbyte_m128(a, zeroVect, count - 16);
+    } else {
+        result.vectS32 = vdupq_n_s32(0);
+    }
+    return result;
+}
+
 static REALLY_INLINE m128 Variable_byte_shift_m128(m128 in, s32 amount) {
+    assert(amount >= -16 && amount <= 16);
     m128 shift_mask = Loadu128(khsel_vbs_mask_data + 16 - amount);
     return pshufb_m128(in, shift_mask);
 }

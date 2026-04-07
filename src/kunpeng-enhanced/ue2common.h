@@ -29,6 +29,7 @@
 #ifndef UE2COMMON_H
 #define UE2COMMON_H
 
+#include "config.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -38,6 +39,8 @@
 
 /* ick */
 #define KHSEL_ALIGN_ATTR(x) __attribute__((aligned((x))))
+
+#define KHSEL_ALIGN_DIRECTIVE KHSEL_ALIGN_ATTR(16)
 
 #define KHSEL_ALIGN_DIRECTIVE KHSEL_ALIGN_ATTR(16)
 #define KHSEL_ALIGN_AVX_DIRECTIVE KHSEL_ALIGN_ATTR(32)
@@ -51,6 +54,14 @@
 #define KHSEL_ROUNDDOWN_N(a, n) ((a) & ~((n)-1))
 // Align to a cacheline - assumed to be 64 bytes
 #define KHSEL_ROUNDUP_CL(a) KHSEL_ROUNDUP_N(a, 64)
+
+#if defined(HAVE_TYPEOF)
+#define KHSEL_ROUNDUP_PTR(ptr, n)   (__typeof__(ptr))(KHSEL_ROUNDUP_N((uintptr_t)(ptr), (n)))
+#define KHSEL_ROUNDDOWN_PTR(ptr, n) (__typeof__(ptr))(KHSEL_ROUNDDOWN_N((uintptr_t)(ptr), (n)))
+#else
+#define KHSEL_ROUNDUP_PTR(ptr, n)   (void*)(KHSEL_ROUNDUP_N((uintptr_t)(ptr), (n)))
+#define KHSEL_ROUNDDOWN_PTR(ptr, n) (void*)(KHSEL_ROUNDDOWN_N((uintptr_t)(ptr), (n)))
+#endif
 
 #define UNUSED __attribute__ ((unused))
 #define HS_CDECL
@@ -80,6 +91,13 @@ typedef u32 ReportID;
 #define NEVER_INLINE __attribute__ ((noinline))
 #define ALIGNOF __alignof
 #define HAVE_TYPEOF 1
+
+#if !defined(MIN)
+  #define MIN(a,b)      ((a) < (b) ? (a) : (b))
+#endif
+#if !defined(MAX)
+  #define MAX(a,b)      ((a) > (b) ? (a) : (b))
+#endif
 
 #include <assert.h>
 

@@ -6,6 +6,18 @@ set (HS_MINOR_VERSION 4)
 set (HS_PATCH_VERSION 2)
 set (HS_VERSION ${HS_MAJOR_VERSION}.${HS_MINOR_VERSION}.${HS_PATCH_VERSION})
 
+# 覆盖率编译选项开关
+option(ENABLE_COVERAGE "Enable coverage compilation options" OFF)
+
+if(ENABLE_COVERAGE)
+    # 添加覆盖率编译选项
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-arcs -ftest-coverage")
+    message(STATUS "Coverage compilation options enabled")
+else()
+    message(STATUS "Coverage compilation options disabled")
+endif()
+
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
@@ -1186,7 +1198,6 @@ SET (hs_compile_SRCS
     src/kunpeng-enhanced/lily.h
     src/kunpeng-enhanced/shufti_enhanced.h
     src/kunpeng-enhanced/ue2common.h
-    src/kunpeng-enhanced/cpufeature.c
     src/kunpeng-enhanced/fdr_enhanced.c
     src/kunpeng-enhanced/runtime_lily.c
     src/kunpeng-enhanced/shufti.c

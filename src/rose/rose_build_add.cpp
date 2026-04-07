@@ -1770,17 +1770,57 @@ bool RoseBuildImpl::addChar(const ue2_literal &lit, u32 expr_index,
         id = rm.getInternalId(r);
     }
 
-    DEBUG_PRINTF("success: graph is literal '%s', report ID %u\n",
-                 dumpString(lit).c_str(), id);
+    // Set both internal and external report IDs for Lily
+    DEBUG_PRINTF("success: graph is literal '%s', internal report ID %u, external report ID %u\n",
+                 dumpString(lit).c_str(), id, external_report);
     ng.minWidth = depth(1);
     std::pair<ReportID, unsigned> p(id, flags);
-    lilyReport report = {id, ekey, flags};
+    lilyReport report = {id, external_report, ekey, flags};
     if (this->lily.size() < 8) {
         auto res = this->lily.insert(std::pair<char, lilyReport>(lit.get_string()[0], report));
         return (res.second);
     } else {
         return false;
     }
+}
+
+bool RoseBuildImpl::addShortLit(const ue2_literal &lit, u32 expr_index,
+                                u32 external_report, bool highlander, som_type som,
+                                bool quiet, NG& ng, unsigned flags) {
+    assert((lit.length() >= 2) && (lit.length() <= 4));
+    // Register external report and validate highlander constraints.
+    rm.registerExtReport(external_report,
+                         external_report_info(highlander, expr_index));
+    u32 ekey;
+    ReportID id;
+    if (som) {
+        assert(!highlander); // not allowed, checked earlier.
+        Report r = makeSomRelativeCallback(external_report, 0, lit.length());
+        id = rm.getInternalId(r);
+        this->setSom();
+        ekey = INVALID_EKEY;
+    } else {
+        ekey = highlander ? rm.getExhaustibleKey(external_report)
+                              : INVALID_EKEY;
+        Report r = makeECallback(external_report, 0, ekey, quiet);
+        id = rm.getInternalId(r);
+    }
+
+    // Set both internal and external report IDs for Lily
+    DEBUG_PRINTF("success: graph is literal '%s', internal report ID %u, external report ID %u\n",
+                dumpString(lit).c_str(), id, external_report);
+    ng.minWidth = depth(1);
+    lilyReport report = {id, external_report, ekey, flags};
+    try {
+        if (this->lilyForTeddyPQ.size() < 8) {
+            this->lilyForTeddyPQ.push(LilyForTeddyPair(lit.get_string(), report));
+        } else {
+            return false;
+        }
+    } catch(const std::exception& e) {
+        return false;
+    }
+    return true;
 }
 
 bool RoseBuildImpl::addOutfix(const NGHolder &h) {

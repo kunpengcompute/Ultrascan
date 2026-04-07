@@ -323,6 +323,7 @@ u32 buildDumpFlags(void) {
     u32 flags = 0;
     flags |= Grey::DUMP_BASICS;
     flags |= Grey::DUMP_IMPL;
+    flags |= Grey::DUMP_LILY;
 
     if (dump_intermediate) {
         flags |= Grey::DUMP_PARSE;

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2020-2022 Huawei Technologies Co., Ltd.
- * 
+ * Copyright (c) 2015-2020, Intel Corporation
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
@@ -26,37 +26,31 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include "khsel_core.h"
-#include "core_precomp.h"
+/**
+ * \file
+ * \brief FDR literal matcher: Common Teddy functions.
+ */
 
-#define CONSTRUCTOR __attribute__((constructor))
-#define DESTRUCTOR __attribute__((destructor))
+#ifndef TEDDY_COMMON_FUNCTION_H
+#define TEDDY_COMMON_FUNCTION_H
 
-#define ARM_CPU_IMP_HISI 0x48
+#include <map>
+#include <vector>
 
-static int32_t gotokhsel_initialized = 0;
+#include "ue2common.h"
+#include "fdr_compile_internal.h"
+#include "hwlm/hwlm_literal.h"
 
-FORCE_INLINE void KhselHwDetect(void)
-{
-    int32_t cpu_id;
-    __asm__ volatile("mrs %0, MIDR_EL1":"=r"(cpu_id));
-    int32_t vendor = (cpu_id >> 0x18) & 0xFF;
+namespace ue2 {
 
-#if defined(KHSEL_CPU_LIMIT) && KHSEL_CPU_LIMIT != 0
-    if (vendor != ARM_CPU_IMP_HISI) {
-        fprintf(stderr, "KHSEL: The software is running into an error, please check CPU ID.\n");
-        abort();
-    }
-#endif
-}
+/**
+ * \brief Fills nibble masks for Teddy engine.
+ */
+void fillNibbleMasks(const std::map<BucketIndex, std::vector<LiteralIndex>> &bucketToLits,
+                     const std::vector<hwlmLiteral> &lits,
+                     u32 numMasks, u32 maskWidth, size_t maskLen,
+                     u8 *baseMsk);
 
-KHSEL_API_LOCAL CONSTRUCTOR void GotoKhselInit(void)
-{
-    if (gotokhsel_initialized) {
-        return;
-    }
-    KhselHwDetect();
-    gotokhsel_initialized = 1;
-}
+} // namespace ue2
+
+#endif // TEDDY_COMMON_FUNCTION_H

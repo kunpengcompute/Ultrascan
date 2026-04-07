@@ -318,6 +318,8 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
                             unsigned length, unsigned flags,
                             hs_scratch_t *scratch, match_event_handler onEvent,
                             void *userCtx) {
+    u8 lilyed = 0;
+    u8 lilyTeddyed = 0;
     if (unlikely(!scratch || !data)) {
         return HS_INVALID;
     }
@@ -400,9 +402,17 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
 
     if (unlikely(rose->lilyOffset)) {
         if (KHSEL_LilyRunExec(rose, scratch) == 1) {
-            scratch->core_info.status = STATUS_TERMINATED;
-            goto done_scan;
+            lilyed = 1;
         }
+    }
+    if (unlikely(rose->lilyForTeddyOffset)) {
+        if (KHSEL_LilyForTeddyRunExec(rose, scratch) == 1) {
+            lilyTeddyed = 1;
+        }
+    }
+    if (lilyed || lilyTeddyed) {
+        scratch->core_info.status = STATUS_TERMINATED;
+        goto done_scan;
     }
 
     // Is this a small write case?
@@ -435,6 +445,8 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
     }
 
 done_scan:
+    // 兜底上报Lily暂存项
+    flushStoredLilyMatches(scratch, ALL_LILY_MATCH_ITEMS);
     if (unlikely(internal_matching_error(scratch))) {
         unmarkScratchInUse(scratch);
         return HS_UNKNOWN_ERROR;
@@ -946,6 +958,16 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
         }
     }
 
+    hs_error_t lilyResult = 0;
+    if (rose->lilyOffset && !(rose->mode & HS_MODE_STREAM)) {
+        lilyResult = KHSEL_LilyRunExec(rose, scratch);
+    }
+
+    hs_error_t lilyForTeddyResult = 0;
+    if (rose->lilyForTeddyOffset && !(rose->mode & HS_MODE_STREAM)) {
+        lilyForTeddyResult = KHSEL_LilyForTeddyRunExec(rose, scratch);
+    }
+
     switch (rose->runtimeImpl) {
     default:
         assert(0);
@@ -959,21 +981,21 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
         soleOutfixStreamExec(id, scratch);
     }
 
-    if (rose->lilyOffset) {
 
-        if (KHSEL_LilyRunExec(rose, scratch) == 1) {
-            scratch->core_info.status = STATUS_TERMINATED;
+    if (lilyResult == 1 || lilyForTeddyResult == 1) {
+        scratch->core_info.status = STATUS_TERMINATED;
+    } else if (rose->lilyOffset || rose->lilyForTeddyOffset) {
+        // highlander
+        if (!told_to_stop_matching(scratch) &&
+            isAllExhausted(rose, scratch->core_info.exhaustionVector)) {
+            DEBUG_PRINTF("stream exhausted\n");
+            scratch->core_info.status |= STATUS_EXHAUSTED;
         } else {
-            // highlander
-            if (!told_to_stop_matching(scratch) &&
-                isAllExhausted(rose, scratch->core_info.exhaustionVector)) {
-                DEBUG_PRINTF("stream exhausted\n");
-                scratch->core_info.status |= STATUS_EXHAUSTED;
-            } else {
-                scratch->core_info.status &= (0xFF - STATUS_EXHAUSTED);
-            }
+            scratch->core_info.status &= (0xFF - STATUS_EXHAUSTED);
         }
     }
+    // 兜底上报Lily暂存项
+    flushStoredLilyMatches(scratch, ALL_LILY_MATCH_ITEMS);
 
     if (rose->hasSom && !told_to_stop_matching(scratch)) {
         int halt = flushStoredSomMatches(scratch, ~0ULL);

@@ -128,6 +128,9 @@ public:
     virtual bool addChar(const ue2_literal &lit, u32 expr_index,
                          u32 external_report, bool highlander, som_type som,
                          bool quiet, NG& ng, unsigned flags) = 0;
+    virtual bool addShortLit(const ue2_literal &lit, u32 expr_index,
+                             u32 external_report, bool highlander, som_type som,
+                             bool quiet, NG& ng, unsigned flags) = 0;
 };
 
 // Construct a usable Rose builder.

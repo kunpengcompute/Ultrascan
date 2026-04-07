@@ -109,6 +109,7 @@ struct RoseEngine {
     u32 scratchStateSize;
     u32 smallWriteOffset;
     u32 lilyOffset;
+    u32 lilyForTeddyOffset;
     u32 amatcherOffset;
     u32 ematcherOffset;
     u32 fmatcherOffset;

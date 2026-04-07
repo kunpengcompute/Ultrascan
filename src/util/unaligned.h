@@ -42,6 +42,10 @@
 #pragma pack(push, 1) // pack everything until told otherwise
 #endif
 
+#if !defined(really_inline)
+#define really_inline REALLY_INLINE
+#endif
+
 /// Perform an unaligned 16-bit load
 static really_inline
 u16 unaligned_load_u16(const void *ptr) {

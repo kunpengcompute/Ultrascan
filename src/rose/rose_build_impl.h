@@ -533,6 +533,10 @@ public:
                  u32 external_report, bool highlander, som_type som,
                  bool quiet, NG& ng, unsigned flags);
 
+    bool addShortLit(const ue2_literal &lit, u32 expr_index,
+                     u32 external_report, bool highlander, som_type som,
+                     bool quiet, NG& ng, unsigned flags);
+
     // Construct a runtime implementation.
     bytecode_ptr<RoseEngine> buildRose(u32 minWidth) override;
     bytecode_ptr<RoseEngine> buildFinalEngine(u32 minWidth);
@@ -655,7 +659,8 @@ public:
     const BoundaryReports &boundary;
 
     std::map<char, lilyReport> lily;
-
+    std::map<std::string, lilyReport> lilyForTeddy;
+    std::priority_queue<LilyForTeddyPair, std::vector<LilyForTeddyPair>, CompareStringLength> lilyForTeddyPQ;
 private:
     ReportID next_nfa_report;
 };

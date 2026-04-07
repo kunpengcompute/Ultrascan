@@ -194,8 +194,16 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const C
         return false;
     }
 
+    // Check if this expression is referenced by any logical combination rules
+    bool is_referenced_by_combination = false;
+    if (ng.rm.pl.getLkeyMap().find(expr.report) != ng.rm.pl.getLkeyMap().end()) {
+        is_referenced_by_combination = true;
+        DEBUG_PRINTF("literal '%s' (id=%u) is referenced by combination rules, skipping lily\n",
+            dumpString(lit).c_str(), expr.report);
+    }
+
     if ((lit.length() <= 1)) {
-        if (cc.grey.allowLily) {
+        if (cc.grey.allowLily && !cc.streaming && !is_referenced_by_combination) {
             if (lit.length() == 1) {
                 return ng.rose->addChar(lit, expr.index, expr.report, expr.highlander, expr.som, expr.quiet, ng, flags);
             }
@@ -204,9 +212,51 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const C
         return false;
     }
 
+    if ((lit.length() >=2) && (lit.length() <= 4)) {
+        if (cc.grey.allowLily && ng.allowLilyForTeddy && !cc.streaming && !is_referenced_by_combination) {
+            return ng.rose->addShortLit(lit, expr.index, expr.report, expr.highlander, expr.som, expr.quiet, ng, flags);
+        }
+        DEBUG_PRINTF("not shortcutting SEP literal\n");
+        return false;
+    }
+
     DEBUG_PRINTF("constructed literal %s\n", dumpString(lit).c_str());
     return ng.addLiteral(lit, expr.index, expr.report, expr.highlander,
                          expr.som, expr.quiet);
+}
+
+size_t isShortLiteral(const ParsedExpression &pe) {
+    if (!pe.component) {
+        return 0;
+    }
+
+    const auto &expr = pe.expr;
+
+    // Check for extended params
+    if (expr.min_offset || expr.max_offset != MAX_OFFSET || expr.min_length ||
+        expr.edit_distance || expr.hamm_distance) {
+        return 0;
+    }
+
+    ConstructLiteralVisitor vis;
+    try {
+        pe.component->accept(vis);
+        assert(vis.repeat_stack.empty());
+    } catch (const ConstructLiteralVisitor::NotLiteral&) {
+        return 0;
+    }
+
+    const ue2_literal &lit = vis.lit;
+    if (lit.empty()) {
+        return 0;
+    }
+
+    size_t len = lit.length();
+    if (len >= 2 && len <= 4) {
+        return len;
+    }
+
+    return 0;
 }
 
 } // namespace ue2
