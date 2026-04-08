@@ -32,7 +32,6 @@
 #define REPORT_H
 
 #include "ue2common.h"
-#include "simd_types.h"
 #include "simd_arm.h"
 #include "multbit.h"
 

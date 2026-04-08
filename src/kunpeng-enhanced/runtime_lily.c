@@ -432,8 +432,8 @@ int runLily(const char *maskLily, const u32 *ekeyVec, u8 flagsQuiet, hs_scratch_
         m128 c_hi  = Pshufb_m128_opt(mask_hi, GET_HI_4(chars));
         m128 rst = And128(c_lo, c_hi);
 
-        u64a conf0 = vgetq_lane_u64(rst.vectU64, 0);
-        u64a conf8 = vgetq_lane_u64(rst.vectU64, 1);
+        u64a conf0 = vgetq_lane_u64(rst.vect_u64, 0);
+        u64a conf8 = vgetq_lane_u64(rst.vect_u64, 1);
         if (lilyMatch(conf0, ekeyVec, flagsQuiet, itPtr, scratch) == KHSEL_MATCHING_TERMINATED ||
             lilyMatch(conf8, ekeyVec, flagsQuiet, itPtr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {
             return KHSEL_MATCHING_TERMINATED;
@@ -448,8 +448,8 @@ int runLily(const char *maskLily, const u32 *ekeyVec, u8 flagsQuiet, hs_scratch_
     m128 c_hi  = Pshufb_m128_opt(mask_hi, GET_HI_4(chars));
     m128 rst = And128(c_lo, c_hi);
 
-    u64a conf0 = vgetq_lane_u64(rst.vectU64, 0);
-    u64a conf8 = vgetq_lane_u64(rst.vectU64, 1);
+    u64a conf0 = vgetq_lane_u64(rst.vect_u64, 0);
+    u64a conf8 = vgetq_lane_u64(rst.vect_u64, 1);
     if (lilyMatch(conf0, ekeyVec, flagsQuiet, itPtr, scratch) == KHSEL_MATCHING_TERMINATED ||
         lilyMatch(conf8, ekeyVec, flagsQuiet, itPtr + 8, scratch) == 1) {
         return KHSEL_MATCHING_TERMINATED;
@@ -577,8 +577,8 @@ do {                                                                          \
         m128 r_0 = PREP_CONF_FN(maskBase, val_0, n_msk);                      \
         r_0 = Or128(r_0, p_mask);                                             \
         FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK(p_mask, n_msk);                    \
-        u64a conf0 = vgetq_lane_u64(r_0.vectU64, 0);                          \
-        u64a conf8 = vgetq_lane_u64(r_0.vectU64, 1);                          \
+        u64a conf0 = vgetq_lane_u64(r_0.vect_u64, 0);                          \
+        u64a conf8 = vgetq_lane_u64(r_0.vect_u64, 1);                          \
         if (lilyForTeddyMatch(conf0, ekeyVec, flagsQuiet, ptr, scratch) == KHSEL_MATCHING_TERMINATED ||      \
             lilyForTeddyMatch(conf8, ekeyVec, flagsQuiet, ptr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {  \
             return KHSEL_MATCHING_TERMINATED;                                            \
@@ -588,8 +588,8 @@ do {                                                                          \
                                                                               \
     if (ptr + 16 <= buf_end) {                                                \
         m128 r_0 = PREP_CONF_FN(maskBase, Load128(ptr), n_msk);               \
-        u64a conf0 = vgetq_lane_u64(r_0.vectU64, 0);                          \
-        u64a conf8 = vgetq_lane_u64(r_0.vectU64, 1);                          \
+        u64a conf0 = vgetq_lane_u64(r_0.vect_u64, 0);                          \
+        u64a conf8 = vgetq_lane_u64(r_0.vect_u64, 1);                          \
         if (lilyForTeddyMatch(conf0, ekeyVec, flagsQuiet, ptr, scratch) == KHSEL_MATCHING_TERMINATED ||      \
             lilyForTeddyMatch(conf8, ekeyVec, flagsQuiet, ptr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {  \
             return KHSEL_MATCHING_TERMINATED;                                              \
@@ -600,15 +600,15 @@ do {                                                                          \
     for (; ptr + iterBytes <= buf_end; ptr += iterBytes) {                    \
         __builtin_prefetch(ptr + (iterBytes * 4));                            \
         m128 r_0 = PREP_CONF_FN(maskBase, Load128(ptr), n_msk);               \
-        u64a conf0 = vgetq_lane_u64(r_0.vectU64, 0);                          \
-        u64a conf8 = vgetq_lane_u64(r_0.vectU64, 1);                          \
+        u64a conf0 = vgetq_lane_u64(r_0.vect_u64, 0);                          \
+        u64a conf8 = vgetq_lane_u64(r_0.vect_u64, 1);                          \
         if (lilyForTeddyMatch(conf0, ekeyVec, flagsQuiet, ptr, scratch) == KHSEL_MATCHING_TERMINATED ||      \
             lilyForTeddyMatch(conf8, ekeyVec, flagsQuiet, ptr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {  \
             return KHSEL_MATCHING_TERMINATED;                                              \
         }                                                                     \
         m128 r_1 = PREP_CONF_FN(maskBase, Load128(ptr + 16), n_msk);          \
-        u64a conf16 = vgetq_lane_u64(r_1.vectU64, 0);                          \
-        u64a conf24 = vgetq_lane_u64(r_1.vectU64, 1);                          \
+        u64a conf16 = vgetq_lane_u64(r_1.vect_u64, 0);                          \
+        u64a conf24 = vgetq_lane_u64(r_1.vect_u64, 1);                          \
         if (lilyForTeddyMatch(conf16, ekeyVec, flagsQuiet, ptr + 16, scratch) == KHSEL_MATCHING_TERMINATED ||      \
             lilyForTeddyMatch(conf24, ekeyVec, flagsQuiet, ptr + 24, scratch) == KHSEL_MATCHING_TERMINATED) {  \
             return KHSEL_MATCHING_TERMINATED;                                              \
@@ -617,8 +617,8 @@ do {                                                                          \
                                                                               \
     if (ptr + 16 <= buf_end) {                                                \
         m128 r_0 = PREP_CONF_FN(maskBase, Load128(ptr), n_msk);               \
-        u64a conf0 = vgetq_lane_u64(r_0.vectU64, 0);                          \
-        u64a conf8 = vgetq_lane_u64(r_0.vectU64, 1);                          \
+        u64a conf0 = vgetq_lane_u64(r_0.vect_u64, 0);                          \
+        u64a conf8 = vgetq_lane_u64(r_0.vect_u64, 1);                          \
         if (lilyForTeddyMatch(conf0, ekeyVec, flagsQuiet, ptr, scratch) == KHSEL_MATCHING_TERMINATED ||      \
             lilyForTeddyMatch(conf8, ekeyVec, flagsQuiet, ptr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {  \
             return KHSEL_MATCHING_TERMINATED;                                              \
@@ -633,8 +633,8 @@ do {                                                                          \
                                      a->buf_history, a->len_history, n_msk);  \
         m128 r_0 = PREP_CONF_FN(maskBase, val_0, n_msk);                      \
         r_0 = Or128(r_0, p_mask);                                             \
-        u64a conf0 = vgetq_lane_u64(r_0.vectU64, 0);                          \
-        u64a conf8 = vgetq_lane_u64(r_0.vectU64, 1);                          \
+        u64a conf0 = vgetq_lane_u64(r_0.vect_u64, 0);                          \
+        u64a conf8 = vgetq_lane_u64(r_0.vect_u64, 1);                          \
         if (lilyForTeddyMatch(conf0, ekeyVec, flagsQuiet, ptr, scratch) == KHSEL_MATCHING_TERMINATED ||      \
             lilyForTeddyMatch(conf8, ekeyVec, flagsQuiet, ptr + 8, scratch) == KHSEL_MATCHING_TERMINATED) {  \
             return KHSEL_MATCHING_TERMINATED;                                              \

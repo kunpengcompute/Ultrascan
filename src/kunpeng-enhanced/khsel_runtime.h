@@ -44,7 +44,7 @@
  */
 #include "rose_internal.h"
 #include "scratch.h"
-#include "simd_types.h"
+#include "../ue2common.h"
 #include "simd_arm.h"
 
 #ifdef __cplusplus

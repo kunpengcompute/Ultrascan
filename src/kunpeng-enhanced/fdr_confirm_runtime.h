@@ -33,17 +33,17 @@
 
 #include "scratch.h"
 #include "khsel_fdr_internal.h"
-#include "fdr_confirm.h"
+#include "../fdr/fdr_confirm.h"
 #include "khsel_hwlm.h"
-#include "ue2common.h"
+#include "../ue2common.h"
 
 static REALLY_INLINE void KHSEL_ConfWithBit(const struct FDRConfirm *fdrc, const struct FDR_Runtime_Args *a,
     size_t i, hwlmcb_rv_t *control, u32 *last_match_in, u64a conf_key, u64a *conf, u8 bit)
 {
     const u8 * buf = a->buf;
-    u32 c = KHSEL_CONF_HASH_CALL(conf_key, fdrc->andmsk, fdrc->mult,
+    u32 c = CONF_HASH_CALL(conf_key, fdrc->andmsk, fdrc->mult,
                            fdrc->nBits);
-    u32 start = KHSEL_GetConfirmLitIndex(fdrc)[c];
+    u32 start = getConfirmLitIndex(fdrc)[c];
     if (likely(!start)) {
         return;
     }
@@ -55,7 +55,7 @@ static REALLY_INLINE void KHSEL_ConfWithBit(const struct FDRConfirm *fdrc, const
     scratchT->fdr_conf_offset = bit;
     u8 oldNext; // initialized in loop
     do {
-        if ((*last_match_in == li->id) && (li->flags & KHSEL_FDR_LIT_FLAG_NOREPEAT)) {
+        if ((*last_match_in == li->id) && (li->flags & FDR_LIT_FLAG_NOREPEAT)) {
             goto out;
         }
         if (unlikely((conf_key & li->msk) != li->v)) {

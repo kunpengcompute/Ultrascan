@@ -29,7 +29,7 @@
 #ifndef SIMD_ARM_H
 #define SIMD_ARM_H
 
-#include "ue2common.h"
+#include "../ue2common.h"
 #include "arm_neon.h"
 #include "core_precomp.h"
 
@@ -64,38 +64,38 @@ KHSEL_ALIGN_CL_DIRECTIVE static const char khsel_vbs_mask_data[] = {
 
 static REALLY_INLINE m128 zeroes128(void) {
     m128 rst;
-    rst.vectS32 = vdupq_n_s32(0x0);
+    rst.vect_s32 = vdupq_n_s32(0x0);
     return rst;
 }
 
 static REALLY_INLINE m128 ones128(void) {
     m128 result;
-    result.vectS32 = vdupq_n_s32(0xFFFFFFFF);
+    result.vect_s32 = vdupq_n_s32(0xFFFFFFFF);
     return result;
 }
 
 static REALLY_INLINE m128 Or128(m128 a, m128 b) {
     m128 rst;
-    rst.vectS32 = vorrq_s32(a.vectS32, b.vectS32);
+    rst.vect_s32 = vorrq_s32(a.vect_s32, b.vect_s32);
     return rst;
 }
 
 static REALLY_INLINE m128 And128(m128 a, m128 b) {
     m128 result;
-    result.vectS32 = vandq_s32(a.vectS32, b.vectS32);
+    result.vect_s32 = vandq_s32(a.vect_s32, b.vect_s32);
     return result;
 }
 
 static REALLY_INLINE m128 Set16x8(u8 c)
 {
     m128 rst;
-    rst.vectS8 = vdupq_n_s8(c);
+    rst.vect_s8 = vdupq_n_s8(c);
     return rst;
 }
 
 static REALLY_INLINE u8 Compare128(m128 a, m128 b) {
     u8 result = 0xF;
-    uint8x16_t mask = vceqq_u8(a.vectU8, b.vectU8);
+    uint8x16_t mask = vceqq_u8(a.vect_u8, b.vect_u8);
     u8 res[16];
     vst1q_u8(res, mask);
     for (int i = 0;i < 16;i++) {
@@ -153,7 +153,7 @@ static REALLY_INLINE m128 Load_m128_from_u64a(const u64a *p) {
 // unaligned load
 static REALLY_INLINE m128 Loadu128(const void *inPtr) {
     m128 rst;
-    rst.vectS32 = vld1q_s32((const int32_t *)inPtr);
+    rst.vect_s32 = vld1q_s32((const int32_t *)inPtr);
     return rst;
 }
 
@@ -161,13 +161,13 @@ static REALLY_INLINE m128 Loadu128(const void *inPtr) {
 static REALLY_INLINE m128 Load128(const void *inPtr) {
     inPtr = assume_aligned(inPtr, 16);
     m128 rst;
-    rst.vectS32 = vld1q_s32((const int32_t *)inPtr);
+    rst.vect_s32 = vld1q_s32((const int32_t *)inPtr);
     return rst;
 }
 
 // unaligned store
 static REALLY_INLINE void Storeu128(void *inPtr, m128 a) {
-    vst1q_s32((int32_t *)inPtr, a.vectS32);
+    vst1q_s32((int32_t *)inPtr, a.vect_s32);
 }
 
 static REALLY_INLINE m128 pshufb_m128(m128 a, m128 b) {
@@ -183,9 +183,9 @@ static REALLY_INLINE m128 pshufb_m128(m128 a, m128 b) {
 
 static REALLY_INLINE m128 RshiftOnebyte_m128(m128 a) {
     m128 zeroVect;
-    zeroVect.vectS8 = vdupq_n_s8(0);
+    zeroVect.vect_s8 = vdupq_n_s8(0);
     m128 rst;
-    rst.vectS8 =  vextq_s8(a.vectS8, zeroVect.vectS8, 1);
+    rst.vect_s8 =  vextq_s8(a.vect_s8, zeroVect.vect_s8, 1);
     return rst;
 }
 
@@ -194,7 +194,7 @@ static REALLY_INLINE m128 Rshift8_m128(m128 a, int imm8) {
         return a;
     }
     m128 result;
-    result.vectU8 = vshrq_n_u8(a.vectU8, imm8);
+    result.vect_u8 = vshrq_n_u8(a.vect_u8, imm8);
     return result;
 }
 
@@ -204,7 +204,7 @@ static REALLY_INLINE m128 Rshift64_m128(m128 a, int imm8) {
         return a;
     }
     m128 result;
-    result.vectU64 = vshrq_n_u64(a.vectU64, imm8);
+    result.vect_u64 = vshrq_n_u64(a.vect_u64, imm8);
     return result;
 }
 
@@ -213,52 +213,52 @@ static REALLY_INLINE m128 Extbyte_m128(m128 a, m128 b, int imm8) {
     m128 result;
     switch (imm8) {
         case 0:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 0);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 0);
             break;
         case 1:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 1);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 1);
             break;
         case 2:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 2);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 2);
             break;
         case 3:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 3);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 3);
             break;
         case 4:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 4);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 4);
             break;
         case 5:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 5);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 5);
             break;
         case 6:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 6);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 6);
             break;
         case 7:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 7);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 7);
             break;
         case 8:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 8);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 8);
             break;
         case 9:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 9);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 9);
             break;
         case 10:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 10);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 10);
             break;
         case 11:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 11);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 11);
             break;
         case 12:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 12);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 12);
             break;
         case 13:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 13);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 13);
             break;
         case 14:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 14);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 14);
             break;
         case 15:
-            result.vectS8 = vextq_s8(a.vectS8, b.vectS8, 15);
+            result.vect_s8 = vextq_s8(a.vect_s8, b.vect_s8, 15);
             break;
         default:
             break;
@@ -273,10 +273,10 @@ static REALLY_INLINE m128 Palignr(m128 a, m128 b, int count) {
         result = Extbyte_m128(b, a, count);
     } else if (count < 32) {
         m128 zeroVect;
-        zeroVect.vectS8 = vdupq_n_s8(0x0);
+        zeroVect.vect_s8 = vdupq_n_s8(0x0);
         result = Extbyte_m128(a, zeroVect, count - 16);
     } else {
-        result.vectS32 = vdupq_n_s32(0);
+        result.vect_s32 = vdupq_n_s32(0);
     }
     return result;
 }
