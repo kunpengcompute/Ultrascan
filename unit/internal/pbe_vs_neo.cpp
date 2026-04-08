@@ -1455,10 +1455,10 @@ TEST(PBERuntime, HaoBlobBatchExecMatchesNaiveForSimpleRules) {
 
 TEST(PBERuntime, HaoRuntimeStatsTrackDirectReportPath) {
     std::vector<hwlmLiteral> lits = {
-        hwlmLiteral("alpha", false, false, 8692, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("12345", false, false, 8692, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 8693, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("theta", false, false, 8694, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("omega", false, false, 8695, HWLM_ALL_GROUPS, {}, {})
+        hwlmLiteral("+-=-+", false, false, 8694, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("90_90", false, false, 8695, HWLM_ALL_GROUPS, {}, {})
     };
 
     PBECompileArtifacts artifacts;
@@ -1467,11 +1467,11 @@ TEST(PBERuntime, HaoRuntimeStatsTrackDirectReportPath) {
     ASSERT_NE(nullptr, haoBlob.get());
 
     const std::vector<u8> data = {
-        'x','a','l','p','h','a','-',
+        'x','1','2','3','4','5','-',
         'A','l','P','h','A','-',
-        't','h','e','t','a','-',
-        'o','m','e','g','a','-',
-        'a','l','p','h','a'
+        '+','-','=','-','+','-',
+        '9','0','_','9','0','-',
+        '1','2','3','4','5'
     };
 
     HaoRuntimeResetStatsForTest();
@@ -1485,6 +1485,7 @@ TEST(PBERuntime, HaoRuntimeStatsTrackDirectReportPath) {
     EXPECT_EQ(matches.size(), stats.directReports);
     EXPECT_EQ(0U, stats.encodedConfirmCalls);
     EXPECT_EQ(0U, stats.residualRuleChecks);
+    EXPECT_EQ(0U, stats.residualPosCalls);
 }
 
 TEST(PBERuntime, HaoBlobBatchExecMatchesNaiveAcrossBlockBoundaries) {
@@ -2178,10 +2179,10 @@ TEST(PBECompile, HaoSummaryTracksCoverageAndAnchors) {
 
 TEST(PBECompile, HaoSummaryTracksDirectReportRules) {
     std::vector<hwlmLiteral> lits = {
-        hwlmLiteral("alpha", false, false, 7296, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("12345", false, false, 7296, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 7297, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("theta", false, false, 7298, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("omega", false, false, 7299, HWLM_ALL_GROUPS, {}, {})
+        hwlmLiteral("+-=-+", false, false, 7298, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("90_90", false, false, 7299, HWLM_ALL_GROUPS, {}, {})
     };
 
     PBECompileArtifacts artifacts;
@@ -2192,6 +2193,60 @@ TEST(PBECompile, HaoSummaryTracksDirectReportRules) {
     EXPECT_EQ(lits.size(), artifacts.haoSummary.directReportRules);
     EXPECT_EQ(0U, artifacts.haoSummary.residualRules);
     EXPECT_EQ(0U, artifacts.haoSummary.fastPathConfirmRules);
+}
+
+TEST(PBECompile, HaoDirectReportSafetyFollowsSelectorCoverage) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 7300, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 7301, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("12345", false, false, 7302, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 7303, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_EQ(lits.size(), artifacts.haoRulePlans.size());
+
+    for (u32 i = 0; i < lits.size(); i++) {
+        const auto &lit = lits[i];
+        const auto &plan = artifacts.haoRulePlans[i];
+        bool expectedSafe = false;
+
+        if (!lit.noruns && lit.msk.empty() && lit.cmp.empty() &&
+            plan.verifier.anchorOffset == 0 &&
+            plan.verifier.anchorLength == lit.s.size()) {
+            if (plan.category == HAORuleCategory::HAO_RULE_NOCASE) {
+                expectedSafe = true;
+            } else if (plan.category == HAORuleCategory::HAO_RULE_EXACT) {
+                expectedSafe = true;
+                for (u32 byteFromEnd = 0; byteFromEnd < lit.s.size();
+                     byteFromEnd++) {
+                    const u8 c =
+                        verify_u8(lit.s[lit.s.size() - byteFromEnd - 1]);
+                    bool foundCaseBit = false;
+
+                    if (!ourisalpha(c)) {
+                        continue;
+                    }
+                    for (const auto &sel : artifacts.bitSelectors) {
+                        if (sel.byteOffset == byteFromEnd &&
+                            sel.bitOffset == 5U) {
+                            foundCaseBit = true;
+                            break;
+                        }
+                    }
+                    if (!foundCaseBit) {
+                        expectedSafe = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        EXPECT_EQ(expectedSafe,
+                  !!(plan.flags & HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE))
+            << "ruleIndex=" << i << " literal=" << lit.s;
+    }
 }
 
 TEST(PBECompile, HaoSummaryTracksResidualUnsupportedRules) {

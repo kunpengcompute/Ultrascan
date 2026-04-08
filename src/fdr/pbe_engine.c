@@ -418,20 +418,7 @@ int haoRuleCanReportFromVerifier(const struct HAORuntimeRuleMeta *rm) {
     if (!rm) {
         return 0;
     }
-    if (rm->flags & PBE_RULE_FLAG_HAS_MASK) {
-        return 0;
-    }
-    if (rm->flags & PBE_RULE_FLAG_NORUNS) {
-        return 0;
-    }
-    if (rm->anchorOffset != 0 || rm->anchorLength != rm->len) {
-        return 0;
-    }
-    if (rm->category != HAO_RUNTIME_RULE_EXACT &&
-        rm->category != HAO_RUNTIME_RULE_NOCASE) {
-        return 0;
-    }
-    return 1;
+    return (rm->planFlags & HAO_RUNTIME_PLAN_FLAG_DIRECT_REPORT_SAFE) != 0;
 }
 
 static u32 haoEntryMatchMaskFromContext(
@@ -603,6 +590,9 @@ static int haoProcessResidualRulesAtPos(
     if (!hdr || !ruleMeta || !literalBlob || !a || !control) {
         return HWLM_SUCCESS;
     }
+    if (!hdr->residualRuleCount) {
+        return HWLM_SUCCESS;
+    }
 
     haoStatsAdd(&g_haoStats.residualPosCalls, 1);
     for (i = 0; i < hdr->residualRuleCount; i++) {
@@ -680,11 +670,14 @@ static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
                 return HWLM_TERMINATED;
             }
         }
-        if (haoProcessResidualRulesAtPos(hdr, residualRuleIndexes, ruleMeta,
-                                         literalBlob, hdr->literalBlobSize, a,
-                                         control, ctx.endPos) ==
-            HWLM_TERMINATED) {
-            return HWLM_TERMINATED;
+        if (hdr->residualRuleCount) {
+            if (haoProcessResidualRulesAtPos(hdr, residualRuleIndexes, ruleMeta,
+                                             literalBlob,
+                                             hdr->literalBlobSize, a, control,
+                                             ctx.endPos) ==
+                HWLM_TERMINATED) {
+                return HWLM_TERMINATED;
+            }
         }
     }
 
@@ -1013,11 +1006,14 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
             }
         }
 
-        if (haoProcessResidualRulesAtPos(hdr, residualRuleIndexes, ruleMeta,
-                                         literalBlob, hdr->literalBlobSize, a,
-                                         control, block.endPos[lane]) ==
-            HWLM_TERMINATED) {
-            return HWLM_TERMINATED;
+        if (hdr->residualRuleCount) {
+            if (haoProcessResidualRulesAtPos(hdr, residualRuleIndexes, ruleMeta,
+                                             literalBlob,
+                                             hdr->literalBlobSize, a, control,
+                                             block.endPos[lane]) ==
+                HWLM_TERMINATED) {
+                return HWLM_TERMINATED;
+            }
         }
     }
 

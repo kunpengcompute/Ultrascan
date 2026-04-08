@@ -258,14 +258,43 @@ bool haoPlanRequiresResidualEval(const HAOCompiledRulePlan &plan) {
 }
 
 static
+bool haoSelectorsCoverExactCaseBits(
+    const hwlmLiteral &lit, const std::vector<PBEBitSelector> &selectors) {
+    for (u32 byteFromEnd = 0; byteFromEnd < lit.s.size(); byteFromEnd++) {
+        const u8 c = verify_u8(lit.s[lit.s.size() - byteFromEnd - 1]);
+        bool found = false;
+
+        if (!ourisalpha(c)) {
+            continue;
+        }
+        for (const auto &sel : selectors) {
+            if (sel.byteOffset == byteFromEnd && sel.bitOffset == 5U) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static
 bool haoPlanCanDirectReport(const hwlmLiteral &lit,
-                            const HAOCompiledRulePlan &plan) {
+                            const HAOCompiledRulePlan &plan,
+                            const std::vector<PBEBitSelector> &selectors) {
     if (plan.category != HAORuleCategory::HAO_RULE_EXACT &&
         plan.category != HAORuleCategory::HAO_RULE_NOCASE) {
         return false;
     }
     if (haoLiteralHasSupplementaryMask(lit) || lit.noruns) {
         return false;
+    }
+    if (plan.category == HAORuleCategory::HAO_RULE_EXACT) {
+        if (!haoSelectorsCoverExactCaseBits(lit, selectors)) {
+            return false;
+        }
     }
     return plan.verifier.anchorOffset == 0 &&
            plan.verifier.anchorLength == lit.s.size();
@@ -382,18 +411,26 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
             break;
         }
 
+        const bool requiresResidual = haoPlanRequiresResidualEval(plan);
+        const bool canDirectReport =
+            haoPlanCanDirectReport(lits[i], plan, selectors);
+
+        if (canDirectReport) {
+            plan.flags |= HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE;
+        }
+
         if (plan.flags & HAO_RULE_PLAN_FLAG_KEY_EXPANDED) {
             summary->keyExpandedRules++;
         }
-        if (haoPlanRequiresResidualEval(plan)) {
+        if (requiresResidual) {
             summary->residualRules++;
             if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
                 summary->residualUnsupportedRules++;
             }
-        } else if (plan.needFullConfirm) {
+        } else if (!canDirectReport) {
             summary->fastPathConfirmRules++;
         }
-        if (haoPlanCanDirectReport(lits[i], plan)) {
+        if (canDirectReport) {
             summary->directReportRules++;
         }
         if (plan.category != HAORuleCategory::HAO_RULE_UNSUPPORTED) {
