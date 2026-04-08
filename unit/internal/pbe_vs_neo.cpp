@@ -427,6 +427,63 @@ char printableOrDot(u8 c) {
 }
 
 static
+const char *haoCategoryName(HAORuleCategory category) {
+    switch (category) {
+    case HAORuleCategory::HAO_RULE_EXACT:
+        return "exact";
+    case HAORuleCategory::HAO_RULE_NOCASE:
+        return "nocase";
+    case HAORuleCategory::HAO_RULE_SMALL_CLASS_EXPAND:
+        return "small-expand";
+    case HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM:
+        return "anchor-confirm";
+    case HAORuleCategory::HAO_RULE_UNSUPPORTED:
+        return "unsupported";
+    default:
+        return "unknown";
+    }
+}
+
+static
+std::string slotVectorString(const PBESecondaryHashEntry &entry, u32 slot,
+                             bool activeOnly) {
+    const u32 laneBase = slot * PBE_BYTES_PER_RULE_SLOT;
+    std::string out;
+
+    out.reserve(PBE_BYTES_PER_RULE_SLOT);
+    for (u32 i = 0; i < PBE_BYTES_PER_RULE_SLOT; i++) {
+        const u8 ctrl = entry.tableControl[laneBase + i];
+        const bool active = ctrl != 0x80;
+        if (activeOnly && !active) {
+            continue;
+        }
+        out.push_back(active ? printableOrDot(entry.ruleVector[laneBase + i])
+                             : '.');
+    }
+    return out;
+}
+
+static
+void dumpBitmapBytes(std::ostream &os, const std::vector<u8> &bytes,
+                     const std::string &indent) {
+    bool sawNonZero = false;
+
+    os << indent << "bitmapBytes=" << bytes.size() << "\n";
+    for (size_t i = 0; i < bytes.size(); i++) {
+        if (!bytes[i]) {
+            continue;
+        }
+        sawNonZero = true;
+        os << indent << "  [" << i << "] dec=" << static_cast<u32>(bytes[i])
+           << " hex=0x" << std::hex << static_cast<u32>(bytes[i]) << std::dec
+           << " bits=" << u8ToBin(bytes[i]) << "\n";
+    }
+    if (!sawNonZero) {
+        os << indent << "  <all_zero>\n";
+    }
+}
+
+static
 u8 ruleBitStateNoMask(const hwlmLiteral &lit, const PBEBitSelector &sel) {
     // 0 -> bit 0, 1 -> bit 1, 2 -> don't-care(X)
     const u32 bitIndex = static_cast<u32>(sel.byteOffset) * 8U +
@@ -2857,12 +2914,13 @@ TEST(PBERuntime, InvalidLayoutOffsetFallsBackCleanly) {
 
 TEST(PBEInspect, DumpSelectorsAndHashTables) {
     std::vector<hwlmLiteral> lits = {
-        hwlmLiteral("alpha", false, false, 100, 0x1, {}, {}),
-        hwlmLiteral("ALPHA", true,  false, 101, 0x3, {}, {}),
-        hwlmLiteral("beta",  false, false, 102, 0x1, {}, {}),
-        hwlmLiteral("delta", false, true,  103, 0x2, {}, {}),
-        hwlmLiteral("gamma", false, false, 104, 0x4, {}, {}),
-        hwlmLiteral("theta", true,  false, 105, 0x7, {}, {}),
+        hwlmLiteral("literal8", false, false, 100, 0x1, {}, {}),
+        hwlmLiteral("CaseRule", true,  false, 101, 0x3, {}, {}),
+        hwlmLiteral("ab",       false, false, 102, 0x1, {}, {}),
+        hwlmLiteral("maskrule", false, false, 103, 0x2,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("theta999", false, false, 104, 0x4, {}, {}),
     };
 
     PBECompileArtifacts artifacts;
@@ -2874,18 +2932,50 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
     std::cout << "[Rules]\n";
     for (size_t i = 0; i < lits.size(); i++) {
         const auto &lit = lits[i];
+        const auto &plan = artifacts.haoRulePlans[i];
+        const bool residual =
+            plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED ||
+            ((plan.flags & HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM) &&
+             plan.category != HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM);
+        const char *kind = "exact";
+        if (!lit.msk.empty() || !lit.cmp.empty()) {
+            kind = "fuzzy-mask";
+        } else if (lit.nocase) {
+            kind = "nocase";
+        } else if (lit.s.size() < PBE_BYTES_PER_RULE_SLOT) {
+            kind = "short-wildcard-like";
+        }
         std::cout << "  r" << i
                   << " id=" << lit.id
                   << " s=\"" << lit.s << "\""
+                  << " kind=" << kind
                   << " nocase=" << lit.nocase
                   << " noruns=" << lit.noruns
+                  << " haoCategory=" << haoCategoryName(plan.category)
+                  << " directReportSafe="
+                  << !!(plan.flags & HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE)
+                  << " residual=" << residual
+                  << " selectedAmbigBits="
+                  << plan.keyExpansion.selectedAmbigBits
+                  << " expandedKeyCount="
+                  << plan.keyExpansion.expandedKeyCount
                   << " groups=0x" << std::hex << lit.groups << std::dec
                   << "\n";
     }
 
     std::cout << "\n[Selectors]\n";
     std::cout << "  keyBits=" << artifacts.keyBits
-              << " selectorCount=" << artifacts.bitSelectors.size() << "\n";
+              << " selectorCount=" << artifacts.bitSelectors.size()
+              << " selectedBits=[";
+    for (size_t i = 0; i < artifacts.bitSelectors.size(); i++) {
+        const auto &sel = artifacts.bitSelectors[i];
+        std::cout << (static_cast<u32>(sel.byteOffset) * 8U +
+                      static_cast<u32>(sel.bitOffset));
+        if (i + 1 != artifacts.bitSelectors.size()) {
+            std::cout << ", ";
+        }
+    }
+    std::cout << "]\n";
     for (size_t i = 0; i < artifacts.bitSelectors.size(); i++) {
         const auto &sel = artifacts.bitSelectors[i];
         std::cout << "  s" << i
@@ -2925,6 +3015,67 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
               << " partialClassCount=" << stats.partialClassCount
               << " totalL2Entries=" << stats.totalL2Entries
               << " totalRulesInL2=" << stats.totalRulesInL2 << "\n";
+
+    std::cout << "\n[HAO Global Bitmap / L1]\n";
+    std::cout << "  keyBits=" << artifacts.haoGlobalHash.keyBits
+              << " nonEmptyL1=" << artifacts.haoGlobalHash.stats.nonEmptyPrimary
+              << " totalSecondaryEntries="
+              << artifacts.haoGlobalHash.stats.totalSecondaryEntries
+              << " maxEntriesPerKey="
+              << artifacts.haoGlobalHash.stats.maxEntriesPerKey << "\n";
+    dumpBitmapBytes(std::cout, artifacts.haoGlobalHash.primaryHashBitmap.bits,
+                    "  ");
+    for (u32 key = 0; key < artifacts.haoGlobalHash.primaryHashTable.offsets.size();
+         key++) {
+        const u32 value = artifacts.haoGlobalHash.primaryHashTable.offsets[key];
+        if (!value) {
+            continue;
+        }
+        std::cout << "  key={dec=" << key
+                  << ",hex=0x" << std::hex << key << std::dec
+                  << ",bin=" << u32ToBin(key, artifacts.haoGlobalHash.keyBits)
+                  << "} -> value={dec=" << value
+                  << ",hex=0x" << std::hex << value << std::dec
+                  << ",offset=" << (value & PBE_L1_OFFSET_MASK)
+                  << ",count=" << (value >> PBE_L1_COUNT_SHIFT) << "}\n";
+    }
+
+    std::cout << "\n[HAO Global L2]\n";
+    std::cout << "  size=" << artifacts.haoGlobalHash.secondaryHashTable.size()
+              << " (entry0 is null)\n";
+    for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
+        const auto &e = artifacts.haoGlobalHash.secondaryHashTable[i];
+        std::cout << "  HAO-L2[" << i << "]"
+                  << " ruleCount=" << e.ruleCount
+                  << " entryCapacity=" << PBE_RULE_SLOTS_PER_ENTRY
+                  << " headMask=0x" << std::hex << e.headMask
+                  << " tailMask=0x" << e.tailMask << std::dec
+                  << " headMaskBits=" << maskToBin(e.headMask)
+                  << " tailMaskBits=" << maskToBin(e.tailMask) << "\n";
+        for (u32 j = 0; j < e.ruleCount && j < PBE_RULE_SLOTS_PER_ENTRY; j++) {
+            const u16 ridx = e.ruleIndex[j];
+            std::cout << "    slot" << j
+                      << ": ruleIndex=" << ridx
+                      << " keyValue=0x" << std::hex << e.keyValue[j]
+                      << " keyMask=0x" << e.keyMask[j] << std::dec
+                      << " vectorFull=\"" << slotVectorString(e, j, false) << "\""
+                      << " vectorActive=\"" << slotVectorString(e, j, true) << "\""
+                      << " tbl=[";
+            for (u32 k = 0; k < PBE_BYTES_PER_RULE_SLOT; k++) {
+                std::cout << static_cast<u32>(
+                                 e.tableControl[j * PBE_BYTES_PER_RULE_SLOT + k]);
+                if (k + 1 != PBE_BYTES_PER_RULE_SLOT) {
+                    std::cout << ", ";
+                }
+            }
+            std::cout << "]";
+            if (ridx < lits.size()) {
+                std::cout << " rule={id=" << lits[ridx].id
+                          << ",s=\"" << lits[ridx].s << "\"}";
+            }
+            std::cout << "\n";
+        }
+    }
 
     std::map<u32, std::vector<u32>> offToL1Keys;
     std::map<u32, u32> offToClassMask;
@@ -3017,6 +3168,7 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
                   << " primarySize=" << klass.primaryHashTable.offsets.size()
                   << " secondaryOffset=" << klass.secondaryOffset
                   << " secondaryCount=" << klass.secondaryCount << "\n";
+        dumpBitmapBytes(std::cout, klass.primaryHashBitmap.bits, "    ");
         size_t nonEmpty = 0;
         for (u32 key = 0; key < klass.primaryHashTable.offsets.size(); key++) {
             const u32 value = klass.primaryHashTable.offsets[key];
@@ -3055,19 +3207,9 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
                       << ": ruleIndex=" << ridx
                       << " keyValue=0x" << std::hex << e.keyValue[j]
                       << " keyMask=0x" << e.keyMask[j] << std::dec
-                      << " suffix=[";
-            for (u32 k = 0; k < PBE_BYTES_PER_RULE_SLOT; k++) {
-                const u8 rv = e.ruleVector[j * PBE_BYTES_PER_RULE_SLOT + k];
-                std::cout << "{char='" << printableOrDot(rv)
-                          << "',dec=" << static_cast<u32>(rv)
-                          << ",hex=0x" << std::hex << static_cast<u32>(rv)
-                          << std::dec
-                          << ",bin=" << u8ToBin(rv) << "}";
-                if (k + 1 != PBE_BYTES_PER_RULE_SLOT) {
-                    std::cout << ", ";
-                }
-            }
-            std::cout << "] tbl=[";
+                      << " vectorFull=\"" << slotVectorString(e, j, false) << "\""
+                      << " vectorActive=\"" << slotVectorString(e, j, true) << "\""
+                      << " tbl=[";
             for (u32 k = 0; k < PBE_BYTES_PER_RULE_SLOT; k++) {
                 std::cout << static_cast<u32>(
                                  e.tableControl[j * PBE_BYTES_PER_RULE_SLOT + k]);

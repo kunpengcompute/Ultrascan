@@ -672,6 +672,45 @@ void dumpRuleKeys(const std::vector<hwlmLiteral> &lits,
 }
 
 static
+char dumpPrintableOrDot(u8 c) {
+    return std::isprint(static_cast<unsigned char>(c)) ? static_cast<char>(c)
+                                                       : '.';
+}
+
+static
+std::string l2VectorString(const u8 *rv, const u8 *tc, bool activeOnly) {
+    std::string out;
+
+    out.reserve(PBE_BYTES_PER_RULE_SLOT);
+    for (u32 i = 0; i < PBE_BYTES_PER_RULE_SLOT; i++) {
+        const bool active = tc[i] != 0x80;
+        if (activeOnly && !active) {
+            continue;
+        }
+        out.push_back(active ? dumpPrintableOrDot(rv[i]) : '.');
+    }
+    return out;
+}
+
+static
+void dumpBitmapBytes(const std::vector<u8> &bits, const char *prefix) {
+    size_t nonZero = 0;
+
+    printf("%s bytes=%zu\n", prefix, bits.size());
+    for (size_t i = 0; i < bits.size(); i++) {
+        if (!bits[i]) {
+            continue;
+        }
+        nonZero++;
+        printf("%s   [%zu] dec=%u hex=0x%02x bits=%s\n", prefix, i,
+               (u32)bits[i], (u32)bits[i], byteToBits(bits[i]).c_str());
+    }
+    if (!nonZero) {
+        printf("%s   <all_zero>\n", prefix);
+    }
+}
+
+static
 void dumpHashTables(const PBECompileArtifacts &artifacts,
                     const std::vector<hwlmLiteral> &lits) {
     if (artifacts.haoGlobalHash.valid) {
@@ -683,6 +722,52 @@ void dumpHashTables(const PBECompileArtifacts &artifacts,
                artifacts.haoGlobalHash.stats.totalSecondaryEntries,
                artifacts.haoGlobalHash.stats.maxEntriesPerKey,
                artifacts.haoGlobalHash.flags);
+        dumpBitmapBytes(artifacts.haoGlobalHash.primaryHashBitmap.bits,
+                        "[PBE][HAO-L1-Bitmap]");
+        printf("[PBE][HAO-L1] size=%zu\n",
+               artifacts.haoGlobalHash.primaryHashTable.offsets.size());
+        for (u32 key = 0; key < artifacts.haoGlobalHash.primaryHashTable.offsets.size();
+             key++) {
+            const u32 off = artifacts.haoGlobalHash.primaryHashTable.offsets[key];
+            if (!off) {
+                continue;
+            }
+            printf("  key={dec=%u hex=0x%x bin=%s} -> value={dec=%u hex=0x%x offset=%u count=%u}\n",
+                   key, key,
+                   keyToBits(key, artifacts.haoGlobalHash.keyBits).c_str(), off,
+                   off, off & PBE_L1_OFFSET_MASK, off >> PBE_L1_COUNT_SHIFT);
+        }
+        printf("[PBE][HAO-L2] size=%zu (entry0 is null)\n",
+               artifacts.haoGlobalHash.secondaryHashTable.size());
+        for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size();
+             i++) {
+            const auto &e = artifacts.haoGlobalHash.secondaryHashTable[i];
+            printf("  HAO-L2[%u] ruleCount=%u entryCapacity=%u headMask=0x%08x tailMask=0x%08x\n",
+                   i, (u32)e.ruleCount, PBE_RULE_SLOTS_PER_ENTRY, e.headMask,
+                   e.tailMask);
+            printf("    headMaskBits=%s\n", maskToBits(e.headMask).c_str());
+            printf("    tailMaskBits=%s\n", maskToBits(e.tailMask).c_str());
+            for (u32 j = 0; j < e.ruleCount && j < PBE_RULE_SLOTS_PER_ENTRY;
+                 j++) {
+                const u16 ridx = e.ruleIndex[j];
+                const u8 *rv = &e.ruleVector[j * PBE_BYTES_PER_RULE_SLOT];
+                const u8 *tc = &e.tableControl[j * PBE_BYTES_PER_RULE_SLOT];
+                printf("    slot%u: ruleIndex=%u keyValue=0x%x keyMask=0x%x vectorFull=\"%s\" vectorActive=\"%s\" tbl=[",
+                       j, (u32)ridx, e.keyValue[j], e.keyMask[j],
+                       l2VectorString(rv, tc, false).c_str(),
+                       l2VectorString(rv, tc, true).c_str());
+                for (u32 k = 0; k < PBE_BYTES_PER_RULE_SLOT; k++) {
+                    printf("%u%s", (u32)tc[k],
+                           k + 1 == PBE_BYTES_PER_RULE_SLOT ? "" : ", ");
+                }
+                printf("]");
+                if (ridx < lits.size()) {
+                    printf(" literal={id=%u s=\"%s\"}", lits[ridx].id,
+                           lits[ridx].s.c_str());
+                }
+                printf("\n");
+            }
+        }
     }
 
     printf("[PBE][Mask-Classes] count=%zu\n", artifacts.maskClasses.size());
@@ -694,7 +779,7 @@ void dumpHashTables(const PBECompileArtifacts &artifacts,
                klass.secondaryOffset,
                klass.secondaryCount);
         printf("    [L1] size=%zu\n", klass.primaryHashTable.offsets.size());
-        printf("    [L1-Bitmap] bytes=%zu\n", klass.primaryHashBitmap.bits.size());
+        dumpBitmapBytes(klass.primaryHashBitmap.bits, "    [L1-Bitmap]");
         size_t nonEmpty = 0;
         for (u32 key = 0; key < klass.primaryHashTable.offsets.size(); key++) {
             const u32 off = klass.primaryHashTable.offsets[key];
@@ -724,16 +809,10 @@ void dumpHashTables(const PBECompileArtifacts &artifacts,
             const u16 ridx = e.ruleIndex[j];
             const u8 *rv = &e.ruleVector[j * PBE_BYTES_PER_RULE_SLOT];
             const u8 *tc = &e.tableControl[j * PBE_BYTES_PER_RULE_SLOT];
-            printf("    slot%u: ruleIndex=%u keyValue=0x%x keyMask=0x%x suffix=[",
-                   j, (u32)ridx, e.keyValue[j], e.keyMask[j]);
-            for (u32 k = 0; k < PBE_BYTES_PER_RULE_SLOT; k++) {
-                const char pc = std::isprint((unsigned char)rv[k]) ?
-                                (char)rv[k] : '.';
-                printf("{'%c',0x%02x,%s}%s", pc, (u32)rv[k],
-                       byteToBits(rv[k]).c_str(),
-                       k + 1 == PBE_BYTES_PER_RULE_SLOT ? "" : ", ");
-            }
-            printf("] tbl=[");
+            printf("    slot%u: ruleIndex=%u keyValue=0x%x keyMask=0x%x vectorFull=\"%s\" vectorActive=\"%s\" tbl=[",
+                   j, (u32)ridx, e.keyValue[j], e.keyMask[j],
+                   l2VectorString(rv, tc, false).c_str(),
+                   l2VectorString(rv, tc, true).c_str());
             for (u32 k = 0; k < PBE_BYTES_PER_RULE_SLOT; k++) {
                 printf("%u%s", (u32)tc[k],
                        k + 1 == PBE_BYTES_PER_RULE_SLOT ? "" : ", ");
