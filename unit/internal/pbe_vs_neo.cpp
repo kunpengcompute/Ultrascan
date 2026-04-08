@@ -2124,9 +2124,6 @@ TEST(PBECompile, HaoGlobalHashBuildsSinglePrimarySpace) {
         if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
             continue;
         }
-        if (plan.flags & HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM) {
-            continue;
-        }
         nonResidualExpandedKeys += plan.keyExpansion.expandedKeyCount;
     }
 
@@ -2139,6 +2136,46 @@ TEST(PBECompile, HaoGlobalHashBuildsSinglePrimarySpace) {
     EXPECT_EQ(nonResidualExpandedKeys,
               artifacts.haoGlobalHash.stats.totalExpandedKeysInBuckets);
     EXPECT_GT(artifacts.haoGlobalHash.stats.nonEmptyPrimary, 0U);
+}
+
+TEST(PBECompile, HaoGlobalHashStoresAnchorConfirmFragments) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 742, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("maskrule", false, false, 743, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'l', 0x60}),
+        hwlmLiteral("delta", false, false, 744, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 745, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    const auto &plan = artifacts.haoRulePlans[1];
+    ASSERT_EQ(HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM, plan.category);
+
+    bool found = false;
+    for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
+        const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
+        for (u32 slot = 0; slot < entry.ruleCount; slot++) {
+            if (entry.ruleIndex[slot] != plan.ruleIndex) {
+                continue;
+            }
+
+            found = true;
+            const u32 laneBase = slot * PBE_BYTES_PER_RULE_SLOT;
+            for (u32 j = 0; j < PBE_BYTES_PER_RULE_SLOT; j++) {
+                if (!(plan.verifier.validByteMask & (1U << j))) {
+                    continue;
+                }
+                EXPECT_EQ(plan.verifier.bytes[j],
+                          entry.ruleVector[laneBase + j]);
+            }
+        }
+    }
+
+    EXPECT_TRUE(found);
 }
 
 TEST(PBECompile, HaoGlobalHashStoresVerifierFragments) {
@@ -2168,8 +2205,47 @@ TEST(PBECompile, HaoGlobalHashStoresVerifierFragments) {
                 if (plan.verifier.validByteMask & (1U << j)) {
                     EXPECT_EQ(plan.verifier.bytes[j],
                               entry.ruleVector[laneBase + j]);
-                    EXPECT_EQ(1U, entry.tableControl[laneBase + j]);
+                    EXPECT_EQ(((laneBase + j) & 0x0fU),
+                              entry.tableControl[laneBase + j]);
                 }
+            }
+        }
+    }
+
+    EXPECT_TRUE(found);
+}
+
+TEST(PBECompile, HaoGlobalHashTableControlEncodesShuffleBytes) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 738, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 739, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 740, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 741, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    const auto &plan = artifacts.haoRulePlans[1];
+    ASSERT_EQ(HAORuleCategory::HAO_RULE_EXACT, plan.category);
+
+    bool found = false;
+    for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
+        const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
+        for (u32 slot = 0; slot < entry.ruleCount; slot++) {
+            if (entry.ruleIndex[slot] != plan.ruleIndex) {
+                continue;
+            }
+
+            found = true;
+            const u32 laneBase = slot * PBE_BYTES_PER_RULE_SLOT;
+            for (u32 j = 0; j < PBE_BYTES_PER_RULE_SLOT; j++) {
+                if (!(plan.verifier.validByteMask & (1U << j))) {
+                    continue;
+                }
+                EXPECT_EQ(((laneBase + j) & 0x0fU),
+                          entry.tableControl[laneBase + j]);
             }
         }
     }

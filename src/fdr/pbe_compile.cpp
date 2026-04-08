@@ -247,6 +247,9 @@ bool haoPlanRequiresResidualEval(const HAOCompiledRulePlan &plan) {
     if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
         return true;
     }
+    if (plan.category == HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM) {
+        return false;
+    }
     if (plan.flags & HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM) {
         return true;
     }
@@ -383,7 +386,7 @@ void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan, u32 keyValue,
         const u32 vecIndex = laneBase + i;
         entry->ruleVector[vecIndex] = plan.verifier.bytes[i];
         /* 当前阶段 tableControl 仍先作为“有效字节位置”占位信息。 */
-        entry->tableControl[vecIndex] = 1;
+        entry->tableControl[vecIndex] = verify_u8(vecIndex & 0x0fU);
         entry->tailMask |= (1U << vecIndex);
         if (i != lastValidBit) {
             entry->headMask |= (1U << vecIndex);
@@ -461,6 +464,7 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
 
         for (u32 chunk = 0; chunk < entryCount; chunk++) {
             PBESecondaryHashEntry entry = {};
+            memset(entry.tableControl, 0x80, sizeof(entry.tableControl));
             const size_t begin = chunk * PBE_RULE_SLOTS_PER_ENTRY;
             const size_t end = std::min(bucketRules.size(),
                                         begin + PBE_RULE_SLOTS_PER_ENTRY);

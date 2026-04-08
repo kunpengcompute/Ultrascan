@@ -329,6 +329,122 @@ static int haoRuleExactMatch(const struct HAORuntimeRuleMeta *rm,
     return 1;
 }
 
+static really_inline
+u32 haoBuildShuffledValidMask(const struct PBERuntimeSecondaryHashEntry *entry,
+                              const struct PBEPositionContext *ctx) {
+    u32 shuffledValidMask = 0;
+    u32 i;
+
+    if (!entry || !ctx) {
+        return 0;
+    }
+
+    for (i = 0; i < PBE_RUNTIME_RULE_VECTOR_BYTES; i++) {
+        const u8 srcCtl = entry->tableControl[i];
+        const u32 chunkBase = i & 0x10U;
+        u32 srcIndex;
+        u32 srcBit;
+
+        if (srcCtl & 0x80U) {
+            continue;
+        }
+        srcIndex = chunkBase + srcCtl;
+        srcBit = 1U << srcIndex;
+        if (ctx->validMask32 & srcBit) {
+            shuffledValidMask |= (1U << i);
+        }
+    }
+
+    return shuffledValidMask;
+}
+
+static really_inline
+int haoRuleCanReportFromVerifier(const struct HAORuntimeRuleMeta *rm) {
+    if (!rm) {
+        return 0;
+    }
+    if (rm->flags & PBE_RULE_FLAG_HAS_MASK) {
+        return 0;
+    }
+    if (rm->flags & PBE_RULE_FLAG_NORUNS) {
+        return 0;
+    }
+    if (rm->anchorOffset != 0 || rm->anchorLength != rm->len) {
+        return 0;
+    }
+    if (rm->category != HAO_RUNTIME_RULE_EXACT &&
+        rm->category != HAO_RUNTIME_RULE_NOCASE) {
+        return 0;
+    }
+    return 1;
+}
+
+static u32 haoEntryMatchMaskFromContext(
+    const struct PBERuntimeSecondaryHashEntry *entry,
+    struct PBEPositionContext *ctx) {
+    u32 shuffledValidMask;
+
+    if (!entry || !entry->ruleCount || !ctx) {
+        return 0;
+    }
+
+    pbeEnsureLaneWindowContext(ctx);
+    shuffledValidMask = haoBuildShuffledValidMask(entry, ctx);
+
+#if defined(HAVE_NEON) || defined(HAVE_SSE2)
+    {
+        {
+            const m128 inputLo = loadu128(ctx->laneWindow32);
+            const m128 inputHi = loadu128(ctx->laneWindow32 + 16);
+            const m128 ctrlLo = loadu128(entry->tableControl);
+            const m128 ctrlHi = loadu128(entry->tableControl + 16);
+            const m128 shufLo = pshufb_m128(inputLo, ctrlLo);
+            const m128 shufHi = pshufb_m128(inputHi, ctrlHi);
+            const m128 ruleLo = loadu128(entry->ruleVector);
+            const m128 ruleHi = loadu128(entry->ruleVector + 16);
+            const u32 eqLo = movemask128(eq128(shufLo, ruleLo));
+            const u32 eqHi = movemask128(eq128(shufHi, ruleHi));
+            const u32 byteMatchMask = (eqLo | (eqHi << 16)) &
+                                      shuffledValidMask & entry->tailMask;
+
+            return pbeEntryLaneMaskFromByteMatches(entry, byteMatchMask);
+        }
+    }
+#else
+    {
+        u8 shuffledWindow32[PBE_RUNTIME_RULE_VECTOR_BYTES] = {0};
+        u32 i;
+
+        for (i = 0; i < PBE_RUNTIME_RULE_VECTOR_BYTES; i++) {
+            const u8 srcCtl = entry->tableControl[i];
+            const u32 chunkBase = i & 0x10U;
+            const u32 srcIndex = chunkBase + srcCtl;
+
+            if (!(shuffledValidMask & (1U << i))) {
+                continue;
+            }
+            shuffledWindow32[i] = ctx->laneWindow32[srcIndex];
+        }
+
+        {
+            u32 byteMatchMask = 0;
+
+            for (i = 0; i < PBE_RUNTIME_RULE_VECTOR_BYTES; i++) {
+                const u32 bit = 1U << i;
+                if (!(shuffledValidMask & bit)) {
+                    continue;
+                }
+                if (shuffledWindow32[i] == entry->ruleVector[i]) {
+                    byteMatchMask |= bit;
+                }
+            }
+
+            return pbeEntryLaneMaskFromByteMatches(entry, byteMatchMask);
+        }
+    }
+#endif
+}
+
 static int haoProcessEncodedRange(
     const struct HAORuntimeHeader *hdr,
     const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
@@ -356,7 +472,7 @@ static int haoProcessEncodedRange(
         }
 
         entry = &secondaryHashTable[off];
-        laneMask = pbeEntryMatchMaskFromContextVector(entry, ctx);
+        laneMask = haoEntryMatchMaskFromContext(entry, ctx);
         if (!laneMask) {
             continue;
         }
@@ -382,7 +498,8 @@ static int haoProcessEncodedRange(
             if (!(rm->groups & *control)) {
                 continue;
             }
-            if (!haoRuleExactMatch(rm, a, ctx->endPos, literalBlob,
+            if (!haoRuleCanReportFromVerifier(rm) &&
+                !haoRuleExactMatch(rm, a, ctx->endPos, literalBlob,
                                    literalBlobSize)) {
                 continue;
             }
