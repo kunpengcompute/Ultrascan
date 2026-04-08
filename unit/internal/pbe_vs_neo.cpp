@@ -1453,6 +1453,40 @@ TEST(PBERuntime, HaoBlobBatchExecMatchesNaiveForSimpleRules) {
     EXPECT_EQ(naiveMatches, batchMatches);
 }
 
+TEST(PBERuntime, HaoRuntimeStatsTrackDirectReportPath) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 8692, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 8693, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 8694, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 8695, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    auto haoBlob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, haoBlob.get());
+
+    const std::vector<u8> data = {
+        'x','a','l','p','h','a','-',
+        'A','l','P','h','A','-',
+        't','h','e','t','a','-',
+        'o','m','e','g','a','-',
+        'a','l','p','h','a'
+    };
+
+    HaoRuntimeResetStatsForTest();
+    const auto matches =
+        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, false);
+    HAORuntimeStats stats = {};
+    HaoRuntimeGetStatsForTest(&stats);
+
+    EXPECT_FALSE(matches.empty());
+    EXPECT_GT(stats.primaryProbeLanes, 0U);
+    EXPECT_EQ(matches.size(), stats.directReports);
+    EXPECT_EQ(0U, stats.encodedConfirmCalls);
+    EXPECT_EQ(0U, stats.residualRuleChecks);
+}
+
 TEST(PBERuntime, HaoBlobBatchExecMatchesNaiveAcrossBlockBoundaries) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 704, HWLM_ALL_GROUPS, {}, {}),
@@ -1707,6 +1741,43 @@ TEST(PBERuntime, HaoBlobNaiveExecMatchesPbeDirectWithResidualUnsupportedRules) {
     std::sort(pbeMatches.begin(), pbeMatches.end());
     std::sort(haoMatches.begin(), haoMatches.end());
     EXPECT_EQ(pbeMatches, haoMatches);
+}
+
+TEST(PBERuntime, HaoRuntimeStatsTrackResidualPath) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 8791, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 8792, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 8793, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 8794, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("mask", false, false, 8795, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'s', 0x60})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    auto haoBlob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, haoBlob.get());
+
+    const std::vector<u8> data = {
+        'x','a','l','p','h','a','-',
+        'm','a','s','k','-',
+        'A','l','P','h','A','-',
+        'b','e','t','a','-',
+        't','h','e','t','a'
+    };
+
+    HaoRuntimeResetStatsForTest();
+    const auto matches =
+        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, true);
+    HAORuntimeStats stats = {};
+    HaoRuntimeGetStatsForTest(&stats);
+
+    EXPECT_FALSE(matches.empty());
+    EXPECT_GT(stats.residualPosCalls, 0U);
+    EXPECT_GT(stats.residualRuleChecks, 0U);
+    EXPECT_GT(stats.residualConfirmCalls, 0U);
+    EXPECT_GT(stats.residualConfirmMatches, 0U);
 }
 
 TEST(PBERuntime, EmbeddedHaoV2FdrBatchMatchesNaive) {
@@ -2103,6 +2174,42 @@ TEST(PBECompile, HaoSummaryTracksCoverageAndAnchors) {
         }
     }
     EXPECT_EQ(anchorCount, artifacts.haoSummary.anchorConfirmRules);
+}
+
+TEST(PBECompile, HaoSummaryTracksDirectReportRules) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 7296, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 7297, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 7298, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 7299, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+
+    EXPECT_EQ(3U, artifacts.haoSummary.exactRules);
+    EXPECT_EQ(1U, artifacts.haoSummary.nocaseRules);
+    EXPECT_EQ(lits.size(), artifacts.haoSummary.directReportRules);
+    EXPECT_EQ(0U, artifacts.haoSummary.residualRules);
+    EXPECT_EQ(0U, artifacts.haoSummary.fastPathConfirmRules);
+}
+
+TEST(PBECompile, HaoSummaryTracksResidualUnsupportedRules) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 7396, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 7397, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 7398, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 7399, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("mask", false, false, 7400, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff, 0xf0},
+                    std::vector<u8>{'s', 0x60})
+    };
+
+    PBECompileArtifacts artifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+
+    EXPECT_GT(artifacts.haoSummary.residualRules, 0U);
+    EXPECT_GT(artifacts.haoSummary.residualUnsupportedRules, 0U);
 }
 
 TEST(PBECompile, HaoGlobalHashBuildsSinglePrimarySpace) {

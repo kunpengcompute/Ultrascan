@@ -6,9 +6,64 @@
 #include "fdr_internal.h"
 #include "pbe_runtime.h"
 #include "pbe_runtime_inline.h"
+#include "util/bitutils.h"
 #include "util/simd_utils.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+static struct HAORuntimeStats g_haoStats;
+static int g_haoStatsForceEnabled;
+static int g_haoStatsEnvEnabled = -1;
+static int g_haoStatsAtexitRegistered;
+
+static void haoDumpRuntimeStats(void);
+
+static int haoStatsEnabled(void) {
+    if (g_haoStatsEnvEnabled < 0) {
+        const char *env = getenv("HS_HAO_STATS");
+        g_haoStatsEnvEnabled = env && *env && *env != '0';
+        if (g_haoStatsEnvEnabled && !g_haoStatsAtexitRegistered) {
+            atexit(haoDumpRuntimeStats);
+            g_haoStatsAtexitRegistered = 1;
+        }
+    }
+    return g_haoStatsForceEnabled || g_haoStatsEnvEnabled;
+}
+
+static really_inline
+void haoStatsAdd(u64a *counter, u64a delta) {
+    if (!haoStatsEnabled() || !counter) {
+        return;
+    }
+    *counter += delta;
+}
+
+static void haoDumpRuntimeStats(void) {
+    if (!haoStatsEnabled()) {
+        return;
+    }
+
+    fprintf(stderr,
+            "[HAO][Runtime] blockCalls=%llu blockLanes=%llu primaryProbeLanes=%llu primaryActiveLanes=%llu encodedRangeCalls=%llu encodedEntriesVisited=%llu verifierCalls=%llu verifierEntryHits=%llu verifierSlotHits=%llu directReports=%llu encodedConfirmCalls=%llu encodedConfirmMatches=%llu residualPosCalls=%llu residualRuleChecks=%llu residualConfirmCalls=%llu residualConfirmMatches=%llu\n",
+            (unsigned long long)g_haoStats.blockCalls,
+            (unsigned long long)g_haoStats.blockLanes,
+            (unsigned long long)g_haoStats.primaryProbeLanes,
+            (unsigned long long)g_haoStats.primaryActiveLanes,
+            (unsigned long long)g_haoStats.encodedRangeCalls,
+            (unsigned long long)g_haoStats.encodedEntriesVisited,
+            (unsigned long long)g_haoStats.verifierCalls,
+            (unsigned long long)g_haoStats.verifierEntryHits,
+            (unsigned long long)g_haoStats.verifierSlotHits,
+            (unsigned long long)g_haoStats.directReports,
+            (unsigned long long)g_haoStats.encodedConfirmCalls,
+            (unsigned long long)g_haoStats.encodedConfirmMatches,
+            (unsigned long long)g_haoStats.residualPosCalls,
+            (unsigned long long)g_haoStats.residualRuleChecks,
+            (unsigned long long)g_haoStats.residualConfirmCalls,
+            (unsigned long long)g_haoStats.residualConfirmMatches);
+}
 
 static int pbeRuleExactMatch(const struct PBERuntimeRuleMeta *rm,
                              const struct FDR_Runtime_Args *a, size_t endPos,
@@ -388,6 +443,7 @@ static u32 haoEntryMatchMaskFromContext(
         return 0;
     }
 
+    haoStatsAdd(&g_haoStats.verifierCalls, 1);
     pbeEnsureLaneWindowContext(ctx);
     shuffledValidMask = haoBuildShuffledValidMask(entry, ctx);
 
@@ -406,8 +462,14 @@ static u32 haoEntryMatchMaskFromContext(
             const u32 eqHi = movemask128(eq128(shufHi, ruleHi));
             const u32 byteMatchMask = (eqLo | (eqHi << 16)) &
                                       shuffledValidMask & entry->tailMask;
+            const u32 laneMask =
+                pbeEntryLaneMaskFromByteMatches(entry, byteMatchMask);
 
-            return pbeEntryLaneMaskFromByteMatches(entry, byteMatchMask);
+            if (laneMask) {
+                haoStatsAdd(&g_haoStats.verifierEntryHits, 1);
+                haoStatsAdd(&g_haoStats.verifierSlotHits, popcount32(laneMask));
+            }
+            return laneMask;
         }
     }
 #else
@@ -439,7 +501,16 @@ static u32 haoEntryMatchMaskFromContext(
                 }
             }
 
-            return pbeEntryLaneMaskFromByteMatches(entry, byteMatchMask);
+            {
+                const u32 laneMask =
+                    pbeEntryLaneMaskFromByteMatches(entry, byteMatchMask);
+                if (laneMask) {
+                    haoStatsAdd(&g_haoStats.verifierEntryHits, 1);
+                    haoStatsAdd(&g_haoStats.verifierSlotHits,
+                                popcount32(laneMask));
+                }
+                return laneMask;
+            }
         }
     }
 #endif
@@ -460,6 +531,7 @@ static int haoProcessEncodedRange(
         return HWLM_SUCCESS;
     }
 
+    haoStatsAdd(&g_haoStats.encodedRangeCalls, 1);
     pbeDecodePrimaryValue(encoded, &offset, &count);
     for (n = 0; n < count; n++) {
         const u32 off = offset + n;
@@ -472,6 +544,7 @@ static int haoProcessEncodedRange(
         }
 
         entry = &secondaryHashTable[off];
+        haoStatsAdd(&g_haoStats.encodedEntriesVisited, 1);
         laneMask = haoEntryMatchMaskFromContext(entry, ctx);
         if (!laneMask) {
             continue;
@@ -498,10 +571,15 @@ static int haoProcessEncodedRange(
             if (!(rm->groups & *control)) {
                 continue;
             }
-            if (!haoRuleCanReportFromVerifier(rm) &&
-                !haoRuleExactMatch(rm, a, ctx->endPos, literalBlob,
-                                   literalBlobSize)) {
-                continue;
+            if (haoRuleCanReportFromVerifier(rm)) {
+                haoStatsAdd(&g_haoStats.directReports, 1);
+            } else {
+                haoStatsAdd(&g_haoStats.encodedConfirmCalls, 1);
+                if (!haoRuleExactMatch(rm, a, ctx->endPos, literalBlob,
+                                       literalBlobSize)) {
+                    continue;
+                }
+                haoStatsAdd(&g_haoStats.encodedConfirmMatches, 1);
             }
 
             *control = a->cb(ctx->endPos, rm->id, a->scratch);
@@ -526,6 +604,7 @@ static int haoProcessResidualRulesAtPos(
         return HWLM_SUCCESS;
     }
 
+    haoStatsAdd(&g_haoStats.residualPosCalls, 1);
     for (i = 0; i < hdr->residualRuleCount; i++) {
         const u32 ridx = residualRuleIndexes[i];
         const struct HAORuntimeRuleMeta *rm;
@@ -538,9 +617,12 @@ static int haoProcessResidualRulesAtPos(
         if (!(rm->groups & *control)) {
             continue;
         }
+        haoStatsAdd(&g_haoStats.residualRuleChecks, 1);
+        haoStatsAdd(&g_haoStats.residualConfirmCalls, 1);
         if (!haoRuleExactMatch(rm, a, endPos, literalBlob, literalBlobSize)) {
             continue;
         }
+        haoStatsAdd(&g_haoStats.residualConfirmMatches, 1);
 
         *control = a->cb(endPos, rm->id, a->scratch);
         if (*control == HWLM_TERMINATE_MATCHING) {
@@ -899,15 +981,20 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
         return HWLM_SUCCESS;
     }
 
+    haoStatsAdd(&g_haoStats.blockCalls, 1);
+    haoStatsAdd(&g_haoStats.blockLanes, block.laneCount);
+
     for (u32 lane = 0; lane < block.laneCount; lane++) {
         primaryIdx[lane] = block.keys[lane];
     }
 
+    haoStatsAdd(&g_haoStats.primaryProbeLanes, block.laneCount);
     pbePrepareBitmapProbeStateFromPrimaryIdx(primaryIdx, block.laneCount,
                                              &probe);
     probe.activeMask = pbeProbeBitmapPacked(primaryBitmap,
                                             hdr->primaryBitmapSize, &probe);
     activeCount = pbeCompactAndLoadPrimary(primaryHashTable, &probe);
+    haoStatsAdd(&g_haoStats.primaryActiveLanes, activeCount);
 
     for (lane = 0; lane < activeCount; lane++) {
         encodedByLane[probe.activeLaneIndex[lane]] = probe.activeEncoded[lane];
@@ -1351,6 +1438,18 @@ int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
     }
     haoInspectLayout(hdr, summary);
     return 1;
+}
+
+void HaoRuntimeResetStatsForTest(void) {
+    memset(&g_haoStats, 0, sizeof(g_haoStats));
+    g_haoStatsForceEnabled = 1;
+}
+
+void HaoRuntimeGetStatsForTest(struct HAORuntimeStats *summary) {
+    if (!summary) {
+        return;
+    }
+    *summary = g_haoStats;
 }
 
 hwlm_error_t HaoEngineExecBlobNaiveForTest(const void *blob, u32 blobSize,

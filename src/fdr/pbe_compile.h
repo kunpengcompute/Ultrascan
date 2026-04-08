@@ -171,6 +171,13 @@ struct HAOCompileSummary {
     u32 fastPathRules = 0;
     u32 unsupportedRules = 0;
     u32 anchorConfirmRules = 0;
+    u32 exactRules = 0;
+    u32 nocaseRules = 0;
+    u32 residualRules = 0;
+    u32 residualUnsupportedRules = 0;
+    u32 fastPathConfirmRules = 0;
+    u32 directReportRules = 0;
+    u32 keyExpandedRules = 0;
     u32 totalExpandedKeys = 0;
     u32 maxSelectedAmbigBits = 0;
 };

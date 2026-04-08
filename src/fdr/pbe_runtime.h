@@ -192,6 +192,25 @@ struct HAORuntimeInspectSummary {
     u32 totalRulesInL2;
 };
 
+struct HAORuntimeStats {
+    u64a blockCalls;
+    u64a blockLanes;
+    u64a primaryProbeLanes;
+    u64a primaryActiveLanes;
+    u64a encodedRangeCalls;
+    u64a encodedEntriesVisited;
+    u64a verifierCalls;
+    u64a verifierEntryHits;
+    u64a verifierSlotHits;
+    u64a directReports;
+    u64a encodedConfirmCalls;
+    u64a encodedConfirmMatches;
+    u64a residualPosCalls;
+    u64a residualRuleChecks;
+    u64a residualConfirmCalls;
+    u64a residualConfirmMatches;
+};
+
 struct FDR;
 struct FDR_Runtime_Args;
 
@@ -215,6 +234,8 @@ u32 PbeRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
 int HaoRuntimeValidateLayoutForTest(const void *blob, u32 blobSize);
 int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
                                  struct HAORuntimeInspectSummary *summary);
+void HaoRuntimeResetStatsForTest(void);
+void HaoRuntimeGetStatsForTest(struct HAORuntimeStats *summary);
 hwlm_error_t HaoEngineExecBlobNaiveForTest(const void *blob, u32 blobSize,
                                            const struct FDR_Runtime_Args *a,
                                            hwlm_group_t control);

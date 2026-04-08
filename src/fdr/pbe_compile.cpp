@@ -15,6 +15,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <cstdio>
 #include <limits>
@@ -256,6 +257,26 @@ bool haoPlanRequiresResidualEval(const HAOCompiledRulePlan &plan) {
     return false;
 }
 
+static
+bool haoPlanCanDirectReport(const hwlmLiteral &lit,
+                            const HAOCompiledRulePlan &plan) {
+    if (plan.category != HAORuleCategory::HAO_RULE_EXACT &&
+        plan.category != HAORuleCategory::HAO_RULE_NOCASE) {
+        return false;
+    }
+    if (haoLiteralHasSupplementaryMask(lit) || lit.noruns) {
+        return false;
+    }
+    return plan.verifier.anchorOffset == 0 &&
+           plan.verifier.anchorLength == lit.s.size();
+}
+
+static
+bool haoStatsDumpEnabled(void) {
+    const char *env = getenv("HS_HAO_STATS");
+    return env && *env && *env != '0';
+}
+
 /* 为后续 L2 verifier 预先生成确定性片段。
  * 注意：当前 HAO v2 runtime 仍复用 PBE 的归一化窗口预筛，因此这里无论 exact 还是
  * nocase，都先写入归一化后的 verifier bytes，最终 exact/nocase 语义差异交给
@@ -325,7 +346,6 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
         if (plan.category == HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM) {
             plan.needFullConfirm = true;
             plan.flags |= HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM;
-            summary->anchorConfirmRules++;
         }
 
         if (summary->maxSelectedAmbigBits < plan.keyExpansion.selectedAmbigBits) {
@@ -336,23 +356,50 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
             summary->unsupportedRules++;
             plan.keyExpansion.expandedKeys.clear();
             plan.keyExpansion.expandedKeyCount = 0;
-            rulePlans->push_back(std::move(plan));
-            continue;
-        }
-
-        if ((u64a)summary->totalExpandedKeys + plan.keyExpansion.expandedKeyCount >
+        } else if ((u64a)summary->totalExpandedKeys +
+                    plan.keyExpansion.expandedKeyCount >
             HAO_MAX_TOTAL_EXPANDED_KEYS) {
             plan.category = HAORuleCategory::HAO_RULE_UNSUPPORTED;
             plan.flags |= HAO_RULE_PLAN_FLAG_OVER_EXPANSION_BUDGET;
             plan.keyExpansion.expandedKeys.clear();
             plan.keyExpansion.expandedKeyCount = 0;
             summary->unsupportedRules++;
-            rulePlans->push_back(std::move(plan));
-            continue;
         }
 
-        summary->fastPathRules++;
-        summary->totalExpandedKeys += plan.keyExpansion.expandedKeyCount;
+        switch (plan.category) {
+        case HAORuleCategory::HAO_RULE_EXACT:
+            summary->exactRules++;
+            break;
+        case HAORuleCategory::HAO_RULE_NOCASE:
+            summary->nocaseRules++;
+            break;
+        case HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM:
+            summary->anchorConfirmRules++;
+            break;
+        case HAORuleCategory::HAO_RULE_UNSUPPORTED:
+            break;
+        default:
+            break;
+        }
+
+        if (plan.flags & HAO_RULE_PLAN_FLAG_KEY_EXPANDED) {
+            summary->keyExpandedRules++;
+        }
+        if (haoPlanRequiresResidualEval(plan)) {
+            summary->residualRules++;
+            if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
+                summary->residualUnsupportedRules++;
+            }
+        } else if (plan.needFullConfirm) {
+            summary->fastPathConfirmRules++;
+        }
+        if (haoPlanCanDirectReport(lits[i], plan)) {
+            summary->directReportRules++;
+        }
+        if (plan.category != HAORuleCategory::HAO_RULE_UNSUPPORTED) {
+            summary->fastPathRules++;
+            summary->totalExpandedKeys += plan.keyExpansion.expandedKeyCount;
+        }
         rulePlans->push_back(std::move(plan));
     }
 }
@@ -665,6 +712,17 @@ void dumpHashTables(const PBECompileArtifacts &artifacts,
 }
 
 static
+void dumpHAOSummary(const PBECompileArtifacts &artifacts) {
+    const auto &s = artifacts.haoSummary;
+    printf("[PBE][HAO-Summary] total=%u fastPath=%u residual=%u residualUnsupported=%u unsupported=%u exact=%u nocase=%u anchorConfirm=%u directReport=%u fastPathConfirm=%u keyExpanded=%u expandedKeys=%u maxSelectedAmbigBits=%u\n",
+           s.totalRules, s.fastPathRules, s.residualRules,
+           s.residualUnsupportedRules, s.unsupportedRules, s.exactRules,
+           s.nocaseRules, s.anchorConfirmRules, s.directReportRules,
+           s.fastPathConfirmRules, s.keyExpandedRules, s.totalExpandedKeys,
+           s.maxSelectedAmbigBits);
+}
+
+static
 void dumpPBEArtifactsVerbose(const std::vector<hwlmLiteral> &lits,
                              const PBECompileArtifacts &artifacts) {
     printf("\n========== [PBE][Build-Artifacts] Begin ==========\n");
@@ -676,6 +734,7 @@ void dumpPBEArtifactsVerbose(const std::vector<hwlmLiteral> &lits,
     dumpSelectors(artifacts.bitSelectors);
     dumpExtractDescriptor(artifacts);
     dumpRuleKeys(lits, artifacts.bitSelectors, artifacts.keyBits);
+    dumpHAOSummary(artifacts);
     dumpHashTables(artifacts, lits);
     printf("[PBE][Flags] artifacts.flags=0x%x\n", artifacts.flags);
     printf("========== [PBE][Build-Artifacts] End ==========\n\n");
@@ -1254,6 +1313,8 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     // Compile-time dump for selector/key/hash construction inspection.
     if (enableDump) {
         dumpPBEArtifactsVerbose(lits, *artifacts);
+    } else if (haoStatsDumpEnabled()) {
+        dumpHAOSummary(*artifacts);
     }
 
     return true;
