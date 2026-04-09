@@ -168,103 +168,6 @@ void get_conf_stride_1(const u8 *itPtr, UNUSED const u8 *start_ptr,
                        const u64a *ft, u64a *conf0, u64a *conf8, m128 *s) {
     /* +1: the zones ensure that we can read the byte at z->end */
     assert(itPtr >= start_ptr && itPtr <= end_ptr);
-#if defined(HAVE_NEON)
-    domain_mask_flipped = ~domain_mask_flipped;
-
-    u32 reach0, reach1, reach2, reach3;
-    u64a ptr = unaligned_load_u64a(itPtr);
-
-    reach0 = ptr & domain_mask_flipped;
-    reach1 = ptr >> 8 & domain_mask_flipped;
-    reach2 = ptr >> 16 & domain_mask_flipped;
-    reach3 = ptr >> 24 & domain_mask_flipped;
-
-    m128 st0 = load_m128_from_u64a(ft + reach0);
-    m128 st1 = load_m128_from_u64a(ft + reach1);
-    m128 st2 = load_m128_from_u64a(ft + reach2);
-    m128 st3 = load_m128_from_u64a(ft + reach3);
-
-    u32 reach4, reach5, reach6, reach7;
-    ptr = unaligned_load_u64a(itPtr + 4);
-    reach4 = ptr & domain_mask_flipped;
-    reach5 = ptr >> 8 & domain_mask_flipped;
-    reach6 = ptr >> 16 & domain_mask_flipped;
-    reach7 = ptr >> 24 & domain_mask_flipped;
-
-    m128 st4 = load_m128_from_u64a(ft + reach4);
-    m128 st5 = load_m128_from_u64a(ft + reach5);
-    m128 st6 = load_m128_from_u64a(ft + reach6);
-    m128 st7 = load_m128_from_u64a(ft + reach7);
-
-    m128 zero = zeroes128();
-
-    st1.vect_s8 = vextq_s8(zero.vect_s8, st1.vect_s8, 15);
-    st2.vect_s8 = vextq_s8(zero.vect_s8, st2.vect_s8, 14);
-    st3.vect_s8 = vextq_s8(zero.vect_s8, st3.vect_s8, 13);
-    st4.vect_s8 = vextq_s8(zero.vect_s8, st4.vect_s8, 12);
-    st5.vect_s8 = vextq_s8(zero.vect_s8, st5.vect_s8, 11);
-    st6.vect_s8 = vextq_s8(zero.vect_s8, st6.vect_s8, 10);
-    st7.vect_s8 = vextq_s8(zero.vect_s8, st7.vect_s8, 9);
-
-    st0 = or128(st0, st1);
-    st2 = or128(st2, st3);
-    st4 = or128(st4, st5);
-    st6 = or128(st6, st7);
-    st0 = or128(st0, st2);
-    st4 = or128(st4, st6);
-    st0 = or128(st0, st4);
-    *s = or128(*s, st0);
-
-    *conf0 = movq(*s);
-    *s = rshiftbyte_m128(*s, 8);
-    *conf0 = ~(*conf0);
-
-    u32 reach8, reach9, reach10, reach11;
-    ptr = unaligned_load_u64a(itPtr + 8);
-    reach8 = ptr & domain_mask_flipped;
-    reach9 = ptr >> 8 & domain_mask_flipped;
-    reach10 = ptr >> 16 & domain_mask_flipped;
-    reach11 = ptr >> 24 & domain_mask_flipped;
-
-    m128 st8 = load_m128_from_u64a(ft + reach8);
-    m128 st9 = load_m128_from_u64a(ft + reach9);
-    m128 st10 = load_m128_from_u64a(ft + reach10);
-    m128 st11 = load_m128_from_u64a(ft + reach11);
-
-    u32 reach12, reach13, reach14, reach15;
-    ptr = unaligned_load_u64a(itPtr + 12);
-    reach12 = ptr & domain_mask_flipped;
-    reach13 = ptr >> 8 & domain_mask_flipped;
-    reach14 = ptr >> 16 & domain_mask_flipped;
-    reach15 = ptr >> 24 & domain_mask_flipped;
-
-    m128 st12 = load_m128_from_u64a(ft + reach12);
-    m128 st13 = load_m128_from_u64a(ft + reach13);
-    m128 st14 = load_m128_from_u64a(ft + reach14);
-    m128 st15 = load_m128_from_u64a(ft + reach15);
-
-    st9.vect_s8 = vextq_s8(zero.vect_s8, st9.vect_s8, 15);
-    st10.vect_s8 = vextq_s8(zero.vect_s8, st10.vect_s8, 14);
-    st11.vect_s8 = vextq_s8(zero.vect_s8, st11.vect_s8, 13);
-    st12.vect_s8 = vextq_s8(zero.vect_s8, st12.vect_s8, 12);
-    st13.vect_s8 = vextq_s8(zero.vect_s8, st13.vect_s8, 11);
-    st14.vect_s8 = vextq_s8(zero.vect_s8, st14.vect_s8, 10);
-    st15.vect_s8 = vextq_s8(zero.vect_s8, st15.vect_s8, 9);
-
-    st8 = or128(st8, st9);
-    st10 = or128(st10, st11);
-    st12 = or128(st12, st13);
-    st14 = or128(st14, st15);
-    st8 = or128(st8, st10);
-    st12 = or128(st12, st14);
-    st8 = or128(st8, st12);
-    *s = or128(*s, st8);
-
-    *conf8 = movq(*s);
-    *s = rshiftbyte_m128(*s, 8);
-    *conf8 = ~(*conf8);
-
-#else
     u64a reach0 = andn(domain_mask_flipped, itPtr);
     u64a reach1 = andn(domain_mask_flipped, itPtr + 1);
     u64a reach2 = andn(domain_mask_flipped, itPtr + 2);
@@ -346,7 +249,6 @@ void get_conf_stride_1(const u8 *itPtr, UNUSED const u8 *start_ptr,
     *conf8 = movq(*s);
     *s = rshiftbyte_m128(*s, 8);
     *conf8 ^= ~0ULL;
-#endif
 }
 
 static really_inline

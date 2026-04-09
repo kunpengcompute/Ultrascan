@@ -52,9 +52,42 @@
 #define ALIGN_ATTR(x) __attribute__((aligned((x))))
 #endif
 
+#ifdef __aarch64__
+#define HAVE_NEON
+#endif
+
 #define ALIGN_DIRECTIVE ALIGN_ATTR(16)
 #define ALIGN_AVX_DIRECTIVE ALIGN_ATTR(32)
 #define ALIGN_CL_DIRECTIVE ALIGN_ATTR(64)
+
+/*arm*/
+#define KHSEL_ALIGN_ATTR(x) __attribute__((aligned((x))))
+
+#define KHSEL_ALIGN_DIRECTIVE KHSEL_ALIGN_ATTR(16)
+
+#define KHSEL_ALIGN_DIRECTIVE KHSEL_ALIGN_ATTR(16)
+#define KHSEL_ALIGN_AVX_DIRECTIVE KHSEL_ALIGN_ATTR(32)
+#define KHSEL_ALIGN_CL_DIRECTIVE KHSEL_ALIGN_ATTR(64)
+
+#define KHSEL_ISALIGNED_N(ptr, n) (((uintptr_t)(ptr) & ((n) - 1)) == 0)
+#define KHSEL_ISALIGNED_16(ptr)   KHSEL_ISALIGNED_N((ptr), 16)
+#define KHSEL_ISALIGNED_CL(ptr)   KHSEL_ISALIGNED_N((ptr), 64)
+// Align to N-byte boundary
+#define KHSEL_ROUNDUP_N(a, n) (((a) + ((n)-1)) & ~((n)-1))
+#define KHSEL_ROUNDDOWN_N(a, n) ((a) & ~((n)-1))
+// Align to a cacheline - assumed to be 64 bytes
+#define KHSEL_ROUNDUP_CL(a) KHSEL_ROUNDUP_N(a, 64)
+
+#if defined(HAVE_TYPEOF)
+#define KHSEL_ROUNDUP_PTR(ptr, n)   (__typeof__(ptr))(KHSEL_ROUNDUP_N((uintptr_t)(ptr), (n)))
+#define KHSEL_ROUNDDOWN_PTR(ptr, n) (__typeof__(ptr))(KHSEL_ROUNDDOWN_N((uintptr_t)(ptr), (n)))
+#else
+#define KHSEL_ROUNDUP_PTR(ptr, n)   (void*)(KHSEL_ROUNDUP_N((uintptr_t)(ptr), (n)))
+#define KHSEL_ROUNDDOWN_PTR(ptr, n) (void*)(KHSEL_ROUNDDOWN_N((uintptr_t)(ptr), (n)))
+#endif
+#define UNUSED __attribute__ ((unused))
+#define HS_CDECL
+
 
 typedef signed char s8;
 typedef unsigned char u8;
@@ -62,6 +95,11 @@ typedef signed short s16;
 typedef unsigned short u16;
 typedef unsigned int u32;
 typedef signed int s32;
+
+
+/*arm*/
+typedef unsigned long long KHSEL_ALIGN_ATTR(8) u64a;
+typedef signed long long KHSEL_ALIGN_ATTR(8) s64a;
 
 /* We append the 'a' for aligned, since these aren't common, garden variety
  * 64 bit values. The alignment is necessary for structs on some platforms,
@@ -111,8 +149,11 @@ typedef u32 ReportID;
 
 /** no, seriously, inline it, even if building in debug mode */
 #define really_really_inline inline __attribute__ ((always_inline, unused))
+#define REALLY_REALLY_INLINE inline __attribute__ ((always_inline, unused))
+#define NEVER_INLINE __attribute__ ((noinline))
 #define never_inline __attribute__ ((noinline))
 #define alignof __alignof
+#define ALIGNOF __alignof
 #define HAVE_TYPEOF 1
 
 #else // ms windows

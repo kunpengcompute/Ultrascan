@@ -41,6 +41,7 @@
 
 // Group constants
 typedef u64a rose_group;
+#define KHSEL_ROSE_CONTINUE_MATCHING_NO_EXHAUST 2
 
 // Delayed literal stuff
 #define DELAY_BITS                  5

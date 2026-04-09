@@ -29,10 +29,12 @@
  */
 
 #include "core_precomp.h"
-#include "simd_types.h"
 #include "fdr_confirm_runtime.h"
-#include "fdr_loadval.h"
-#include "fdr_enhanced.h"
+#include "../fdr/fdr_loadval.h"
+#include "../fdr/fdr_enhanced.h"
+#include "khsel_hwlm.h"
+#include "khsel_fdr_internal.h"
+#include "simd_arm.h"
 
 #define SHIFT_BYTES_ONE 8
 #define SHIFT_BYTES_TWO 16

@@ -26,7 +26,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "lily.h"
+#include "../rose/lily.h"
+#include "hs_compile.h"
+
+#define HS_FLAG_CASELESS 1
 
 #include <vector>
 #include <map>

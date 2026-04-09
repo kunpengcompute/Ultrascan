@@ -32,7 +32,7 @@
 #include "khsel_typebase.h"
 #include "khsel_type.h"
 #include "khsel_core.h"
-#include "fdr_enhanced.h"
+#include "../fdr/fdr_enhanced.h"
 #include "shufti_enhanced.h"
 
 #endif /* KHSEL_H__ */
