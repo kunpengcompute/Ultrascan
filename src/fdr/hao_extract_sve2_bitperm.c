@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (c) 2026, Huawei Technologies Co., Ltd.
  */
 
@@ -8,7 +8,7 @@
 #include <arm_sve.h>
 #include <stdint.h>
 
-u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask) {
+u64a haoExtractPackedBitsSveBitPerm(u64a window, u64a mask) {
     const svbool_t pg = svptrue_b64();
     const svuint64_t windowVec = svdup_n_u64((uint64_t)window);
     const svuint64_t packedVec = svbext_n_u64(windowVec, (uint64_t)mask);
@@ -18,11 +18,11 @@ u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask) {
     return (u64a)lanes[0];
 }
 
-u32 pbeExtractPackedBitsSveBitPermLaneCount(void) {
+u32 haoExtractPackedBitsSveBitPermLaneCount(void) {
     return (u32)svcntd();
 }
 
-void pbeExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
+void haoExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
                                          u64a mask, u64a *packedOut) {
     u32 i = 0;
 
@@ -42,11 +42,11 @@ void pbeExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
 
 #else
 
-u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask) {
+u64a haoExtractPackedBitsSveBitPerm(u64a window, u64a mask) {
     u64a packed = 0;
     u32 outBit = 0;
 
-    while (mask && outBit < PBE_RUNTIME_MAX_SELECTORS) {
+    while (mask && outBit < HAO_COMPAT_RUNTIME_MAX_SELECTORS) {
         const u64a lowest = mask & (0 - mask);
         if (window & lowest) {
             packed |= ((u64a)1 << outBit);
@@ -58,11 +58,11 @@ u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask) {
     return packed;
 }
 
-u32 pbeExtractPackedBitsSveBitPermLaneCount(void) {
+u32 haoExtractPackedBitsSveBitPermLaneCount(void) {
     return 1;
 }
 
-void pbeExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
+void haoExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
                                          u64a mask, u64a *packedOut) {
     u32 i;
 
@@ -71,9 +71,23 @@ void pbeExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
     }
 
     for (i = 0; i < count; i++) {
-        packedOut[i] = pbeExtractPackedBitsSveBitPerm(windows[i], mask);
+        packedOut[i] = haoExtractPackedBitsSveBitPerm(windows[i], mask);
     }
 }
 
 #endif
 
+
+
+u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask) {
+    return haoExtractPackedBitsSveBitPerm(window, mask);
+}
+
+u32 pbeExtractPackedBitsSveBitPermLaneCount(void) {
+    return haoExtractPackedBitsSveBitPermLaneCount();
+}
+
+void pbeExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
+                                         u64a mask, u64a *packedOut) {
+    haoExtractPackedBitsSveBitPermBatch(windows, count, mask, packedOut);
+}

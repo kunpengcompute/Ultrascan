@@ -1,5 +1,5 @@
-﻿#ifndef PBE_RUNTIME_INLINE_H
-#define PBE_RUNTIME_INLINE_H
+#ifndef HAO_RUNTIME_INLINE_H
+#define HAO_RUNTIME_INLINE_H
 
 #include "fdr_internal.h"
 #include "hao_runtime.h"
@@ -12,9 +12,12 @@
 
 #include <string.h>
 
-#define PBE_BATCH_FALLBACK_WIDTH 4U
-#define PBE_BATCH_MAX_WIDTH 32U
-#define PBE_BITMAP_GROUPED_BYTES 4U
+#define HAO_COMPAT_BATCH_FALLBACK_WIDTH 4U
+#define HAO_COMPAT_BATCH_MAX_WIDTH 32U
+#define HAO_COMPAT_BITMAP_GROUPED_BYTES 4U
+#define PBE_BATCH_FALLBACK_WIDTH HAO_COMPAT_BATCH_FALLBACK_WIDTH
+#define PBE_BATCH_MAX_WIDTH HAO_COMPAT_BATCH_MAX_WIDTH
+#define PBE_BITMAP_GROUPED_BYTES HAO_COMPAT_BITMAP_GROUPED_BYTES
 
 struct PBEPositionContext {
     size_t endPos;
@@ -49,6 +52,10 @@ struct PBEMaskClassBatchState {
     u32 classActiveMask[PBE_RUNTIME_MAX_MASK_CLASSES];
     u8 activeClassIndex[PBE_RUNTIME_MAX_MASK_CLASSES];
 };
+
+typedef struct PBEPositionContext HAOCompatPositionContext;
+typedef struct PBEBitmapProbeState HAOCompatBitmapProbeState;
+typedef struct PBEMaskClassBatchState HAOCompatMaskClassBatchState;
 
 static really_inline
 int pbeGetByteAt(const struct FDR_Runtime_Args *a, s64a pos, u8 *out) {
@@ -99,7 +106,7 @@ static really_inline
 u32 pbeSuggestedBatchWidth(const struct PBERuntimeHeader *hdr) {
     if (hdr && hdr->extractMode == PBE_RUNTIME_EXTRACT_MODE_BEXT &&
         pbeRuntimeCanUseBextFastPath()) {
-        u32 lanes = pbeExtractPackedBitsSveBitPermLaneCount();
+        u32 lanes = haoExtractPackedBitsSveBitPermLaneCount();
         if (!lanes) {
             return PBE_BATCH_FALLBACK_WIDTH;
         }
@@ -261,7 +268,7 @@ int pbeMaskClassIsHot(const struct PBERuntimeMaskClass *klass) {
 static really_inline
 u32 pbeExtractKeyBext(const struct PBERuntimeHeader *hdr, u64a window) {
     const u64a packed = pbeRuntimeCanUseBextFastPath()
-                            ? pbeExtractPackedBitsSveBitPerm(window,
+                            ? haoExtractPackedBitsSveBitPerm(window,
                                                              hdr->bextMask)
                             : pbeExtractPackedBitsFallback(window,
                                                            hdr->bextMask);
@@ -284,7 +291,7 @@ void pbeExtractKeysFromWindows(const struct PBERuntimeHeader *hdr,
 
         assert(count <= PBE_BATCH_MAX_WIDTH);
         if (pbeRuntimeCanUseBextFastPath()) {
-            pbeExtractPackedBitsSveBitPermBatch(windows, count, hdr->bextMask,
+            haoExtractPackedBitsSveBitPermBatch(windows, count, hdr->bextMask,
                                                 packed);
         } else {
             for (i = 0; i < count; i++) {
@@ -314,6 +321,11 @@ u32 pbeExtractKeyFromWindow(const struct PBERuntimeHeader *hdr,
     }
 
     return pbeExtractKeyScalarFromWindow(selectors, hdr->selectorCount, window);
+}
+
+static really_inline
+int haoCompatGetByteAt(const struct FDR_Runtime_Args *a, s64a pos, u8 *out) {
+    return pbeGetByteAt(a, pos, out);
 }
 
 static really_inline
@@ -453,7 +465,7 @@ u32 haoPackedKeyMask(u32 selectorCount) {
 static really_inline
 u32 haoExtractKeyBext(const struct HAORuntimeHeader *hdr, u64a window) {
     const u64a packed = haoRuntimeCanUseBextFastPath()
-                            ? pbeExtractPackedBitsSveBitPerm(window,
+                            ? haoExtractPackedBitsSveBitPerm(window,
                                                              hdr->bextMask)
                             : haoExtractPackedBitsFallback(window,
                                                            hdr->bextMask);
@@ -476,7 +488,7 @@ void haoExtractKeysFromWindows(const struct HAORuntimeHeader *hdr,
 
         assert(count <= PBE_BATCH_MAX_WIDTH);
         if (haoRuntimeCanUseBextFastPath()) {
-            pbeExtractPackedBitsSveBitPermBatch(windows, count, hdr->bextMask,
+            haoExtractPackedBitsSveBitPermBatch(windows, count, hdr->bextMask,
                                                 packed);
         } else {
             for (i = 0; i < count; i++) {
@@ -949,5 +961,10 @@ void pbeDecodePrimaryValue(u32 encoded, u32 *offset, u32 *count) {
     }
 }
 
-#endif // PBE_RUNTIME_INLINE_H
+static really_inline
+void haoCompatDecodePrimaryValue(u32 encoded, u32 *offset, u32 *count) {
+    pbeDecodePrimaryValue(encoded, offset, count);
+}
+
+#endif // HAO_RUNTIME_INLINE_H
 

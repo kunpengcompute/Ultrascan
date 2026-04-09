@@ -8,7 +8,7 @@
 #include <array>
 #include <vector>
 
-/* HAO v2 顶层调参宏：后续编译期展开预算与准入判断都依赖这些参数。 */
+/* Top-level HAO tuning knobs used by compile-time expansion and admission. */
 #ifndef HAO_KEY_BITS
 #define HAO_KEY_BITS 22U
 #endif
@@ -35,34 +35,65 @@
 
 namespace ue2 {
 
-static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE = 1U << 0;
-static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY = 1U << 1;
-static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW = 1U << 2;
-static constexpr u32 PBE_KEY_BITS = 22U;
-static constexpr u32 PBE_L1_OFFSET_BITS = 18U;
-static constexpr u32 PBE_L1_OFFSET_MASK = (1U << PBE_L1_OFFSET_BITS) - 1U;
-static constexpr u32 PBE_L1_COUNT_SHIFT = PBE_L1_OFFSET_BITS;
-static constexpr u32 PBE_RULE_SLOTS_PER_ENTRY = 4U;
-static constexpr u32 PBE_BYTES_PER_RULE_SLOT = 8U;
-static constexpr u32 PBE_RULE_VECTOR_BYTES =
-    PBE_RULE_SLOTS_PER_ENTRY * PBE_BYTES_PER_RULE_SLOT;
-static constexpr u32 PBE_TBL_CONTROL_BYTES =
-    PBE_RULE_SLOTS_PER_ENTRY * PBE_BYTES_PER_RULE_SLOT;
-static constexpr u32 PBE_RULE_SLOT_MASK_WORDS = 1U;
-static constexpr u32 PBE_MAX_SELECTORS = 32U;
-static constexpr u32 PBE_MAX_MASK_CLASSES = 32U;
-static constexpr u32 PBE_MAX_HOT_MASK_CLASSES = 4U;
-static constexpr u32 PBE_HOT_MASK_CLASS_COVERAGE_PCT = 80U;
-static constexpr u32 PBE_EXTRACT_MODE_SCALAR = 0U;
-static constexpr u32 PBE_EXTRACT_MODE_BEXT = 1U;
+static constexpr u32 HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE = 1U << 0;
+static constexpr u32 HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY =
+    1U << 1;
+static constexpr u32 HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW =
+    1U << 2;
+static constexpr u32 HAO_COMPAT_KEY_BITS = 22U;
+static constexpr u32 HAO_COMPAT_L1_OFFSET_BITS = 18U;
+static constexpr u32 HAO_COMPAT_L1_OFFSET_MASK =
+    (1U << HAO_COMPAT_L1_OFFSET_BITS) - 1U;
+static constexpr u32 HAO_COMPAT_L1_COUNT_SHIFT = HAO_COMPAT_L1_OFFSET_BITS;
+static constexpr u32 HAO_COMPAT_RULE_SLOTS_PER_ENTRY = 4U;
+static constexpr u32 HAO_COMPAT_BYTES_PER_RULE_SLOT = 8U;
+static constexpr u32 HAO_COMPAT_RULE_VECTOR_BYTES =
+    HAO_COMPAT_RULE_SLOTS_PER_ENTRY * HAO_COMPAT_BYTES_PER_RULE_SLOT;
+static constexpr u32 HAO_COMPAT_TBL_CONTROL_BYTES =
+    HAO_COMPAT_RULE_SLOTS_PER_ENTRY * HAO_COMPAT_BYTES_PER_RULE_SLOT;
+static constexpr u32 HAO_COMPAT_RULE_SLOT_MASK_WORDS = 1U;
+static constexpr u32 HAO_COMPAT_MAX_SELECTORS = 32U;
+static constexpr u32 HAO_COMPAT_MAX_MASK_CLASSES = 32U;
+static constexpr u32 HAO_COMPAT_MAX_HOT_MASK_CLASSES = 4U;
+static constexpr u32 HAO_COMPAT_HOT_MASK_CLASS_COVERAGE_PCT = 80U;
+static constexpr u32 HAO_COMPAT_EXTRACT_MODE_SCALAR = 0U;
+static constexpr u32 HAO_COMPAT_EXTRACT_MODE_BEXT = 1U;
 static constexpr u32 HAO_FAMILY_ENGINE_ID = 2U;
 static constexpr u32 HAO_ENGINE_ID = HAO_FAMILY_ENGINE_ID;
 
-static constexpr u32 PBE_MASK_CLASS_FLAG_HOT = 1U << 0;
+static constexpr u32 HAO_COMPAT_MASK_CLASS_FLAG_HOT = 1U << 0;
 
-static constexpr u16 PBE_RULE_FLAG_NOCASE = 1U << 0;
-static constexpr u16 PBE_RULE_FLAG_NORUNS = 1U << 1;
-static constexpr u16 PBE_RULE_FLAG_HAS_MASK = 1U << 2;
+static constexpr u16 HAO_COMPAT_RULE_FLAG_NOCASE = 1U << 0;
+static constexpr u16 HAO_COMPAT_RULE_FLAG_NORUNS = 1U << 1;
+static constexpr u16 HAO_COMPAT_RULE_FLAG_HAS_MASK = 1U << 2;
+
+/* Legacy PBE names remain as compatibility aliases. */
+static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE =
+    HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY =
+    HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY;
+static constexpr u32 PBE_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW =
+    HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW;
+static constexpr u32 PBE_KEY_BITS = HAO_COMPAT_KEY_BITS;
+static constexpr u32 PBE_L1_OFFSET_BITS = HAO_COMPAT_L1_OFFSET_BITS;
+static constexpr u32 PBE_L1_OFFSET_MASK = HAO_COMPAT_L1_OFFSET_MASK;
+static constexpr u32 PBE_L1_COUNT_SHIFT = HAO_COMPAT_L1_COUNT_SHIFT;
+static constexpr u32 PBE_RULE_SLOTS_PER_ENTRY = HAO_COMPAT_RULE_SLOTS_PER_ENTRY;
+static constexpr u32 PBE_BYTES_PER_RULE_SLOT = HAO_COMPAT_BYTES_PER_RULE_SLOT;
+static constexpr u32 PBE_RULE_VECTOR_BYTES = HAO_COMPAT_RULE_VECTOR_BYTES;
+static constexpr u32 PBE_TBL_CONTROL_BYTES = HAO_COMPAT_TBL_CONTROL_BYTES;
+static constexpr u32 PBE_RULE_SLOT_MASK_WORDS = HAO_COMPAT_RULE_SLOT_MASK_WORDS;
+static constexpr u32 PBE_MAX_SELECTORS = HAO_COMPAT_MAX_SELECTORS;
+static constexpr u32 PBE_MAX_MASK_CLASSES = HAO_COMPAT_MAX_MASK_CLASSES;
+static constexpr u32 PBE_MAX_HOT_MASK_CLASSES = HAO_COMPAT_MAX_HOT_MASK_CLASSES;
+static constexpr u32 PBE_HOT_MASK_CLASS_COVERAGE_PCT =
+    HAO_COMPAT_HOT_MASK_CLASS_COVERAGE_PCT;
+static constexpr u32 PBE_EXTRACT_MODE_SCALAR = HAO_COMPAT_EXTRACT_MODE_SCALAR;
+static constexpr u32 PBE_EXTRACT_MODE_BEXT = HAO_COMPAT_EXTRACT_MODE_BEXT;
+static constexpr u32 PBE_MASK_CLASS_FLAG_HOT = HAO_COMPAT_MASK_CLASS_FLAG_HOT;
+static constexpr u16 PBE_RULE_FLAG_NOCASE = HAO_COMPAT_RULE_FLAG_NOCASE;
+static constexpr u16 PBE_RULE_FLAG_NORUNS = HAO_COMPAT_RULE_FLAG_NORUNS;
+static constexpr u16 PBE_RULE_FLAG_HAS_MASK = HAO_COMPAT_RULE_FLAG_HAS_MASK;
 
 static constexpr u32 HAO_RULE_PLAN_FLAG_KEY_EXPANDED = 1U << 0;
 static constexpr u32 HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM = 1U << 1;
@@ -102,11 +133,11 @@ struct PBEMaskClassArtifacts {
 };
 
 struct PBESecondaryHashEntry {
-    u8 ruleVector[PBE_RULE_VECTOR_BYTES];
-    u8 tableControl[PBE_TBL_CONTROL_BYTES];
-    u16 ruleIndex[PBE_RULE_SLOTS_PER_ENTRY];
-    u32 keyValue[PBE_RULE_SLOTS_PER_ENTRY];
-    u32 keyMask[PBE_RULE_SLOTS_PER_ENTRY];
+    u8 ruleVector[HAO_COMPAT_RULE_VECTOR_BYTES];
+    u8 tableControl[HAO_COMPAT_TBL_CONTROL_BYTES];
+    u16 ruleIndex[HAO_COMPAT_RULE_SLOTS_PER_ENTRY];
+    u32 keyValue[HAO_COMPAT_RULE_SLOTS_PER_ENTRY];
+    u32 keyMask[HAO_COMPAT_RULE_SLOTS_PER_ENTRY];
     u32 headMask;
     u32 tailMask;
     u16 ruleCount;
@@ -114,9 +145,9 @@ struct PBESecondaryHashEntry {
 };
 
 struct HAOSecondaryHashEntry {
-    u8 ruleVector[PBE_RULE_VECTOR_BYTES];
-    u8 tableControl[PBE_TBL_CONTROL_BYTES];
-    u16 ruleIndex[PBE_RULE_SLOTS_PER_ENTRY];
+    u8 ruleVector[HAO_COMPAT_RULE_VECTOR_BYTES];
+    u8 tableControl[HAO_COMPAT_TBL_CONTROL_BYTES];
+    u16 ruleIndex[HAO_COMPAT_RULE_SLOTS_PER_ENTRY];
     u32 headMask;
     u32 tailMask;
     u8 slotMask;
@@ -135,7 +166,7 @@ struct PBERuleMeta {
     u8 cmp[8];
 };
 
-/* HAO v2 中每条规则在编译期都会被归入一个明确类别。 */
+/* Each HAO rule is classified into one explicit compile-time category. */
 enum class HAORuleCategory : u8 {
     HAO_RULE_EXACT = 0,
     HAO_RULE_NOCASE = 1,
@@ -144,14 +175,14 @@ enum class HAORuleCategory : u8 {
     HAO_RULE_UNSUPPORTED = 4
 };
 
-/* 单条规则在一级 key 空间展开后得到的一个确定 key 变体。 */
+/* One concrete key variant produced after expanding a single rule. */
 struct HAOExpandedKey {
     u32 keyValue = 0;
     u32 ambiguousSelectorMask = 0;
     u32 variantIndex = 0;
 };
 
-/* 记录 selected bits 上的模糊信息以及受控展开结果。 */
+/* Selected-bit ambiguity plus the resulting controlled key expansion. */
 struct HAOKeyExpansionInfo {
     u32 selectedAmbigBits = 0;
     u32 ambiguousSelectorMask = 0;
@@ -159,16 +190,16 @@ struct HAOKeyExpansionInfo {
     std::vector<HAOExpandedKey> expandedKeys;
 };
 
-/* verifier fragment 是后续 L2 向量校验真正消费的确定性片段。 */
+/* Deterministic verifier fragment consumed by the L2 vector verifier. */
 struct HAOVerifierFragment {
-    std::array<u8, PBE_BYTES_PER_RULE_SLOT> bytes = {};
+    std::array<u8, HAO_COMPAT_BYTES_PER_RULE_SLOT> bytes = {};
     u8 validByteMask = 0;
     u8 anchorOffset = 0;
     u8 anchorLength = 0;
     u8 flags = 0;
 };
 
-/* HAO 编译期规则计划：后续构表应以它为核心，而不是 Mask-Class。 */
+/* Compile-time rule plan used as the core HAO build input. */
 struct HAOCompiledRulePlan {
     u32 ruleIndex = 0;
     HAORuleCategory category = HAORuleCategory::HAO_RULE_UNSUPPORTED;
@@ -178,7 +209,7 @@ struct HAOCompiledRulePlan {
     HAOVerifierFragment verifier;
 };
 
-/* HAO 编译期汇总信息，用于 feasibility 判断和后续调优。 */
+/* Summary counters used for feasibility decisions and tuning. */
 struct HAOCompileSummary {
     u32 totalRules = 0;
     u32 fastPathRules = 0;
@@ -195,8 +226,8 @@ struct HAOCompileSummary {
     u32 maxSelectedAmbigBits = 0;
 };
 
-/* HAO v2 全局单表构建的统计信息，用于跟踪是否已经收束到单一 22-bit
- * 键空间。 */
+/* Build-time statistics for the HAO v2 global single-table layout. */
+
 struct HAOGlobalHashStats {
     u32 nonEmptyPrimary = 0;
     u32 totalRulesInBuckets = 0;
@@ -205,7 +236,7 @@ struct HAOGlobalHashStats {
     u32 maxEntriesPerKey = 0;
 };
 
-/* HAO v2 第一轮并行接入的全局单表结果。 */
+/* Artifacts for the HAO v2 global single-table build. */
 struct HAOGlobalHashArtifacts {
     bool valid = false;
     u32 flags = 0;
@@ -217,7 +248,7 @@ struct HAOGlobalHashArtifacts {
     HAOGlobalHashStats stats;
 };
 
-/* HAO v2 还没切 runtime 之前，编译期需要显式记录当前希望输出哪种 blob 布局。 */
+/* Compile-time choice of which blob layout should be emitted. */
 enum class HAOBlobLayoutMode : u8 {
     HAO_BLOB_LAYOUT_V1_COMPAT = 0,
     HAO_BLOB_LAYOUT_V2_GLOBAL = 1
@@ -226,16 +257,16 @@ enum class HAOBlobLayoutMode : u8 {
 struct PBECompileArtifacts {
     u32 keyBits = 0;
     u32 flags = 0;
-    u32 extractMode = PBE_EXTRACT_MODE_SCALAR;
-    u32 windowBytes = PBE_BYTES_PER_RULE_SLOT;
+    u32 extractMode = HAO_COMPAT_EXTRACT_MODE_SCALAR;
+    u32 windowBytes = HAO_COMPAT_BYTES_PER_RULE_SLOT;
     u64a bextMask = 0;
     HAOBlobLayoutMode haoBlobLayoutMode =
         HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
     std::vector<PBEBitSelector> bitSelectors;
-    /* HAO v2 新增：规则计划层和汇总信息。 */
+    /* HAO v2 additions: rule plans and summary counters. */
     std::vector<HAOCompiledRulePlan> haoRulePlans;
     HAOCompileSummary haoSummary;
-    /* HAO v2 全局单表结果：当前先和 HAO v1 旧结果并存。 */
+    /* HAO v2 global single-table artifacts kept alongside compat data. */
     HAOGlobalHashArtifacts haoGlobalHash;
     std::vector<PBEMaskClassArtifacts> maskClasses;
     PBEPrimaryHashTable primaryHashTable;
@@ -248,8 +279,8 @@ struct PBECompileArtifacts {
 struct HAOCompileArtifacts {
     u32 keyBits = 0;
     u32 flags = 0;
-    u32 extractMode = PBE_EXTRACT_MODE_SCALAR;
-    u32 windowBytes = PBE_BYTES_PER_RULE_SLOT;
+    u32 extractMode = HAO_COMPAT_EXTRACT_MODE_SCALAR;
+    u32 windowBytes = HAO_COMPAT_BYTES_PER_RULE_SLOT;
     u64a bextMask = 0;
     std::vector<PBEBitSelector> bitSelectors;
     std::vector<HAOCompiledRulePlan> haoRulePlans;
@@ -319,8 +350,8 @@ bool analyzePBEFeasibility(const target_t &target,
 bool analyzeHAOCompatFeasibility(const target_t &target,
                                  const std::vector<hwlmLiteral> &lits,
                                  const Grey &grey,
-                                 PBEFeasibilityResult *result,
-                                 PBECompileArtifacts *artifacts);
+                                 HAOCompatFeasibilityResult *result,
+                                 HAOCompatCompileArtifacts *artifacts);
 
 bool analyzeHAOFeasibility(const target_t &target,
                            const std::vector<hwlmLiteral> &lits,
@@ -328,7 +359,7 @@ bool analyzeHAOFeasibility(const target_t &target,
                            HAOCompileArtifacts *artifacts);
 
 const char *pbeFeasibilityReasonName(PBEFeasibilityReason reason);
-const char *haoCompatFeasibilityReasonName(PBEFeasibilityReason reason);
+const char *haoCompatFeasibilityReasonName(HAOCompatFeasibilityReason reason);
 const char *haoFeasibilityReasonName(HAOFeasibilityReason reason);
 
 bool haoFamilyGreyEnabled(const Grey &grey);
@@ -352,7 +383,7 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
                        PBECompileArtifacts *artifacts,
                        bool enableDump = true);
 bool buildHAOCompatArtifacts(const std::vector<hwlmLiteral> &lits,
-                             PBECompileArtifacts *artifacts,
+                             HAOCompatCompileArtifacts *artifacts,
                              bool enableDump = true);
 
 bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
@@ -360,9 +391,9 @@ bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
                        bool enableDump = true);
 
 bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts);
-bytecode_ptr<u8> buildHAOCompatBlob(const PBECompileArtifacts &artifacts);
+bytecode_ptr<u8> buildHAOCompatBlob(const HAOCompatCompileArtifacts &artifacts);
 bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts);
-bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts);
+bytecode_ptr<u8> buildHAOGlobalBlob(const HAOCompatCompileArtifacts &artifacts);
 
 } // namespace ue2
 

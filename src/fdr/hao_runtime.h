@@ -23,24 +23,48 @@
 #define PBE_RUNTIME_EXTRACT_MODE_SCALAR 0U
 #define PBE_RUNTIME_EXTRACT_MODE_BEXT 1U
 
+#define HAO_COMPAT_RUNTIME_MAGIC PBE_RUNTIME_MAGIC
+#define HAO_COMPAT_RUNTIME_VERSION PBE_RUNTIME_VERSION
+#define HAO_COMPAT_RUNTIME_FLAG_PARTIAL_COVERAGE \
+    PBE_RUNTIME_FLAG_PARTIAL_COVERAGE
+#define HAO_COMPAT_RUNTIME_KEY_BITS PBE_RUNTIME_KEY_BITS
+#define HAO_COMPAT_RUNTIME_L1_OFFSET_BITS PBE_RUNTIME_L1_OFFSET_BITS
+#define HAO_COMPAT_RUNTIME_L1_OFFSET_MASK PBE_RUNTIME_L1_OFFSET_MASK
+#define HAO_COMPAT_RUNTIME_L1_COUNT_SHIFT PBE_RUNTIME_L1_COUNT_SHIFT
+#define HAO_COMPAT_RUNTIME_RULE_SLOTS_PER_ENTRY \
+    PBE_RUNTIME_RULE_SLOTS_PER_ENTRY
+#define HAO_COMPAT_RUNTIME_BYTES_PER_RULE_SLOT \
+    PBE_RUNTIME_BYTES_PER_RULE_SLOT
+#define HAO_COMPAT_RUNTIME_RULE_VECTOR_BYTES PBE_RUNTIME_RULE_VECTOR_BYTES
+#define HAO_COMPAT_RUNTIME_TBL_CONTROL_BYTES PBE_RUNTIME_TBL_CONTROL_BYTES
+#define HAO_COMPAT_RUNTIME_RULE_SLOT_MASK_WORDS \
+    PBE_RUNTIME_RULE_SLOT_MASK_WORDS
+#define HAO_COMPAT_RUNTIME_MAX_SELECTORS PBE_RUNTIME_MAX_SELECTORS
+#define HAO_COMPAT_RUNTIME_MAX_MASK_CLASSES PBE_RUNTIME_MAX_MASK_CLASSES
+#define HAO_COMPAT_RUNTIME_EXTRACT_MODE_SCALAR PBE_RUNTIME_EXTRACT_MODE_SCALAR
+#define HAO_COMPAT_RUNTIME_EXTRACT_MODE_BEXT PBE_RUNTIME_EXTRACT_MODE_BEXT
+
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
 #define HAO_RUNTIME_VERSION 5U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_EXTRACT_MODE_SCALAR 0U
 #define HAO_RUNTIME_EXTRACT_MODE_BEXT 1U
-#define HAO_RUNTIME_L1_OFFSET_BITS PBE_RUNTIME_L1_OFFSET_BITS
-#define HAO_RUNTIME_L1_OFFSET_MASK PBE_RUNTIME_L1_OFFSET_MASK
+#define HAO_RUNTIME_L1_OFFSET_BITS HAO_COMPAT_RUNTIME_L1_OFFSET_BITS
+#define HAO_RUNTIME_L1_OFFSET_MASK HAO_COMPAT_RUNTIME_L1_OFFSET_MASK
 #define HAO_RUNTIME_L1_COUNT_SHIFT HAO_RUNTIME_L1_OFFSET_BITS
-#define HAO_RUNTIME_RULE_SLOTS_PER_ENTRY PBE_RUNTIME_RULE_SLOTS_PER_ENTRY
-#define HAO_RUNTIME_BYTES_PER_RULE_SLOT PBE_RUNTIME_BYTES_PER_RULE_SLOT
-#define HAO_RUNTIME_RULE_VECTOR_BYTES PBE_RUNTIME_RULE_VECTOR_BYTES
-#define HAO_RUNTIME_TBL_CONTROL_BYTES PBE_RUNTIME_TBL_CONTROL_BYTES
-#define HAO_RUNTIME_MAX_SELECTORS PBE_RUNTIME_MAX_SELECTORS
+#define HAO_RUNTIME_RULE_SLOTS_PER_ENTRY \
+    HAO_COMPAT_RUNTIME_RULE_SLOTS_PER_ENTRY
+#define HAO_RUNTIME_BYTES_PER_RULE_SLOT \
+    HAO_COMPAT_RUNTIME_BYTES_PER_RULE_SLOT
+#define HAO_RUNTIME_RULE_VECTOR_BYTES HAO_COMPAT_RUNTIME_RULE_VECTOR_BYTES
+#define HAO_RUNTIME_TBL_CONTROL_BYTES HAO_COMPAT_RUNTIME_TBL_CONTROL_BYTES
+#define HAO_RUNTIME_MAX_SELECTORS HAO_COMPAT_RUNTIME_MAX_SELECTORS
 
 #define PBE_RUNTIME_MASK_CLASS_FLAG_HOT (1U << 0)
+#define HAO_COMPAT_RUNTIME_MASK_CLASS_FLAG_HOT PBE_RUNTIME_MASK_CLASS_FLAG_HOT
 
-/* HAO v2 与编译期共享的调参宏。当前 runtime 还未完全切到 HAO v2，
- * 但这些宏已经作为新的设计约束进入公共头。 */
+/* Shared HAO tuning knobs used by compile-time and runtime code paths. */
+/* These remain part of the public HAO contract even while compat layout stays alive. */
 #ifndef HAO_KEY_BITS
 #define HAO_KEY_BITS 22U
 #endif
@@ -63,6 +87,9 @@
 #define PBE_RULE_FLAG_NOCASE (1U << 0)
 #define PBE_RULE_FLAG_NORUNS (1U << 1)
 #define PBE_RULE_FLAG_HAS_MASK (1U << 2)
+#define HAO_COMPAT_RULE_FLAG_NOCASE PBE_RULE_FLAG_NOCASE
+#define HAO_COMPAT_RULE_FLAG_NORUNS PBE_RULE_FLAG_NORUNS
+#define HAO_COMPAT_RULE_FLAG_HAS_MASK PBE_RULE_FLAG_HAS_MASK
 
 #define HAO_RUNTIME_RULE_EXACT 0U
 #define HAO_RUNTIME_RULE_NOCASE 1U
@@ -71,7 +98,7 @@
 #define HAO_RUNTIME_RULE_UNSUPPORTED 4U
 #define HAO_RUNTIME_PLAN_FLAG_DIRECT_REPORT_SAFE (1U << 7)
 
-/* 当前仍是 HAO v1/PBE runtime layout。后续 HAO v2 会去掉 class table。 */
+/* Legacy HAO compat runtime layout that still carries the v1/class-table format. */
 struct PBERuntimeHeader {
     u32 magic;
     u32 version;
@@ -153,7 +180,7 @@ struct PBERuntimeRuleMeta {
     u8 cmp[8];
 };
 
-/* HAO v2 新布局：去掉 class table，直接面向全局单表。 */
+/* HAO v2 runtime layout: class table removed, global single-table retained. */
 struct HAORuntimeHeader {
     u32 magic;
     u32 version;
@@ -184,7 +211,7 @@ struct HAORuntimeBitSelector {
     u16 reserved;
 };
 
-/* HAO v2 rule meta 同时保留原始规则确认信息和 verifier 片段信息。 */
+/* Compat rule metadata keeps the original literal-confirm payload. */
 typedef struct PBERuntimeRuleMeta HAOCompatRuntimeRuleMeta;
 
 struct HAORuntimeRuleMeta {
@@ -206,7 +233,7 @@ struct HAORuntimeRuleMeta {
     u8 cmp[8];
 };
 
-/* HAO v2 runtime 只读校验阶段返回的摘要信息。 */
+/* Read-only summary returned by HAO runtime blob inspection helpers. */
 struct HAORuntimeInspectSummary {
     u32 selectorCount;
     u32 primaryCount;
@@ -246,6 +273,10 @@ struct FDR_Runtime_Args;
 extern "C" {
 #endif
 
+u64a haoExtractPackedBitsSveBitPerm(u64a window, u64a mask);
+void haoExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
+                                         u64a mask, u64a *packedOut);
+u32 haoExtractPackedBitsSveBitPermLaneCount(void);
 u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask);
 void pbeExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
                                          u64a mask, u64a *packedOut);
@@ -260,7 +291,7 @@ hwlm_error_t HaoCompatEngineExecNaiveForTest(const struct FDR *fdr,
                                        const struct FDR_Runtime_Args *a,
                                        hwlm_group_t control);
 u32 HaoCompatRuntimeEntryMatchMaskForTest(
-    const struct PBERuntimeSecondaryHashEntry *entry,
+    const HAOCompatRuntimeSecondaryHashEntry *entry,
     const struct FDR_Runtime_Args *a, size_t endPos, int useVector);
 u32 HaoCompatRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
                                      const u32 *primaryIdx, u32 laneCount,
@@ -274,7 +305,7 @@ hwlm_error_t PbeEngineExecNaiveForTest(const struct FDR *fdr,
                                        const struct FDR_Runtime_Args *a,
                                        hwlm_group_t control);
 u32 PbeRuntimeEntryMatchMaskForTest(
-    const struct PBERuntimeSecondaryHashEntry *entry,
+    const HAOCompatRuntimeSecondaryHashEntry *entry,
     const struct FDR_Runtime_Args *a, size_t endPos, int useVector);
 u32 PbeRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
                                      const u32 *primaryIdx, u32 laneCount,

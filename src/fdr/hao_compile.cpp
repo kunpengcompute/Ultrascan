@@ -1,4 +1,4 @@
-﻿#include "hao_compile.h"
+#include "hao_compile.h"
 
 #include "grey.h"
 #include "hao_runtime.h"
@@ -29,26 +29,26 @@ namespace ue2 {
 
 namespace {
 
-static constexpr u32 PBE_MAX_SUFFIX_BYTES = 8;
-static constexpr u32 PBE_MAX_CANDIDATE_BITS = PBE_MAX_SUFFIX_BYTES * 8;
-static constexpr u32 PBE_SECONDARY_KEY_BITS = 18;
-static constexpr u32 PBE_MAX_SECONDARY_ENTRIES = 1U << PBE_SECONDARY_KEY_BITS;
-static constexpr u64a PBE_MAX_TOTAL_PRIMARY_FOOTPRINT =
+static constexpr u32 HAO_COMPAT_MAX_SUFFIX_BYTES = 8;
+static constexpr u32 HAO_COMPAT_MAX_CANDIDATE_BITS = HAO_COMPAT_MAX_SUFFIX_BYTES * 8;
+static constexpr u32 HAO_COMPAT_SECONDARY_KEY_BITS = 18;
+static constexpr u32 HAO_COMPAT_MAX_SECONDARY_ENTRIES = 1U << HAO_COMPAT_SECONDARY_KEY_BITS;
+static constexpr u64a HAO_COMPAT_MAX_TOTAL_PRIMARY_FOOTPRINT =
     128ULL * 1024ULL * 1024ULL;
-static constexpr u8 PBE_STATE_DONT_CARE = 2;
+static constexpr u8 HAO_COMPAT_STATE_DONT_CARE = 2;
 
-struct PBEBitCandidate {
+struct HAOCompatBitCandidate {
     u32 bitIndex = 0;
     double score = 0.0;
-    std::vector<u8> states; // 0, 1, or PBE_STATE_DONT_CARE
+    std::vector<u8> states; // 0, 1, or HAO_COMPAT_STATE_DONT_CARE
 };
 
 static
 bool getBitState(const hwlmLiteral &lit, u32 bitIndex, u8 *state);
 
 static
-void computeKeyValueMaskForLiteral(const hwlmLiteral &lit,
-                                   const std::vector<PBEBitSelector> &selectors,
+void haoCompatComputeKeyValueMaskForLiteral(const hwlmLiteral &lit,
+                                   const std::vector<HAOCompatBitSelector> &selectors,
                                    u32 *keyValue, u32 *keyMask) {
     u32 v = 0;
     u32 m = 0;
@@ -56,9 +56,9 @@ void computeKeyValueMaskForLiteral(const hwlmLiteral &lit,
         const auto &sel = selectors[i];
         const u32 bitIndex = static_cast<u32>(sel.byteOffset) * 8U +
                              static_cast<u32>(sel.bitOffset);
-        u8 state = PBE_STATE_DONT_CARE;
+        u8 state = HAO_COMPAT_STATE_DONT_CARE;
         getBitState(lit, bitIndex, &state);
-        if (state == PBE_STATE_DONT_CARE) {
+        if (state == HAO_COMPAT_STATE_DONT_CARE) {
             continue;
         }
         m |= (1U << i);
@@ -71,7 +71,7 @@ void computeKeyValueMaskForLiteral(const hwlmLiteral &lit,
 }
 
 static
-u32 selectorBitIndex(const PBEBitSelector &selector) {
+u32 haoCompatSelectorBitIndex(const HAOCompatBitSelector &selector) {
     return static_cast<u32>(selector.byteOffset) * 8U +
            static_cast<u32>(selector.bitOffset);
 }
@@ -100,15 +100,15 @@ std::string keyToBits(u32 key, u32 width) {
 
 static
 std::string maskToBits(u32 mask) {
-    return keyToBits(mask, PBE_RULE_VECTOR_BYTES);
+    return keyToBits(mask, HAO_COMPAT_RULE_VECTOR_BYTES);
 }
 
 static
 const char *extractModeName(u32 mode) {
     switch (mode) {
-    case PBE_EXTRACT_MODE_SCALAR:
+    case HAO_COMPAT_EXTRACT_MODE_SCALAR:
         return "scalar";
-    case PBE_EXTRACT_MODE_BEXT:
+    case HAO_COMPAT_EXTRACT_MODE_BEXT:
         return "bext";
     default:
         return "unknown";
@@ -117,9 +117,9 @@ const char *extractModeName(u32 mode) {
 
 static
 u32 encodePrimaryValue(u32 secondaryOffset, u32 entryCount) {
-    assert(secondaryOffset <= PBE_L1_OFFSET_MASK);
-    assert(entryCount < (1U << (32U - PBE_L1_COUNT_SHIFT)));
-    return (entryCount << PBE_L1_COUNT_SHIFT) | secondaryOffset;
+    assert(secondaryOffset <= HAO_COMPAT_L1_OFFSET_MASK);
+    assert(entryCount < (1U << (32U - HAO_COMPAT_L1_COUNT_SHIFT)));
+    return (entryCount << HAO_COMPAT_L1_COUNT_SHIFT) | secondaryOffset;
 }
 
 static
@@ -128,30 +128,30 @@ u8 normalizedLiteralByte(u8 c) {
 }
 
 static
-u32 pbePrimaryBitmapBytes(u32 primaryCount) {
+u32 haoCompatPrimaryBitmapBytes(u32 primaryCount) {
     return (primaryCount + 7U) / 8U;
 }
 
 static
-void buildPrimaryBitmap(const PBEPrimaryHashTable &primaryHashTable,
-                        PBEPrimaryHashBitmap *primaryHashBitmap);
+void buildCompatPrimaryBitmap(const HAOCompatPrimaryHashTable &primaryHashTable,
+                        HAOCompatPrimaryHashBitmap *primaryHashBitmap);
 
 static
-u32 pbePackedKeyBits(u32 classMask) {
+u32 haoCompatPackedKeyBits(u32 classMask) {
     return classMask ? popcount32(classMask) : 0;
 }
 
 static
-u32 pbePrimaryCountForKeyBits(u32 keyBits) {
+u32 haoCompatPrimaryCountForKeyBits(u32 keyBits) {
     if (!keyBits) {
         return 1U;
     }
-    assert(keyBits <= PBE_KEY_BITS);
+    assert(keyBits <= HAO_COMPAT_KEY_BITS);
     return 1U << keyBits;
 }
 
 static
-u32 pbeFullKeyMask(u32 keyBits) {
+u32 haoCompatFullKeyMask(u32 keyBits) {
     if (!keyBits) {
         return 0;
     }
@@ -172,7 +172,7 @@ bool haoLiteralHasSupplementaryMask(const hwlmLiteral &lit) {
  * rules from the fast path when ambiguity exceeds HAO_MAX_KEY_AMBIG_BITS. */
 static
 HAOKeyExpansionInfo haoEnumerateExpandedKeysForLiteral(
-    const hwlmLiteral &lit, const std::vector<PBEBitSelector> &selectors) {
+    const hwlmLiteral &lit, const std::vector<HAOCompatBitSelector> &selectors) {
     HAOKeyExpansionInfo info;
     u32 baseKeyValue = 0;
     std::vector<u32> ambiguousBits;
@@ -180,10 +180,10 @@ HAOKeyExpansionInfo haoEnumerateExpandedKeysForLiteral(
 
     for (u32 i = 0; i < selectors.size(); i++) {
         const auto &sel = selectors[i];
-        const u32 bitIndex = selectorBitIndex(sel);
-        u8 state = PBE_STATE_DONT_CARE;
+        const u32 bitIndex = haoCompatSelectorBitIndex(sel);
+        u8 state = HAO_COMPAT_STATE_DONT_CARE;
         getBitState(lit, bitIndex, &state);
-        if (state == PBE_STATE_DONT_CARE) {
+        if (state == HAO_COMPAT_STATE_DONT_CARE) {
             ambiguousBits.push_back(i);
             info.ambiguousSelectorMask |= (1U << i);
             continue;
@@ -261,7 +261,7 @@ bool haoPlanRequiresResidualEval(const HAOCompiledRulePlan &plan) {
 
 static
 bool haoSelectorsCoverExactCaseBits(
-    const hwlmLiteral &lit, const std::vector<PBEBitSelector> &selectors) {
+    const hwlmLiteral &lit, const std::vector<HAOCompatBitSelector> &selectors) {
     for (u32 byteFromEnd = 0; byteFromEnd < lit.s.size(); byteFromEnd++) {
         const u8 c = verify_u8(lit.s[lit.s.size() - byteFromEnd - 1]);
         bool found = false;
@@ -285,7 +285,7 @@ bool haoSelectorsCoverExactCaseBits(
 static
 bool haoPlanCanDirectReport(const hwlmLiteral &lit,
                             const HAOCompiledRulePlan &plan,
-                            const std::vector<PBEBitSelector> &selectors) {
+                            const std::vector<HAOCompatBitSelector> &selectors) {
     if (plan.category != HAORuleCategory::HAO_RULE_EXACT &&
         plan.category != HAORuleCategory::HAO_RULE_NOCASE) {
         return false;
@@ -316,8 +316,8 @@ HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
                                              HAORuleCategory category) {
     HAOVerifierFragment fragment = {};
     const u32 len = verify_u32(lit.s.size());
-    const u32 suffixLen = std::min<u32>(len, PBE_BYTES_PER_RULE_SLOT);
-    const u32 laneStart = PBE_BYTES_PER_RULE_SLOT - suffixLen;
+    const u32 suffixLen = std::min<u32>(len, HAO_COMPAT_BYTES_PER_RULE_SLOT);
+    const u32 laneStart = HAO_COMPAT_BYTES_PER_RULE_SLOT - suffixLen;
 
     fragment.anchorOffset = verify_u8(len - suffixLen);
     fragment.anchorLength = verify_u8(suffixLen);
@@ -341,7 +341,7 @@ HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
  * consumes directly. */
 static
 void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
-                       const std::vector<PBEBitSelector> &selectors,
+                       const std::vector<HAOCompatBitSelector> &selectors,
                        std::vector<HAOCompiledRulePlan> *rulePlans,
                        HAOCompileSummary *summary) {
     if (!rulePlans || !summary) {
@@ -449,11 +449,11 @@ void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan,
                                   u32 localSlot,
                                   HAOSecondaryHashEntry *entry) {
     assert(entry);
-    const u32 laneBase = localSlot * PBE_BYTES_PER_RULE_SLOT;
+    const u32 laneBase = localSlot * HAO_COMPAT_BYTES_PER_RULE_SLOT;
     const u8 validMask = plan.verifier.validByteMask;
-    u32 lastValidBit = PBE_BYTES_PER_RULE_SLOT;
+    u32 lastValidBit = HAO_COMPAT_BYTES_PER_RULE_SLOT;
 
-    for (u32 i = 0; i < PBE_BYTES_PER_RULE_SLOT; i++) {
+    for (u32 i = 0; i < HAO_COMPAT_BYTES_PER_RULE_SLOT; i++) {
         if (validMask & (1U << i)) {
             lastValidBit = i;
         }
@@ -462,7 +462,7 @@ void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan,
     entry->ruleIndex[localSlot] = verify_u16(plan.ruleIndex);
     entry->slotMask |= verify_u8(1U << localSlot);
 
-    for (u32 i = 0; i < PBE_BYTES_PER_RULE_SLOT; i++) {
+    for (u32 i = 0; i < HAO_COMPAT_BYTES_PER_RULE_SLOT; i++) {
         if (!(validMask & (1U << i))) {
             continue;
         }
@@ -490,7 +490,7 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
     out->valid = false;
     out->flags = 0;
     out->keyBits = keyBits;
-    out->fullKeyMask = pbeFullKeyMask(keyBits);
+    out->fullKeyMask = haoCompatFullKeyMask(keyBits);
     out->primaryHashTable.offsets.clear();
     out->primaryHashBitmap.bits.clear();
     out->secondaryHashTable.clear();
@@ -500,7 +500,7 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
         return;
     }
 
-    const u32 primaryCount = pbePrimaryCountForKeyBits(keyBits);
+    const u32 primaryCount = haoCompatPrimaryCountForKeyBits(keyBits);
     out->primaryHashTable.offsets.assign(primaryCount, 0);
 
     // Keep secondary[0] empty so runtime null-target handling stays unchanged.
@@ -521,18 +521,18 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
         const u32 key = it.first;
         const auto &bucketRules = it.second;
         const u32 entryCount = verify_u32(
-            (bucketRules.size() + PBE_RULE_SLOTS_PER_ENTRY - 1) /
-            PBE_RULE_SLOTS_PER_ENTRY);
+            (bucketRules.size() + HAO_COMPAT_RULE_SLOTS_PER_ENTRY - 1) /
+            HAO_COMPAT_RULE_SLOTS_PER_ENTRY);
 
         if (out->secondaryHashTable.size() + entryCount >
-            PBE_MAX_SECONDARY_ENTRIES) {
-            out->flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
-            out->flags |= PBE_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY;
+            HAO_COMPAT_MAX_SECONDARY_ENTRIES) {
+            out->flags |= HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+            out->flags |= HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY;
             return;
         }
-        if (entryCount >= (1U << (32U - PBE_L1_COUNT_SHIFT))) {
-            out->flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
-            out->flags |= PBE_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW;
+        if (entryCount >= (1U << (32U - HAO_COMPAT_L1_COUNT_SHIFT))) {
+            out->flags |= HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+            out->flags |= HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW;
             return;
         }
 
@@ -548,9 +548,9 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
         for (u32 chunk = 0; chunk < entryCount; chunk++) {
             HAOSecondaryHashEntry entry = {};
             memset(entry.tableControl, 0x80, sizeof(entry.tableControl));
-            const size_t begin = chunk * PBE_RULE_SLOTS_PER_ENTRY;
+            const size_t begin = chunk * HAO_COMPAT_RULE_SLOTS_PER_ENTRY;
             const size_t end = std::min(bucketRules.size(),
-                                        begin + PBE_RULE_SLOTS_PER_ENTRY);
+                                        begin + HAO_COMPAT_RULE_SLOTS_PER_ENTRY);
 
             for (size_t slot = begin; slot < end; slot++) {
                 const u32 localSlot = verify_u32(slot - begin);
@@ -564,7 +564,7 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
         }
     }
 
-    buildPrimaryBitmap(out->primaryHashTable, &out->primaryHashBitmap);
+    buildCompatPrimaryBitmap(out->primaryHashTable, &out->primaryHashBitmap);
     out->valid = true;
 }
 
@@ -572,29 +572,29 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
 // chooses between scalar extraction and the BEXT-based path.
 template <class ArtifactsT>
 static
-void buildExtractDescriptor(const std::vector<PBEBitSelector> &selectors,
+void buildExtractDescriptor(const std::vector<HAOCompatBitSelector> &selectors,
                             ArtifactsT *artifacts) {
     if (!artifacts) {
         return;
     }
 
-    artifacts->extractMode = PBE_EXTRACT_MODE_SCALAR;
-    artifacts->windowBytes = PBE_BYTES_PER_RULE_SLOT;
+    artifacts->extractMode = HAO_COMPAT_EXTRACT_MODE_SCALAR;
+    artifacts->windowBytes = HAO_COMPAT_BYTES_PER_RULE_SLOT;
     artifacts->bextMask = 0;
 
-    if (selectors.empty() || selectors.size() > PBE_MAX_SELECTORS) {
+    if (selectors.empty() || selectors.size() > HAO_COMPAT_MAX_SELECTORS) {
         return;
     }
     
     // For now, feed every selected bit directly into the BEXT mask.
     for (const auto &selector : selectors) {
-        artifacts->bextMask |= (1ULL << selectorBitIndex(selector));
+        artifacts->bextMask |= (1ULL << haoCompatSelectorBitIndex(selector));
     }
-    artifacts->extractMode = PBE_EXTRACT_MODE_BEXT;
+    artifacts->extractMode = HAO_COMPAT_EXTRACT_MODE_BEXT;
 }
 
 static
-void pbePrimaryBitmapSet(std::vector<u8> *bitmap, u32 idx) {
+void haoCompatPrimaryBitmapSet(std::vector<u8> *bitmap, u32 idx) {
     if (!bitmap || idx / 8U >= bitmap->size()) {
         return;
     }
@@ -602,17 +602,17 @@ void pbePrimaryBitmapSet(std::vector<u8> *bitmap, u32 idx) {
 }
 
 static
-void buildPrimaryBitmap(const PBEPrimaryHashTable &primaryHashTable,
-                        PBEPrimaryHashBitmap *primaryHashBitmap) {
+void buildCompatPrimaryBitmap(const HAOCompatPrimaryHashTable &primaryHashTable,
+                        HAOCompatPrimaryHashBitmap *primaryHashBitmap) {
     if (!primaryHashBitmap) {
         return;
     }
     primaryHashBitmap->bits.clear();
     const u32 primaryCount = verify_u32(primaryHashTable.offsets.size());
-    primaryHashBitmap->bits.assign(pbePrimaryBitmapBytes(primaryCount), 0);
+    primaryHashBitmap->bits.assign(haoCompatPrimaryBitmapBytes(primaryCount), 0);
     for (u32 i = 0; i < primaryCount; i++) {
         if (primaryHashTable.offsets[i]) {
-            pbePrimaryBitmapSet(&primaryHashBitmap->bits, i);
+            haoCompatPrimaryBitmapSet(&primaryHashBitmap->bits, i);
         }
     }
 }
@@ -639,11 +639,11 @@ void dumpRuleBits(const std::vector<hwlmLiteral> &lits) {
 }
 
 static
-void dumpSelectors(const std::vector<PBEBitSelector> &selectors) {
+void dumpSelectors(const std::vector<HAOCompatBitSelector> &selectors) {
     printf("[PBE][Selectors] count=%zu\n", selectors.size());
     for (size_t i = 0; i < selectors.size(); i++) {
         const auto &s = selectors[i];
-        const u32 bitIndex = selectorBitIndex(s);
+        const u32 bitIndex = haoCompatSelectorBitIndex(s);
         printf("  s%zu -> suffix_bit=%u (byteOffset=%u, bitOffset=%u)\n", i,
                bitIndex, (u32)s.byteOffset, (u32)s.bitOffset);
     }
@@ -659,13 +659,13 @@ void dumpExtractDescriptor(const ArtifactsT &artifacts) {
 
 static
 void dumpRuleKeys(const std::vector<hwlmLiteral> &lits,
-                  const std::vector<PBEBitSelector> &selectors,
+                  const std::vector<HAOCompatBitSelector> &selectors,
                   u32 keyBits) {
     printf("[PBE][Rule->KeyMask] key_bits=%u\n", keyBits);
     for (size_t i = 0; i < lits.size(); i++) {
         u32 keyValue = 0;
         u32 keyMask = 0;
-        computeKeyValueMaskForLiteral(lits[i], selectors, &keyValue, &keyMask);
+        haoCompatComputeKeyValueMaskForLiteral(lits[i], selectors, &keyValue, &keyMask);
         printf("  r%zu id=%u keyValue={dec=%u hex=0x%x bin=%s} keyMask={dec=%u hex=0x%x bin=%s}\n",
                i, lits[i].id, keyValue, keyValue,
                keyToBits(keyValue, keyBits).c_str(), keyMask, keyMask,
@@ -681,15 +681,15 @@ char dumpPrintableOrDot(u8 c) {
 
 static
 u32 haoSecondarySlotCount(u8 slotMask) {
-    return popcount32(slotMask & ((1U << PBE_RULE_SLOTS_PER_ENTRY) - 1U));
+    return popcount32(slotMask & ((1U << HAO_COMPAT_RULE_SLOTS_PER_ENTRY) - 1U));
 }
 
 static
 std::string l2VectorString(const u8 *rv, const u8 *tc, bool activeOnly) {
     std::string out;
 
-    out.reserve(PBE_BYTES_PER_RULE_SLOT);
-    for (u32 i = 0; i < PBE_BYTES_PER_RULE_SLOT; i++) {
+    out.reserve(HAO_COMPAT_BYTES_PER_RULE_SLOT);
+    for (u32 i = 0; i < HAO_COMPAT_BYTES_PER_RULE_SLOT; i++) {
         const bool active = tc[i] != 0x80;
         if (activeOnly && !active) {
             continue;
@@ -718,7 +718,7 @@ void dumpBitmapBytes(const std::vector<u8> &bits, const char *prefix) {
 }
 
 static
-void dumpHashTables(const PBECompileArtifacts &artifacts,
+void dumpHashTables(const HAOCompatCompileArtifacts &artifacts,
                     const std::vector<hwlmLiteral> &lits) {
     if (artifacts.haoGlobalHash.valid) {
         printf("[PBE][HAO-Global] keyBits=%u nonEmptyL1=%u expandedKeys=%u totalRulesInBuckets=%u totalSecondaryEntries=%u maxEntriesPerKey=%u flags=0x%x\n",
@@ -742,7 +742,7 @@ void dumpHashTables(const PBECompileArtifacts &artifacts,
             printf("  key={dec=%u hex=0x%x bin=%s} -> value={dec=%u hex=0x%x offset=%u count=%u}\n",
                    key, key,
                    keyToBits(key, artifacts.haoGlobalHash.keyBits).c_str(), off,
-                   off, off & PBE_L1_OFFSET_MASK, off >> PBE_L1_COUNT_SHIFT);
+                   off, off & HAO_COMPAT_L1_OFFSET_MASK, off >> HAO_COMPAT_L1_COUNT_SHIFT);
         }
         printf("[PBE][HAO-L2] size=%zu (entry0 is null)\n",
                artifacts.haoGlobalHash.secondaryHashTable.size());
@@ -751,25 +751,25 @@ void dumpHashTables(const PBECompileArtifacts &artifacts,
             const auto &e = artifacts.haoGlobalHash.secondaryHashTable[i];
             const u32 ruleCount = haoSecondarySlotCount(e.slotMask);
             printf("  HAO-L2[%u] ruleCount=%u entryCapacity=%u headMask=0x%08x tailMask=0x%08x\n",
-                   i, ruleCount, PBE_RULE_SLOTS_PER_ENTRY, e.headMask,
+                   i, ruleCount, HAO_COMPAT_RULE_SLOTS_PER_ENTRY, e.headMask,
                    e.tailMask);
             printf("    headMaskBits=%s\n", maskToBits(e.headMask).c_str());
             printf("    tailMaskBits=%s\n", maskToBits(e.tailMask).c_str());
             printf("    slotMask=0x%02x\n", (u32)e.slotMask);
-            for (u32 j = 0; j < PBE_RULE_SLOTS_PER_ENTRY; j++) {
+            for (u32 j = 0; j < HAO_COMPAT_RULE_SLOTS_PER_ENTRY; j++) {
                 if (!(e.slotMask & (1U << j))) {
                     continue;
                 }
                 const u16 ridx = e.ruleIndex[j];
-                const u8 *rv = &e.ruleVector[j * PBE_BYTES_PER_RULE_SLOT];
-                const u8 *tc = &e.tableControl[j * PBE_BYTES_PER_RULE_SLOT];
+                const u8 *rv = &e.ruleVector[j * HAO_COMPAT_BYTES_PER_RULE_SLOT];
+                const u8 *tc = &e.tableControl[j * HAO_COMPAT_BYTES_PER_RULE_SLOT];
                 printf("    slot%u: ruleIndex=%u vectorFull=\"%s\" vectorActive=\"%s\" tbl=[",
                        j, (u32)ridx,
                        l2VectorString(rv, tc, false).c_str(),
                        l2VectorString(rv, tc, true).c_str());
-                for (u32 k = 0; k < PBE_BYTES_PER_RULE_SLOT; k++) {
+                for (u32 k = 0; k < HAO_COMPAT_BYTES_PER_RULE_SLOT; k++) {
                     printf("%u%s", (u32)tc[k],
-                           k + 1 == PBE_BYTES_PER_RULE_SLOT ? "" : ", ");
+                           k + 1 == HAO_COMPAT_BYTES_PER_RULE_SLOT ? "" : ", ");
                 }
                 printf("]");
                 if (ridx < lits.size()) {
@@ -798,8 +798,8 @@ void dumpHashTables(const PBECompileArtifacts &artifacts,
                 continue;
             }
             nonEmpty++;
-            const u32 secondaryOffset = off & PBE_L1_OFFSET_MASK;
-            const u32 entryCount = off >> PBE_L1_COUNT_SHIFT;
+            const u32 secondaryOffset = off & HAO_COMPAT_L1_OFFSET_MASK;
+            const u32 entryCount = off >> HAO_COMPAT_L1_COUNT_SHIFT;
             printf("      key={dec=%u hex=0x%x bin=%s} -> value={dec=%u hex=0x%x offset=%u count=%u}\n",
                    key, key, keyToBits(key, klass.classKeyBits).c_str(), off, off,
                    secondaryOffset, entryCount);
@@ -812,21 +812,21 @@ void dumpHashTables(const PBECompileArtifacts &artifacts,
     for (u32 i = 1; i < artifacts.secondaryHashTable.size(); i++) {
         const auto &e = artifacts.secondaryHashTable[i];
         printf("  L2[%u] ruleCount=%u entryCapacity=%u headMask=0x%08x tailMask=0x%08x\n",
-               i, (u32)e.ruleCount, PBE_RULE_SLOTS_PER_ENTRY, e.headMask,
+               i, (u32)e.ruleCount, HAO_COMPAT_RULE_SLOTS_PER_ENTRY, e.headMask,
                e.tailMask);
         printf("    headMaskBits=%s\n", maskToBits(e.headMask).c_str());
         printf("    tailMaskBits=%s\n", maskToBits(e.tailMask).c_str());
-        for (u32 j = 0; j < e.ruleCount && j < PBE_RULE_SLOTS_PER_ENTRY; j++) {
+        for (u32 j = 0; j < e.ruleCount && j < HAO_COMPAT_RULE_SLOTS_PER_ENTRY; j++) {
             const u16 ridx = e.ruleIndex[j];
-            const u8 *rv = &e.ruleVector[j * PBE_BYTES_PER_RULE_SLOT];
-            const u8 *tc = &e.tableControl[j * PBE_BYTES_PER_RULE_SLOT];
+            const u8 *rv = &e.ruleVector[j * HAO_COMPAT_BYTES_PER_RULE_SLOT];
+            const u8 *tc = &e.tableControl[j * HAO_COMPAT_BYTES_PER_RULE_SLOT];
             printf("    slot%u: ruleIndex=%u keyValue=0x%x keyMask=0x%x vectorFull=\"%s\" vectorActive=\"%s\" tbl=[",
                    j, (u32)ridx, e.keyValue[j], e.keyMask[j],
                    l2VectorString(rv, tc, false).c_str(),
                    l2VectorString(rv, tc, true).c_str());
-            for (u32 k = 0; k < PBE_BYTES_PER_RULE_SLOT; k++) {
+            for (u32 k = 0; k < HAO_COMPAT_BYTES_PER_RULE_SLOT; k++) {
                 printf("%u%s", (u32)tc[k],
-                       k + 1 == PBE_BYTES_PER_RULE_SLOT ? "" : ", ");
+                       k + 1 == HAO_COMPAT_BYTES_PER_RULE_SLOT ? "" : ", ");
             }
             printf("]");
             if (ridx < lits.size()) {
@@ -851,13 +851,13 @@ void dumpHAOSummary(const ArtifactsT &artifacts) {
 }
 
 static
-void dumpPBEArtifactsVerbose(const std::vector<hwlmLiteral> &lits,
-                             const PBECompileArtifacts &artifacts) {
+void dumpHAOCompatArtifactsVerbose(const std::vector<hwlmLiteral> &lits,
+                                   const HAOCompatCompileArtifacts &artifacts) {
     printf("\n========== [PBE][Build-Artifacts] Begin ==========\n");
     printf("[PBE][Params] key_bits(fixed=%u, selector_count=%zu, mask_classes=%zu) secondary_key_bits=%u secondary_capacity=%u entry_capacity=%u\n",
            artifacts.keyBits, artifacts.bitSelectors.size(),
-           artifacts.maskClasses.size(), PBE_SECONDARY_KEY_BITS,
-           PBE_MAX_SECONDARY_ENTRIES, PBE_RULE_SLOTS_PER_ENTRY);
+           artifacts.maskClasses.size(), HAO_COMPAT_SECONDARY_KEY_BITS,
+           HAO_COMPAT_MAX_SECONDARY_ENTRIES, HAO_COMPAT_RULE_SLOTS_PER_ENTRY);
     dumpRuleBits(lits);
     dumpSelectors(artifacts.bitSelectors);
     dumpExtractDescriptor(artifacts);
@@ -936,7 +936,7 @@ bool getBitState(const hwlmLiteral &lit, u32 bitIndex, u8 *state) {
         }
     }
 
-    *state = care ? (value ? 1 : 0) : PBE_STATE_DONT_CARE;
+    *state = care ? (value ? 1 : 0) : HAO_COMPAT_STATE_DONT_CARE;
     return true;
 }
 
@@ -968,13 +968,13 @@ u64a signatureOfStates(const std::vector<u8> &states) {
 }
 
 static
-std::vector<PBEBitCandidate> buildBitCandidates(
+std::vector<HAOCompatBitCandidate> buildBitCandidates(
     const std::vector<hwlmLiteral> &lits) {
-    std::vector<PBEBitCandidate> out;
-    out.reserve(PBE_MAX_CANDIDATE_BITS);
+    std::vector<HAOCompatBitCandidate> out;
+    out.reserve(HAO_COMPAT_MAX_CANDIDATE_BITS);
     // Collect per-bit state distributions across the candidate 64-bit window.
-    for (u32 bit = 0; bit < PBE_MAX_CANDIDATE_BITS; bit++) {
-        PBEBitCandidate c;
+    for (u32 bit = 0; bit < HAO_COMPAT_MAX_CANDIDATE_BITS; bit++) {
+        HAOCompatBitCandidate c;
         c.bitIndex = bit;
         c.states.reserve(lits.size());
 
@@ -983,11 +983,11 @@ std::vector<PBEBitCandidate> buildBitCandidates(
         u32 ones = 0;
 
         for (const auto &lit : lits) {
-            u8 state = PBE_STATE_DONT_CARE;
+            u8 state = HAO_COMPAT_STATE_DONT_CARE;
             getBitState(lit, bit, &state); // 0, 1, or don't care.
             c.states.push_back(state);
             // Skip don't-care bits when collecting statistics.
-            if (state == PBE_STATE_DONT_CARE) {
+            if (state == HAO_COMPAT_STATE_DONT_CARE) {
                 continue;
             }
             careCount++;
@@ -1015,7 +1015,7 @@ std::vector<PBEBitCandidate> buildBitCandidates(
 
 static
 void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
-                        std::vector<PBEBitSelector> *selectors,
+                        std::vector<HAOCompatBitSelector> *selectors,
                         u32 *keyBitsOut) {
     selectors->clear();
     if (keyBitsOut) {
@@ -1032,14 +1032,14 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
     // Sort candidate bits by score first, then by bit index so ties stay
     // closer to the end of the literal window.
     std::sort(candidates.begin(), candidates.end(),
-              [](const PBEBitCandidate &a, const PBEBitCandidate &b) {
+              [](const HAOCompatBitCandidate &a, const HAOCompatBitCandidate &b) {
                   if (a.score != b.score) {
                       return a.score > b.score;
                   }
                   return a.bitIndex < b.bitIndex;
               });
 
-    const u32 targetBits = std::min<u32>(PBE_KEY_BITS,
+    const u32 targetBits = std::min<u32>(HAO_COMPAT_KEY_BITS,
                                          verify_u32(candidates.size()));
 
     std::unordered_set<u64a> signatures;
@@ -1055,7 +1055,7 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
             continue;
         }
 
-        PBEBitSelector s;
+        HAOCompatBitSelector s;
         s.byteOffset = verify_u8(cand.bitIndex / 8);
         s.bitOffset = verify_u8(cand.bitIndex % 8);
         selectors->push_back(s);
@@ -1071,7 +1071,7 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
             if (chosenBits.find(cand.bitIndex) != chosenBits.end()) {
                 continue;
             }
-            PBEBitSelector s;
+            HAOCompatBitSelector s;
             s.byteOffset = verify_u8(cand.bitIndex / 8);
             s.bitOffset = verify_u8(cand.bitIndex % 8);
             selectors->push_back(s);
@@ -1080,8 +1080,8 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
     }
 
     std::sort(selectors->begin(), selectors->end(),
-              [](const PBEBitSelector &a, const PBEBitSelector &b) {
-                  return selectorBitIndex(a) < selectorBitIndex(b);
+              [](const HAOCompatBitSelector &a, const HAOCompatBitSelector &b) {
+                  return haoCompatSelectorBitIndex(a) < haoCompatSelectorBitIndex(b);
               });
 
     if (keyBitsOut) {
@@ -1091,11 +1091,11 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
 
 static
 void buildHashTables(const std::vector<hwlmLiteral> &lits,
-                     const std::vector<PBEBitSelector> &selectors,
-                     std::vector<PBEMaskClassArtifacts> *maskClasses,
-                     PBEPrimaryHashTable *legacyPrimaryHashTable,
-                     PBEPrimaryHashBitmap *legacyPrimaryHashBitmap,
-                     std::vector<PBESecondaryHashEntry> *secondaryHashTable,
+                     const std::vector<HAOCompatBitSelector> &selectors,
+                     std::vector<HAOCompatMaskClassArtifacts> *maskClasses,
+                     HAOCompatPrimaryHashTable *legacyPrimaryHashTable,
+                     HAOCompatPrimaryHashBitmap *legacyPrimaryHashBitmap,
+                     std::vector<HAOCompatSecondaryHashEntry> *secondaryHashTable,
                      u32 *flags) {
     if (maskClasses) {
         maskClasses->clear();
@@ -1109,15 +1109,15 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
     }
 
     // secondaryHashTable[0] stays empty as a null target.
-    secondaryHashTable->push_back(PBESecondaryHashEntry{});
+    secondaryHashTable->push_back(HAOCompatSecondaryHashEntry{});
 
     std::vector<u32> litKeyValue(lits.size(), 0);
     std::map<u32, std::vector<u32>> maskToLiteralIndexes;
-    const u32 fullMask = pbeFullKeyMask(verify_u32(selectors.size()));
+    const u32 fullMask = haoCompatFullKeyMask(verify_u32(selectors.size()));
     for (u32 i = 0; i < lits.size(); i++) {
         u32 keyValue = 0;
         u32 keyMask = 0;
-        computeKeyValueMaskForLiteral(lits[i], selectors, &keyValue, &keyMask);
+        haoCompatComputeKeyValueMaskForLiteral(lits[i], selectors, &keyValue, &keyMask);
         litKeyValue[i] = keyValue;
         maskToLiteralIndexes[keyMask].push_back(i);
     }
@@ -1134,17 +1134,17 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
                   if (aFull != bFull) {
                       return aFull;
                   }
-                  const u32 aBits = pbePackedKeyBits(a);
-                  const u32 bBits = pbePackedKeyBits(b);
+                  const u32 aBits = haoCompatPackedKeyBits(a);
+                  const u32 bBits = haoCompatPackedKeyBits(b);
                   if (aBits != bBits) {
                       return aBits > bBits;
                   }
                   return a < b;
               });
 
-    if (orderedMasks.size() > PBE_MAX_MASK_CLASSES) {
+    if (orderedMasks.size() > HAO_COMPAT_MAX_MASK_CLASSES) {
         if (flags) {
-            *flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+            *flags |= HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE;
         }
         return;
     }
@@ -1161,19 +1161,19 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
             continue;
         }
 
-        PBEMaskClassArtifacts klass = {};
+        HAOCompatMaskClassArtifacts klass = {};
         klass.classId = classId++;
         klass.classMask = classMask;
-        klass.classKeyBits = pbePackedKeyBits(classMask);
+        klass.classKeyBits = haoCompatPackedKeyBits(classMask);
         klass.ruleCount = verify_u32(idxes.size());
         klass.secondaryOffset = verify_u32(secondaryHashTable->size());
 
-        const u32 primaryCount = pbePrimaryCountForKeyBits(klass.classKeyBits);
+        const u32 primaryCount = haoCompatPrimaryCountForKeyBits(klass.classKeyBits);
         totalPrimaryFootprint +=
-            (u64a)primaryCount * sizeof(u32) + pbePrimaryBitmapBytes(primaryCount);
-        if (totalPrimaryFootprint > PBE_MAX_TOTAL_PRIMARY_FOOTPRINT) {
+            (u64a)primaryCount * sizeof(u32) + haoCompatPrimaryBitmapBytes(primaryCount);
+        if (totalPrimaryFootprint > HAO_COMPAT_MAX_TOTAL_PRIMARY_FOOTPRINT) {
             if (flags) {
-                *flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+                *flags |= HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE;
             }
             break;
         }
@@ -1185,27 +1185,27 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
             keyToLiteralIndexes[bucketKey].push_back(ridx);
         }
 
-        const u32 packedMask = pbeFullKeyMask(klass.classKeyBits);
+        const u32 packedMask = haoCompatFullKeyMask(klass.classKeyBits);
         for (const auto &it : keyToLiteralIndexes) {
             const u32 key = it.first;
             const auto &bucketIdxes = it.second;
             const u32 entryCount = verify_u32(
-                (bucketIdxes.size() + PBE_RULE_SLOTS_PER_ENTRY - 1) /
-                PBE_RULE_SLOTS_PER_ENTRY);
+                (bucketIdxes.size() + HAO_COMPAT_RULE_SLOTS_PER_ENTRY - 1) /
+                HAO_COMPAT_RULE_SLOTS_PER_ENTRY);
 
-            if (secondaryHashTable->size() + entryCount > PBE_MAX_SECONDARY_ENTRIES) {
+            if (secondaryHashTable->size() + entryCount > HAO_COMPAT_MAX_SECONDARY_ENTRIES) {
                 if (flags) {
-                    *flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
-                    *flags |= PBE_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY;
+                    *flags |= HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+                    *flags |= HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY;
                 }
                 stop = true;
                 break;
             }
 
-            if (entryCount >= (1U << (32U - PBE_L1_COUNT_SHIFT))) {
+            if (entryCount >= (1U << (32U - HAO_COMPAT_L1_COUNT_SHIFT))) {
                 if (flags) {
-                    *flags |= PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE;
-                    *flags |= PBE_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW;
+                    *flags |= HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+                    *flags |= HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW;
                 }
                 stop = true;
                 break;
@@ -1216,10 +1216,10 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
                 encodePrimaryValue(secondaryOffset, entryCount);
 
             for (u32 chunk = 0; chunk < entryCount; chunk++) {
-                PBESecondaryHashEntry entry = {};
-                const size_t begin = chunk * PBE_RULE_SLOTS_PER_ENTRY;
+                HAOCompatSecondaryHashEntry entry = {};
+                const size_t begin = chunk * HAO_COMPAT_RULE_SLOTS_PER_ENTRY;
                 const size_t end = std::min(bucketIdxes.size(),
-                                            begin + PBE_RULE_SLOTS_PER_ENTRY);
+                                            begin + HAO_COMPAT_RULE_SLOTS_PER_ENTRY);
                 entry.ruleCount = verify_u16(end - begin);
 
                 for (size_t slot = begin; slot < end; slot++) {
@@ -1227,8 +1227,8 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
                     const auto &lit = lits[bucketIdxes[slot]];
                     const u32 len = verify_u32(lit.s.size());
                     const u32 suffixLen =
-                        std::min<u32>(len, PBE_BYTES_PER_RULE_SLOT);
-                    const u32 laneBase = localSlot * PBE_BYTES_PER_RULE_SLOT;
+                        std::min<u32>(len, HAO_COMPAT_BYTES_PER_RULE_SLOT);
+                    const u32 laneBase = localSlot * HAO_COMPAT_BYTES_PER_RULE_SLOT;
 
                     entry.ruleIndex[localSlot] = verify_u16(bucketIdxes[slot]);
                     entry.keyValue[localSlot] = key;
@@ -1236,7 +1236,7 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
 
                     for (u32 j = 0; j < suffixLen; j++) {
                         const u32 vecIndex = laneBase +
-                            (PBE_BYTES_PER_RULE_SLOT - suffixLen + j);
+                            (HAO_COMPAT_BYTES_PER_RULE_SLOT - suffixLen + j);
                         const u8 c = verify_u8(lit.s[len - suffixLen + j]);
                         entry.ruleVector[vecIndex] = normalizedLiteralByte(c);
                         entry.tableControl[vecIndex] = 1;
@@ -1252,7 +1252,7 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
             }
         }
 
-        buildPrimaryBitmap(klass.primaryHashTable, &klass.primaryHashBitmap);
+        buildCompatPrimaryBitmap(klass.primaryHashTable, &klass.primaryHashBitmap);
         maskClasses->push_back(std::move(klass));
     }
 
@@ -1286,15 +1286,15 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
 
         for (u32 idx : hotOrder) {
             auto &klass = (*maskClasses)[idx];
-            if (!klass.ruleCount || hotCount >= PBE_MAX_HOT_MASK_CLASSES) {
+            if (!klass.ruleCount || hotCount >= HAO_COMPAT_MAX_HOT_MASK_CLASSES) {
                 break;
             }
-            klass.flags |= PBE_MASK_CLASS_FLAG_HOT;
+            klass.flags |= HAO_COMPAT_MASK_CLASS_FLAG_HOT;
             hotCount++;
             coveredRules += klass.ruleCount;
             if (totalRules &&
                 coveredRules * 100 >=
-                    totalRules * PBE_HOT_MASK_CLASS_COVERAGE_PCT) {
+                    totalRules * HAO_COMPAT_HOT_MASK_CLASS_COVERAGE_PCT) {
                 break;
             }
         }
@@ -1308,29 +1308,29 @@ void buildHashTables(const std::vector<hwlmLiteral> &lits,
 
 static
 void buildRuleMeta(const std::vector<hwlmLiteral> &lits,
-                   std::vector<PBERuleMeta> *ruleMeta,
+                   std::vector<HAOCompatRuleMeta> *ruleMeta,
                    std::vector<u8> *literalBlob) {
     ruleMeta->clear();
     ruleMeta->reserve(lits.size());
     literalBlob->clear();
 
     for (const auto &lit : lits) {
-        PBERuleMeta m = {};
+        HAOCompatRuleMeta m = {};
         m.id = lit.id;
         m.groups = lit.groups;
         m.len = verify_u16(std::min<size_t>(lit.s.size(),
                                             std::numeric_limits<u16>::max()));
         if (lit.nocase) {
-            m.flags |= PBE_RULE_FLAG_NOCASE;
+            m.flags |= HAO_COMPAT_RULE_FLAG_NOCASE;
         }
         if (lit.noruns) {
-            m.flags |= PBE_RULE_FLAG_NORUNS;
+            m.flags |= HAO_COMPAT_RULE_FLAG_NORUNS;
         }
         std::array<u8, 8> normMsk = {};
         std::array<u8, 8> normCmp = {};
         u8 normLen = 0;
         if (normalizeMaskCmp(lit, &normMsk, &normCmp, &normLen) && normLen) {
-            m.flags |= PBE_RULE_FLAG_HAS_MASK;
+            m.flags |= HAO_COMPAT_RULE_FLAG_HAS_MASK;
             m.maskLen = normLen;
             for (size_t j = 0; j < m.maskLen; j++) {
                 m.msk[j] = normMsk[j];
@@ -1359,8 +1359,8 @@ void resetHAOCompileArtifactsCommon(ArtifactsT *artifacts) {
     }
     artifacts->keyBits = 0;
     artifacts->flags = 0;
-    artifacts->extractMode = PBE_EXTRACT_MODE_SCALAR;
-    artifacts->windowBytes = PBE_BYTES_PER_RULE_SLOT;
+    artifacts->extractMode = HAO_COMPAT_EXTRACT_MODE_SCALAR;
+    artifacts->windowBytes = HAO_COMPAT_BYTES_PER_RULE_SLOT;
     artifacts->bextMask = 0;
     artifacts->bitSelectors.clear();
     artifacts->haoRulePlans.clear();
@@ -1413,8 +1413,8 @@ void dumpHAOArtifactsVerbose(const std::vector<hwlmLiteral> &lits,
     printf("\n========== [HAO][Build-Artifacts] Begin ==========\n");
     printf("[HAO][Params] key_bits(fixed=%u, selector_count=%zu) secondary_key_bits=%u secondary_capacity=%u entry_capacity=%u\n",
            artifacts.keyBits, artifacts.bitSelectors.size(),
-           PBE_SECONDARY_KEY_BITS, PBE_MAX_SECONDARY_ENTRIES,
-           PBE_RULE_SLOTS_PER_ENTRY);
+           HAO_COMPAT_SECONDARY_KEY_BITS, HAO_COMPAT_MAX_SECONDARY_ENTRIES,
+           HAO_COMPAT_RULE_SLOTS_PER_ENTRY);
     dumpRuleBits(lits);
     dumpSelectors(artifacts.bitSelectors);
     dumpExtractDescriptor(artifacts);
@@ -1500,7 +1500,7 @@ bool pbeHasSveBitPermPrereq(const target_t &target) {
 }
 
 bool buildHAOCompatArtifacts(const std::vector<hwlmLiteral> &lits,
-                             PBECompileArtifacts *artifacts,
+                             HAOCompatCompileArtifacts *artifacts,
                              bool enableDump) {
     if (!artifacts) {
         return false;
@@ -1517,7 +1517,7 @@ bool buildHAOCompatArtifacts(const std::vector<hwlmLiteral> &lits,
 
     // Compile-time dump for selector/key/hash construction inspection.
     if (enableDump) {
-        dumpPBEArtifactsVerbose(lits, *artifacts);
+        dumpHAOCompatArtifactsVerbose(lits, *artifacts);
     } else if (haoStatsDumpEnabled()) {
         dumpHAOSummary(*artifacts);
     }
@@ -1621,10 +1621,10 @@ bool analyzeHAOFeasibility(const target_t &target,
     }
 
     if (!out->haoGlobalHash.valid ||
-        (out->haoGlobalHash.flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE)) {
-        if (out->haoGlobalHash.flags & PBE_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY) {
+        (out->haoGlobalHash.flags & HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE)) {
+        if (out->haoGlobalHash.flags & HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY) {
             local.reason = HAOFeasibilityReason::PARTIAL_SECONDARY_CAPACITY;
-        } else if (out->haoGlobalHash.flags & PBE_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW) {
+        } else if (out->haoGlobalHash.flags & HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW) {
             local.reason = HAOFeasibilityReason::PARTIAL_ENTRY_OVERFLOW;
         } else {
             local.reason = HAOFeasibilityReason::PARTIAL_OTHER;
@@ -1715,10 +1715,10 @@ bool analyzeHAOCompatFeasibility(const target_t &target,
         return false;
     }
 
-    if (out->flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
-        if (out->flags & PBE_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY) {
+    if (out->flags & HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
+        if (out->flags & HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY) {
             local.reason = PBEFeasibilityReason::PARTIAL_SECONDARY_CAPACITY;
-        } else if (out->flags & PBE_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW) {
+        } else if (out->flags & HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW) {
             local.reason = PBEFeasibilityReason::PARTIAL_ENTRY_OVERFLOW;
         } else {
             local.reason = PBEFeasibilityReason::PARTIAL_OTHER;
@@ -1762,7 +1762,7 @@ bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
     return analyzeHAOFeasibility(target, lits, grey, &result, nullptr);
 }
 
-bytecode_ptr<u8> buildHAOCompatBlob(const PBECompileArtifacts &artifacts) {
+bytecode_ptr<u8> buildHAOCompatBlob(const HAOCompatCompileArtifacts &artifacts) {
     /* Serialize the legacy compatibility layout that keeps the historical
      * PBE/HAO-v1 runtime format alive behind the new HAO compatibility API. */
     const u32 selectorCount = verify_u32(artifacts.bitSelectors.size());
@@ -1783,7 +1783,7 @@ bytecode_ptr<u8> buildHAOCompatBlob(const PBECompileArtifacts &artifacts) {
         sizeof(PBERuntimeRuleMeta) * artifacts.ruleMeta.size();
     const size_t literalBlobBytes = artifacts.literalBlob.size();
 
-    struct PBEMaskClassLayout {
+    struct HAOCompatMaskClassLayout {
         u32 classMask;
         u32 classKeyBits;
         u32 flags;
@@ -1794,7 +1794,7 @@ bytecode_ptr<u8> buildHAOCompatBlob(const PBECompileArtifacts &artifacts) {
         u32 secondaryOffset;
         u32 secondaryCount;
     };
-    std::vector<PBEMaskClassLayout> classLayouts;
+    std::vector<HAOCompatMaskClassLayout> classLayouts;
     classLayouts.reserve(artifacts.maskClasses.size());
 
     size_t totalSize = ROUNDUP_N(sizeof(PBERuntimeHeader), alignof(u32));
@@ -1803,7 +1803,7 @@ bytecode_ptr<u8> buildHAOCompatBlob(const PBECompileArtifacts &artifacts) {
     const u32 classTableOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(classTableBytes, alignof(u32));
     for (const auto &klass : artifacts.maskClasses) {
-        PBEMaskClassLayout layout = {};
+        HAOCompatMaskClassLayout layout = {};
         layout.classMask = klass.classMask;
         layout.classKeyBits = klass.classKeyBits;
         layout.flags = klass.flags;
@@ -2100,7 +2100,7 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
     return blob;
 }
 
-bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
+bytecode_ptr<u8> buildHAOGlobalBlob(const HAOCompatCompileArtifacts &artifacts) {
     return buildHAOGlobalBlobImpl(artifacts);
 }
 

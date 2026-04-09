@@ -88,12 +88,12 @@ struct FDR {
                     * for ABI compatibility */
 };
 
-static really_inline
+static inline
 u32 fdrMatcherBlobOffset(const struct FDR *fdr) {
     return fdr ? fdr->pbeOffset : 0;
 }
 
-static really_inline
+static inline
 u32 fdrMatcherBlobSize(const struct FDR *fdr) {
     return fdr ? fdr->pbeSize : 0;
 }

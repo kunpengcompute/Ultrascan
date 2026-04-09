@@ -91,7 +91,8 @@ bool haoV2LayoutCanPreserveCoverage(const HAOCompileArtifacts &artifacts) {
     if (!artifacts.haoGlobalHash.valid) {
         return false;
     }
-    if (artifacts.haoGlobalHash.flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
+    if (artifacts.haoGlobalHash.flags &
+        HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
         return false;
     }
 
@@ -145,20 +146,20 @@ static
 bool tryBuildHaoCompatProtoArtifacts(const target_t &target,
                                      const std::vector<hwlmLiteral> &lits,
                                      const Grey &grey,
-                                     PBECompileArtifacts *artifacts) {
+                                     HAOCompatCompileArtifacts *artifacts) {
     if (!artifacts) {
         return false;
     }
 
-    PBEFeasibilityResult pbeResult;
-    const bool pbeFeasible = analyzeHAOCompatFeasibility(target, lits, grey,
-                                                         &pbeResult,
-                                                         artifacts);
+    HAOCompatFeasibilityResult compatResult;
+    const bool compatFeasible = analyzeHAOCompatFeasibility(target, lits, grey,
+                                                            &compatResult,
+                                                            artifacts);
     DEBUG_PRINTF("HAO compat feasibility: canBuild=%u reason=%s flags=0x%x\n",
-                 pbeFeasible ? 1 : 0,
-                 haoCompatFeasibilityReasonName(pbeResult.reason),
-                 pbeResult.flags);
-    if (!pbeFeasible) {
+                 compatFeasible ? 1 : 0,
+                 haoCompatFeasibilityReasonName(compatResult.reason),
+                 compatResult.flags);
+    if (!compatFeasible) {
         return false;
     }
 
@@ -1096,7 +1097,8 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
                 return nullptr;
             }
             const HAOCompatCompileArtifacts *artifacts = &rebuiltCompatArtifacts;
-            if (artifacts->flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
+            if (artifacts->flags &
+                HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
                 assert(0 && "HAO compat feasibility mismatch: partial coverage in table build");
                 return nullptr;
             }

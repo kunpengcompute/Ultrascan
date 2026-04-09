@@ -49,6 +49,7 @@ namespace ue2 {
 class FDREngineDescription;
 struct HAOCompileArtifacts;
 struct PBECompileArtifacts;
+using HAOCompatCompileArtifacts = PBECompileArtifacts;
 class TeddyEngineDescription;
 struct CompileContext;
 struct Grey;
@@ -90,7 +91,7 @@ struct HWLMProto {
      * to avoid rebuilding during table generation once feasibility has already
      * been established.
      */
-    std::unique_ptr<PBECompileArtifacts> haoCompatArtifacts;
+    std::unique_ptr<HAOCompatCompileArtifacts> haoCompatArtifacts;
 
     /**
      * \brief Optional cached HAO v2 compile artifacts, used when proto build
@@ -100,7 +101,7 @@ struct HWLMProto {
 
     /**
      * \brief True when proto build selected the HAO v2 global single-table
-     * layout. This keeps table-build routing independent from legacy PBE
+     * layout. This keeps table-build routing independent from legacy compat
      * artifact mode fields.
      */
     bool useHaoV2Layout = false;
