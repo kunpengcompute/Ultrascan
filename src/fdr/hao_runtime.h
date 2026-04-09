@@ -284,6 +284,7 @@ u32 pbeExtractPackedBitsSveBitPermLaneCount(void);
 hwlm_error_t HaoEngineExec(const struct FDR *fdr,
                            const struct FDR_Runtime_Args *a,
                            hwlm_group_t control);
+/* Legacy wrapper entry points retained for compatibility. */
 hwlm_error_t PbeEngineExec(const struct FDR *fdr,
                           const struct FDR_Runtime_Args *a,
                           hwlm_group_t control);

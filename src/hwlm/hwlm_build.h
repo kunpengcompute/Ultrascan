@@ -48,8 +48,8 @@ namespace ue2 {
 
 class FDREngineDescription;
 struct HAOCompileArtifacts;
-struct PBECompileArtifacts;
-using HAOCompatCompileArtifacts = PBECompileArtifacts;
+struct HAOCompatCompileArtifacts;
+using PBECompileArtifacts = HAOCompatCompileArtifacts;
 class TeddyEngineDescription;
 struct CompileContext;
 struct Grey;

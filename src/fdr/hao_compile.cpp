@@ -1371,7 +1371,7 @@ void resetHAOCompileArtifactsCommon(ArtifactsT *artifacts) {
 }
 
 static
-void resetPBECompileArtifacts(PBECompileArtifacts *artifacts) {
+void resetHAOCompatCompileArtifacts(HAOCompatCompileArtifacts *artifacts) {
     resetHAOCompileArtifactsCommon(artifacts);
     if (!artifacts) {
         return;
@@ -1506,7 +1506,7 @@ bool buildHAOCompatArtifacts(const std::vector<hwlmLiteral> &lits,
         return false;
     }
 
-    resetPBECompileArtifacts(artifacts);
+    resetHAOCompatCompileArtifacts(artifacts);
     if (!buildSharedHAOArtifacts(lits, artifacts)) {
         return false;
     }
@@ -1646,15 +1646,15 @@ bool analyzeHAOFeasibility(const target_t &target,
 bool analyzeHAOCompatFeasibility(const target_t &target,
                                  const std::vector<hwlmLiteral> &lits,
                                  const Grey &grey,
-                                 PBEFeasibilityResult *result,
-                                 PBECompileArtifacts *artifacts) {
-    PBEFeasibilityResult local;
+                                 HAOCompatFeasibilityResult *result,
+                                 HAOCompatCompileArtifacts *artifacts) {
+    HAOCompatFeasibilityResult local;
     local.canBuild = false;
     local.reason = PBEFeasibilityReason::ARTIFACT_BUILD_FAILED;
     local.flags = 0;
 
     if (!haoFamilyGreyEnabled(grey)) {
-        local.reason = PBEFeasibilityReason::GREY_DISABLED;
+        local.reason = HAOCompatFeasibilityReason::GREY_DISABLED;
         if (result) {
             *result = local;
         }
@@ -1664,7 +1664,7 @@ bool analyzeHAOCompatFeasibility(const target_t &target,
     // PBE is currently only enabled on Arm64 builds.
 #if !defined(__aarch64__)
     (void)target;
-    local.reason = PBEFeasibilityReason::ARCH_UNSUPPORTED;
+    local.reason = HAOCompatFeasibilityReason::ARCH_UNSUPPORTED;
     if (result) {
         *result = local;
     }
@@ -1674,7 +1674,7 @@ bool analyzeHAOCompatFeasibility(const target_t &target,
 #endif
 
     if (lits.size() < 4) {
-        local.reason = PBEFeasibilityReason::TOO_FEW_LITERALS;
+        local.reason = HAOCompatFeasibilityReason::TOO_FEW_LITERALS;
         if (result) {
             *result = local;
         }
@@ -1682,7 +1682,7 @@ bool analyzeHAOCompatFeasibility(const target_t &target,
     }
 
     if (lits.size() > std::numeric_limits<u16>::max()) {
-        local.reason = PBEFeasibilityReason::TOO_MANY_LITERALS;
+        local.reason = HAOCompatFeasibilityReason::TOO_MANY_LITERALS;
         if (result) {
             *result = local;
         }
@@ -1692,14 +1692,14 @@ bool analyzeHAOCompatFeasibility(const target_t &target,
     /* Only build a temporary artifacts object when the caller does not
      * provide one. This avoids needless large STL allocations on the common
      * feasibility-only path. */
-    std::unique_ptr<PBECompileArtifacts> tempStorage;
-    PBECompileArtifacts *out = artifacts;
+    std::unique_ptr<HAOCompatCompileArtifacts> tempStorage;
+    HAOCompatCompileArtifacts *out = artifacts;
     if (!out) {
-        tempStorage.reset(new PBECompileArtifacts());
+        tempStorage.reset(new HAOCompatCompileArtifacts());
         out = tempStorage.get();
     }
     if (!buildHAOCompatArtifacts(lits, out, false)) {
-        local.reason = PBEFeasibilityReason::ARTIFACT_BUILD_FAILED;
+        local.reason = HAOCompatFeasibilityReason::ARTIFACT_BUILD_FAILED;
         if (result) {
             *result = local;
         }
@@ -1708,7 +1708,7 @@ bool analyzeHAOCompatFeasibility(const target_t &target,
 
     local.flags = out->flags;
     if (out->bitSelectors.empty()) {
-        local.reason = PBEFeasibilityReason::NO_SELECTORS;
+        local.reason = HAOCompatFeasibilityReason::NO_SELECTORS;
         if (result) {
             *result = local;
         }
@@ -1717,11 +1717,11 @@ bool analyzeHAOCompatFeasibility(const target_t &target,
 
     if (out->flags & HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
         if (out->flags & HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY) {
-            local.reason = PBEFeasibilityReason::PARTIAL_SECONDARY_CAPACITY;
+            local.reason = HAOCompatFeasibilityReason::PARTIAL_SECONDARY_CAPACITY;
         } else if (out->flags & HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW) {
-            local.reason = PBEFeasibilityReason::PARTIAL_ENTRY_OVERFLOW;
+            local.reason = HAOCompatFeasibilityReason::PARTIAL_ENTRY_OVERFLOW;
         } else {
-            local.reason = PBEFeasibilityReason::PARTIAL_OTHER;
+            local.reason = HAOCompatFeasibilityReason::PARTIAL_OTHER;
         }
         if (result) {
             *result = local;
@@ -1730,7 +1730,7 @@ bool analyzeHAOCompatFeasibility(const target_t &target,
     }
 
     local.canBuild = true;
-    local.reason = PBEFeasibilityReason::OK;
+    local.reason = HAOCompatFeasibilityReason::OK;
     if (result) {
         *result = local;
     }
@@ -1774,13 +1774,13 @@ bytecode_ptr<u8> buildHAOCompatBlob(const HAOCompatCompileArtifacts &artifacts) 
     const u32 literalBlobSize = verify_u32(artifacts.literalBlob.size());
 
     const size_t selectorBytes =
-        sizeof(PBERuntimeBitSelector) * artifacts.bitSelectors.size();
+        sizeof(HAOCompatRuntimeBitSelector) * artifacts.bitSelectors.size();
     const size_t classTableBytes =
-        sizeof(PBERuntimeMaskClass) * artifacts.maskClasses.size();
-    const size_t secondaryBytes = sizeof(PBERuntimeSecondaryHashEntry) *
+        sizeof(HAOCompatRuntimeMaskClass) * artifacts.maskClasses.size();
+    const size_t secondaryBytes = sizeof(HAOCompatRuntimeSecondaryHashEntry) *
                                   artifacts.secondaryHashTable.size();
     const size_t ruleMetaBytes =
-        sizeof(PBERuntimeRuleMeta) * artifacts.ruleMeta.size();
+        sizeof(HAOCompatRuntimeRuleMeta) * artifacts.ruleMeta.size();
     const size_t literalBlobBytes = artifacts.literalBlob.size();
 
     struct HAOCompatMaskClassLayout {
@@ -1797,7 +1797,7 @@ bytecode_ptr<u8> buildHAOCompatBlob(const HAOCompatCompileArtifacts &artifacts) 
     std::vector<HAOCompatMaskClassLayout> classLayouts;
     classLayouts.reserve(artifacts.maskClasses.size());
 
-    size_t totalSize = ROUNDUP_N(sizeof(PBERuntimeHeader), alignof(u32));
+    size_t totalSize = ROUNDUP_N(sizeof(HAOCompatRuntimeHeader), alignof(u32));
     const u32 selectorsOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(selectorBytes, alignof(u32));
     const u32 classTableOffset = verify_u32(totalSize);
@@ -1831,7 +1831,7 @@ bytecode_ptr<u8> buildHAOCompatBlob(const HAOCompatCompileArtifacts &artifacts) 
         return nullptr;
     }
 
-    auto *hdr = reinterpret_cast<PBERuntimeHeader *>(blob.get());
+    auto *hdr = reinterpret_cast<HAOCompatRuntimeHeader *>(blob.get());
     hdr->magic = PBE_RUNTIME_MAGIC;
     hdr->version = PBE_RUNTIME_VERSION;
     hdr->flags = artifacts.flags;
@@ -1856,7 +1856,7 @@ bytecode_ptr<u8> buildHAOCompatBlob(const HAOCompatCompileArtifacts &artifacts) 
 
     u8 *base = blob.get();
     auto *selectorsOut =
-        reinterpret_cast<PBERuntimeBitSelector *>(base + selectorsOffset);
+        reinterpret_cast<HAOCompatRuntimeBitSelector *>(base + selectorsOffset);
     for (u32 i = 0; i < selectorCount; i++) {
         selectorsOut[i].byteOffset = artifacts.bitSelectors[i].byteOffset;
         selectorsOut[i].bitOffset = artifacts.bitSelectors[i].bitOffset;
@@ -1864,7 +1864,7 @@ bytecode_ptr<u8> buildHAOCompatBlob(const HAOCompatCompileArtifacts &artifacts) 
     }
 
     auto *classOut =
-        reinterpret_cast<PBERuntimeMaskClass *>(base + classTableOffset);
+        reinterpret_cast<HAOCompatRuntimeMaskClass *>(base + classTableOffset);
     for (u32 i = 0; i < classCount; i++) {
         classOut[i].classMask = classLayouts[i].classMask;
         classOut[i].classKeyBits = classLayouts[i].classKeyBits;
@@ -1893,7 +1893,7 @@ bytecode_ptr<u8> buildHAOCompatBlob(const HAOCompatCompileArtifacts &artifacts) 
     }
 
     auto *secondaryOut =
-        reinterpret_cast<PBERuntimeSecondaryHashEntry *>(base + secondaryOffset);
+        reinterpret_cast<HAOCompatRuntimeSecondaryHashEntry *>(base + secondaryOffset);
     for (u32 i = 0; i < secondaryCount; i++) {
         const auto &in = artifacts.secondaryHashTable[i];
         auto &out = secondaryOut[i];
@@ -1909,7 +1909,7 @@ bytecode_ptr<u8> buildHAOCompatBlob(const HAOCompatCompileArtifacts &artifacts) 
     }
 
     auto *ruleMetaOut =
-        reinterpret_cast<PBERuntimeRuleMeta *>(base + ruleMetaOffset);
+        reinterpret_cast<HAOCompatRuntimeRuleMeta *>(base + ruleMetaOffset);
     for (u32 i = 0; i < ruleMetaCount; i++) {
         ruleMetaOut[i].id = artifacts.ruleMeta[i].id;
         ruleMetaOut[i].groups = artifacts.ruleMeta[i].groups;

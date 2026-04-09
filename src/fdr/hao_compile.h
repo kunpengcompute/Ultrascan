@@ -107,20 +107,20 @@ static constexpr u32 HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE = 1U << 7;
 struct Grey;
 struct target_t;
 
-struct PBEBitSelector {
+struct HAOCompatBitSelector {
     u8 byteOffset;
     u8 bitOffset;
 };
 
-struct PBEPrimaryHashTable {
+struct HAOCompatPrimaryHashTable {
     std::vector<u32> offsets;
 };
 
-struct PBEPrimaryHashBitmap {
+struct HAOCompatPrimaryHashBitmap {
     std::vector<u8> bits;
 };
 
-struct PBEMaskClassArtifacts {
+struct HAOCompatMaskClassArtifacts {
     u32 classId = 0;
     u32 classMask = 0;
     u32 classKeyBits = 0;
@@ -128,11 +128,11 @@ struct PBEMaskClassArtifacts {
     u32 flags = 0;
     u32 secondaryOffset = 0;
     u32 secondaryCount = 0;
-    PBEPrimaryHashTable primaryHashTable;
-    PBEPrimaryHashBitmap primaryHashBitmap;
+    HAOCompatPrimaryHashTable primaryHashTable;
+    HAOCompatPrimaryHashBitmap primaryHashBitmap;
 };
 
-struct PBESecondaryHashEntry {
+struct HAOCompatSecondaryHashEntry {
     u8 ruleVector[HAO_COMPAT_RULE_VECTOR_BYTES];
     u8 tableControl[HAO_COMPAT_TBL_CONTROL_BYTES];
     u16 ruleIndex[HAO_COMPAT_RULE_SLOTS_PER_ENTRY];
@@ -154,7 +154,7 @@ struct HAOSecondaryHashEntry {
     u8 reserved[3];
 };
 
-struct PBERuleMeta {
+struct HAOCompatRuleMeta {
     u32 id;
     hwlm_group_t groups;
     u16 len;
@@ -242,8 +242,8 @@ struct HAOGlobalHashArtifacts {
     u32 flags = 0;
     u32 keyBits = 0;
     u32 fullKeyMask = 0;
-    PBEPrimaryHashTable primaryHashTable;
-    PBEPrimaryHashBitmap primaryHashBitmap;
+    HAOCompatPrimaryHashTable primaryHashTable;
+    HAOCompatPrimaryHashBitmap primaryHashBitmap;
     std::vector<HAOSecondaryHashEntry> secondaryHashTable;
     HAOGlobalHashStats stats;
 };
@@ -254,7 +254,7 @@ enum class HAOBlobLayoutMode : u8 {
     HAO_BLOB_LAYOUT_V2_GLOBAL = 1
 };
 
-struct PBECompileArtifacts {
+struct HAOCompatCompileArtifacts {
     u32 keyBits = 0;
     u32 flags = 0;
     u32 extractMode = HAO_COMPAT_EXTRACT_MODE_SCALAR;
@@ -262,17 +262,17 @@ struct PBECompileArtifacts {
     u64a bextMask = 0;
     HAOBlobLayoutMode haoBlobLayoutMode =
         HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
-    std::vector<PBEBitSelector> bitSelectors;
+    std::vector<HAOCompatBitSelector> bitSelectors;
     /* HAO v2 additions: rule plans and summary counters. */
     std::vector<HAOCompiledRulePlan> haoRulePlans;
     HAOCompileSummary haoSummary;
     /* HAO v2 global single-table artifacts kept alongside compat data. */
     HAOGlobalHashArtifacts haoGlobalHash;
-    std::vector<PBEMaskClassArtifacts> maskClasses;
-    PBEPrimaryHashTable primaryHashTable;
-    PBEPrimaryHashBitmap primaryHashBitmap;
-    std::vector<PBESecondaryHashEntry> secondaryHashTable;
-    std::vector<PBERuleMeta> ruleMeta;
+    std::vector<HAOCompatMaskClassArtifacts> maskClasses;
+    HAOCompatPrimaryHashTable primaryHashTable;
+    HAOCompatPrimaryHashBitmap primaryHashBitmap;
+    std::vector<HAOCompatSecondaryHashEntry> secondaryHashTable;
+    std::vector<HAOCompatRuleMeta> ruleMeta;
     std::vector<u8> literalBlob;
 };
 
@@ -282,24 +282,24 @@ struct HAOCompileArtifacts {
     u32 extractMode = HAO_COMPAT_EXTRACT_MODE_SCALAR;
     u32 windowBytes = HAO_COMPAT_BYTES_PER_RULE_SLOT;
     u64a bextMask = 0;
-    std::vector<PBEBitSelector> bitSelectors;
+    std::vector<HAOCompatBitSelector> bitSelectors;
     std::vector<HAOCompiledRulePlan> haoRulePlans;
     HAOCompileSummary haoSummary;
     HAOGlobalHashArtifacts haoGlobalHash;
-    std::vector<PBERuleMeta> ruleMeta;
+    std::vector<HAOCompatRuleMeta> ruleMeta;
     std::vector<u8> literalBlob;
 };
 
-using HAOCompatBitSelector = PBEBitSelector;
-using HAOCompatPrimaryHashTable = PBEPrimaryHashTable;
-using HAOCompatPrimaryHashBitmap = PBEPrimaryHashBitmap;
-using HAOCompatMaskClassArtifacts = PBEMaskClassArtifacts;
-using HAOCompatSecondaryHashEntry = PBESecondaryHashEntry;
-using HAOCompatRuleMeta = PBERuleMeta;
-using HAOCompatCompileArtifacts = PBECompileArtifacts;
+using PBEBitSelector = HAOCompatBitSelector;
+using PBEPrimaryHashTable = HAOCompatPrimaryHashTable;
+using PBEPrimaryHashBitmap = HAOCompatPrimaryHashBitmap;
+using PBEMaskClassArtifacts = HAOCompatMaskClassArtifacts;
+using PBESecondaryHashEntry = HAOCompatSecondaryHashEntry;
+using PBERuleMeta = HAOCompatRuleMeta;
+using PBECompileArtifacts = HAOCompatCompileArtifacts;
 
 
-enum class PBEFeasibilityReason : u32 {
+enum class HAOCompatFeasibilityReason : u32 {
     OK = 0,
     GREY_DISABLED,
     ARCH_UNSUPPORTED,
@@ -327,10 +327,11 @@ enum class HAOFeasibilityReason : u32 {
     ARTIFACT_BUILD_FAILED
 };
 
-struct PBEFeasibilityResult {
+struct HAOCompatFeasibilityResult {
     bool canBuild = false;
     u32 flags = 0;
-    PBEFeasibilityReason reason = PBEFeasibilityReason::ARTIFACT_BUILD_FAILED;
+    HAOCompatFeasibilityReason reason =
+        HAOCompatFeasibilityReason::ARTIFACT_BUILD_FAILED;
 };
 
 struct HAOFeasibilityResult {
@@ -339,10 +340,11 @@ struct HAOFeasibilityResult {
     HAOFeasibilityReason reason = HAOFeasibilityReason::ARTIFACT_BUILD_FAILED;
 };
 
-using HAOCompatFeasibilityReason = PBEFeasibilityReason;
-using HAOCompatFeasibilityResult = PBEFeasibilityResult;
+using PBEFeasibilityReason = HAOCompatFeasibilityReason;
+using PBEFeasibilityResult = HAOCompatFeasibilityResult;
 
 
+/* Legacy wrapper entry points retained for compatibility. */
 bool analyzePBEFeasibility(const target_t &target,
                            const std::vector<hwlmLiteral> &lits,
                            const Grey &grey, PBEFeasibilityResult *result,

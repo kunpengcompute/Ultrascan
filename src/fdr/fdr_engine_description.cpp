@@ -426,9 +426,10 @@ unique_ptr<FDREngineDescription> getFdrDescription(u32 engineID) {
     getNeoFdrDescriptions(&neoDescs);
     allDescs.insert(allDescs.end(), neoDescs.begin(), neoDescs.end());
 
-    vector<FDREngineDescription> pbeDescs;
-    getPbeDescriptions(&pbeDescs);
-    allDescs.insert(allDescs.end(), pbeDescs.begin(), pbeDescs.end());
+    vector<FDREngineDescription> haoFamilyDescs;
+    getPbeDescriptions(&haoFamilyDescs);
+    allDescs.insert(allDescs.end(), haoFamilyDescs.begin(),
+                    haoFamilyDescs.end());
 
     for (const auto &desc : allDescs) {
         if (desc.getID() == engineID) {

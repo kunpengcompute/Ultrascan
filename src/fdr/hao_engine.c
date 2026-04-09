@@ -255,7 +255,7 @@ static void haoDumpRuntimeStats(void) {
             (unsigned long long)g_haoStats.residualConfirmMatches);
 }
 
-static int haoCompatRuleExactMatch(const struct PBERuntimeRuleMeta *rm,
+static int haoCompatRuleExactMatch(const HAOCompatRuntimeRuleMeta *rm,
                                    const struct FDR_Runtime_Args *a,
                                    size_t endPos, const u8 *literalBlob,
                                    u32 literalBlobSize) {
@@ -314,7 +314,7 @@ static int haoCompatRuleExactMatch(const struct PBERuntimeRuleMeta *rm,
 }
 
 static int haoCompatValidateLayout(const struct FDR *fdr,
-                                   const struct PBERuntimeHeader *hdr) {
+                                   const HAOCompatRuntimeHeader *hdr) {
     if (!fdr || !hdr) {
         return 0;
     }
@@ -338,22 +338,22 @@ static int haoCompatValidateLayout(const struct FDR *fdr,
         return 0;
     }
     if ((u64a)hdr->selectorsOffset + (u64a)hdr->selectorCount *
-            sizeof(struct PBERuntimeBitSelector) >
+            sizeof(HAOCompatRuntimeBitSelector) >
         (u64a)fdrMatcherBlobSize(fdr)) {
         return 0;
     }
     if ((u64a)hdr->classTableOffset + (u64a)hdr->classCount *
-            sizeof(struct PBERuntimeMaskClass) >
+            sizeof(HAOCompatRuntimeMaskClass) >
         (u64a)fdrMatcherBlobSize(fdr)) {
         return 0;
     }
     if ((u64a)hdr->secondaryOffset + (u64a)hdr->secondaryCount *
-            sizeof(struct PBERuntimeSecondaryHashEntry) >
+            sizeof(HAOCompatRuntimeSecondaryHashEntry) >
         (u64a)fdrMatcherBlobSize(fdr)) {
         return 0;
     }
     if ((u64a)hdr->ruleMetaOffset + (u64a)hdr->ruleMetaCount *
-            sizeof(struct PBERuntimeRuleMeta) >
+            sizeof(HAOCompatRuntimeRuleMeta) >
         (u64a)fdrMatcherBlobSize(fdr)) {
         return 0;
     }
@@ -362,12 +362,12 @@ static int haoCompatValidateLayout(const struct FDR *fdr,
         return 0;
     }
     {
-        const struct PBERuntimeMaskClass *classes =
-            (const struct PBERuntimeMaskClass *)((const u8 *)hdr +
+        const HAOCompatRuntimeMaskClass *classes =
+            (const HAOCompatRuntimeMaskClass *)((const u8 *)hdr +
                                                  hdr->classTableOffset);
         u32 i;
         for (i = 0; i < hdr->classCount; i++) {
-            const struct PBERuntimeMaskClass *klass = &classes[i];
+            const HAOCompatRuntimeMaskClass *klass = &classes[i];
             if (klass->classKeyBits > hdr->keyBits) {
                 return 0;
             }
@@ -1144,7 +1144,7 @@ static void haoExtractKeysFromByteLanes(
     }
 }
 
-// haoBuildBlockState函数实现了从输入数据构建一个批处理块的状态。它根据给定的块起始位置和车道数量，提取相应的数据字节，并计算每个车道的有效掩码和键值。这些信息将用于后续的批处理操作，以提高HAO引擎的性能。
+// haoBuildBlockState函数实现了从输入数据构建一个批处理块的状态。它根据给定的块起始位置和车道数量，提取相应的数据字节，并计算每个车道的有效掩码和键值。这些信息将用于后续的批处理操作，以提高HAO引擎的性能�?
 static int haoBuildBlockState(const struct HAORuntimeHeader *hdr,
                               const struct HAORuntimeBitSelector *selectors,
                               const struct FDR_Runtime_Args *a,
@@ -1342,12 +1342,12 @@ static int haoReadBlobMagic(const void *blob, u32 blobSize, u32 *magic) {
     return 1;
 }
 
-static int pbeProcessEncodedRange(
-    const struct PBERuntimeHeader *hdr,
-    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
-    const struct PBERuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
+static int haoCompatProcessEncodedRange(
+    const HAOCompatRuntimeHeader *hdr,
+    const HAOCompatRuntimeSecondaryHashEntry *secondaryHashTable,
+    const HAOCompatRuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
     u32 literalBlobSize, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, struct PBEPositionContext *ctx, u32 classKey,
+    hwlm_group_t *control, struct HAOCompatPositionContext *ctx, u32 classKey,
     u32 encoded) {
     u32 offset = 0;
     u32 count = 0;
@@ -1357,10 +1357,10 @@ static int pbeProcessEncodedRange(
         return HWLM_SUCCESS;
     }
 
-    pbeDecodePrimaryValue(encoded, &offset, &count);
+    haoCompatDecodePrimaryValue(encoded, &offset, &count);
     for (n = 0; n < count; n++) {
         const u32 off = offset + n;
-        const struct PBERuntimeSecondaryHashEntry *entry;
+        const HAOCompatRuntimeSecondaryHashEntry *entry;
         u32 laneMask;
         u32 r;
 
@@ -1369,7 +1369,7 @@ static int pbeProcessEncodedRange(
         }
 
         entry = &secondaryHashTable[off];
-        laneMask = pbeEntryMatchMaskFromContextVector(entry, ctx);
+        laneMask = haoCompatEntryMatchMaskFromContextVector(entry, ctx);
         if (!laneMask) {
             continue;
         }
@@ -1379,7 +1379,7 @@ static int pbeProcessEncodedRange(
             const u16 ridx = entry->ruleIndex[r];
             const u32 kv = entry->keyValue[r];
             const u32 km = entry->keyMask[r];
-            const struct PBERuntimeRuleMeta *rm;
+            const HAOCompatRuntimeRuleMeta *rm;
 
             if (ridx >= hdr->ruleMetaCount) {
                 continue;
@@ -1410,31 +1410,31 @@ static int pbeProcessEncodedRange(
     return HWLM_SUCCESS;
 }
 
-static int pbeProcessMaskClassesForContext(
-    const struct PBERuntimeHeader *hdr,
-    const struct PBERuntimeMaskClass *classes,
-    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
-    const struct PBERuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
+static int haoCompatProcessMaskClassesForContext(
+    const HAOCompatRuntimeHeader *hdr,
+    const HAOCompatRuntimeMaskClass *classes,
+    const HAOCompatRuntimeSecondaryHashEntry *secondaryHashTable,
+    const HAOCompatRuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
     u32 literalBlobSize, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, struct PBEPositionContext *ctx) {
+    hwlm_group_t *control, struct HAOCompatPositionContext *ctx) {
     u32 classIdx;
 
     for (classIdx = 0; classIdx < hdr->classCount; classIdx++) {
-        const struct PBERuntimeMaskClass *klass = &classes[classIdx];
+        const HAOCompatRuntimeMaskClass *klass = &classes[classIdx];
         const u8 *primaryBitmap =
             (const u8 *)hdr + klass->primaryBitmapOffset;
         const u32 *primaryHashTable =
             (const u32 *)((const u8 *)hdr + klass->primaryOffset);
-        const u32 classKey = pbeProjectKeyToClass(ctx->key, klass->classMask);
+        const u32 classKey = haoCompatProjectKeyToClass(ctx->key, klass->classMask);
 
         if (classKey >= klass->primaryCount) {
             continue;
         }
-        if (!pbePrimaryBitmapHasValue(primaryBitmap, klass->primaryBitmapSize,
+        if (!haoCompatPrimaryBitmapHasValue(primaryBitmap, klass->primaryBitmapSize,
                                       classKey)) {
             continue;
         }
-        if (pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+        if (haoCompatProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
                                    literalBlob, literalBlobSize, a, control,
                                    ctx, classKey,
                                    primaryHashTable[classKey]) ==
@@ -1446,22 +1446,22 @@ static int pbeProcessMaskClassesForContext(
     return HWLM_SUCCESS;
 }
 
-static int pbeProcessMaskClassesForLaneWithBatchState(
-    const struct PBERuntimeHeader *hdr,
-    const struct PBERuntimeMaskClass *classes,
-    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable,
-    const struct PBERuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
+static int haoCompatProcessMaskClassesForLaneWithBatchState(
+    const HAOCompatRuntimeHeader *hdr,
+    const HAOCompatRuntimeMaskClass *classes,
+    const HAOCompatRuntimeSecondaryHashEntry *secondaryHashTable,
+    const HAOCompatRuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
     u32 literalBlobSize, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, struct PBEPositionContext *ctx,
-    const struct PBEMaskClassBatchState *batchState, u32 lane) {
+    hwlm_group_t *control, struct HAOCompatPositionContext *ctx,
+    const struct HAOCompatMaskClassBatchState *batchState, u32 lane) {
     u32 classIdx;
 
     for (classIdx = 0; classIdx < hdr->classCount; classIdx++) {
-        const struct PBERuntimeMaskClass *klass = &classes[classIdx];
+        const HAOCompatRuntimeMaskClass *klass = &classes[classIdx];
         u32 classKey = 0;
         u32 encoded = 0;
 
-        if (batchState && lane < batchState->laneCount && pbeMaskClassIsHot(klass)) {
+        if (batchState && lane < batchState->laneCount && haoCompatMaskClassIsHot(klass)) {
             encoded = batchState->classEncoded[classIdx][lane];
             if (!encoded) {
                 continue;
@@ -1473,19 +1473,19 @@ static int pbeProcessMaskClassesForLaneWithBatchState(
             const u32 *primaryHashTable =
                 (const u32 *)((const u8 *)hdr + klass->primaryOffset);
 
-            classKey = pbeProjectKeyToClass(ctx->key, klass->classMask);
+            classKey = haoCompatProjectKeyToClass(ctx->key, klass->classMask);
 
             if (classKey >= klass->primaryCount) {
                 continue;
             }
-            if (!pbePrimaryBitmapHasValue(primaryBitmap, klass->primaryBitmapSize,
+            if (!haoCompatPrimaryBitmapHasValue(primaryBitmap, klass->primaryBitmapSize,
                                           classKey)) {
                 continue;
             }
             encoded = primaryHashTable[classKey];
         }
 
-        if (pbeProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+        if (haoCompatProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
                                    literalBlob, literalBlobSize, a, control,
                                    ctx, classKey,
                                    encoded) ==
@@ -1498,34 +1498,34 @@ static int pbeProcessMaskClassesForLaneWithBatchState(
 }
 
 static UNUSED
-int pbeRunNaive(const struct PBERuntimeHeader *hdr,
+int haoCompatRunNaive(const HAOCompatRuntimeHeader *hdr,
                        const struct FDR_Runtime_Args *a,
                        hwlm_group_t *control) {
     if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
         return HWLM_SUCCESS;
     }
 
-    const struct PBERuntimeBitSelector *selectors =
-        (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
+    const HAOCompatRuntimeBitSelector *selectors =
+        (const HAOCompatRuntimeBitSelector *)((const u8 *)hdr +
                                                hdr->selectorsOffset);
-    const struct PBERuntimeMaskClass *classes =
-        (const struct PBERuntimeMaskClass *)((const u8 *)hdr +
+    const HAOCompatRuntimeMaskClass *classes =
+        (const HAOCompatRuntimeMaskClass *)((const u8 *)hdr +
                                              hdr->classTableOffset);
-    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable =
-        (const struct PBERuntimeSecondaryHashEntry *)((const u8 *)hdr +
+    const HAOCompatRuntimeSecondaryHashEntry *secondaryHashTable =
+        (const HAOCompatRuntimeSecondaryHashEntry *)((const u8 *)hdr +
                                                       hdr->secondaryOffset);
-    const struct PBERuntimeRuleMeta *ruleMeta =
-        (const struct PBERuntimeRuleMeta *)((const u8 *)hdr +
+    const HAOCompatRuntimeRuleMeta *ruleMeta =
+        (const HAOCompatRuntimeRuleMeta *)((const u8 *)hdr +
                                             hdr->ruleMetaOffset);
     const u8 *literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
     const u32 literalBlobSize = hdr->literalBlobSize;
 
     size_t i;
     for (i = a->start_offset; i < a->len; i++) {
-        struct PBEPositionContext ctx;
+        struct HAOCompatPositionContext ctx;
 
-        pbeBuildPositionContext(hdr, selectors, a, i, &ctx, 1);
-        if (pbeProcessMaskClassesForContext(hdr, classes, secondaryHashTable,
+        haoCompatBuildPositionContext(hdr, selectors, a, i, &ctx, 1);
+        if (haoCompatProcessMaskClassesForContext(hdr, classes, secondaryHashTable,
                                             ruleMeta, literalBlob,
                                             literalBlobSize, a, control,
                                             &ctx) == HWLM_TERMINATED) {
@@ -1535,37 +1535,37 @@ int pbeRunNaive(const struct PBERuntimeHeader *hdr,
     return HWLM_SUCCESS;
 }
 
-static int pbeRunBatch4(const struct PBERuntimeHeader *hdr,
+static int haoCompatRunBatch(const HAOCompatRuntimeHeader *hdr,
                         const struct FDR_Runtime_Args *a,
                         hwlm_group_t *control) {
-    const struct PBERuntimeBitSelector *selectors =
-        (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
+    const HAOCompatRuntimeBitSelector *selectors =
+        (const HAOCompatRuntimeBitSelector *)((const u8 *)hdr +
                                                hdr->selectorsOffset);
-    const struct PBERuntimeMaskClass *classes =
-        (const struct PBERuntimeMaskClass *)((const u8 *)hdr +
+    const HAOCompatRuntimeMaskClass *classes =
+        (const HAOCompatRuntimeMaskClass *)((const u8 *)hdr +
                                              hdr->classTableOffset);
-    const struct PBERuntimeSecondaryHashEntry *secondaryHashTable =
-        (const struct PBERuntimeSecondaryHashEntry *)((const u8 *)hdr +
+    const HAOCompatRuntimeSecondaryHashEntry *secondaryHashTable =
+        (const HAOCompatRuntimeSecondaryHashEntry *)((const u8 *)hdr +
                                                       hdr->secondaryOffset);
-    const struct PBERuntimeRuleMeta *ruleMeta =
-        (const struct PBERuntimeRuleMeta *)((const u8 *)hdr +
+    const HAOCompatRuntimeRuleMeta *ruleMeta =
+        (const HAOCompatRuntimeRuleMeta *)((const u8 *)hdr +
                                             hdr->ruleMetaOffset);
     const u8 *literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
     const u32 literalBlobSize = hdr->literalBlobSize;
 
-    const u32 batchWidth = pbeSuggestedBatchWidth(hdr);
+    const u32 batchWidth = haoCompatSuggestedBatchWidth(hdr);
     size_t i;
     for (i = a->start_offset; i < a->len; i += batchWidth) {
-        struct PBEPositionContext ctxs[HAO_COMPAT_BATCH_MAX_WIDTH];
+        struct HAOCompatPositionContext ctxs[HAO_COMPAT_BATCH_MAX_WIDTH];
         u32 laneCount = 0;
 
-        laneCount = pbeBuildBatchContexts(hdr, selectors, a, i, batchWidth,
+        laneCount = haoCompatBuildBatchContexts(hdr, selectors, a, i, batchWidth,
                                           ctxs);
 
         if (hdr->classCount <= 2) {
             u32 lane;
             for (lane = 0; lane < laneCount; lane++) {
-                if (pbeProcessMaskClassesForContext(hdr, classes,
+                if (haoCompatProcessMaskClassesForContext(hdr, classes,
                                                     secondaryHashTable,
                                                     ruleMeta, literalBlob,
                                                     literalBlobSize, a, control,
@@ -1575,13 +1575,13 @@ static int pbeRunBatch4(const struct PBERuntimeHeader *hdr,
                 }
             }
         } else {
-            struct PBEMaskClassBatchState batchState;
+            struct HAOCompatMaskClassBatchState batchState;
             u32 lane;
-            pbeBuildMaskClassBatchState(hdr, classes, ctxs, laneCount,
+            haoCompatBuildMaskClassBatchState(hdr, classes, ctxs, laneCount,
                                         &batchState);
 
             for (lane = 0; lane < laneCount; lane++) {
-                if (pbeProcessMaskClassesForLaneWithBatchState(
+                if (haoCompatProcessMaskClassesForLaneWithBatchState(
                         hdr, classes, secondaryHashTable, ruleMeta,
                         literalBlob, literalBlobSize, a, control, &ctxs[lane],
                         &batchState, lane) == HWLM_TERMINATED) {
@@ -1595,7 +1595,7 @@ static int pbeRunBatch4(const struct PBERuntimeHeader *hdr,
 }
 
 static
-hwlm_error_t pbeExecWithPath(const struct FDR *fdr,
+hwlm_error_t haoCompatExecWithPath(const struct FDR *fdr,
                              const struct FDR_Runtime_Args *a,
                              hwlm_group_t control, int useBatch4) {
     if (!fdr || !fdrMatcherBlobOffset(fdr) || !fdrMatcherBlobSize(fdr)) {
@@ -1603,8 +1603,8 @@ hwlm_error_t pbeExecWithPath(const struct FDR *fdr,
     }
 
     const u8 *base = (const u8 *)fdr;
-    const struct PBERuntimeHeader *hdr =
-        (const struct PBERuntimeHeader *)(base + fdrMatcherBlobOffset(fdr));
+    const HAOCompatRuntimeHeader *hdr =
+        (const HAOCompatRuntimeHeader *)(base + fdrMatcherBlobOffset(fdr));
 
     if (!haoCompatValidateLayout(fdr, hdr)) {
         return HWLM_SUCCESS;
@@ -1614,8 +1614,8 @@ hwlm_error_t pbeExecWithPath(const struct FDR *fdr,
         return HWLM_SUCCESS;
     }
 
-    return useBatch4 ? pbeRunBatch4(hdr, a, &control)
-                     : pbeRunNaive(hdr, a, &control);
+    return useBatch4 ? haoCompatRunBatch(hdr, a, &control)
+                     : haoCompatRunNaive(hdr, a, &control);
 }
 
 hwlm_error_t HaoCompatEngineExecNaiveForTest(const struct FDR *fdr,
@@ -1637,34 +1637,34 @@ hwlm_error_t HaoCompatEngineExecNaiveForTest(const struct FDR *fdr,
         }
     }
 
-    return pbeExecWithPath(fdr, a, control, 0);
+    return haoCompatExecWithPath(fdr, a, control, 0);
 }
 
 u32 HaoCompatRuntimeEntryMatchMaskForTest(
     const HAOCompatRuntimeSecondaryHashEntry *entry,
     const struct FDR_Runtime_Args *a, size_t endPos, int useVector) {
-    struct PBEPositionContext ctx;
+    struct HAOCompatPositionContext ctx;
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.endPos = endPos;
-    ctx.window64 = pbeLoadWindow64Normalized(a, endPos,
+    ctx.window64 = haoCompatLoadWindow64Normalized(a, endPos,
                                              PBE_RUNTIME_BYTES_PER_RULE_SLOT);
-    ctx.validMask8 = pbeComputeValidMask8(a, endPos);
+    ctx.validMask8 = haoCompatComputeValidMask8(a, endPos);
 
-    return useVector ? pbeEntryMatchMaskFromContextVector(entry, &ctx)
-                     : pbeEntryMatchMaskFromContextScalar(entry, &ctx);
+    return useVector ? haoCompatEntryMatchMaskFromContextVector(entry, &ctx)
+                     : haoCompatEntryMatchMaskFromContextScalar(entry, &ctx);
 }
 
 u32 HaoCompatRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
                                            const u32 *primaryIdx,
                                            u32 laneCount, int usePacked) {
-    struct PBEBitmapProbeState probe;
+    struct HAOCompatBitmapProbeState probe;
 
     memset(&probe, 0, sizeof(probe));
-    pbePrepareBitmapProbeStateFromPrimaryIdx(primaryIdx, laneCount, &probe);
+    haoCompatPrepareBitmapProbeStateFromPrimaryIdx(primaryIdx, laneCount, &probe);
 
-    return usePacked ? pbeProbeBitmapPacked(bitmap, bitmapSize, &probe)
-                     : pbeProbeBitmapScalar(bitmap, bitmapSize, &probe);
+    return usePacked ? haoCompatProbeBitmapPacked(bitmap, bitmapSize, &probe)
+                     : haoCompatProbeBitmapScalar(bitmap, bitmapSize, &probe);
 }
 
 int HaoRuntimeValidateLayoutForTest(const void *blob, u32 blobSize) {
@@ -1729,7 +1729,7 @@ hwlm_error_t haoFamilyExec(const struct FDR *fdr,
         }
     }
 
-    return pbeExecWithPath(fdr, a, control, 1);
+    return haoCompatExecWithPath(fdr, a, control, 1);
 }
 
 hwlm_error_t HaoEngineExec(const struct FDR *fdr,
