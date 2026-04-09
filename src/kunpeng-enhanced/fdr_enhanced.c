@@ -33,7 +33,7 @@
 #include "../fdr/fdr_loadval.h"
 #include "../fdr/fdr_enhanced.h"
 #include "../hwlm/hwlm.h"
-#include "khsel_fdr_internal.h"
+#include "../fdr/fdr_internal.h"
 #include "simd_arm.h"
 
 #define SHIFT_BYTES_ONE 8

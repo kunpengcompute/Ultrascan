@@ -34,7 +34,7 @@
 #include "../rose/rose_internal.h"
 #include "../khsel_runtime.h"
 #include "../hwlm/hwlm.h"
-#include "khsel_fdr_internal.h"
+#include "../fdr/fdr_internal.h"
 #include "../report.h"
 #include "../util/unaligned.h"
 #include "../fdr/teddy_internal.h"
