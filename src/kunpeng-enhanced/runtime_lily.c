@@ -35,7 +35,7 @@
 #include "../khsel_runtime.h"
 #include "khsel_hwlm.h"
 #include "khsel_fdr_internal.h"
-#include "report.h"
+#include "../report.h"
 #include "../util/unaligned.h"
 #include "../fdr/teddy_internal.h"
 #include "hs_common.h"
@@ -171,7 +171,7 @@ int lilyItemReport(hs_scratch_t *scratch, const LilyMatchItem *item, const u32 *
     int halt = scratch->core_info.userCallback(onmatch, 0, toOffset, 0, scratch->core_info.userContext);
     if (halt) {
         // 标记终止状态，与原生逻辑对齐
-        scratch->core_info.status |= SCRATCH_STATUS_TERMINATED;
+        scratch->core_info.status |= STATUS_TERMINATED;
         return 1;
     }
 
@@ -322,7 +322,7 @@ int RoseDeliverReport(enum HsEngine engine_type, u64a offset, uint8_t index, s32
     u64a toOffset = offset + offset_adjust;
 
     if (index >=  8U || (unsigned long long)toOffset > LILY_TO_OFFSET_MAX) {
-        ci->status |= SCRATCH_STATUS_TERMINATED;
+        ci->status |= STATUS_TERMINATED;
         return KHSEL_MO_HALT_MATCHING;
     }
 
@@ -339,12 +339,12 @@ int RoseDeliverReport(enum HsEngine engine_type, u64a offset, uint8_t index, s32
     	ret = pushLilyItems(&item, &scratch->lily_for_teddy_ctx);
     }
     if (ret != 0) { // 暂存失败，停止后续匹配
-        ci->status |= SCRATCH_STATUS_TERMINATED;
+        ci->status |= STATUS_TERMINATED;
         return KHSEL_MO_HALT_MATCHING;
     }
 
     if (ekey != INVALID_EKEY) {
-        MarkAsMatched(ci->rose, ci->exhaustionVector, ekey);
+        markAsMatched(ci->rose, ci->exhaustionVector, ekey);
         return KHSEL_MO_CONTINUE_MATCHING;
     } else {
         return KHSEL_ROSE_CONTINUE_MATCHING_NO_EXHAUST;
@@ -368,7 +368,7 @@ int lilyMatch(u64a conf, const u32 *ekeyVec, u8 flagsQuiet, const u8 *ptr, hs_sc
 
         // 只有当规则不是quiet模式时才上报
         if ((ekeyVec[index] == INVALID_EKEY ||
-            !IsExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) &&
+            !isExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) &&
             !(flagsQuiet & (1 << index))) {
             i = scratch->core_info.buf_offset + ptr - scratch->core_info.buf + byte;
             int ret = RoseDeliverReport(HS_ENGINE_LILY, i + 1 , index, 0, scratch, ekeyVec[index]);
@@ -397,7 +397,7 @@ int lilyForTeddyMatch(u64a conf, const u32 *ekeyVec, u8 flagsQuiet, const u8 *pt
         conf = conf & (conf - 1);
 
         if ((ekeyVec[index] == INVALID_EKEY ||
-            !IsExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) &&
+            !isExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) &&
             !(flagsQuiet & (1 << index))) {
             i = scratch->core_info.buf_offset + ptr - scratch->core_info.buf + byte;
             if (i < scratch->core_info.buf_offset + scratch->core_info.len && i >= lenVec[index] - 1) {
