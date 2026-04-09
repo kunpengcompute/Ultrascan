@@ -21,7 +21,6 @@
 #include "rose/rose_internal.h"
 #include "scratch.h"
 #include "ue2common.h"
-//#include "simd_arm.h"
 
 #ifdef __cplusplus
 extern "C"

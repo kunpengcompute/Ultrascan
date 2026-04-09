@@ -32,8 +32,7 @@
 #define REPORT_H
 
 #include "ue2common.h"
-#include "simd_arm.h"
-#include "multbit.h"
+#include "../util/multibit.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -49,13 +48,13 @@ extern "C"
 static REALLY_INLINE
 int IsExhausted(const struct RoseEngine *rose, const char *evec, u32 ekey)
 {
-    return MMbit_isset((const u8 *)evec, rose->ekeyCount, ekey);
+    return mmbit_isset((const u8 *)evec, rose->ekeyCount, ekey);
 }
 
 static REALLY_INLINE
 void MarkAsMatched(const struct RoseEngine *rose, char *evec, u32 ekey)
 {
-    MMbit_set((u8 *)evec, rose->ekeyCount, ekey);
+    mmbit_set((u8 *)evec, rose->ekeyCount, ekey);
 }
 
 #ifdef __cplusplus
