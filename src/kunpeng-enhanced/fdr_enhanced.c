@@ -34,7 +34,7 @@
 #include "../fdr/fdr_enhanced.h"
 #include "../hwlm/hwlm.h"
 #include "../fdr/fdr_internal.h"
-#include "simd_arm.h"
+#include "../util/simd_arm.h"
 
 #define SHIFT_BYTES_ONE 8
 #define SHIFT_BYTES_TWO 16
@@ -260,7 +260,7 @@ static REALLY_INLINE m128 KHSEL_GetInitState(const struct FDR *fdr, u8 len_histo
         /* +1: the zones ensure that we can read the byte at z->end */
         u32 tmp = lv_u16(inZ->start + inZ->shift - 1, inZ->buf, inZ->end + 1);
         tmp &= fdr->domainMask;
-        state = Load_m128_from_u64a(ft + tmp);
+        state = load_m128_from_u64a(ft + tmp);
         state = RshiftOnebyte_m128(state);
     } else {
         state = fdr->start;
@@ -328,7 +328,7 @@ static REALLY_INLINE void KHSEL_CreateShortZone(const u8 *buf, const u8 *hend, c
 
     static const size_t ZONE_SHORT_DATA_OFFSET = 16; /* after history */
 
-    *(m128 *)inZ->buf = Loadu128(hend - sizeof(m128));
+    *(m128 *)inZ->buf = loadu128(hend - sizeof(m128));
 
     /* The amount of data we have to copy from main buffer. */
     size_t copy_len = KHSEL_MIN((size_t)(end - buf),
@@ -372,12 +372,12 @@ static REALLY_INLINE void KHSEL_CreateShortZone(const u8 *buf, const u8 *hend, c
                              UnalignedLoadU64a(end - sizeof(u64a)));
         break;
     case 16:
-        *(m128 *)zone_data = Loadu128(end - SHIFT_BYTES_TWO);
+        *(m128 *)zone_data = loadu128(end - SHIFT_BYTES_TWO);
         break;
     default:
         *(u64a *)zone_data = UnalignedLoadU64a(end - copy_len);
-        Storeu128(zone_data + copy_len - sizeof(m128),
-                  Loadu128(end - sizeof(m128)));
+        storeu128(zone_data + copy_len - sizeof(m128),
+                  loadu128(end - sizeof(m128)));
         break;
     }
 
@@ -405,7 +405,7 @@ static REALLY_INLINE void KHSEL_CreateStartZone(const u8 *buf, const u8 *hend, c
     inZ->start = z_end - KHSEL_ITER_BYTES;
     Unaligned_store_u64a(inZ->buf + ZONE_START_BEGIN,
                          UnalignedLoadU64a(end - copy_len));
-    Storeu128(z_end - sizeof(m128), Loadu128(end - sizeof(m128)));
+    storeu128(z_end - sizeof(m128), loadu128(end - sizeof(m128)));
     inZ->zone_pointer_adjust = (ptrdiff_t)((uintptr_t)end - (uintptr_t)z_end);
 }
 
@@ -438,9 +438,9 @@ static REALLY_INLINE void KHSEL_CreateEndZone(const u8 *buf, const u8 *begin, co
                          UnalignedLoadU64a(end_first - copy_len_first));
 
     /* copy the last 16 bytes, may overlap with the previous 8 byte write */
-    Storeu128(z_end_first - sizeof(m128), Loadu128(end_first - sizeof(m128)));
+    storeu128(z_end_first - sizeof(m128), loadu128(end_first - sizeof(m128)));
     if (unlikely(iter_bytes_second)) {
-        Storeu128(z_end - sizeof(m128), Loadu128(end - sizeof(m128)));
+        storeu128(z_end - sizeof(m128), loadu128(end - sizeof(m128)));
     }
 
     inZ->zone_pointer_adjust = (ptrdiff_t)((uintptr_t)end - (uintptr_t)z_end);
@@ -523,8 +523,8 @@ hwlm_error_t KHSEL_FdrEngineExec(const struct FDR *fdr,
     for (size_t curZone = 0; curZone < numZone; curZone++) {
         struct zone *z = &zones[curZone];
         u8 shift = z->shift;
-        state = Variable_byte_shift_m128(state, shift);
-        state = Or128(state, Load128(khsel_zone_or_mask[shift]));
+        state = variable_byte_shift_m128(state, shift);
+        state = or128(state, Load128(khsel_zone_or_mask[shift]));
         switch (stride) {
         case 0x1:
             KHSEL_FDR_MAIN_LOOP(z, state, KHSELGetConfStrideOne);
@@ -563,8 +563,8 @@ hwlm_error_t KHSEL_NeoFdrEngineExec(const struct FDR *fdr,
     for (size_t curZone = 0; curZone < numZone; curZone++) {
         struct zone *z = &zones[curZone];
         u8 shift = z->shift;
-        state = Variable_byte_shift_m128(state, shift);
-        state = Or128(state, Load128(khsel_zone_or_mask[shift]));
+        state = variable_byte_shift_m128(state, shift);
+        state = or128(state, Load128(khsel_zone_or_mask[shift]));
         switch (stride) {
         case 0x1:
             KHSEL_FDR_MAIN_LOOP(z, state, KHSELGetConfStrideOne);

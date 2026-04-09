@@ -68,6 +68,8 @@ extern const char vbs_mask_data[];
 #ifdef __cplusplus
 }
 #endif
+#define CTZ64(z) (u32)__builtin_ctzll(z)
+#define CLZ32(z) (u32)__builtin_clz(z)
 
 /*
 ** extend 4.8.5 neon inline assembly functions
@@ -81,6 +83,100 @@ vmvnq_u64(uint64x2_t a) {
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wshadow"
+
+static REALLY_INLINE u8 Compare128(m128 a, m128 b) {
+    u8 result = 0xF;
+    uint8x16_t mask = vceqq_u8(a.vect_u8, b.vect_u8);
+    u8 res[16];
+    vst1q_u8(res, mask);
+    for (int i = 0;i < 16;i++) {
+        result &= res[i];
+    }
+    return result;
+}
+
+/// Perform an unaligned 64-bit load
+static REALLY_INLINE u64a UnalignedLoadU64a(const void *inPtr) {
+    struct unaligned { u64a u; };
+    const struct unaligned *uptr = (const struct unaligned *)inPtr;
+    return uptr->u;
+}
+
+static REALLY_INLINE u16 UnalignedLoadU16(const void *inPtr) {
+    struct unaligned { u16 u; };
+    const struct unaligned *uptr = (const struct unaligned *)inPtr;
+    return uptr->u;
+}
+
+/// Perform an unaligned 32-bit load
+static REALLY_INLINE u32 Unaligned_load_u32(const void *inPtr) {
+    struct unaligned { u32 u; };
+    const struct unaligned *uptr = (const struct unaligned *)inPtr;
+    return uptr->u;
+}
+
+/// Perform an unaligned 32-bit store
+static REALLY_INLINE void Unaligned_store_u32(void *inPtr, u32 val) {
+    struct unaligned { u32 u; };
+    struct unaligned *uptr = (struct unaligned *)inPtr;
+    uptr->u = val;
+}
+
+/// Perform an unaligned 64-bit store
+static REALLY_INLINE void Unaligned_store_u64a(void *inPtr, u64a val) {
+    struct unaligned { u64a u; };
+    struct unaligned *uptr = (struct unaligned *)inPtr;
+    uptr->u = val;
+}
+
+// aligned load
+static REALLY_INLINE m128 Load128(const void *inPtr) {
+    inPtr = assume_aligned(inPtr, 16);
+    m128 rst;
+    rst.vect_s32 = vld1q_s32((const int32_t *)inPtr);
+    return rst;
+}
+
+static REALLY_INLINE m128 RshiftOnebyte_m128(m128 a) {
+    m128 zeroVect;
+    zeroVect.vect_s8 = vdupq_n_s8(0);
+    m128 rst;
+    rst.vect_s8 =  vextq_s8(a.vect_s8, zeroVect.vect_s8, 1);
+    return rst;
+}
+
+static REALLY_INLINE m128 Rshift8_m128(m128 a, int imm8) {
+    if (unlikely(imm8 == 0)) {
+        return a;
+    }
+    m128 result;
+    result.vect_u8 = vshrq_n_u8(a.vect_u8, imm8);
+    return result;
+}
+
+static REALLY_INLINE m128 Rshift64_m128(m128 a, int imm8) {
+    assert(imm8 >= 0 && imm8 <= 63);
+    if (unlikely(imm8 == 0)) {
+        return a;
+    }
+    m128 result;
+    result.vect_u64 = vshrq_n_u64(a.vect_u64, imm8);
+    return result;
+}
+static REALLY_INLINE u32 FindAndClearLSB_64(u64a *v) {
+    u64a val = *v, offset;
+    offset = CTZ64(val);
+    *v = val & (val - 1);
+    return (u32)offset;
+}
+static REALLY_INLINE m128 Pshufb_m128_opt(m128 a, m128 b) {
+    m128 result;
+    __asm__ __volatile__("tbl %0.16b, {%1.16b}, %2.16b        \n\t"
+                         : "=w"(result)
+                         : "w"(a), "w"(b)
+                         : "v3");
+    return result;
+}
 
 static really_inline m128 extbyte_m128(m128 a, m128 b, int imm8) {
     assert(imm8 >= 0 && imm8 <= 15);
