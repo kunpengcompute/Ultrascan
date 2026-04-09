@@ -277,12 +277,12 @@ const u32 *getHaoPrimaryTable(const HAORuntimeHeader *hdr) {
 }
 
 static
-const PBERuntimeSecondaryHashEntry *getHaoSecondaryTable(
+const HAORuntimeSecondaryHashEntry *getHaoSecondaryTable(
     const HAORuntimeHeader *hdr) {
     if (!hdr) {
         return nullptr;
     }
-    return reinterpret_cast<const PBERuntimeSecondaryHashEntry *>(
+    return reinterpret_cast<const HAORuntimeSecondaryHashEntry *>(
         reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
 }
 
@@ -464,6 +464,30 @@ std::string slotVectorString(const PBESecondaryHashEntry &entry, u32 slot,
 }
 
 static
+std::string slotVectorString(const HAOSecondaryHashEntry &entry, u32 slot,
+                             bool activeOnly) {
+    const u32 laneBase = slot * PBE_BYTES_PER_RULE_SLOT;
+    std::string out;
+
+    out.reserve(PBE_BYTES_PER_RULE_SLOT);
+    for (u32 i = 0; i < PBE_BYTES_PER_RULE_SLOT; i++) {
+        const u8 ctrl = entry.tableControl[laneBase + i];
+        const bool active = ctrl != 0x80;
+        if (activeOnly && !active) {
+            continue;
+        }
+        out.push_back(active ? printableOrDot(entry.ruleVector[laneBase + i])
+                             : '.');
+    }
+    return out;
+}
+
+static
+u32 haoSlotCount(u8 slotMask) {
+    return popcount32(slotMask & ((1U << PBE_RULE_SLOTS_PER_ENTRY) - 1U));
+}
+
+static
 void dumpBitmapBytes(std::ostream &os, const std::vector<u8> &bytes,
                      const std::string &indent) {
     bool sawNonZero = false;
@@ -576,15 +600,15 @@ HAOInspectStats computeHaoInspectStats(const bytecode_ptr<u8> &blob) {
         return stats;
     }
 
-    const auto *primary = getHaoPrimaryTable(hdr);
     const auto *bitmap = getHaoPrimaryBitmap(hdr);
+    const auto *primary = getHaoPrimaryTable(hdr);
     const auto *secondary = getHaoSecondaryTable(hdr);
 
     stats.bitmapBytes = hdr->primaryBitmapSize;
     stats.totalL2Entries = hdr->secondaryCount ? hdr->secondaryCount - 1 : 0;
 
     for (u32 i = 0; i < hdr->secondaryCount; i++) {
-        stats.totalRulesInL2 += secondary[i].ruleCount;
+        stats.totalRulesInL2 += haoSlotCount(secondary[i].slotMask);
     }
     /* Read-only inspection of the HAO global single-table layout for runtime validation tests. */
     for (u32 i = 0; i < hdr->primaryCount; i++) {
@@ -1323,7 +1347,7 @@ TEST(PBECompile, BuildHaoGlobalBlobSecondaryEntriesMatchArtifacts) {
     for (u32 i = 0; i < hdr->secondaryCount; i++) {
         const auto &src = artifacts.haoGlobalHash.secondaryHashTable[i];
         const auto &dst = secondary[i];
-        EXPECT_EQ(src.ruleCount, dst.ruleCount) << "entry=" << i;
+        EXPECT_EQ(src.slotMask, dst.slotMask) << "entry=" << i;
         EXPECT_EQ(src.headMask, dst.headMask) << "entry=" << i;
         EXPECT_EQ(src.tailMask, dst.tailMask) << "entry=" << i;
         for (u32 j = 0; j < PBE_RUNTIME_RULE_VECTOR_BYTES; j++) {
@@ -1335,10 +1359,6 @@ TEST(PBECompile, BuildHaoGlobalBlobSecondaryEntriesMatchArtifacts) {
         for (u32 slot = 0; slot < PBE_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
             EXPECT_EQ(src.ruleIndex[slot], dst.ruleIndex[slot])
                 << "entry=" << i << " slot=" << slot;
-            EXPECT_EQ(src.keyValue[slot], dst.keyValue[slot])
-                << "entry=" << i << " keyValue slot=" << slot;
-            EXPECT_EQ(src.keyMask[slot], dst.keyMask[slot])
-                << "entry=" << i << " keyMask slot=" << slot;
         }
     }
 }
@@ -2377,7 +2397,10 @@ TEST(PBECompile, HaoGlobalHashStoresAnchorConfirmFragments) {
     bool found = false;
     for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
         const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
-        for (u32 slot = 0; slot < entry.ruleCount; slot++) {
+        for (u32 slot = 0; slot < PBE_RULE_SLOTS_PER_ENTRY; slot++) {
+            if (!(entry.slotMask & (1U << slot))) {
+                continue;
+            }
             if (entry.ruleIndex[slot] != plan.ruleIndex) {
                 continue;
             }
@@ -2414,7 +2437,10 @@ TEST(PBECompile, HaoGlobalHashStoresVerifierFragments) {
     bool found = false;
     for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
         const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
-        for (u32 slot = 0; slot < entry.ruleCount; slot++) {
+        for (u32 slot = 0; slot < PBE_RULE_SLOTS_PER_ENTRY; slot++) {
+            if (!(entry.slotMask & (1U << slot))) {
+                continue;
+            }
             if (entry.ruleIndex[slot] != plan.ruleIndex) {
                 continue;
             }
@@ -2452,7 +2478,10 @@ TEST(PBECompile, HaoGlobalHashTableControlEncodesShuffleBytes) {
     bool found = false;
     for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
         const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
-        for (u32 slot = 0; slot < entry.ruleCount; slot++) {
+        for (u32 slot = 0; slot < PBE_RULE_SLOTS_PER_ENTRY; slot++) {
+            if (!(entry.slotMask & (1U << slot))) {
+                continue;
+            }
             if (entry.ruleIndex[slot] != plan.ruleIndex) {
                 continue;
             }
@@ -3045,19 +3074,23 @@ TEST(PBEInspect, DumpSelectorsAndHashTables) {
               << " (entry0 is null)\n";
     for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
         const auto &e = artifacts.haoGlobalHash.secondaryHashTable[i];
+        const u32 ruleCount = haoSlotCount(e.slotMask);
         std::cout << "  HAO-L2[" << i << "]"
-                  << " ruleCount=" << e.ruleCount
+                  << " ruleCount=" << ruleCount
                   << " entryCapacity=" << PBE_RULE_SLOTS_PER_ENTRY
                   << " headMask=0x" << std::hex << e.headMask
                   << " tailMask=0x" << e.tailMask << std::dec
                   << " headMaskBits=" << maskToBin(e.headMask)
                   << " tailMaskBits=" << maskToBin(e.tailMask) << "\n";
-        for (u32 j = 0; j < e.ruleCount && j < PBE_RULE_SLOTS_PER_ENTRY; j++) {
+        std::cout << "    slotMask=0x" << std::hex
+                  << static_cast<u32>(e.slotMask) << std::dec << "\n";
+        for (u32 j = 0; j < PBE_RULE_SLOTS_PER_ENTRY; j++) {
+            if (!(e.slotMask & (1U << j))) {
+                continue;
+            }
             const u16 ridx = e.ruleIndex[j];
             std::cout << "    slot" << j
                       << ": ruleIndex=" << ridx
-                      << " keyValue=0x" << std::hex << e.keyValue[j]
-                      << " keyMask=0x" << e.keyMask[j] << std::dec
                       << " vectorFull=\"" << slotVectorString(e, j, false) << "\""
                       << " vectorActive=\"" << slotVectorString(e, j, true) << "\""
                       << " tbl=[";

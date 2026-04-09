@@ -111,6 +111,16 @@ struct PBESecondaryHashEntry {
     u16 reserved;
 };
 
+struct HAOSecondaryHashEntry {
+    u8 ruleVector[PBE_RULE_VECTOR_BYTES];
+    u8 tableControl[PBE_TBL_CONTROL_BYTES];
+    u16 ruleIndex[PBE_RULE_SLOTS_PER_ENTRY];
+    u32 headMask;
+    u32 tailMask;
+    u8 slotMask;
+    u8 reserved[3];
+};
+
 struct PBERuleMeta {
     u32 id;
     hwlm_group_t groups;
@@ -201,7 +211,7 @@ struct HAOGlobalHashArtifacts {
     u32 fullKeyMask = 0;
     PBEPrimaryHashTable primaryHashTable;
     PBEPrimaryHashBitmap primaryHashBitmap;
-    std::vector<PBESecondaryHashEntry> secondaryHashTable;
+    std::vector<HAOSecondaryHashEntry> secondaryHashTable;
     HAOGlobalHashStats stats;
 };
 

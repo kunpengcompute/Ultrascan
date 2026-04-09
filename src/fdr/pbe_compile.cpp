@@ -445,9 +445,9 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
  * 当前阶段先把“可向量校验的确定性片段”落入全局单表，后续 runtime v2
  * 会直接消费这些 fragment。 */
 static
-void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan, u32 keyValue,
-                                  u32 fullKeyMask, u32 localSlot,
-                                  PBESecondaryHashEntry *entry) {
+void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan,
+                                  u32 localSlot,
+                                  HAOSecondaryHashEntry *entry) {
     assert(entry);
     const u32 laneBase = localSlot * PBE_BYTES_PER_RULE_SLOT;
     const u8 validMask = plan.verifier.validByteMask;
@@ -460,8 +460,7 @@ void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan, u32 keyValue,
     }
 
     entry->ruleIndex[localSlot] = verify_u16(plan.ruleIndex);
-    entry->keyValue[localSlot] = keyValue;
-    entry->keyMask[localSlot] = fullKeyMask;
+    entry->slotMask |= verify_u8(1U << localSlot);
 
     for (u32 i = 0; i < PBE_BYTES_PER_RULE_SLOT; i++) {
         if (!(validMask & (1U << i))) {
@@ -505,7 +504,7 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
     out->primaryHashTable.offsets.assign(primaryCount, 0);
 
     /* secondary[0] 保留为空，和现有 runtime null target 约定保持一致。 */
-    out->secondaryHashTable.push_back(PBESecondaryHashEntry{});
+    out->secondaryHashTable.push_back(HAOSecondaryHashEntry{});
 
     std::map<u32, std::vector<u32>> keyToRuleIndexes;
     for (const auto &plan : rulePlans) {
@@ -547,19 +546,17 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
             std::max(out->stats.maxEntriesPerKey, entryCount);
 
         for (u32 chunk = 0; chunk < entryCount; chunk++) {
-            PBESecondaryHashEntry entry = {};
+            HAOSecondaryHashEntry entry = {};
             memset(entry.tableControl, 0x80, sizeof(entry.tableControl));
             const size_t begin = chunk * PBE_RULE_SLOTS_PER_ENTRY;
             const size_t end = std::min(bucketRules.size(),
                                         begin + PBE_RULE_SLOTS_PER_ENTRY);
-            entry.ruleCount = verify_u16(end - begin);
 
             for (size_t slot = begin; slot < end; slot++) {
                 const u32 localSlot = verify_u32(slot - begin);
                 const u32 ruleIndex = bucketRules[slot];
                 assert(ruleIndex < rulePlans.size());
-                haoFillSecondarySlotFromPlan(rulePlans[ruleIndex], key,
-                                             out->fullKeyMask, localSlot,
+                haoFillSecondarySlotFromPlan(rulePlans[ruleIndex], localSlot,
                                              &entry);
             }
 
@@ -678,6 +675,11 @@ char dumpPrintableOrDot(u8 c) {
 }
 
 static
+u32 haoSecondarySlotCount(u8 slotMask) {
+    return popcount32(slotMask & ((1U << PBE_RULE_SLOTS_PER_ENTRY) - 1U));
+}
+
+static
 std::string l2VectorString(const u8 *rv, const u8 *tc, bool activeOnly) {
     std::string out;
 
@@ -742,18 +744,22 @@ void dumpHashTables(const PBECompileArtifacts &artifacts,
         for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size();
              i++) {
             const auto &e = artifacts.haoGlobalHash.secondaryHashTable[i];
+            const u32 ruleCount = haoSecondarySlotCount(e.slotMask);
             printf("  HAO-L2[%u] ruleCount=%u entryCapacity=%u headMask=0x%08x tailMask=0x%08x\n",
-                   i, (u32)e.ruleCount, PBE_RULE_SLOTS_PER_ENTRY, e.headMask,
+                   i, ruleCount, PBE_RULE_SLOTS_PER_ENTRY, e.headMask,
                    e.tailMask);
             printf("    headMaskBits=%s\n", maskToBits(e.headMask).c_str());
             printf("    tailMaskBits=%s\n", maskToBits(e.tailMask).c_str());
-            for (u32 j = 0; j < e.ruleCount && j < PBE_RULE_SLOTS_PER_ENTRY;
-                 j++) {
+            printf("    slotMask=0x%02x\n", (u32)e.slotMask);
+            for (u32 j = 0; j < PBE_RULE_SLOTS_PER_ENTRY; j++) {
+                if (!(e.slotMask & (1U << j))) {
+                    continue;
+                }
                 const u16 ridx = e.ruleIndex[j];
                 const u8 *rv = &e.ruleVector[j * PBE_BYTES_PER_RULE_SLOT];
                 const u8 *tc = &e.tableControl[j * PBE_BYTES_PER_RULE_SLOT];
-                printf("    slot%u: ruleIndex=%u keyValue=0x%x keyMask=0x%x vectorFull=\"%s\" vectorActive=\"%s\" tbl=[",
-                       j, (u32)ridx, e.keyValue[j], e.keyMask[j],
+                printf("    slot%u: ruleIndex=%u vectorFull=\"%s\" vectorActive=\"%s\" tbl=[",
+                       j, (u32)ridx,
                        l2VectorString(rv, tc, false).c_str(),
                        l2VectorString(rv, tc, true).c_str());
                 for (u32 k = 0; k < PBE_BYTES_PER_RULE_SLOT; k++) {
@@ -1743,7 +1749,7 @@ bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
     const size_t primaryBytes =
         sizeof(u32) * artifacts.haoGlobalHash.primaryHashTable.offsets.size();
     const size_t secondaryBytes =
-        sizeof(PBERuntimeSecondaryHashEntry) *
+        sizeof(HAORuntimeSecondaryHashEntry) *
         artifacts.haoGlobalHash.secondaryHashTable.size();
     const size_t ruleMetaBytes =
         sizeof(HAORuntimeRuleMeta) * artifacts.ruleMeta.size();
@@ -1815,19 +1821,17 @@ bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
     }
     if (secondaryBytes) {
         auto *secondaryOut =
-            reinterpret_cast<PBERuntimeSecondaryHashEntry *>(base + secondaryOffset);
+            reinterpret_cast<HAORuntimeSecondaryHashEntry *>(base + secondaryOffset);
         for (u32 i = 0; i < secondaryCount; i++) {
             const auto &src = artifacts.haoGlobalHash.secondaryHashTable[i];
             auto &dst = secondaryOut[i];
             memcpy(dst.ruleVector, src.ruleVector, sizeof(dst.ruleVector));
             memcpy(dst.tableControl, src.tableControl, sizeof(dst.tableControl));
             memcpy(dst.ruleIndex, src.ruleIndex, sizeof(dst.ruleIndex));
-            memcpy(dst.keyValue, src.keyValue, sizeof(dst.keyValue));
-            memcpy(dst.keyMask, src.keyMask, sizeof(dst.keyMask));
             dst.headMask = src.headMask;
             dst.tailMask = src.tailMask;
-            dst.ruleCount = src.ruleCount;
-            dst.reserved = 0;
+            dst.slotMask = src.slotMask;
+            memset(dst.reserved, 0, sizeof(dst.reserved));
         }
     }
 

@@ -24,7 +24,7 @@
 #define PBE_RUNTIME_EXTRACT_MODE_BEXT 1U
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 4U
+#define HAO_RUNTIME_VERSION 5U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 
 #define PBE_RUNTIME_MASK_CLASS_FLAG_HOT (1U << 0)
@@ -114,6 +114,16 @@ struct PBERuntimeSecondaryHashEntry {
     u32 tailMask;
     u16 ruleCount;
     u16 reserved;
+};
+
+struct HAORuntimeSecondaryHashEntry {
+    u8 ruleVector[PBE_RUNTIME_RULE_VECTOR_BYTES];
+    u8 tableControl[PBE_RUNTIME_TBL_CONTROL_BYTES];
+    u16 ruleIndex[PBE_RUNTIME_RULE_SLOTS_PER_ENTRY];
+    u32 headMask;
+    u32 tailMask;
+    u8 slotMask;
+    u8 reserved[3];
 };
 
 struct PBERuntimeRuleMeta {
