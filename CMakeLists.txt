@@ -1215,8 +1215,8 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
         src/kunpeng-enhanced/khsel_runtime.h
         src/kunpeng-enhanced/multbit.h
         src/kunpeng-enhanced/report.h
-        src/kunpeng-enhanced/rose_internal.h
-        src/kunpeng-enhanced/scratch.h
+#        src/kunpeng-enhanced/rose_internal.h
+#         src/kunpeng-enhanced/scratch.h
         src/kunpeng-enhanced/simd_arm.h
 #        src/kunpeng-enhanced/simd_types.h
     )

@@ -42,7 +42,7 @@
  * This header contains functions for using compiled Hyperscan databases for
  * scanning data at runtime.
  */
-#include "rose_internal.h"
+#include "../rose/rose_internal.h"
 #include "scratch.h"
 #include "../ue2common.h"
 #include "simd_arm.h"

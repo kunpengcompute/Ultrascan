@@ -31,7 +31,7 @@
 #include <string.h>
 #include "khsel_core.h"
 #include "core_precomp.h"
-#include "rose_internal.h"
+#include "../rose/rose_internal.h"
 #include "khsel_runtime.h"
 #include "khsel_hwlm.h"
 #include "khsel_fdr_internal.h"

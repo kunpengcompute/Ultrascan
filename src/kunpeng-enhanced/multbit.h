@@ -32,7 +32,7 @@
 #define MULTIBIT_H
 
 #include "ue2common.h"
-#include "rose_internal.h"
+#include "../rose/rose_internal.h"
 #include "scratch.h"
 #include "simd_arm.h"
 
