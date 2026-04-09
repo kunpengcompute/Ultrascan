@@ -32,7 +32,7 @@
 #define FDR_INTERNAL_H
 
 #include "ue2common.h"
-#include "khsel_hwlm.h" // for hwlm_group_t, HWLMCallback
+#include "../hwlm/hwlm.h" // for hwlm_group_t, HWLMCallback
 
 struct hs_scratch;
 

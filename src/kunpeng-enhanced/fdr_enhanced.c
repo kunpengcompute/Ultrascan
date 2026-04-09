@@ -29,10 +29,10 @@
  */
 
 #include "core_precomp.h"
-#include "fdr_confirm_runtime.h"
+#include "../fdr/fdr_confirm_runtime.h"
 #include "../fdr/fdr_loadval.h"
 #include "../fdr/fdr_enhanced.h"
-#include "khsel_hwlm.h"
+#include "../hwlm/hwlm.h"
 #include "khsel_fdr_internal.h"
 #include "simd_arm.h"
 
@@ -302,7 +302,7 @@ static REALLY_INLINE void KHSEL_DoConfirmFdr(u64a *conf, u8 offset, hwlmcb_rv_t 
             continue;
         }
         u64a confVal = UnalignedLoadU64a(confLoc + byteNum - sizeof(u64a) + 1);
-        KHSEL_ConfWithBit(fdrc, a, ptr_main - a->buf + byteNum, control,
+        confWithBit(fdrc, a, ptr_main - a->buf + byteNum, control,
                     last_match_id, confVal, conf, bit);
     } while (unlikely(!!*conf));
 }
