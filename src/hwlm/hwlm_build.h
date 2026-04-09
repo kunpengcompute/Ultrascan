@@ -86,10 +86,11 @@ struct HWLMProto {
     bool make_small = false;
 
     /**
-     * \brief Optional cached PBE compile artifacts, used to avoid rebuilding
-     * during table generation once feasibility has already been established.
+     * \brief Optional cached HAO compatibility-layout compile artifacts, used
+     * to avoid rebuilding during table generation once feasibility has already
+     * been established.
      */
-    std::unique_ptr<PBECompileArtifacts> pbeArtifacts;
+    std::unique_ptr<PBECompileArtifacts> haoCompatArtifacts;
 
     /**
      * \brief Optional cached HAO v2 compile artifacts, used when proto build

@@ -36,7 +36,7 @@
 #include "fdr_confirm.h"
 #include "fdr_compile_internal.h"
 #include "fdr_engine_description.h"
-#include "pbe_compile.h"
+#include "hao_compile.h"
 #include "teddy_compile.h"
 #include "teddy_engine_description.h"
 #include "grey.h"
@@ -995,14 +995,14 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
             return proto;
         }
 
-        PBECompileArtifacts legacyPbeArtifacts;
+        HAOCompatCompileArtifacts legacyCompatArtifacts;
         if (tryBuildHaoCompatProtoArtifacts(target, lits, grey,
-                                            &legacyPbeArtifacts)) {
+                                            &legacyCompatArtifacts)) {
             auto proto = ue2::make_unique<HWLMProto>(
                 engType, move(haoFamilyDes), lits, haoFamilyBucketToLits,
                 make_small);
-            proto->pbeArtifacts = ue2::make_unique<PBECompileArtifacts>(
-                std::move(legacyPbeArtifacts));
+            proto->haoCompatArtifacts = ue2::make_unique<HAOCompatCompileArtifacts>(
+                std::move(legacyCompatArtifacts));
             proto->useHaoV2Layout = false;
             return proto;
         }
@@ -1088,16 +1088,16 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
                 return nullptr;
             }
         } else {
-            PBECompileArtifacts rebuiltArtifacts;
+            HAOCompatCompileArtifacts rebuiltCompatArtifacts;
             // Rebuild from final proto.lits at table-build time. proto.lits may be
             // updated after proto construction (e.g. Rose program offsets), so
             // stale cached artifacts can carry invalid rule IDs.
-            if (!buildHAOCompatArtifacts(proto.lits, &rebuiltArtifacts, false)) {
+            if (!buildHAOCompatArtifacts(proto.lits, &rebuiltCompatArtifacts, false)) {
                 return nullptr;
             }
-            const PBECompileArtifacts *artifacts = &rebuiltArtifacts;
+            const HAOCompatCompileArtifacts *artifacts = &rebuiltCompatArtifacts;
             if (artifacts->flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
-                assert(0 && "PBE feasibility mismatch: partial coverage in table build");
+                assert(0 && "HAO compat feasibility mismatch: partial coverage in table build");
                 return nullptr;
             }
             matcherBlob = buildHAOCompatBlob(*artifacts);

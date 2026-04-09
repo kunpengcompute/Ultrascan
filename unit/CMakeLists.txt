@@ -86,7 +86,7 @@ set(unit_internal_SOURCES
     internal/database.cpp
     internal/depth.cpp
     internal/fdr.cpp
-    internal/pbe_vs_neo.cpp
+    internal/hao_vs_neo.cpp
     internal/fdr_flood.cpp
     internal/fdr_loadval.cpp
     internal/flat_set.cpp

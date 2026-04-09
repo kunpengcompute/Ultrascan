@@ -26,9 +26,13 @@ hwlm_error_t KHSEL_NeoFdrEngineExec(const struct FDR *fdr,
                              const struct FDR_Runtime_Args *a,
                              hwlm_group_t control);
 
+hwlm_error_t HaoEngineExec(const struct FDR *fdr,
+                           const struct FDR_Runtime_Args *a,
+                           hwlm_group_t control);
+
 hwlm_error_t PbeEngineExec(const struct FDR *fdr,
-                             const struct FDR_Runtime_Args *a,
-                             hwlm_group_t control);
+                          const struct FDR_Runtime_Args *a,
+                          hwlm_group_t control);
 #ifdef __cplusplus
 }
 #endif // __cplusplus
