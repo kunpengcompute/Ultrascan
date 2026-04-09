@@ -568,9 +568,11 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
     out->valid = true;
 }
 
+// 基于 selected bits 构建提取描述符，目前分为 scalar 和 bext 两种模式。
+template <class ArtifactsT>
 static
 void buildExtractDescriptor(const std::vector<PBEBitSelector> &selectors,
-                            PBECompileArtifacts *artifacts) {
+                            ArtifactsT *artifacts) {
     if (!artifacts) {
         return;
     }
@@ -582,7 +584,8 @@ void buildExtractDescriptor(const std::vector<PBEBitSelector> &selectors,
     if (selectors.empty() || selectors.size() > PBE_MAX_SELECTORS) {
         return;
     }
-
+    
+    // 
     for (const auto &selector : selectors) {
         artifacts->bextMask |= (1ULL << selectorBitIndex(selector));
     }
@@ -645,8 +648,9 @@ void dumpSelectors(const std::vector<PBEBitSelector> &selectors) {
     }
 }
 
+template <class ArtifactsT>
 static
-void dumpExtractDescriptor(const PBECompileArtifacts &artifacts) {
+void dumpExtractDescriptor(const ArtifactsT &artifacts) {
     printf("[PBE][Extract] mode=%s windowBytes=%u bextMask=0x%llx\n",
            extractModeName(artifacts.extractMode), artifacts.windowBytes,
            (unsigned long long)artifacts.bextMask);
@@ -833,8 +837,9 @@ void dumpHashTables(const PBECompileArtifacts &artifacts,
     }
 }
 
+template <class ArtifactsT>
 static
-void dumpHAOSummary(const PBECompileArtifacts &artifacts) {
+void dumpHAOSummary(const ArtifactsT &artifacts) {
     const auto &s = artifacts.haoSummary;
     printf("[PBE][HAO-Summary] total=%u fastPath=%u residual=%u residualUnsupported=%u unsupported=%u exact=%u nocase=%u anchorConfirm=%u directReport=%u fastPathConfirm=%u keyExpanded=%u expandedKeys=%u maxSelectedAmbigBits=%u\n",
            s.totalRules, s.fastPathRules, s.residualRules,
@@ -934,6 +939,9 @@ bool getBitState(const hwlmLiteral &lit, u32 bitIndex, u8 *state) {
     return true;
 }
 
+// entropyScore 计算一个 bit 位的熵得分，基于这个 bit 位在所有 lit 中的 0/1 分布情况。
+// 熵越高说明这个 bit 位在区分 lit 方面越有价值。
+// 熵计算公式：H = -(p0 * log2(p0) + p1 * log2(p1))，其中 p0 和 p1 分别是这个 bit 位为 0 和 1 的概率。
 static
 double entropyScore(u32 zeros, u32 ones) {
     const u32 total = zeros + ones;
@@ -946,6 +954,7 @@ double entropyScore(u32 zeros, u32 ones) {
     return -(p0 * std::log2(p0) + p1 * std::log2(p1));
 }
 
+// signatureOfStates 计算一个 bit 位状态分布的签名，用于快速识别具有相同状态分布的 bit 位，避免选择多个特征相同的 bit 位作为 selector。
 static
 u64a signatureOfStates(const std::vector<u8> &states) {
     // FNV-1a 64-bit
@@ -962,7 +971,7 @@ std::vector<PBEBitCandidate> buildBitCandidates(
     const std::vector<hwlmLiteral> &lits) {
     std::vector<PBEBitCandidate> out;
     out.reserve(PBE_MAX_CANDIDATE_BITS);
-
+    // 64bit: 对每个潜在的 bit 位，统计所有 lit 在这个位上的状态分布，并据此计算一个启发式得分。
     for (u32 bit = 0; bit < PBE_MAX_CANDIDATE_BITS; bit++) {
         PBEBitCandidate c;
         c.bitIndex = bit;
@@ -974,8 +983,9 @@ std::vector<PBEBitCandidate> buildBitCandidates(
 
         for (const auto &lit : lits) {
             u8 state = PBE_STATE_DONT_CARE;
-            getBitState(lit, bit, &state);
+            getBitState(lit, bit, &state); // 获取当前bit位中这一条lit的状态：0, 1, 或者 don't care
             c.states.push_back(state);
+            // 不关心的位直接跳过，不纳入统计。0/1状态的位则分别计数。
             if (state == PBE_STATE_DONT_CARE) {
                 continue;
             }
@@ -986,15 +996,17 @@ std::vector<PBEBitCandidate> buildBitCandidates(
                 zeros++;
             }
         }
-
+        // 如果没有任何lit关心这个bit位，那么这个bit位就没有区分度，不适合做selector，直接跳过。
         if (!careCount) {
             continue;
         }
-
+        // 启发式得分计算：主要考虑两个因素：
         // Principle 1 + 2:
         // prioritize low don't-care ratio and high discrimination.
+        // careRatio 越高说明这个bit位被更多的lit关心，潜在的区分度越大。
         const double careRatio =
             static_cast<double>(careCount) / std::max<size_t>(1, lits.size());
+        // entropy 越高说明这个bit位在关心它的lit中分布越均匀，区分度越大。
         const double entropy = entropyScore(zeros, ones);
         c.score = (careRatio * 0.7) + (entropy * 0.3);
         out.push_back(std::move(c));
@@ -1019,7 +1031,7 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
     if (candidates.empty()) {
         return;
     }
-
+    // 对候选的 bit 位进行排序，优先考虑得分高的位。如果得分相同，则优先考虑位序较低的位（更靠近字符串末尾的位）。
     std::sort(candidates.begin(), candidates.end(),
               [](const PBEBitCandidate &a, const PBEBitCandidate &b) {
                   if (a.score != b.score) {
@@ -1038,7 +1050,7 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
             break;
         }
 
-        // Principle 3: keep only one from identical-feature columns.
+        // Principle 3: keep only one from identical-feature columns. 
         const u64a sig = signatureOfStates(cand.states);
         if (!signatures.insert(sig).second) {
             continue;
@@ -1050,7 +1062,7 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
         selectors->push_back(s);
         chosenBits.insert(cand.bitIndex);
     }
-
+    // 如果前面基于启发式得分的选择没有达到目标位数，那么就继续从剩余的候选位中按位序顺序选择，直到达到目标位数或者没有更多候选位了。
     if (selectors->size() < targetBits) {
         for (const auto &cand : candidates) {
             if (selectors->size() >= targetBits) {
@@ -1339,35 +1351,118 @@ void buildRuleMeta(const std::vector<hwlmLiteral> &lits,
     }
 }
 
+template <class ArtifactsT>
+static
+void resetHAOCompileArtifactsCommon(ArtifactsT *artifacts) {
+    if (!artifacts) {
+        return;
+    }
+    artifacts->keyBits = 0;
+    artifacts->flags = 0;
+    artifacts->extractMode = PBE_EXTRACT_MODE_SCALAR;
+    artifacts->windowBytes = PBE_BYTES_PER_RULE_SLOT;
+    artifacts->bextMask = 0;
+    artifacts->bitSelectors.clear();
+    artifacts->haoRulePlans.clear();
+    artifacts->haoSummary = {};
+    artifacts->haoGlobalHash = {};
+    artifacts->ruleMeta.clear();
+    artifacts->literalBlob.clear();
+}
+
+static
+void resetPBECompileArtifacts(PBECompileArtifacts *artifacts) {
+    resetHAOCompileArtifactsCommon(artifacts);
+    if (!artifacts) {
+        return;
+    }
+    artifacts->haoBlobLayoutMode =
+        HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
+    artifacts->maskClasses.clear();
+    artifacts->primaryHashTable.offsets.clear();
+    artifacts->primaryHashBitmap.bits.clear();
+    artifacts->secondaryHashTable.clear();
+}
+
+template <class ArtifactsT>
+static
+bool buildSharedHAOArtifacts(const std::vector<hwlmLiteral> &lits,
+                             ArtifactsT *artifacts) {
+    if (!artifacts || lits.empty()) {
+        return false;
+    }
+
+    selectBitSelectors(lits, &artifacts->bitSelectors, &artifacts->keyBits);
+    if (artifacts->bitSelectors.empty()) {
+        return false;
+    }
+
+    buildExtractDescriptor(artifacts->bitSelectors, artifacts);
+    buildHAORulePlans(lits, artifacts->bitSelectors, &artifacts->haoRulePlans,
+                      &artifacts->haoSummary);
+    buildHAOGlobalHashTables(artifacts->haoRulePlans, artifacts->keyBits,
+                             &artifacts->haoGlobalHash);
+    buildRuleMeta(lits, &artifacts->ruleMeta, &artifacts->literalBlob);
+    artifacts->flags = artifacts->haoGlobalHash.flags;
+    return true;
+}
+
+static
+void dumpHAOArtifactsVerbose(const std::vector<hwlmLiteral> &lits,
+                             const HAOCompileArtifacts &artifacts) {
+    printf("\n========== [HAO][Build-Artifacts] Begin ==========\n");
+    printf("[HAO][Params] key_bits(fixed=%u, selector_count=%zu) secondary_key_bits=%u secondary_capacity=%u entry_capacity=%u\n",
+           artifacts.keyBits, artifacts.bitSelectors.size(),
+           PBE_SECONDARY_KEY_BITS, PBE_MAX_SECONDARY_ENTRIES,
+           PBE_RULE_SLOTS_PER_ENTRY);
+    dumpRuleBits(lits);
+    dumpSelectors(artifacts.bitSelectors);
+    dumpExtractDescriptor(artifacts);
+    dumpRuleKeys(lits, artifacts.bitSelectors, artifacts.keyBits);
+    dumpHAOSummary(artifacts);
+    printf("[HAO][Flags] artifacts.flags=0x%x\n", artifacts.flags);
+    printf("========== [HAO][Build-Artifacts] End ==========\n\n");
+}
+
 } // namespace
 
-const char *pbeFeasibilityReasonName(PBEFeasibilityReason reason) {
+template <class ReasonT>
+static
+const char *buildFeasibilityReasonName(ReasonT reason) {
     switch (reason) {
-    case PBEFeasibilityReason::OK:
+    case ReasonT::OK:
         return "OK";
-    case PBEFeasibilityReason::GREY_DISABLED:
+    case ReasonT::GREY_DISABLED:
         return "GREY_DISABLED";
-    case PBEFeasibilityReason::ARCH_UNSUPPORTED:
+    case ReasonT::ARCH_UNSUPPORTED:
         return "ARCH_UNSUPPORTED";
-    case PBEFeasibilityReason::TOO_FEW_LITERALS:
+    case ReasonT::TOO_FEW_LITERALS:
         return "TOO_FEW_LITERALS";
-    case PBEFeasibilityReason::TOO_MANY_LITERALS:
+    case ReasonT::TOO_MANY_LITERALS:
         return "TOO_MANY_LITERALS";
-    case PBEFeasibilityReason::UNSUPPORTED_INCLUDED_LITERAL:
+    case ReasonT::UNSUPPORTED_INCLUDED_LITERAL:
         return "UNSUPPORTED_INCLUDED_LITERAL";
-    case PBEFeasibilityReason::NO_SELECTORS:
+    case ReasonT::NO_SELECTORS:
         return "NO_SELECTORS";
-    case PBEFeasibilityReason::PARTIAL_SECONDARY_CAPACITY:
+    case ReasonT::PARTIAL_SECONDARY_CAPACITY:
         return "PARTIAL_SECONDARY_CAPACITY";
-    case PBEFeasibilityReason::PARTIAL_ENTRY_OVERFLOW:
+    case ReasonT::PARTIAL_ENTRY_OVERFLOW:
         return "PARTIAL_ENTRY_OVERFLOW";
-    case PBEFeasibilityReason::PARTIAL_OTHER:
+    case ReasonT::PARTIAL_OTHER:
         return "PARTIAL_OTHER";
-    case PBEFeasibilityReason::ARTIFACT_BUILD_FAILED:
+    case ReasonT::ARTIFACT_BUILD_FAILED:
         return "ARTIFACT_BUILD_FAILED";
     default:
         return "UNKNOWN";
     }
+}
+
+const char *pbeFeasibilityReasonName(PBEFeasibilityReason reason) {
+    return buildFeasibilityReasonName(reason);
+}
+
+const char *haoFeasibilityReasonName(HAOFeasibilityReason reason) {
+    return buildFeasibilityReasonName(reason);
 }
 
 bool pbeCanUseBextFastPath(const target_t &target) {
@@ -1395,42 +1490,14 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
         return false;
     }
 
-    artifacts->keyBits = 0;
-    artifacts->flags = 0;
-    artifacts->extractMode = PBE_EXTRACT_MODE_SCALAR;
-    artifacts->windowBytes = PBE_BYTES_PER_RULE_SLOT;
-    artifacts->bextMask = 0;
-    artifacts->haoBlobLayoutMode =
-        HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
-    artifacts->bitSelectors.clear();
-    artifacts->haoRulePlans.clear();
-    artifacts->haoSummary = {};
-    artifacts->haoGlobalHash = {};
-    artifacts->maskClasses.clear();
-    artifacts->primaryHashTable.offsets.clear();
-    artifacts->primaryHashBitmap.bits.clear();
-    artifacts->secondaryHashTable.clear();
-    artifacts->ruleMeta.clear();
-    artifacts->literalBlob.clear();
-
-    if (lits.empty()) {
+    resetPBECompileArtifacts(artifacts);
+    if (!buildSharedHAOArtifacts(lits, artifacts)) {
         return false;
     }
-
-    selectBitSelectors(lits, &artifacts->bitSelectors, &artifacts->keyBits);
-    if (artifacts->bitSelectors.empty()) {
-        return false;
-    }
-    buildExtractDescriptor(artifacts->bitSelectors, artifacts);
-    buildHAORulePlans(lits, artifacts->bitSelectors, &artifacts->haoRulePlans,
-                      &artifacts->haoSummary);
-    buildHAOGlobalHashTables(artifacts->haoRulePlans, artifacts->keyBits,
-                             &artifacts->haoGlobalHash);
 
     buildHashTables(lits, artifacts->bitSelectors, &artifacts->maskClasses,
                     &artifacts->primaryHashTable, &artifacts->primaryHashBitmap,
                     &artifacts->secondaryHashTable, &artifacts->flags);
-    buildRuleMeta(lits, &artifacts->ruleMeta, &artifacts->literalBlob);
 
     // Compile-time dump for selector/key/hash construction inspection.
     if (enableDump) {
@@ -1439,6 +1506,118 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
         dumpHAOSummary(*artifacts);
     }
 
+    return true;
+}
+
+bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
+                       HAOCompileArtifacts *artifacts,
+                       bool enableDump) {
+    if (!artifacts) {
+        return false;
+    }
+
+    resetHAOCompileArtifactsCommon(artifacts);
+    if (!buildSharedHAOArtifacts(lits, artifacts)) {
+        return false;
+    }
+
+    if (enableDump) {
+        dumpHAOArtifactsVerbose(lits, *artifacts);
+    } else if (haoStatsDumpEnabled()) {
+        dumpHAOSummary(*artifacts);
+    }
+
+    return true;
+}
+
+bool analyzeHAOFeasibility(const target_t &target,
+                           const std::vector<hwlmLiteral> &lits,
+                           const Grey &grey, HAOFeasibilityResult *result,
+                           HAOCompileArtifacts *artifacts) {
+    HAOFeasibilityResult local;
+    local.canBuild = false;
+    local.reason = HAOFeasibilityReason::ARTIFACT_BUILD_FAILED;
+    local.flags = 0;
+
+    if (!grey.allowPbe) {
+        local.reason = HAOFeasibilityReason::GREY_DISABLED;
+        if (result) {
+            *result = local;
+        }
+        return false;
+    }
+
+#if !defined(__aarch64__)
+    (void)target;
+    local.reason = HAOFeasibilityReason::ARCH_UNSUPPORTED;
+    if (result) {
+        *result = local;
+    }
+    return false;
+#else
+    (void)target;
+#endif
+
+    if (lits.size() < 4) {
+        local.reason = HAOFeasibilityReason::TOO_FEW_LITERALS;
+        if (result) {
+            *result = local;
+        }
+        return false;
+    }
+
+    if (lits.size() > std::numeric_limits<u16>::max()) {
+        local.reason = HAOFeasibilityReason::TOO_MANY_LITERALS;
+        if (result) {
+            *result = local;
+        }
+        return false;
+    }
+
+    std::unique_ptr<HAOCompileArtifacts> tempStorage;
+    HAOCompileArtifacts *out = artifacts;
+    if (!out) {
+        tempStorage.reset(new HAOCompileArtifacts());
+        out = tempStorage.get();
+    }
+
+    if (!buildHAOArtifacts(lits, out, false)) {
+        local.reason = HAOFeasibilityReason::ARTIFACT_BUILD_FAILED;
+        if (result) {
+            *result = local;
+        }
+        return false;
+    }
+
+    local.flags = out->flags;
+    if (out->bitSelectors.empty()) {
+        local.reason = HAOFeasibilityReason::NO_SELECTORS;
+        if (result) {
+            *result = local;
+        }
+        return false;
+    }
+
+    if (!out->haoGlobalHash.valid ||
+        (out->haoGlobalHash.flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE)) {
+        if (out->haoGlobalHash.flags & PBE_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY) {
+            local.reason = HAOFeasibilityReason::PARTIAL_SECONDARY_CAPACITY;
+        } else if (out->haoGlobalHash.flags & PBE_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW) {
+            local.reason = HAOFeasibilityReason::PARTIAL_ENTRY_OVERFLOW;
+        } else {
+            local.reason = HAOFeasibilityReason::PARTIAL_OTHER;
+        }
+        if (result) {
+            *result = local;
+        }
+        return false;
+    }
+
+    local.canBuild = true;
+    local.reason = HAOFeasibilityReason::OK;
+    if (result) {
+        *result = local;
+    }
     return true;
 }
 
@@ -1538,6 +1717,12 @@ bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
                  const Grey &grey) {
     PBEFeasibilityResult result;
     return analyzePBEFeasibility(target, lits, grey, &result, nullptr);
+}
+
+bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
+                 const Grey &grey) {
+    HAOFeasibilityResult result;
+    return analyzeHAOFeasibility(target, lits, grey, &result, nullptr);
 }
 
 bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
@@ -1714,7 +1899,9 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     return blob;
 }
 
-bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
+template <class ArtifactsT>
+static
+bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
     std::vector<u32> residualRuleIndexes;
 
     if (!artifacts.haoGlobalHash.valid) {
@@ -1869,6 +2056,14 @@ bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
     }
 
     return blob;
+}
+
+bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts) {
+    return buildHAOGlobalBlobImpl(artifacts);
+}
+
+bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts) {
+    return buildHAOGlobalBlobImpl(artifacts);
 }
 
 } // namespace ue2

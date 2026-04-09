@@ -243,7 +243,35 @@ struct PBECompileArtifacts {
     std::vector<u8> literalBlob;
 };
 
+struct HAOCompileArtifacts {
+    u32 keyBits = 0;
+    u32 flags = 0;
+    u32 extractMode = PBE_EXTRACT_MODE_SCALAR;
+    u32 windowBytes = PBE_BYTES_PER_RULE_SLOT;
+    u64a bextMask = 0;
+    std::vector<PBEBitSelector> bitSelectors;
+    std::vector<HAOCompiledRulePlan> haoRulePlans;
+    HAOCompileSummary haoSummary;
+    HAOGlobalHashArtifacts haoGlobalHash;
+    std::vector<PBERuleMeta> ruleMeta;
+    std::vector<u8> literalBlob;
+};
+
 enum class PBEFeasibilityReason : u32 {
+    OK = 0,
+    GREY_DISABLED,
+    ARCH_UNSUPPORTED,
+    TOO_FEW_LITERALS,
+    TOO_MANY_LITERALS,
+    UNSUPPORTED_INCLUDED_LITERAL,
+    NO_SELECTORS,
+    PARTIAL_SECONDARY_CAPACITY,
+    PARTIAL_ENTRY_OVERFLOW,
+    PARTIAL_OTHER,
+    ARTIFACT_BUILD_FAILED
+};
+
+enum class HAOFeasibilityReason : u32 {
     OK = 0,
     GREY_DISABLED,
     ARCH_UNSUPPORTED,
@@ -263,12 +291,24 @@ struct PBEFeasibilityResult {
     PBEFeasibilityReason reason = PBEFeasibilityReason::ARTIFACT_BUILD_FAILED;
 };
 
+struct HAOFeasibilityResult {
+    bool canBuild = false;
+    u32 flags = 0;
+    HAOFeasibilityReason reason = HAOFeasibilityReason::ARTIFACT_BUILD_FAILED;
+};
+
 bool analyzePBEFeasibility(const target_t &target,
                            const std::vector<hwlmLiteral> &lits,
                            const Grey &grey, PBEFeasibilityResult *result,
                            PBECompileArtifacts *artifacts);
 
+bool analyzeHAOFeasibility(const target_t &target,
+                           const std::vector<hwlmLiteral> &lits,
+                           const Grey &grey, HAOFeasibilityResult *result,
+                           HAOCompileArtifacts *artifacts);
+
 const char *pbeFeasibilityReasonName(PBEFeasibilityReason reason);
+const char *haoFeasibilityReasonName(HAOFeasibilityReason reason);
 
 bool pbeHasSveBitPermPrereq(const target_t &target);
 
@@ -277,11 +317,19 @@ bool pbeCanUseBextFastPath(const target_t &target);
 bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
                  const Grey &grey);
 
+bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
+                 const Grey &grey);
+
 bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
                        PBECompileArtifacts *artifacts,
                        bool enableDump = true);
 
+bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
+                       HAOCompileArtifacts *artifacts,
+                       bool enableDump = true);
+
 bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts);
+bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts);
 bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts);
 
 } // namespace ue2

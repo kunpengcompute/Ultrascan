@@ -1101,6 +1101,15 @@ TEST(PBECompile, FeasibilityReasonNameMapping) {
                      PBEFeasibilityReason::ARTIFACT_BUILD_FAILED));
 }
 
+TEST(PBECompile, HaoFeasibilityReasonNameMapping) {
+    EXPECT_STREQ("OK", haoFeasibilityReasonName(HAOFeasibilityReason::OK));
+    EXPECT_STREQ("GREY_DISABLED",
+                 haoFeasibilityReasonName(HAOFeasibilityReason::GREY_DISABLED));
+    EXPECT_STREQ("ARTIFACT_BUILD_FAILED",
+                 haoFeasibilityReasonName(
+                     HAOFeasibilityReason::ARTIFACT_BUILD_FAILED));
+}
+
 TEST(PBECompile, AnalyzeFeasibilityGreyDisabled) {
     auto grey = makePbeGrey(false);
     PBEFeasibilityResult result;
@@ -1118,6 +1127,23 @@ TEST(PBECompile, AnalyzeFeasibilityGreyDisabled) {
     EXPECT_FALSE(result.canBuild);
 }
 
+TEST(PBECompile, AnalyzeHaoFeasibilityGreyDisabled) {
+    auto grey = makePbeGrey(false);
+    HAOFeasibilityResult result;
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 6030, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 6031, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("gamma", false, false, 6032, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 6033, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    const bool ok = analyzeHAOFeasibility(get_current_target(), lits, grey,
+                                          &result, nullptr);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(HAOFeasibilityReason::GREY_DISABLED, result.reason);
+    EXPECT_FALSE(result.canBuild);
+}
+
 TEST(PBECompile, CanBuildPbeRejectsTooFewLiterals) {
     auto grey = makePbeGrey(true);
     std::vector<hwlmLiteral> lits = {
@@ -1127,6 +1153,69 @@ TEST(PBECompile, CanBuildPbeRejectsTooFewLiterals) {
     };
 
     EXPECT_FALSE(canBuildPBE(get_current_target(), lits, grey));
+}
+
+TEST(PBECompile, CanBuildHaoRejectsTooFewLiterals) {
+    auto grey = makePbeGrey(true);
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("a", false, false, 6230, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("b", false, false, 6231, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("c", false, false, 6232, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    EXPECT_FALSE(canBuildHAO(get_current_target(), lits, grey));
+}
+
+TEST(PBECompile, HAOProtoBuildPrefersHaoV2Artifacts) {
+    Grey grey;
+    grey.fdrAllowTeddy = false;
+    grey.allowNeoFdr = true;
+    grey.allowPbe = true;
+    grey.allowHaoV2 = true;
+
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 6233, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 6234, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 6235, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 6236, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    auto proto = fdrBuildProtoHinted(HWLM_ENGINE_FDR, std::move(lits), false,
+                                     ENGINE_ID_PBE, get_current_target(), grey);
+    if (!proto || !proto->fdrEng || proto->fdrEng->getID() != ENGINE_ID_PBE) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    EXPECT_TRUE(proto->useHaoV2Layout);
+    EXPECT_NE(nullptr, proto->haoArtifacts.get());
+    EXPECT_EQ(nullptr, proto->pbeArtifacts.get());
+}
+
+TEST(PBECompile, HAOProtoBuildFallsBackToLegacyCompatWhenV2Disabled) {
+    Grey grey;
+    grey.fdrAllowTeddy = false;
+    grey.allowNeoFdr = true;
+    grey.allowPbe = true;
+    grey.allowHaoV2 = false;
+
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 6237, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 6238, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 6239, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 6240, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    auto proto = fdrBuildProtoHinted(HWLM_ENGINE_FDR, std::move(lits), false,
+                                     ENGINE_ID_PBE, get_current_target(), grey);
+    if (!proto || !proto->fdrEng || proto->fdrEng->getID() != ENGINE_ID_PBE) {
+        skipIfNoPbeSupport();
+        return;
+    }
+
+    EXPECT_FALSE(proto->useHaoV2Layout);
+    EXPECT_EQ(nullptr, proto->haoArtifacts.get());
+    EXPECT_NE(nullptr, proto->pbeArtifacts.get());
 }
 
 TEST(PBECompile, BuildPbeBlobHeaderMatchesArtifacts) {
@@ -1217,11 +1306,11 @@ TEST(PBECompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
         hwlmLiteral("delta", false, false, 647, HWLM_ALL_GROUPS, {}, {})
     };
 
-    PBECompileArtifacts artifacts;
-    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
     ASSERT_TRUE(artifacts.haoGlobalHash.valid);
 
-    auto blob = buildHAOGlobalBlob(artifacts);
+    auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
 
     const auto *hdr = reinterpret_cast<const HAORuntimeHeader *>(blob.get());
@@ -1253,11 +1342,11 @@ TEST(PBECompile, BuildHaoGlobalBlobStoresRulePlanMeta) {
         hwlmLiteral("theta", false, false, 651, HWLM_ALL_GROUPS, {}, {})
     };
 
-    PBECompileArtifacts artifacts;
-    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
     ASSERT_TRUE(artifacts.haoGlobalHash.valid);
 
-    auto blob = buildHAOGlobalBlob(artifacts);
+    auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
 
     const auto *hdr = reinterpret_cast<const HAORuntimeHeader *>(blob.get());
@@ -1291,11 +1380,11 @@ TEST(PBECompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {
         hwlmLiteral("theta", false, false, 655, HWLM_ALL_GROUPS, {}, {})
     };
 
-    PBECompileArtifacts artifacts;
-    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
     ASSERT_TRUE(artifacts.haoGlobalHash.valid);
 
-    auto blob = buildHAOGlobalBlob(artifacts);
+    auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
 
     const auto *hdr = getHaoRuntimeHeader(blob);
@@ -1331,11 +1420,11 @@ TEST(PBECompile, BuildHaoGlobalBlobSecondaryEntriesMatchArtifacts) {
         hwlmLiteral("omega", false, false, 659, HWLM_ALL_GROUPS, {}, {})
     };
 
-    PBECompileArtifacts artifacts;
-    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
     ASSERT_TRUE(artifacts.haoGlobalHash.valid);
 
-    auto blob = buildHAOGlobalBlob(artifacts);
+    auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
 
     const auto *hdr = getHaoRuntimeHeader(blob);
@@ -1373,11 +1462,11 @@ TEST(PBECompile, HaoRuntimeValidateLayoutAcceptsGeneratedBlob) {
         hwlmLiteral("theta", false, false, 671, HWLM_ALL_GROUPS, {}, {})
     };
 
-    PBECompileArtifacts artifacts;
-    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
     ASSERT_TRUE(artifacts.haoGlobalHash.valid);
 
-    auto blob = buildHAOGlobalBlob(artifacts);
+    auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
     EXPECT_TRUE(HaoRuntimeValidateLayoutForTest(blob.get(),
                                                 verify_u32(blob.size())));
@@ -1405,11 +1494,11 @@ TEST(PBECompile, HaoRuntimeValidateLayoutRejectsBrokenSecondaryOffset) {
         hwlmLiteral("omega", false, false, 675, HWLM_ALL_GROUPS, {}, {})
     };
 
-    PBECompileArtifacts artifacts;
-    ASSERT_TRUE(buildPBEArtifacts(lits, &artifacts, false));
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
     ASSERT_TRUE(artifacts.haoGlobalHash.valid);
 
-    auto blob = buildHAOGlobalBlob(artifacts);
+    auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
 
     auto *hdr = reinterpret_cast<HAORuntimeHeader *>(blob.get());

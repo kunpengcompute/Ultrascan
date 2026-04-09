@@ -78,7 +78,7 @@ namespace ue2 {
 namespace {
 
 static
-bool haoV2LayoutCanPreserveCoverage(const PBECompileArtifacts &artifacts) {
+bool haoV2LayoutCanPreserveCoverage(const HAOCompileArtifacts &artifacts) {
     const HAOCompileSummary &summary = artifacts.haoSummary;
     /* HAO v2 currently preserves correctness via two paths:
      * 1) global single-table fast path
@@ -102,6 +102,75 @@ bool haoV2LayoutCanPreserveCoverage(const PBECompileArtifacts &artifacts) {
     return true;
 }
 
+static
+bool tryBuildHaoV2ProtoArtifacts(const target_t &target,
+                                 const std::vector<hwlmLiteral> &lits,
+                                 const Grey &grey,
+                                 std::unique_ptr<HAOCompileArtifacts> *out) {
+    if (out) {
+        out->reset();
+    }
+
+    if (!grey.allowHaoV2) {
+        DEBUG_PRINTF("HAO v2 feasibility: disabled by grey flag\n");
+        return false;
+    }
+
+    HAOCompileArtifacts builtArtifacts;
+    HAOFeasibilityResult haoResult;
+    const bool haoFeasible = analyzeHAOFeasibility(target, lits, grey,
+                                                   &haoResult,
+                                                   &builtArtifacts);
+    DEBUG_PRINTF("HAO v2 feasibility: canBuild=%u reason=%s flags=0x%x\n",
+                 haoFeasible ? 1 : 0,
+                 haoFeasibilityReasonName(haoResult.reason),
+                 haoResult.flags);
+    if (!haoFeasible) {
+        return false;
+    }
+
+    if (!haoV2LayoutCanPreserveCoverage(builtArtifacts)) {
+        DEBUG_PRINTF("HAO v2 feasibility: rejected by coverage gate\n");
+        return false;
+    }
+
+    if (out) {
+        *out = ue2::make_unique<HAOCompileArtifacts>(
+            std::move(builtArtifacts));
+    }
+    return true;
+}
+
+static
+bool tryBuildLegacyPbeCompatArtifacts(const target_t &target,
+                                      const std::vector<hwlmLiteral> &lits,
+                                      const Grey &grey,
+                                      PBECompileArtifacts *artifacts) {
+    if (!artifacts) {
+        return false;
+    }
+
+    PBEFeasibilityResult pbeResult;
+    const bool pbeFeasible = analyzePBEFeasibility(target, lits, grey,
+                                                   &pbeResult,
+                                                   artifacts);
+    DEBUG_PRINTF("Legacy PBE feasibility: canBuild=%u reason=%s flags=0x%x\n",
+                 pbeFeasible ? 1 : 0,
+                 pbeFeasibilityReasonName(pbeResult.reason),
+                 pbeResult.flags);
+    if (!pbeFeasible) {
+        return false;
+    }
+
+    artifacts->haoBlobLayoutMode = HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
+    return true;
+}
+
+static
+bool protoUsesHaoV2Layout(const HWLMProto &proto) {
+    return proto.useHaoV2Layout || !!proto.haoArtifacts;
+}
+
 class FDRCompiler : noncopyable {
 private:
     const FDREngineDescription &eng;
@@ -110,7 +179,7 @@ private:
     vector<hwlmLiteral> lits;
     map<BucketIndex, std::vector<LiteralIndex> > bucketToLits;
     bool make_small;
-    bytecode_ptr<u8> pbeBlob;
+    bytecode_ptr<u8> matcherBlob;
 
     u8 *tabIndexToMask(u32 indexInTable);
 #ifdef DEBUG
@@ -125,10 +194,10 @@ public:
                 map<BucketIndex, std::vector<LiteralIndex>> bucketToLits_in,
                 const FDREngineDescription &eng_in,
                 bool make_small_in, const Grey &grey_in,
-                bytecode_ptr<u8> pbeBlob_in = nullptr)
+                bytecode_ptr<u8> matcherBlob_in = nullptr)
         : eng(eng_in), grey(grey_in), tab(eng_in.getTabSizeBytes()),
           lits(move(lits_in)), bucketToLits(move(bucketToLits_in)),
-          make_small(make_small_in), pbeBlob(move(pbeBlob_in)) {}
+          make_small(make_small_in), matcherBlob(move(matcherBlob_in)) {}
 
     bytecode_ptr<FDR> build();
 };
@@ -193,14 +262,14 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     size_t tabSize = eng.getTabSizeBytes();
 
     // Note: we place each major structure here on a cacheline boundary.
-    size_t pbeSize = pbeBlob ? pbeBlob.size() : 0;
+    size_t matcherBlobSize = matcherBlob ? matcherBlob.size() : 0;
     size_t size = ROUNDUP_CL(headerSize) + ROUNDUP_CL(tabSize) +
-                  ROUNDUP_CL(pbeSize) + ROUNDUP_CL(confirmTable.size()) +
+                  ROUNDUP_CL(matcherBlobSize) + ROUNDUP_CL(confirmTable.size()) +
                   floodTable.size();
 
-    DEBUG_PRINTF("sizes base=%zu tabSize=%zu pbe=%zu confirm=%zu "
+    DEBUG_PRINTF("sizes base=%zu tabSize=%zu matcherBlob=%zu confirm=%zu "
                  "floodControl=%zu total=%zu\n",
-                 headerSize, tabSize, pbeSize, confirmTable.size(),
+                 headerSize, tabSize, matcherBlobSize, confirmTable.size(),
                  floodTable.size(), size);
 
     auto fdr = make_zeroed_bytecode_ptr<FDR>(size, 64);
@@ -228,13 +297,13 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     copy(tab.begin(), tab.end(), ptr);
     ptr += ROUNDUP_CL(tabSize);
 
-    // Write PBE structures if present.
-    if (pbeBlob && pbeBlob.size()) {
+    // Write embedded matcher blob if present.
+    if (matcherBlob && matcherBlob.size()) {
         assert(ISALIGNED_CL(ptr));
         fdr->pbeOffset = verify_u32(ptr - fdr_base);
-        fdr->pbeSize = verify_u32(pbeBlob.size());
-        memcpy(ptr, pbeBlob.get(), pbeBlob.size());
-        ptr += ROUNDUP_CL(pbeBlob.size());
+        fdr->pbeSize = verify_u32(matcherBlob.size());
+        memcpy(ptr, matcherBlob.get(), matcherBlob.size());
+        ptr += ROUNDUP_CL(matcherBlob.size());
     }
 
     // Write confirm structures.
@@ -886,7 +955,7 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                                             bool make_small,
                                             const target_t &target,
                                             const Grey &grey, u32 hint) {
-    static constexpr u32 PBE_ENGINE_ID = 2;
+    static constexpr u32 HAO_FAMILY_ENGINE_ID = 2;
     DEBUG_PRINTF("cpu has %s\n", target.has_avx2() ? "avx2" : "no-avx2");
 
     if (grey.fdrAllowTeddy) {
@@ -900,51 +969,51 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         }
     }
 
-    const bool pbeHint = (hint == PBE_ENGINE_ID);
-    auto pbeDes = (hint == HINT_INVALID)
+    /* Engine-family 2 is still the shared FDR slot for legacy PBE compat and
+     * HAO v2. Phase 3 prefers HAO v2 selection first and only falls back to
+     * legacy compat when HAO cannot be used. */
+    const bool haoFamilyHint = (hint == HAO_FAMILY_ENGINE_ID);
+    auto haoFamilyDes = (hint == HINT_INVALID)
                       ? choosePbeEngine(target, lits, make_small)
                       : getFdrDescription(hint);
-    if (pbeDes && pbeDes->getID() == PBE_ENGINE_ID) {
+    if (haoFamilyDes && haoFamilyDes->getID() == HAO_FAMILY_ENGINE_ID) {
         // temporary hack for unit testing
         if (hint != HINT_INVALID) {
-            pbeDes->bits = 9;
-            pbeDes->stride = 1;
+            haoFamilyDes->bits = 9;
+            haoFamilyDes->stride = 1;
         }
 
-        auto pbeBucketToLits = assignStringsToBuckets(lits, *pbeDes);
-        addIncludedInfo(lits, pbeDes->getNumBuckets(), pbeBucketToLits);
+        auto haoFamilyBucketToLits = assignStringsToBuckets(lits, *haoFamilyDes);
+        addIncludedInfo(lits, haoFamilyDes->getNumBuckets(), haoFamilyBucketToLits);
 
-        PBECompileArtifacts pbeArtifacts;
-        PBEFeasibilityResult pbeResult;
-        const bool pbeFeasible = analyzePBEFeasibility(target, lits, grey,
-                                                       &pbeResult,
-                                                       &pbeArtifacts);
-        DEBUG_PRINTF("PBE feasibility: canBuild=%u reason=%s flags=0x%x\n",
-                     pbeFeasible ? 1 : 0,
-                     pbeFeasibilityReasonName(pbeResult.reason),
-                     pbeResult.flags);
-
-        if (pbeFeasible) {
-            /* HAO v2 can follow any build that actually selects the PBE path,
-             * but only while the current v2 runtime can preserve full rule
-             * coverage for this compiled rule set. */
-            const bool useHaoV2Layout =
-                grey.allowHaoV2 && haoV2LayoutCanPreserveCoverage(pbeArtifacts);
-            pbeArtifacts.haoBlobLayoutMode = useHaoV2Layout
-                                                 ? HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V2_GLOBAL
-                                                 : HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
+        std::unique_ptr<HAOCompileArtifacts> haoArtifacts;
+        if (tryBuildHaoV2ProtoArtifacts(target, lits, grey, &haoArtifacts)) {
             auto proto = ue2::make_unique<HWLMProto>(
-                engType, move(pbeDes), lits, pbeBucketToLits, make_small);
-            proto->pbeArtifacts =
-                ue2::make_unique<PBECompileArtifacts>(std::move(pbeArtifacts));
+                engType, move(haoFamilyDes), lits, haoFamilyBucketToLits,
+                make_small);
+            proto->haoArtifacts = std::move(haoArtifacts);
+            proto->useHaoV2Layout = true;
             return proto;
         }
 
-        if (pbeHint) {
-            // Explicit PBE hint but feasibility check failed.
+        PBECompileArtifacts legacyPbeArtifacts;
+        if (tryBuildLegacyPbeCompatArtifacts(target, lits, grey,
+                                             &legacyPbeArtifacts)) {
+            auto proto = ue2::make_unique<HWLMProto>(
+                engType, move(haoFamilyDes), lits, haoFamilyBucketToLits,
+                make_small);
+            proto->pbeArtifacts = ue2::make_unique<PBECompileArtifacts>(
+                std::move(legacyPbeArtifacts));
+            proto->useHaoV2Layout = false;
+            return proto;
+        }
+
+        if (haoFamilyHint) {
+            // Explicit engine-family hint but neither HAO v2 nor legacy compat
+            // could accept this rule set.
             return nullptr;
         }
-    } else if (pbeHint) {
+    } else if (haoFamilyHint) {
         return nullptr;
     }
 
@@ -1004,33 +1073,43 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
         return teddyBuildTable(proto, grey);
     }
 
-    bytecode_ptr<u8> pbeBlob = nullptr;
+    bytecode_ptr<u8> matcherBlob = nullptr;
     if (proto.fdrEng && proto.fdrEng->getID() == 2) {
-        PBECompileArtifacts rebuiltArtifacts;
-        // Rebuild from final proto.lits at table-build time. proto.lits may be
-        // updated after proto construction (e.g. Rose program offsets), so
-        // stale cached artifacts can carry invalid rule IDs.
-        if (!buildPBEArtifacts(proto.lits, &rebuiltArtifacts, false)) {
-            return nullptr;
-        }
-        /* Reuse the layout chosen during proto build so config changes do not retarget normal PBE builds. */
-        rebuiltArtifacts.haoBlobLayoutMode = proto.pbeArtifacts
-                                                 ? proto.pbeArtifacts->haoBlobLayoutMode
-                                                 : HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
-        const PBECompileArtifacts *artifacts = &rebuiltArtifacts;
-        if (artifacts->flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
-            // Contract violation: canBuildPBE() should have filtered this set.
-            assert(0 && "PBE feasibility mismatch: partial coverage in table build");
-            return nullptr;
-        }
-        pbeBlob = buildPBEBlob(*artifacts);
-        if (!pbeBlob) {
-            return nullptr;
+        if (protoUsesHaoV2Layout(proto)) {
+            HAOCompileArtifacts rebuiltHaoArtifacts;
+            if (!buildHAOArtifacts(proto.lits, &rebuiltHaoArtifacts, false)) {
+                return nullptr;
+            }
+            if (!haoV2LayoutCanPreserveCoverage(rebuiltHaoArtifacts)) {
+                assert(0 && "HAO feasibility mismatch: invalid v2 coverage in table build");
+                return nullptr;
+            }
+            matcherBlob = buildHAOBlob(rebuiltHaoArtifacts);
+            if (!matcherBlob) {
+                return nullptr;
+            }
+        } else {
+            PBECompileArtifacts rebuiltArtifacts;
+            // Rebuild from final proto.lits at table-build time. proto.lits may be
+            // updated after proto construction (e.g. Rose program offsets), so
+            // stale cached artifacts can carry invalid rule IDs.
+            if (!buildPBEArtifacts(proto.lits, &rebuiltArtifacts, false)) {
+                return nullptr;
+            }
+            const PBECompileArtifacts *artifacts = &rebuiltArtifacts;
+            if (artifacts->flags & PBE_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
+                assert(0 && "PBE feasibility mismatch: partial coverage in table build");
+                return nullptr;
+            }
+            matcherBlob = buildPBEBlob(*artifacts);
+            if (!matcherBlob) {
+                return nullptr;
+            }
         }
     }
 
     FDRCompiler fc(proto.lits, proto.bucketToLits, *(proto.fdrEng),
-                   proto.make_small, grey, move(pbeBlob));
+                   proto.make_small, grey, move(matcherBlob));
     return fc.build();
 }
 

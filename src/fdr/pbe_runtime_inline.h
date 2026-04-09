@@ -317,6 +317,198 @@ u32 pbeExtractKeyFromWindow(const struct PBERuntimeHeader *hdr,
 }
 
 static really_inline
+u8 haoNormalizeByte(u8 c) {
+    return ourisalpha(c) ? (u8)mytoupper((char)c) : c;
+}
+
+static really_inline
+int haoRuntimeCanUseBextFastPath(void) {
+    return pbeRuntimeCanUseBextFastPath();
+}
+
+static really_inline
+u64a haoByteReverse64(u64a v) {
+    v = ((v & 0x00ff00ff00ff00ffULL) << 8)
+        | ((v >> 8) & 0x00ff00ff00ff00ffULL);
+    v = ((v & 0x0000ffff0000ffffULL) << 16)
+        | ((v >> 16) & 0x0000ffff0000ffffULL);
+    return (v << 32) | (v >> 32);
+}
+
+static really_inline
+int haoCanDirectLoadCurrentWindow64(const struct FDR_Runtime_Args *a,
+                                    size_t endPos, u32 windowBytes) {
+    return a && a->buf && windowBytes == HAO_RUNTIME_BYTES_PER_RULE_SLOT &&
+           endPos + 1 >= HAO_RUNTIME_BYTES_PER_RULE_SLOT;
+}
+
+static really_inline
+u64a haoExtractPackedBitsFallback(u64a window, u64a mask) {
+    return pbeExtractPackedBitsFallback(window, mask);
+}
+
+static really_inline
+u64a haoLoadWindow64Normalized(const struct FDR_Runtime_Args *a,
+                               size_t endPos, u32 windowBytes) {
+    u64a window = 0;
+    u32 i;
+
+    if (!a) {
+        return 0;
+    }
+
+    if (!windowBytes || windowBytes > HAO_RUNTIME_BYTES_PER_RULE_SLOT) {
+        windowBytes = HAO_RUNTIME_BYTES_PER_RULE_SLOT;
+    }
+
+    if (haoCanDirectLoadCurrentWindow64(a, endPos, windowBytes)) {
+        const u8 *start = a->buf + endPos + 1 - windowBytes;
+        return haoByteReverse64(unaligned_load_u64a(start));
+    }
+
+    for (i = 0; i < windowBytes; i++) {
+        u8 b = 0;
+        if (!pbeGetByteAt(a, (s64a)endPos - (s64a)i, &b)) {
+            continue;
+        }
+        window |= ((u64a)b) << (i * 8U);
+    }
+
+    return window;
+}
+
+static really_inline
+u32 haoComputeValidMask8(const struct FDR_Runtime_Args *a, size_t endPos) {
+    u64a available;
+
+    if (!a) {
+        return 0;
+    }
+
+    available = (u64a)endPos + 1 + a->len_history;
+    if (!available) {
+        return 0;
+    }
+    if (available >= HAO_RUNTIME_BYTES_PER_RULE_SLOT) {
+        return 0xffU;
+    }
+
+    return ((1U << (u32)available) - 1U)
+           << (HAO_RUNTIME_BYTES_PER_RULE_SLOT - (u32)available);
+}
+
+static really_inline
+void haoBuildLaneWindow32FromWindow(u64a window, u32 validMask8,
+                                    u8 *window32, u32 *validMask32) {
+    u8 laneWindow[HAO_RUNTIME_BYTES_PER_RULE_SLOT] = {0};
+    u32 j;
+    u32 slot;
+
+    if (!window32 || !validMask32) {
+        return;
+    }
+
+    *validMask32 = 0;
+    for (j = 0; j < HAO_RUNTIME_BYTES_PER_RULE_SLOT; j++) {
+        const u32 srcByte = HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U - j;
+        laneWindow[j] = haoNormalizeByte((u8)(window >> (srcByte * 8U)));
+    }
+
+    for (slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
+        const u32 laneBase = slot * HAO_RUNTIME_BYTES_PER_RULE_SLOT;
+        memcpy(window32 + laneBase, laneWindow, HAO_RUNTIME_BYTES_PER_RULE_SLOT);
+        *validMask32 |= (validMask8 << laneBase);
+    }
+}
+
+static really_inline
+u32 haoExtractKeyScalarFromWindow(
+    const struct HAORuntimeBitSelector *selectors, u32 selectorCount,
+    u64a window) {
+    u32 key = 0;
+    u32 i;
+
+    for (i = 0; i < selectorCount && i < HAO_RUNTIME_MAX_SELECTORS; i++) {
+        const struct HAORuntimeBitSelector *s = &selectors[i];
+        const u32 bitIndex = (u32)s->byteOffset * 8U + (u32)s->bitOffset;
+        if (window & ((u64a)1 << bitIndex)) {
+            key |= (1U << i);
+        }
+    }
+
+    return key;
+}
+
+static really_inline
+u32 haoPackedKeyMask(u32 selectorCount) {
+    if (!selectorCount) {
+        return 0;
+    }
+    if (selectorCount >= 32U) {
+        return 0xffffffffU;
+    }
+    return (1U << selectorCount) - 1U;
+}
+
+static really_inline
+u32 haoExtractKeyBext(const struct HAORuntimeHeader *hdr, u64a window) {
+    const u64a packed = haoRuntimeCanUseBextFastPath()
+                            ? pbeExtractPackedBitsSveBitPerm(window,
+                                                             hdr->bextMask)
+                            : haoExtractPackedBitsFallback(window,
+                                                           hdr->bextMask);
+    return (u32)(packed & haoPackedKeyMask(hdr->selectorCount));
+}
+
+static really_inline
+void haoExtractKeysFromWindows(const struct HAORuntimeHeader *hdr,
+                               const struct HAORuntimeBitSelector *selectors,
+                               const u64a *windows, u32 count, u32 *keys) {
+    u32 i;
+
+    if (!hdr || !windows || !keys) {
+        return;
+    }
+
+    if (hdr->extractMode == HAO_RUNTIME_EXTRACT_MODE_BEXT) {
+        u64a packed[PBE_BATCH_MAX_WIDTH] = {0};
+        const u32 keyMask = haoPackedKeyMask(hdr->selectorCount);
+
+        assert(count <= PBE_BATCH_MAX_WIDTH);
+        if (haoRuntimeCanUseBextFastPath()) {
+            pbeExtractPackedBitsSveBitPermBatch(windows, count, hdr->bextMask,
+                                                packed);
+        } else {
+            for (i = 0; i < count; i++) {
+                packed[i] = haoExtractPackedBitsFallback(windows[i],
+                                                         hdr->bextMask);
+            }
+        }
+
+        for (i = 0; i < count; i++) {
+            keys[i] = (u32)(packed[i] & keyMask);
+        }
+        return;
+    }
+
+    for (i = 0; i < count; i++) {
+        keys[i] = haoExtractKeyScalarFromWindow(selectors, hdr->selectorCount,
+                                                windows[i]);
+    }
+}
+
+static really_inline
+u32 haoExtractKeyFromWindow(const struct HAORuntimeHeader *hdr,
+                            const struct HAORuntimeBitSelector *selectors,
+                            u64a window) {
+    if (hdr->extractMode == HAO_RUNTIME_EXTRACT_MODE_BEXT) {
+        return haoExtractKeyBext(hdr, window);
+    }
+
+    return haoExtractKeyScalarFromWindow(selectors, hdr->selectorCount, window);
+}
+
+static really_inline
 void pbeBuildPositionContext(const struct PBERuntimeHeader *hdr,
                              const struct PBERuntimeBitSelector *selectors,
                              const struct FDR_Runtime_Args *a, size_t endPos,

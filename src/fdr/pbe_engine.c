@@ -26,7 +26,7 @@ struct HAOPositionContext {
     u8 reserved0;
     u16 reserved1;
     u64a window64;
-    u8 laneWindow32[PBE_RUNTIME_RULE_VECTOR_BYTES];
+    u8 laneWindow32[HAO_RUNTIME_RULE_VECTOR_BYTES];
     u32 validMask32;
 };
 
@@ -64,13 +64,13 @@ void haoStatsAdd(u64a *counter, u64a delta) {
 }
 
 static really_inline
-void haoBuildPositionContext(const struct PBERuntimeHeader *hdr,
-                             const struct PBERuntimeBitSelector *selectors,
+void haoBuildPositionContext(const struct HAORuntimeHeader *hdr,
+                             const struct HAORuntimeBitSelector *selectors,
                              const struct FDR_Runtime_Args *a, size_t endPos,
                              struct HAOPositionContext *ctx, int fillKey) {
     const u64a window64 =
-        pbeLoadWindow64Normalized(a, endPos, hdr->windowBytes);
-    const u32 validMask8 = pbeComputeValidMask8(a, endPos);
+        haoLoadWindow64Normalized(a, endPos, hdr->windowBytes);
+    const u32 validMask8 = haoComputeValidMask8(a, endPos);
 
     assert(ctx);
     memset(ctx, 0, sizeof(*ctx));
@@ -78,7 +78,7 @@ void haoBuildPositionContext(const struct PBERuntimeHeader *hdr,
     ctx->window64 = window64;
     ctx->validMask8 = validMask8;
     if (fillKey) {
-        ctx->key = pbeExtractKeyFromWindow(hdr, selectors, window64);
+        ctx->key = haoExtractKeyFromWindow(hdr, selectors, window64);
     }
 }
 
@@ -88,7 +88,7 @@ void haoEnsureLaneWindowContext(struct HAOPositionContext *ctx) {
         return;
     }
 
-    pbeBuildLaneWindow32FromWindow(ctx->window64, ctx->validMask8,
+    haoBuildLaneWindow32FromWindow(ctx->window64, ctx->validMask8,
                                    ctx->laneWindow32, &ctx->validMask32);
     ctx->laneWindowReady = 1;
 }
@@ -408,13 +408,13 @@ static int haoValidateLayout(const void *blob, u32 blobSize,
     if (!hdr->selectorCount || !hdr->primaryCount || !hdr->secondaryCount) {
         return 0;
     }
-    if (hdr->selectorCount > PBE_RUNTIME_MAX_SELECTORS) {
+    if (hdr->selectorCount > HAO_RUNTIME_MAX_SELECTORS) {
         return 0;
     }
-    if (!hdr->windowBytes || hdr->windowBytes > PBE_RUNTIME_BYTES_PER_RULE_SLOT) {
+    if (!hdr->windowBytes || hdr->windowBytes > HAO_RUNTIME_BYTES_PER_RULE_SLOT) {
         return 0;
     }
-    if (hdr->extractMode > PBE_RUNTIME_EXTRACT_MODE_BEXT) {
+    if (hdr->extractMode > HAO_RUNTIME_EXTRACT_MODE_BEXT) {
         return 0;
     }
     if ((u64a)hdr->selectorsOffset + (u64a)hdr->selectorCount *
@@ -484,7 +484,7 @@ static void haoInspectLayout(const struct HAORuntimeHeader *hdr,
             continue;
         }
         {
-            const u32 entryCount = primary[i] >> PBE_RUNTIME_L1_COUNT_SHIFT;
+            const u32 entryCount = primary[i] >> HAO_RUNTIME_L1_COUNT_SHIFT;
             summary->nonEmptyPrimary++;
             if (entryCount > 1) {
                 summary->multiEntryBucketCount++;
@@ -498,27 +498,12 @@ static void haoInspectLayout(const struct HAORuntimeHeader *hdr,
     for (i = 0; i < hdr->secondaryCount; i++) {
         summary->totalRulesInL2 +=
             popcount32(secondary[i].slotMask &
-                       ((1U << PBE_RUNTIME_RULE_SLOTS_PER_ENTRY) - 1U));
+                       ((1U << HAO_RUNTIME_RULE_SLOTS_PER_ENTRY) - 1U));
     }
 }
 
 /* HAO v2 运行期当前先复用 PBE 的位置上下文与 L2 预筛 helper，
  * 通过一个轻量 shim 头把全局单表 layout 接入现有公共小函数。 */
-static void haoBuildShimHeader(const struct HAORuntimeHeader *hdr,
-                               struct PBERuntimeHeader *shim) {
-    memset(shim, 0, sizeof(*shim));
-    shim->keyBits = hdr->keyBits;
-    shim->selectorCount = hdr->selectorCount;
-    shim->primaryCount = hdr->primaryCount;
-    shim->primaryBitmapSize = hdr->primaryBitmapSize;
-    shim->secondaryCount = hdr->secondaryCount;
-    shim->ruleMetaCount = hdr->ruleMetaCount;
-    shim->literalBlobSize = hdr->literalBlobSize;
-    shim->extractMode = hdr->extractMode;
-    shim->windowBytes = hdr->windowBytes;
-    shim->bextMask = hdr->bextMask;
-}
-
 /* HAO v2 的 confirm 当前仍然沿用原始 literal + mask/cmp 做最终确认。
  * 后续真正的 HAO confirm 优化会在 block kernel 稳定后再推进。 */
 static int haoRuleExactMatch(const struct HAORuntimeRuleMeta *rm,
@@ -586,7 +571,7 @@ u32 haoBuildShuffledValidMask(const struct HAORuntimeSecondaryHashEntry *entry,
         return 0;
     }
 
-    for (i = 0; i < PBE_RUNTIME_RULE_VECTOR_BYTES; i++) {
+    for (i = 0; i < HAO_RUNTIME_RULE_VECTOR_BYTES; i++) {
         const u8 srcCtl = entry->tableControl[i];
         const u32 chunkBase = i & 0x10U;
         u32 srcIndex;
@@ -618,7 +603,7 @@ u32 haoEntrySlotMask(const struct HAORuntimeSecondaryHashEntry *entry) {
     if (!entry) {
         return 0;
     }
-    return entry->slotMask & ((1U << PBE_RUNTIME_RULE_SLOTS_PER_ENTRY) - 1U);
+    return entry->slotMask & ((1U << HAO_RUNTIME_RULE_SLOTS_PER_ENTRY) - 1U);
 }
 
 static really_inline
@@ -628,8 +613,8 @@ u32 haoEntryLaneMaskFromByteMatches(
     u32 slotMask = haoEntrySlotMask(entry);
     u32 slot;
 
-    for (slot = 0; slot < PBE_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
-        const u32 laneBase = slot * PBE_RUNTIME_BYTES_PER_RULE_SLOT;
+    for (slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
+        const u32 laneBase = slot * HAO_RUNTIME_BYTES_PER_RULE_SLOT;
         const u32 laneBits = 0xffU << laneBase;
         const u32 laneTail = (entry->tailMask & ~entry->headMask) & laneBits;
         const u32 laneHead = entry->headMask & laneBits;
@@ -733,10 +718,10 @@ static u32 haoEntryMatchMaskFromContext(
     }
 #else
     {
-        u8 shuffledWindow32[PBE_RUNTIME_RULE_VECTOR_BYTES] = {0};
+        u8 shuffledWindow32[HAO_RUNTIME_RULE_VECTOR_BYTES] = {0};
         u32 i;
 
-        for (i = 0; i < PBE_RUNTIME_RULE_VECTOR_BYTES; i++) {
+        for (i = 0; i < HAO_RUNTIME_RULE_VECTOR_BYTES; i++) {
             const u8 srcCtl = entry->tableControl[i];
             const u32 chunkBase = i & 0x10U;
             const u32 srcIndex = chunkBase + srcCtl;
@@ -750,7 +735,7 @@ static u32 haoEntryMatchMaskFromContext(
         {
             u32 byteMatchMask = 0;
 
-            for (i = 0; i < PBE_RUNTIME_RULE_VECTOR_BYTES; i++) {
+            for (i = 0; i < HAO_RUNTIME_RULE_VECTOR_BYTES; i++) {
                 const u32 bit = 1U << i;
                 if (!(shuffledValidMask & bit)) {
                     continue;
@@ -808,7 +793,7 @@ static int haoProcessEncodedRange(
             continue;
         }
 
-        for (r = 0; r < PBE_RUNTIME_RULE_SLOTS_PER_ENTRY; r++) {
+        for (r = 0; r < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; r++) {
             const u16 ridx = entry->ruleIndex[r];
             const struct HAORuntimeRuleMeta *rm;
 
@@ -896,8 +881,7 @@ static int haoProcessResidualRulesAtPos(
 static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
                            const struct FDR_Runtime_Args *a,
                            hwlm_group_t *control) {
-    struct PBERuntimeHeader shim;
-    const struct PBERuntimeBitSelector *selectors;
+    const struct HAORuntimeBitSelector *selectors;
     const u8 *primaryBitmap;
     const u32 *primaryHashTable;
     const struct HAORuntimeSecondaryHashEntry *secondaryHashTable;
@@ -910,8 +894,7 @@ static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
         return HWLM_SUCCESS;
     }
 
-    haoBuildShimHeader(hdr, &shim);
-    selectors = (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
+    selectors = (const struct HAORuntimeBitSelector *)((const u8 *)hdr +
                                                        hdr->selectorsOffset);
     primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
     primaryHashTable = (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
@@ -926,7 +909,7 @@ static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
     for (i = a->start_offset; i < a->len; i++) {
         struct HAOPositionContext ctx;
 
-        haoBuildPositionContext(&shim, selectors, a, i, &ctx, 1);
+        haoBuildPositionContext(hdr, selectors, a, i, &ctx, 1);
         if (ctx.key < hdr->primaryCount &&
             haoPrimaryBitmapHasValue(primaryBitmap, hdr->primaryBitmapSize,
                                      ctx.key)) {
@@ -958,7 +941,7 @@ static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
 struct HAOBlockState {
     u32 laneCount;
     size_t endPos[PBE_BATCH_MAX_WIDTH];
-    u8 byteLanes[PBE_RUNTIME_BYTES_PER_RULE_SLOT][PBE_BATCH_MAX_WIDTH];
+    u8 byteLanes[HAO_RUNTIME_BYTES_PER_RULE_SLOT][PBE_BATCH_MAX_WIDTH];
     u32 keys[PBE_BATCH_MAX_WIDTH];
     u32 validMask8[PBE_BATCH_MAX_WIDTH];
 };
@@ -966,7 +949,7 @@ struct HAOBlockState {
 static void haoBuildBlockByteView(const struct FDR_Runtime_Args *a,
                                   size_t blockStart, u32 laneCount,
                                   u8 *blockBytes) {
-    const u32 prefix = PBE_RUNTIME_BYTES_PER_RULE_SLOT - 1U;
+    const u32 prefix = HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U;
     u32 i;
 
     memset(blockBytes, 0, prefix + laneCount);
@@ -981,7 +964,7 @@ static void haoBuildBlockByteView(const struct FDR_Runtime_Args *a,
 
 static void haoBuildByteLanesFromBlockBytes(
     const u8 *blockBytes, u32 laneCount,
-    u8 byteLanes[PBE_RUNTIME_BYTES_PER_RULE_SLOT][PBE_BATCH_MAX_WIDTH]) {
+    u8 byteLanes[HAO_RUNTIME_BYTES_PER_RULE_SLOT][PBE_BATCH_MAX_WIDTH]) {
     u32 byteIdx;
     u32 lane;
 
@@ -990,7 +973,7 @@ static void haoBuildByteLanesFromBlockBytes(
     }
 
     memset(byteLanes, 0,
-           sizeof(u8) * PBE_RUNTIME_BYTES_PER_RULE_SLOT * PBE_BATCH_MAX_WIDTH);
+           sizeof(u8) * HAO_RUNTIME_BYTES_PER_RULE_SLOT * PBE_BATCH_MAX_WIDTH);
 
 #if defined(__aarch64__) || defined(__x86_64__)
     {
@@ -1000,7 +983,7 @@ static void haoBuildByteLanesFromBlockBytes(
         m128 src1 = loadu128(blockBytes + 16);
         m128 src2 = loadu128(blockBytes + 32);
 
-        for (byteIdx = 0; byteIdx < PBE_RUNTIME_BYTES_PER_RULE_SLOT; byteIdx++) {
+        for (byteIdx = 0; byteIdx < HAO_RUNTIME_BYTES_PER_RULE_SLOT; byteIdx++) {
 #if defined(__aarch64__)
             lo = extbyte_m128(src0, src1, (int)byteIdx);
             hi = extbyte_m128(src1, src2, (int)byteIdx);
@@ -1045,7 +1028,7 @@ static void haoBuildByteLanesFromBlockBytes(
         }
 
         if (laneCount < PBE_BATCH_MAX_WIDTH) {
-            for (byteIdx = 0; byteIdx < PBE_RUNTIME_BYTES_PER_RULE_SLOT;
+            for (byteIdx = 0; byteIdx < HAO_RUNTIME_BYTES_PER_RULE_SLOT;
                  byteIdx++) {
                 memset(byteLanes[byteIdx] + laneCount, 0,
                        PBE_BATCH_MAX_WIDTH - laneCount);
@@ -1055,7 +1038,7 @@ static void haoBuildByteLanesFromBlockBytes(
     }
 #endif
 
-    for (byteIdx = 0; byteIdx < PBE_RUNTIME_BYTES_PER_RULE_SLOT; byteIdx++) {
+    for (byteIdx = 0; byteIdx < HAO_RUNTIME_BYTES_PER_RULE_SLOT; byteIdx++) {
         for (lane = 0; lane < laneCount; lane++) {
             byteLanes[byteIdx][lane] = blockBytes[lane + byteIdx];
         }
@@ -1063,17 +1046,17 @@ static void haoBuildByteLanesFromBlockBytes(
 }
 
 static u64a haoLoadWindow64FromByteLanes(
-    const u8 byteLanes[PBE_RUNTIME_BYTES_PER_RULE_SLOT][PBE_BATCH_MAX_WIDTH],
+    const u8 byteLanes[HAO_RUNTIME_BYTES_PER_RULE_SLOT][PBE_BATCH_MAX_WIDTH],
     u32 lane, u32 windowBytes) {
     u64a window = 0;
     u32 i;
 
-    if (!windowBytes || windowBytes > PBE_RUNTIME_BYTES_PER_RULE_SLOT) {
-        windowBytes = PBE_RUNTIME_BYTES_PER_RULE_SLOT;
+    if (!windowBytes || windowBytes > HAO_RUNTIME_BYTES_PER_RULE_SLOT) {
+        windowBytes = HAO_RUNTIME_BYTES_PER_RULE_SLOT;
     }
 
     for (i = 0; i < windowBytes; i++) {
-        window |= ((u64a)byteLanes[PBE_RUNTIME_BYTES_PER_RULE_SLOT - 1U - i][lane])
+        window |= ((u64a)byteLanes[HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U - i][lane])
                   << (i * 8U);
     }
 
@@ -1081,7 +1064,7 @@ static u64a haoLoadWindow64FromByteLanes(
 }
 
 static void haoBuildWindowsFromByteLanes(
-    const u8 byteLanes[PBE_RUNTIME_BYTES_PER_RULE_SLOT][PBE_BATCH_MAX_WIDTH],
+    const u8 byteLanes[HAO_RUNTIME_BYTES_PER_RULE_SLOT][PBE_BATCH_MAX_WIDTH],
     u32 laneCount, u32 windowBytes, u64a *windows) {
     u32 lane;
     u32 i;
@@ -1090,13 +1073,13 @@ static void haoBuildWindowsFromByteLanes(
         return;
     }
 
-    if (!windowBytes || windowBytes > PBE_RUNTIME_BYTES_PER_RULE_SLOT) {
-        windowBytes = PBE_RUNTIME_BYTES_PER_RULE_SLOT;
+    if (!windowBytes || windowBytes > HAO_RUNTIME_BYTES_PER_RULE_SLOT) {
+        windowBytes = HAO_RUNTIME_BYTES_PER_RULE_SLOT;
     }
 
     memset(windows, 0, sizeof(u64a) * PBE_BATCH_MAX_WIDTH);
     for (i = 0; i < windowBytes; i++) {
-        const u32 srcByte = PBE_RUNTIME_BYTES_PER_RULE_SLOT - 1U - i;
+        const u32 srcByte = HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U - i;
         const u32 shift = i * 8U;
         for (lane = 0; lane < laneCount; lane++) {
             windows[lane] |= ((u64a)byteLanes[srcByte][lane]) << shift;
@@ -1105,33 +1088,33 @@ static void haoBuildWindowsFromByteLanes(
 }
 
 static void haoExtractKeysFromByteLanes(
-    const struct PBERuntimeHeader *shim,
-    const struct PBERuntimeBitSelector *selectors,
+    const struct HAORuntimeHeader *hdr,
+    const struct HAORuntimeBitSelector *selectors,
     struct HAOBlockState *state) {
     u32 sel;
     const u32 laneMaskLimit = state && state->laneCount < 32U
                                   ? ((1U << state->laneCount) - 1U)
                                   : 0xffffffffU;
 
-    if (!shim || !selectors || !state || !state->laneCount) {
+    if (!hdr || !selectors || !state || !state->laneCount) {
         return;
     }
 
     memset(state->keys, 0, sizeof(state->keys));
 
-    if (shim->extractMode == PBE_RUNTIME_EXTRACT_MODE_BEXT) {
+    if (hdr->extractMode == HAO_RUNTIME_EXTRACT_MODE_BEXT) {
         u64a windows[PBE_BATCH_MAX_WIDTH] = {0};
         haoBuildWindowsFromByteLanes(state->byteLanes, state->laneCount,
-                                     shim->windowBytes, windows);
-        pbeExtractKeysFromWindows(shim, selectors, windows, state->laneCount,
+                                     hdr->windowBytes, windows);
+        haoExtractKeysFromWindows(hdr, selectors, windows, state->laneCount,
                                   state->keys);
         return;
     }
 
-    for (sel = 0; sel < shim->selectorCount &&
-                  sel < PBE_RUNTIME_MAX_SELECTORS; sel++) {
+    for (sel = 0; sel < hdr->selectorCount &&
+                  sel < HAO_RUNTIME_MAX_SELECTORS; sel++) {
         const u32 srcByte =
-            PBE_RUNTIME_BYTES_PER_RULE_SLOT - 1U - selectors[sel].byteOffset;
+            HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U - selectors[sel].byteOffset;
         const u8 bit = (u8)(1U << selectors[sel].bitOffset);
 
 #if defined(__aarch64__) || defined(__x86_64__)
@@ -1163,15 +1146,15 @@ static void haoExtractKeysFromByteLanes(
     }
 }
 
-static int haoBuildBlockState(const struct PBERuntimeHeader *shim,
-                              const struct PBERuntimeBitSelector *selectors,
+static int haoBuildBlockState(const struct HAORuntimeHeader *hdr,
+                              const struct HAORuntimeBitSelector *selectors,
                               const struct FDR_Runtime_Args *a,
                               size_t blockStart, u32 blockLaneCount,
                               struct HAOBlockState *state) {
     u8 blockBytes[HAO_RUNTIME_BLOCK_BYTES + 16U];
     u32 laneCount = 0;
 
-    if (!shim || !selectors || !a || !state || !blockLaneCount ||
+    if (!hdr || !selectors || !a || !state || !blockLaneCount ||
         blockLaneCount > PBE_BATCH_MAX_WIDTH) {
         return 0;
     }
@@ -1182,7 +1165,7 @@ static int haoBuildBlockState(const struct PBERuntimeHeader *shim,
     while (laneCount < blockLaneCount && blockStart + laneCount < a->len) {
         const size_t pos = blockStart + laneCount;
         state->endPos[laneCount] = pos;
-        state->validMask8[laneCount] = pbeComputeValidMask8(a, pos);
+        state->validMask8[laneCount] = haoComputeValidMask8(a, pos);
         laneCount++;
     }
 
@@ -1193,7 +1176,7 @@ static int haoBuildBlockState(const struct PBERuntimeHeader *shim,
     haoBuildBlockByteView(a, blockStart, laneCount, blockBytes);
     haoBuildByteLanesFromBlockBytes(blockBytes, laneCount, state->byteLanes);
     state->laneCount = laneCount;
-    haoExtractKeysFromByteLanes(shim, selectors, state);
+    haoExtractKeysFromByteLanes(hdr, selectors, state);
     return laneCount;
 }
 
@@ -1213,8 +1196,7 @@ static void haoBuildContextFromBlockState(const struct HAOBlockState *state,
 }
 
 static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
-                                const struct PBERuntimeHeader *shim,
-                                const struct PBERuntimeBitSelector *selectors,
+                                const struct HAORuntimeBitSelector *selectors,
                                 const u8 *primaryBitmap,
                                 const u32 *primaryHashTable,
                                 const struct HAORuntimeSecondaryHashEntry *secondaryHashTable,
@@ -1231,13 +1213,13 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
     u32 activeCount = 0;
     u32 lane;
 
-    if (!hdr || !shim || !selectors || !primaryBitmap || !primaryHashTable ||
+    if (!hdr || !selectors || !primaryBitmap || !primaryHashTable ||
         !secondaryHashTable || !ruleMeta || !literalBlob || !a || !control ||
         !blockLaneCount || blockLaneCount > PBE_BATCH_MAX_WIDTH) {
         return HWLM_SUCCESS;
     }
 
-    if (!haoBuildBlockState(shim, selectors, a, blockStart, blockLaneCount,
+    if (!haoBuildBlockState(hdr, selectors, a, blockStart, blockLaneCount,
                             &block)) {
         return HWLM_SUCCESS;
     }
@@ -1266,7 +1248,7 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
         if (encodedByLane[lane]) {
             struct HAOPositionContext ctx;
 
-            haoBuildContextFromBlockState(&block, lane, shim->windowBytes, &ctx);
+            haoBuildContextFromBlockState(&block, lane, hdr->windowBytes, &ctx);
             if (haoProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
                                        literalBlob, hdr->literalBlobSize, a,
                                        control, &ctx,
@@ -1292,8 +1274,7 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
 static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
                            const struct FDR_Runtime_Args *a,
                            hwlm_group_t *control) {
-    struct PBERuntimeHeader shim;
-    const struct PBERuntimeBitSelector *selectors;
+    const struct HAORuntimeBitSelector *selectors;
     const u8 *primaryBitmap;
     const u32 *primaryHashTable;
     const struct HAORuntimeSecondaryHashEntry *secondaryHashTable;
@@ -1306,8 +1287,7 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
         return HWLM_SUCCESS;
     }
 
-    haoBuildShimHeader(hdr, &shim);
-    selectors = (const struct PBERuntimeBitSelector *)((const u8 *)hdr +
+    selectors = (const struct HAORuntimeBitSelector *)((const u8 *)hdr +
                                                        hdr->selectorsOffset);
     primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
     primaryHashTable = (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
@@ -1324,7 +1304,7 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
                                        ? HAO_RUNTIME_BLOCK_BYTES
                                        : (u32)remaining;
 
-        if (haoProcessBlockBatch(hdr, &shim, selectors, primaryBitmap,
+        if (haoProcessBlockBatch(hdr, selectors, primaryBitmap,
                                  primaryHashTable, secondaryHashTable,
                                  ruleMeta, literalBlob, residualRuleIndexes,
                                  a, control, i,
