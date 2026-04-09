@@ -1193,32 +1193,21 @@ SET (hs_compile_SRCS
 
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
     list(APPEND hs_compile_SRCS
-#        src/kunpeng-enhanced/fdr_enhanced.h
         src/kunpeng-enhanced/khsel_core.h
         src/kunpeng-enhanced/khsel_ops.h
         src/kunpeng-enhanced/khsel_type.h
         src/kunpeng-enhanced/khsel_typebase.h
         src/kunpeng-enhanced/khsel.h
-#        src/kunpeng-enhanced/lily.h
         src/kunpeng-enhanced/shufti_enhanced.h
-#        src/kunpeng-enhanced/ue2common.h
         src/kunpeng-enhanced/fdr_enhanced.c
         src/kunpeng-enhanced/runtime_lily.c
         src/kunpeng-enhanced/shufti.c
         src/kunpeng-enhanced/lily.cpp
         src/kunpeng-enhanced/compare.h
         src/kunpeng-enhanced/core_precomp.h
-#        src/kunpeng-enhanced/fdr_confirm.h
-#       src/kunpeng-enhanced/fdr_loadval.h
         src/kunpeng-enhanced/khsel_fdr_internal.h
         src/kunpeng-enhanced/khsel_hwlm.h
-#        src/kunpeng-enhanced/khsel_runtime.h
-#        src/kunpeng-enhanced/multbit.h
-#        src/kunpeng-enhanced/report.h
-#        src/kunpeng-enhanced/rose_internal.h
-#         src/kunpeng-enhanced/scratch.h
         src/kunpeng-enhanced/simd_arm.h
-#        src/kunpeng-enhanced/simd_types.h
     )
 endif()
 
