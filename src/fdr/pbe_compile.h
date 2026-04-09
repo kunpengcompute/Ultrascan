@@ -55,6 +55,7 @@ static constexpr u32 PBE_MAX_HOT_MASK_CLASSES = 4U;
 static constexpr u32 PBE_HOT_MASK_CLASS_COVERAGE_PCT = 80U;
 static constexpr u32 PBE_EXTRACT_MODE_SCALAR = 0U;
 static constexpr u32 PBE_EXTRACT_MODE_BEXT = 1U;
+static constexpr u32 HAO_FAMILY_ENGINE_ID = 2U;
 
 static constexpr u32 PBE_MASK_CLASS_FLAG_HOT = 1U << 0;
 
@@ -301,6 +302,11 @@ bool analyzePBEFeasibility(const target_t &target,
                            const std::vector<hwlmLiteral> &lits,
                            const Grey &grey, PBEFeasibilityResult *result,
                            PBECompileArtifacts *artifacts);
+bool analyzeHAOCompatFeasibility(const target_t &target,
+                                 const std::vector<hwlmLiteral> &lits,
+                                 const Grey &grey,
+                                 PBEFeasibilityResult *result,
+                                 PBECompileArtifacts *artifacts);
 
 bool analyzeHAOFeasibility(const target_t &target,
                            const std::vector<hwlmLiteral> &lits,
@@ -308,7 +314,10 @@ bool analyzeHAOFeasibility(const target_t &target,
                            HAOCompileArtifacts *artifacts);
 
 const char *pbeFeasibilityReasonName(PBEFeasibilityReason reason);
+const char *haoCompatFeasibilityReasonName(PBEFeasibilityReason reason);
 const char *haoFeasibilityReasonName(HAOFeasibilityReason reason);
+
+bool haoFamilyGreyEnabled(const Grey &grey);
 
 bool pbeHasSveBitPermPrereq(const target_t &target);
 
@@ -316,6 +325,9 @@ bool pbeCanUseBextFastPath(const target_t &target);
 
 bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
                  const Grey &grey);
+bool canBuildHAOCompat(const target_t &target,
+                       const std::vector<hwlmLiteral> &lits,
+                       const Grey &grey);
 
 bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
                  const Grey &grey);
@@ -323,12 +335,16 @@ bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
 bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
                        PBECompileArtifacts *artifacts,
                        bool enableDump = true);
+bool buildHAOCompatArtifacts(const std::vector<hwlmLiteral> &lits,
+                             PBECompileArtifacts *artifacts,
+                             bool enableDump = true);
 
 bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
                        HAOCompileArtifacts *artifacts,
                        bool enableDump = true);
 
 bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts);
+bytecode_ptr<u8> buildHAOCompatBlob(const PBECompileArtifacts &artifacts);
 bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts);
 bytecode_ptr<u8> buildHAOGlobalBlob(const PBECompileArtifacts &artifacts);
 

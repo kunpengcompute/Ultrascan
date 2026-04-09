@@ -41,7 +41,7 @@ using namespace ue2;
 namespace {
 
 static constexpr u32 ENGINE_ID_NEO = 1;
-static constexpr u32 ENGINE_ID_PBE = 2;
+static constexpr u32 ENGINE_ID_PBE = ue2::HAO_FAMILY_ENGINE_ID;
 
 struct Match {
     size_t end;
@@ -238,6 +238,57 @@ const PBERuntimeHeader *getPbeRuntimeHeader(const FDR *fdr) {
     }
     return reinterpret_cast<const PBERuntimeHeader *>(
         reinterpret_cast<const u8 *>(fdr) + fdr->pbeOffset);
+}
+
+static
+size_t getPbeCompatBlobSize(const PBERuntimeHeader *hdr) {
+    if (!hdr) {
+        return 0;
+    }
+
+    size_t end = ROUNDUP_N(sizeof(PBERuntimeHeader), alignof(u32));
+    end = std::max(end, static_cast<size_t>(hdr->selectorsOffset) +
+                        hdr->selectorCount *
+                            sizeof(PBERuntimeBitSelector));
+    end = std::max(end, static_cast<size_t>(hdr->classTableOffset) +
+                        hdr->classCount * sizeof(PBERuntimeMaskClass));
+
+    const auto *classTable = reinterpret_cast<const PBERuntimeMaskClass *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->classTableOffset);
+    for (u32 i = 0; i < hdr->classCount; i++) {
+        end = std::max(end, static_cast<size_t>(classTable[i].primaryBitmapOffset) +
+                            classTable[i].primaryBitmapSize);
+        end = std::max(end, static_cast<size_t>(classTable[i].primaryOffset) +
+                            classTable[i].primaryCount * sizeof(u32));
+    }
+
+    end = std::max(end, static_cast<size_t>(hdr->secondaryOffset) +
+                        hdr->secondaryCount *
+                            sizeof(PBERuntimeSecondaryHashEntry));
+    end = std::max(end, static_cast<size_t>(hdr->ruleMetaOffset) +
+                        hdr->ruleMetaCount * sizeof(PBERuntimeRuleMeta));
+    end = std::max(end, static_cast<size_t>(hdr->literalBlobOffset) +
+                        hdr->literalBlobSize);
+    return ROUNDUP_N(end, alignof(u32));
+}
+
+static
+void expectPbeCompatBlobsEqual(const bytecode_ptr<u8> &lhs,
+                               const bytecode_ptr<u8> &rhs) {
+    ASSERT_NE(nullptr, lhs.get());
+    ASSERT_NE(nullptr, rhs.get());
+
+    const auto *lhsHdr =
+        reinterpret_cast<const PBERuntimeHeader *>(lhs.get());
+    const auto *rhsHdr =
+        reinterpret_cast<const PBERuntimeHeader *>(rhs.get());
+    const size_t lhsSize = getPbeCompatBlobSize(lhsHdr);
+    const size_t rhsSize = getPbeCompatBlobSize(rhsHdr);
+
+    ASSERT_EQ(lhs.size(), lhsSize);
+    ASSERT_EQ(rhs.size(), rhsSize);
+    ASSERT_EQ(lhsSize, rhsSize);
+    EXPECT_EQ(0, memcmp(lhs.get(), rhs.get(), lhsSize));
 }
 
 /* Test-only read-only entry for inspecting HAO v2 blobs before runtime switch-over. */
@@ -1101,6 +1152,19 @@ TEST(PBECompile, FeasibilityReasonNameMapping) {
                      PBEFeasibilityReason::ARTIFACT_BUILD_FAILED));
 }
 
+TEST(PBECompile, HaoCompatFeasibilityReasonNameMatchesPbeWrapper) {
+    EXPECT_STREQ(haoCompatFeasibilityReasonName(PBEFeasibilityReason::OK),
+                 pbeFeasibilityReasonName(PBEFeasibilityReason::OK));
+    EXPECT_STREQ(
+        haoCompatFeasibilityReasonName(PBEFeasibilityReason::GREY_DISABLED),
+        pbeFeasibilityReasonName(PBEFeasibilityReason::GREY_DISABLED));
+    EXPECT_STREQ(
+        haoCompatFeasibilityReasonName(
+            PBEFeasibilityReason::ARTIFACT_BUILD_FAILED),
+        pbeFeasibilityReasonName(
+            PBEFeasibilityReason::ARTIFACT_BUILD_FAILED));
+}
+
 TEST(PBECompile, HaoFeasibilityReasonNameMapping) {
     EXPECT_STREQ("OK", haoFeasibilityReasonName(HAOFeasibilityReason::OK));
     EXPECT_STREQ("GREY_DISABLED",
@@ -1125,6 +1189,29 @@ TEST(PBECompile, AnalyzeFeasibilityGreyDisabled) {
     EXPECT_FALSE(ok);
     EXPECT_EQ(PBEFeasibilityReason::GREY_DISABLED, result.reason);
     EXPECT_FALSE(result.canBuild);
+}
+
+TEST(PBECompile, AnalyzePbeFeasibilityWrapsHaoCompatFeasibility) {
+    auto grey = makePbeGrey(true);
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 6034, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 6035, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 6036, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 6037, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBEFeasibilityResult pbeResult = {};
+    PBEFeasibilityResult compatResult = {};
+    const bool pbeOk = analyzePBEFeasibility(get_current_target(), lits, grey,
+                                             &pbeResult, nullptr);
+    const bool compatOk = analyzeHAOCompatFeasibility(get_current_target(), lits,
+                                                      grey, &compatResult,
+                                                      nullptr);
+
+    EXPECT_EQ(pbeOk, compatOk);
+    EXPECT_EQ(pbeResult.canBuild, compatResult.canBuild);
+    EXPECT_EQ(pbeResult.flags, compatResult.flags);
+    EXPECT_EQ(pbeResult.reason, compatResult.reason);
 }
 
 TEST(PBECompile, AnalyzeHaoFeasibilityGreyDisabled) {
@@ -1153,6 +1240,19 @@ TEST(PBECompile, CanBuildPbeRejectsTooFewLiterals) {
     };
 
     EXPECT_FALSE(canBuildPBE(get_current_target(), lits, grey));
+}
+
+TEST(PBECompile, CanBuildPbeMatchesHaoCompatWrapper) {
+    auto grey = makePbeGrey(true);
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 6220, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 6221, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 6222, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 6223, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    EXPECT_EQ(canBuildPBE(get_current_target(), lits, grey),
+              canBuildHAOCompat(get_current_target(), lits, grey));
 }
 
 TEST(PBECompile, CanBuildHaoRejectsTooFewLiterals) {
@@ -1246,6 +1346,37 @@ TEST(PBECompile, BuildPbeBlobHeaderMatchesArtifacts) {
     EXPECT_EQ(artifacts.extractMode, hdr->extractMode);
     EXPECT_EQ(artifacts.windowBytes, hdr->windowBytes);
     EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
+}
+
+TEST(PBECompile, BuildPbeCompatWrappersMatchHaoCompatBuilders) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 6440, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 6441, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta", false, false, 6442, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 6443, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    PBECompileArtifacts wrapperArtifacts;
+    PBECompileArtifacts compatArtifacts;
+    ASSERT_TRUE(buildPBEArtifacts(lits, &wrapperArtifacts, false));
+    ASSERT_TRUE(buildHAOCompatArtifacts(lits, &compatArtifacts, false));
+
+    EXPECT_EQ(wrapperArtifacts.keyBits, compatArtifacts.keyBits);
+    EXPECT_EQ(wrapperArtifacts.flags, compatArtifacts.flags);
+    EXPECT_EQ(wrapperArtifacts.extractMode, compatArtifacts.extractMode);
+    EXPECT_EQ(wrapperArtifacts.windowBytes, compatArtifacts.windowBytes);
+    EXPECT_EQ(wrapperArtifacts.bextMask, compatArtifacts.bextMask);
+    EXPECT_EQ(wrapperArtifacts.haoBlobLayoutMode,
+              compatArtifacts.haoBlobLayoutMode);
+    EXPECT_EQ(wrapperArtifacts.primaryHashTable.offsets,
+              compatArtifacts.primaryHashTable.offsets);
+    EXPECT_EQ(wrapperArtifacts.primaryHashBitmap.bits,
+              compatArtifacts.primaryHashBitmap.bits);
+    EXPECT_EQ(wrapperArtifacts.literalBlob, compatArtifacts.literalBlob);
+
+    auto wrapperBlob = buildPBEBlob(wrapperArtifacts);
+    auto compatBlob = buildHAOCompatBlob(compatArtifacts);
+    expectPbeCompatBlobsEqual(wrapperBlob, compatBlob);
 }
 
 TEST(PBECompile, BuildPbeBlobDefaultsToV1CompatLayout) {

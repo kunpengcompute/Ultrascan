@@ -1709,7 +1709,8 @@ hwlm_error_t HaoEngineExecBlobBatchForTest(const void *blob, u32 blobSize,
     return haoExecBlobWithPath(blob, blobSize, a, control, 1);
 }
 
-hwlm_error_t PbeEngineExec(const struct FDR *fdr,
+static
+hwlm_error_t haoFamilyExec(const struct FDR *fdr,
                            const struct FDR_Runtime_Args *a,
                            hwlm_group_t control) {
     if (!fdr || !fdr->pbeOffset || !fdr->pbeSize) {
@@ -1729,4 +1730,10 @@ hwlm_error_t PbeEngineExec(const struct FDR *fdr,
     }
 
     return pbeExecWithPath(fdr, a, control, 1);
+}
+
+hwlm_error_t PbeEngineExec(const struct FDR *fdr,
+                           const struct FDR_Runtime_Args *a,
+                           hwlm_group_t control) {
+    return haoFamilyExec(fdr, a, control);
 }

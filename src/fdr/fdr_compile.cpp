@@ -142,21 +142,21 @@ bool tryBuildHaoV2ProtoArtifacts(const target_t &target,
 }
 
 static
-bool tryBuildLegacyPbeCompatArtifacts(const target_t &target,
-                                      const std::vector<hwlmLiteral> &lits,
-                                      const Grey &grey,
-                                      PBECompileArtifacts *artifacts) {
+bool tryBuildHaoCompatProtoArtifacts(const target_t &target,
+                                     const std::vector<hwlmLiteral> &lits,
+                                     const Grey &grey,
+                                     PBECompileArtifacts *artifacts) {
     if (!artifacts) {
         return false;
     }
 
     PBEFeasibilityResult pbeResult;
-    const bool pbeFeasible = analyzePBEFeasibility(target, lits, grey,
-                                                   &pbeResult,
-                                                   artifacts);
-    DEBUG_PRINTF("Legacy PBE feasibility: canBuild=%u reason=%s flags=0x%x\n",
+    const bool pbeFeasible = analyzeHAOCompatFeasibility(target, lits, grey,
+                                                         &pbeResult,
+                                                         artifacts);
+    DEBUG_PRINTF("HAO compat feasibility: canBuild=%u reason=%s flags=0x%x\n",
                  pbeFeasible ? 1 : 0,
-                 pbeFeasibilityReasonName(pbeResult.reason),
+                 haoCompatFeasibilityReasonName(pbeResult.reason),
                  pbeResult.flags);
     if (!pbeFeasible) {
         return false;
@@ -955,7 +955,6 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                                             bool make_small,
                                             const target_t &target,
                                             const Grey &grey, u32 hint) {
-    static constexpr u32 HAO_FAMILY_ENGINE_ID = 2;
     DEBUG_PRINTF("cpu has %s\n", target.has_avx2() ? "avx2" : "no-avx2");
 
     if (grey.fdrAllowTeddy) {
@@ -997,8 +996,8 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         }
 
         PBECompileArtifacts legacyPbeArtifacts;
-        if (tryBuildLegacyPbeCompatArtifacts(target, lits, grey,
-                                             &legacyPbeArtifacts)) {
+        if (tryBuildHaoCompatProtoArtifacts(target, lits, grey,
+                                            &legacyPbeArtifacts)) {
             auto proto = ue2::make_unique<HWLMProto>(
                 engType, move(haoFamilyDes), lits, haoFamilyBucketToLits,
                 make_small);
@@ -1074,7 +1073,7 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
     }
 
     bytecode_ptr<u8> matcherBlob = nullptr;
-    if (proto.fdrEng && proto.fdrEng->getID() == 2) {
+    if (proto.fdrEng && proto.fdrEng->getID() == HAO_FAMILY_ENGINE_ID) {
         if (protoUsesHaoV2Layout(proto)) {
             HAOCompileArtifacts rebuiltHaoArtifacts;
             if (!buildHAOArtifacts(proto.lits, &rebuiltHaoArtifacts, false)) {
@@ -1093,7 +1092,7 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
             // Rebuild from final proto.lits at table-build time. proto.lits may be
             // updated after proto construction (e.g. Rose program offsets), so
             // stale cached artifacts can carry invalid rule IDs.
-            if (!buildPBEArtifacts(proto.lits, &rebuiltArtifacts, false)) {
+            if (!buildHAOCompatArtifacts(proto.lits, &rebuiltArtifacts, false)) {
                 return nullptr;
             }
             const PBECompileArtifacts *artifacts = &rebuiltArtifacts;
@@ -1101,7 +1100,7 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
                 assert(0 && "PBE feasibility mismatch: partial coverage in table build");
                 return nullptr;
             }
-            matcherBlob = buildPBEBlob(*artifacts);
+            matcherBlob = buildHAOCompatBlob(*artifacts);
             if (!matcherBlob) {
                 return nullptr;
             }

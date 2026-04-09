@@ -161,15 +161,15 @@ u32 pbeFullKeyMask(u32 keyBits) {
     return (1U << keyBits) - 1U;
 }
 
-/* 辅助判断一条规则是否带 supplementary msk/cmp 语义。
- * 当前 HAO v2 第一轮先把这类规则归入 anchor-confirm。 */
+/* Returns true when a literal carries supplementary mask/cmp semantics.
+ * In the current HAO v2 plan this maps to anchor-confirm. */
 static
 bool haoLiteralHasSupplementaryMask(const hwlmLiteral &lit) {
     return !lit.msk.empty() || !lit.cmp.empty();
 }
 
-/* 根据 selected bits 计算一条规则在一级 key 空间中的受控展开结果。
- * 如果 selected 模糊位数量超过 HAO_MAX_KEY_AMBIG_BITS，调用方应将其排除出 fast path。 */
+/* Enumerate the selected-bit key variants for one rule. Callers exclude
+ * rules from the fast path when ambiguity exceeds HAO_MAX_KEY_AMBIG_BITS. */
 static
 HAOKeyExpansionInfo haoEnumerateExpandedKeysForLiteral(
     const hwlmLiteral &lit, const std::vector<PBEBitSelector> &selectors) {
@@ -198,6 +198,9 @@ HAOKeyExpansionInfo haoEnumerateExpandedKeysForLiteral(
         return info;
     }
 
+    // Enumerate all key variants induced by ambiguous selected bits. These
+    // key values are based on normalized literal bytes; final confirm resolves
+    // exact versus nocase semantics.
     const u32 variantCount = info.selectedAmbigBits ?
                              (1U << info.selectedAmbigBits) : 1U;
     info.expandedKeys.reserve(variantCount);
@@ -222,9 +225,8 @@ HAOKeyExpansionInfo haoEnumerateExpandedKeysForLiteral(
     return info;
 }
 
-/* 当前第一轮的规则分类还是保守版本：
- * exact / nocase / anchor-confirm / unsupported。
- * 后续还会继续细化 small-class-expand 等类别。 */
+/* Current first-pass rule categories are conservative: exact, nocase,
+ * anchor-confirm, and unsupported. */
 static
 HAORuleCategory haoClassifyLiteral(const hwlmLiteral &lit,
                                    const HAOKeyExpansionInfo &expansion) {
@@ -306,10 +308,9 @@ bool haoStatsDumpEnabled(void) {
     return env && *env && *env != '0';
 }
 
-/* 为后续 L2 verifier 预先生成确定性片段。
- * 注意：当前 HAO v2 runtime 仍复用 PBE 的归一化窗口预筛，因此这里无论 exact 还是
- * nocase，都先写入归一化后的 verifier bytes，最终 exact/nocase 语义差异交给
- * final confirm 判定。这样可以避免在 L2 预筛阶段把 exact 小写规则误拒掉。 */
+/* Build the deterministic verifier fragment that the later L2 verifier
+ * consumes. Both exact and nocase rules store normalized bytes here;
+ * final confirm resolves the exact versus nocase distinction. */
 static
 HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
                                              HAORuleCategory category) {
@@ -336,8 +337,8 @@ HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
     return fragment;
 }
 
-/* 生成 HAO 编译期规则计划层。
- * 第一轮的目标是先把“规则怎么处理”显式化，后续构表将改为直接消费这些计划。 */
+/* Build the compile-time HAO rule-plan layer that later table construction
+ * consumes directly. */
 static
 void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
                        const std::vector<PBEBitSelector> &selectors,
@@ -441,9 +442,8 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
     }
 }
 
-/* 将 HAO verifier fragment 写入 L2 entry 的某个 slot。
- * 当前阶段先把“可向量校验的确定性片段”落入全局单表，后续 runtime v2
- * 会直接消费这些 fragment。 */
+/* Write one HAO verifier fragment into one L2 slot. Runtime v2 consumes these
+ * fragments directly from the global single-table layout. */
 static
 void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan,
                                   u32 localSlot,
@@ -468,7 +468,8 @@ void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan,
         }
         const u32 vecIndex = laneBase + i;
         entry->ruleVector[vecIndex] = plan.verifier.bytes[i];
-        /* 当前阶段 tableControl 仍先作为“有效字节位置”占位信息。 */
+        /* tableControl is still a placeholder per-byte mapping at this stage.
+         * Later phases replace it with the final shuffle control bytes. */
         entry->tableControl[vecIndex] = verify_u8(vecIndex & 0x0fU);
         entry->tailMask |= (1U << vecIndex);
         if (i != lastValidBit) {
@@ -477,9 +478,8 @@ void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan,
     }
 }
 
-/* 基于 HAO rule plans 构建一张全局单表。
- * 这里不再按 Mask-Class 分层，而是把 expanded keys 直接落入全局 22-bit
- * 键空间。当前结果先并行存入 compile artifacts，供下一轮 runtime 切换使用。 */
+/* Build the HAO global single-table hash. Expanded keys go straight into the
+ * global key space instead of being grouped by mask class. */
 static
 void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
                               u32 keyBits, HAOGlobalHashArtifacts *out) {
@@ -503,7 +503,7 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
     const u32 primaryCount = pbePrimaryCountForKeyBits(keyBits);
     out->primaryHashTable.offsets.assign(primaryCount, 0);
 
-    /* secondary[0] 保留为空，和现有 runtime null target 约定保持一致。 */
+    // Keep secondary[0] empty so runtime null-target handling stays unchanged.
     out->secondaryHashTable.push_back(HAOSecondaryHashEntry{});
 
     std::map<u32, std::vector<u32>> keyToRuleIndexes;
@@ -568,7 +568,8 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
     out->valid = true;
 }
 
-// 基于 selected bits 构建提取描述符，目前分为 scalar 和 bext 两种模式。
+// Build the extraction descriptor for the selected bits. At present this
+// chooses between scalar extraction and the BEXT-based path.
 template <class ArtifactsT>
 static
 void buildExtractDescriptor(const std::vector<PBEBitSelector> &selectors,
@@ -585,7 +586,7 @@ void buildExtractDescriptor(const std::vector<PBEBitSelector> &selectors,
         return;
     }
     
-    // 
+    // For now, feed every selected bit directly into the BEXT mask.
     for (const auto &selector : selectors) {
         artifacts->bextMask |= (1ULL << selectorBitIndex(selector));
     }
@@ -939,9 +940,8 @@ bool getBitState(const hwlmLiteral &lit, u32 bitIndex, u8 *state) {
     return true;
 }
 
-// entropyScore 计算一个 bit 位的熵得分，基于这个 bit 位在所有 lit 中的 0/1 分布情况。
-// 熵越高说明这个 bit 位在区分 lit 方面越有价值。
-// 熵计算公式：H = -(p0 * log2(p0) + p1 * log2(p1))，其中 p0 和 p1 分别是这个 bit 位为 0 和 1 的概率。
+// Computes an entropy score for one bit position from its 0/1 distribution
+// across all literals.
 static
 double entropyScore(u32 zeros, u32 ones) {
     const u32 total = zeros + ones;
@@ -954,7 +954,8 @@ double entropyScore(u32 zeros, u32 ones) {
     return -(p0 * std::log2(p0) + p1 * std::log2(p1));
 }
 
-// signatureOfStates 计算一个 bit 位状态分布的签名，用于快速识别具有相同状态分布的 bit 位，避免选择多个特征相同的 bit 位作为 selector。
+// Hashes one bit-state distribution so selector choice can avoid picking
+// multiple columns with identical features.
 static
 u64a signatureOfStates(const std::vector<u8> &states) {
     // FNV-1a 64-bit
@@ -971,7 +972,7 @@ std::vector<PBEBitCandidate> buildBitCandidates(
     const std::vector<hwlmLiteral> &lits) {
     std::vector<PBEBitCandidate> out;
     out.reserve(PBE_MAX_CANDIDATE_BITS);
-    // 64bit: 对每个潜在的 bit 位，统计所有 lit 在这个位上的状态分布，并据此计算一个启发式得分。
+    // Collect per-bit state distributions across the candidate 64-bit window.
     for (u32 bit = 0; bit < PBE_MAX_CANDIDATE_BITS; bit++) {
         PBEBitCandidate c;
         c.bitIndex = bit;
@@ -983,9 +984,9 @@ std::vector<PBEBitCandidate> buildBitCandidates(
 
         for (const auto &lit : lits) {
             u8 state = PBE_STATE_DONT_CARE;
-            getBitState(lit, bit, &state); // 获取当前bit位中这一条lit的状态：0, 1, 或者 don't care
+            getBitState(lit, bit, &state); // 0, 1, or don't care.
             c.states.push_back(state);
-            // 不关心的位直接跳过，不纳入统计。0/1状态的位则分别计数。
+            // Skip don't-care bits when collecting statistics.
             if (state == PBE_STATE_DONT_CARE) {
                 continue;
             }
@@ -996,17 +997,14 @@ std::vector<PBEBitCandidate> buildBitCandidates(
                 zeros++;
             }
         }
-        // 如果没有任何lit关心这个bit位，那么这个bit位就没有区分度，不适合做selector，直接跳过。
+        // Skip bit positions that no literal cares about.
         if (!careCount) {
             continue;
         }
-        // 启发式得分计算：主要考虑两个因素：
-        // Principle 1 + 2:
-        // prioritize low don't-care ratio and high discrimination.
-        // careRatio 越高说明这个bit位被更多的lit关心，潜在的区分度越大。
+        // Heuristic scoring prefers widely cared-about bits with balanced
+        // 0/1 distributions.
         const double careRatio =
             static_cast<double>(careCount) / std::max<size_t>(1, lits.size());
-        // entropy 越高说明这个bit位在关心它的lit中分布越均匀，区分度越大。
         const double entropy = entropyScore(zeros, ones);
         c.score = (careRatio * 0.7) + (entropy * 0.3);
         out.push_back(std::move(c));
@@ -1031,7 +1029,8 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
     if (candidates.empty()) {
         return;
     }
-    // 对候选的 bit 位进行排序，优先考虑得分高的位。如果得分相同，则优先考虑位序较低的位（更靠近字符串末尾的位）。
+    // Sort candidate bits by score first, then by bit index so ties stay
+    // closer to the end of the literal window.
     std::sort(candidates.begin(), candidates.end(),
               [](const PBEBitCandidate &a, const PBEBitCandidate &b) {
                   if (a.score != b.score) {
@@ -1062,7 +1061,8 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
         selectors->push_back(s);
         chosenBits.insert(cand.bitIndex);
     }
-    // 如果前面基于启发式得分的选择没有达到目标位数，那么就继续从剩余的候选位中按位序顺序选择，直到达到目标位数或者没有更多候选位了。
+    // If heuristic selection did not fill the target bit budget,
+    // take additional candidates in bit-order until the budget is met.
     if (selectors->size() < targetBits) {
         for (const auto &cand : candidates) {
             if (selectors->size() >= targetBits) {
@@ -1458,11 +1458,19 @@ const char *buildFeasibilityReasonName(ReasonT reason) {
 }
 
 const char *pbeFeasibilityReasonName(PBEFeasibilityReason reason) {
+    return haoCompatFeasibilityReasonName(reason);
+}
+
+const char *haoCompatFeasibilityReasonName(PBEFeasibilityReason reason) {
     return buildFeasibilityReasonName(reason);
 }
 
 const char *haoFeasibilityReasonName(HAOFeasibilityReason reason) {
     return buildFeasibilityReasonName(reason);
+}
+
+bool haoFamilyGreyEnabled(const Grey &grey) {
+    return grey.allowPbe;
 }
 
 bool pbeCanUseBextFastPath(const target_t &target) {
@@ -1483,9 +1491,9 @@ bool pbeHasSveBitPermPrereq(const target_t &target) {
 #endif
 }
 
-bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
-                       PBECompileArtifacts *artifacts,
-                       bool enableDump) {
+bool buildHAOCompatArtifacts(const std::vector<hwlmLiteral> &lits,
+                             PBECompileArtifacts *artifacts,
+                             bool enableDump) {
     if (!artifacts) {
         return false;
     }
@@ -1507,6 +1515,12 @@ bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
     }
 
     return true;
+}
+
+bool buildPBEArtifacts(const std::vector<hwlmLiteral> &lits,
+                       PBECompileArtifacts *artifacts,
+                       bool enableDump) {
+    return buildHAOCompatArtifacts(lits, artifacts, enableDump);
 }
 
 bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
@@ -1539,7 +1553,7 @@ bool analyzeHAOFeasibility(const target_t &target,
     local.reason = HAOFeasibilityReason::ARTIFACT_BUILD_FAILED;
     local.flags = 0;
 
-    if (!grey.allowPbe) {
+    if (!haoFamilyGreyEnabled(grey)) {
         local.reason = HAOFeasibilityReason::GREY_DISABLED;
         if (result) {
             *result = local;
@@ -1621,16 +1635,17 @@ bool analyzeHAOFeasibility(const target_t &target,
     return true;
 }
 
-bool analyzePBEFeasibility(const target_t &target,
-                           const std::vector<hwlmLiteral> &lits,
-                           const Grey &grey, PBEFeasibilityResult *result,
-                           PBECompileArtifacts *artifacts) {
+bool analyzeHAOCompatFeasibility(const target_t &target,
+                                 const std::vector<hwlmLiteral> &lits,
+                                 const Grey &grey,
+                                 PBEFeasibilityResult *result,
+                                 PBECompileArtifacts *artifacts) {
     PBEFeasibilityResult local;
     local.canBuild = false;
     local.reason = PBEFeasibilityReason::ARTIFACT_BUILD_FAILED;
     local.flags = 0;
 
-    if (!grey.allowPbe) {
+    if (!haoFamilyGreyEnabled(grey)) {
         local.reason = PBEFeasibilityReason::GREY_DISABLED;
         if (result) {
             *result = local;
@@ -1666,15 +1681,16 @@ bool analyzePBEFeasibility(const target_t &target,
         return false;
     }
 
-    /* 这里只在调用方没有提供 artifacts 时才构造临时对象。
-     * 这样可以避免在常见路径里无意义地创建/析构一个大型 STL 聚合对象。 */
+    /* Only build a temporary artifacts object when the caller does not
+     * provide one. This avoids needless large STL allocations on the common
+     * feasibility-only path. */
     std::unique_ptr<PBECompileArtifacts> tempStorage;
     PBECompileArtifacts *out = artifacts;
     if (!out) {
         tempStorage.reset(new PBECompileArtifacts());
         out = tempStorage.get();
     }
-    if (!buildPBEArtifacts(lits, out, false)) {
+    if (!buildHAOCompatArtifacts(lits, out, false)) {
         local.reason = PBEFeasibilityReason::ARTIFACT_BUILD_FAILED;
         if (result) {
             *result = local;
@@ -1713,10 +1729,23 @@ bool analyzePBEFeasibility(const target_t &target,
     return true;
 }
 
+bool analyzePBEFeasibility(const target_t &target,
+                           const std::vector<hwlmLiteral> &lits,
+                           const Grey &grey, PBEFeasibilityResult *result,
+                           PBECompileArtifacts *artifacts) {
+    return analyzeHAOCompatFeasibility(target, lits, grey, result, artifacts);
+}
+
 bool canBuildPBE(const target_t &target, const std::vector<hwlmLiteral> &lits,
                  const Grey &grey) {
+    return canBuildHAOCompat(target, lits, grey);
+}
+
+bool canBuildHAOCompat(const target_t &target,
+                       const std::vector<hwlmLiteral> &lits,
+                       const Grey &grey) {
     PBEFeasibilityResult result;
-    return analyzePBEFeasibility(target, lits, grey, &result, nullptr);
+    return analyzeHAOCompatFeasibility(target, lits, grey, &result, nullptr);
 }
 
 bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
@@ -1725,12 +1754,9 @@ bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
     return analyzeHAOFeasibility(target, lits, grey, &result, nullptr);
 }
 
-bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
-    /* 过渡阶段统一走这个入口，具体输出 HAO v1 还是 HAO v2 布局由模式字段决定。 */
-    if (artifacts.haoBlobLayoutMode == HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V2_GLOBAL) {
-        return buildHAOGlobalBlob(artifacts);
-    }
-
+bytecode_ptr<u8> buildHAOCompatBlob(const PBECompileArtifacts &artifacts) {
+    /* Serialize the legacy compatibility layout that keeps the historical
+     * PBE/HAO-v1 runtime format alive behind the new HAO compatibility API. */
     const u32 selectorCount = verify_u32(artifacts.bitSelectors.size());
     const u32 classCount = verify_u32(artifacts.maskClasses.size());
     const u32 primaryCount = verify_u32(artifacts.primaryHashTable.offsets.size());
@@ -1897,6 +1923,14 @@ bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
     }
 
     return blob;
+}
+
+bytecode_ptr<u8> buildPBEBlob(const PBECompileArtifacts &artifacts) {
+    if (artifacts.haoBlobLayoutMode ==
+        HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V2_GLOBAL) {
+        return buildHAOGlobalBlob(artifacts);
+    }
+    return buildHAOCompatBlob(artifacts);
 }
 
 template <class ArtifactsT>
@@ -2067,3 +2101,4 @@ bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts) {
 }
 
 } // namespace ue2
+
