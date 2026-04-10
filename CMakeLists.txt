@@ -1197,7 +1197,6 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
         src/kunpeng-enhanced/khsel_ops.h
         src/kunpeng-enhanced/khsel_type.h
         src/kunpeng-enhanced/khsel_typebase.h
-        src/kunpeng-enhanced/shufti_enhanced.h
         src/kunpeng-enhanced/fdr_enhanced.c
         src/kunpeng-enhanced/runtime_lily.c
         src/kunpeng-enhanced/shufti.c
