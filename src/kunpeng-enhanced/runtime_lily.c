@@ -33,8 +33,8 @@
 #include "core_precomp.h"
 #include "../rose/rose_internal.h"
 #include "../khsel_runtime.h"
-#include "khsel_hwlm.h"
-#include "khsel_fdr_internal.h"
+#include "../hwlm/hwlm.h"
+#include "../fdr/fdr_internal.h"
 #include "../report.h"
 #include "../util/unaligned.h"
 #include "../fdr/teddy_internal.h"
@@ -42,7 +42,7 @@
 #include "hs_compile.h"
 #include "lily_teddy_common.h"
 
-#define GET_LO_4(chars) And128(chars, low4bits)
+#define GET_LO_4(chars) and128(chars, low4bits)
 #define GET_HI_4(chars) Rshift8_m128(chars, BYTE_SIZE_FOUR)
 #define ones_u32            0xfffffffful
 static const u8 KHSEL_ALIGN_DIRECTIVE p_mask_arr[17][32];
@@ -419,18 +419,18 @@ int runLily(const char *maskLily, const u32 *ekeyVec, u8 flagsQuiet, hs_scratch_
     const u8 *buffer = scratch->core_info.buf;
     size_t length = scratch->core_info.len;
 
-    const m128 low4bits = Set16x8(0xf);
+    const m128 low4bits = set16x8(0xf);
     m128 mask_lo = Load128(maskLily);
     m128 mask_hi = Load128(maskLily + step);
 
     const u8 *itPtr = buffer;
 
     for (; itPtr + step < buffer + length; itPtr += step) {
-        m128 chars = Loadu128(itPtr);
+        m128 chars = loadu128(itPtr);
 
         m128 c_lo  = Pshufb_m128_opt(mask_lo, GET_LO_4(chars));
         m128 c_hi  = Pshufb_m128_opt(mask_hi, GET_HI_4(chars));
-        m128 rst = And128(c_lo, c_hi);
+        m128 rst = and128(c_lo, c_hi);
 
         u64a conf0 = vgetq_lane_u64(rst.vect_u64, 0);
         u64a conf8 = vgetq_lane_u64(rst.vect_u64, 1);
@@ -442,11 +442,11 @@ int runLily(const char *maskLily, const u32 *ekeyVec, u8 flagsQuiet, hs_scratch_
 
     u8 zerobuf[16] = {0};
     memcpy(zerobuf, itPtr, length - (itPtr - buffer));
-    m128 chars = Loadu128(zerobuf);
+    m128 chars = loadu128(zerobuf);
 
     m128 c_lo  = Pshufb_m128_opt(mask_lo, GET_LO_4(chars));
     m128 c_hi  = Pshufb_m128_opt(mask_hi, GET_HI_4(chars));
-    m128 rst = And128(c_lo, c_hi);
+    m128 rst = and128(c_lo, c_hi);
 
     u64a conf0 = vgetq_lane_u64(rst.vect_u64, 0);
     u64a conf8 = vgetq_lane_u64(rst.vect_u64, 1);
@@ -526,12 +526,12 @@ m128 vectoredLoad128(m128 *p_mask, const u8 *ptr, const size_t start_offset,
         uintptr_t avail = (uintptr_t)(hi - ptr);
         if (avail >= 16) {
             assert(start_offset - start <= 16);
-            *p_mask = Loadu128(p_mask_arr[16 - start_offset + start]
+            *p_mask = loadu128(p_mask_arr[16 - start_offset + start]
                                + 16 - start_offset + start);
-            return Loadu128(ptr);
+            return loadu128(ptr);
         }
         assert(start_offset - start <= avail);
-        *p_mask = Loadu128(p_mask_arr[avail - start_offset + start]
+        *p_mask = loadu128(p_mask_arr[avail - start_offset + start]
                            + 16 - start_offset + start);
         copy_start = 0;
         copy_len = avail;
@@ -545,7 +545,7 @@ m128 vectoredLoad128(m128 *p_mask, const u8 *ptr, const size_t start_offset,
         }
         uintptr_t end = MIN(16, (uintptr_t)(hi - ptr));
         assert(start + start_offset <= end);
-        *p_mask = Loadu128(p_mask_arr[end - start - start_offset]
+        *p_mask = loadu128(p_mask_arr[end - start - start_offset]
                            + 16 - start - start_offset);
         copy_start = start;
         copy_len = end - start;
@@ -575,7 +575,7 @@ do {                                                                          \
                                      a->buf, buf_end,                         \
                                      a->buf_history, a->len_history, n_msk);  \
         m128 r_0 = PREP_CONF_FN(maskBase, val_0, n_msk);                      \
-        r_0 = Or128(r_0, p_mask);                                             \
+        r_0 = or128(r_0, p_mask);                                             \
         FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK(p_mask, n_msk);                    \
         u64a conf0 = vgetq_lane_u64(r_0.vect_u64, 0);                          \
         u64a conf8 = vgetq_lane_u64(r_0.vect_u64, 1);                          \
@@ -632,7 +632,7 @@ do {                                                                          \
         m128 val_0 = vectoredLoad128(&p_mask, ptr, 0, ptr, buf_end,           \
                                      a->buf_history, a->len_history, n_msk);  \
         m128 r_0 = PREP_CONF_FN(maskBase, val_0, n_msk);                      \
-        r_0 = Or128(r_0, p_mask);                                             \
+        r_0 = or128(r_0, p_mask);                                             \
         u64a conf0 = vgetq_lane_u64(r_0.vect_u64, 0);                          \
         u64a conf8 = vgetq_lane_u64(r_0.vect_u64, 1);                          \
         if (lilyForTeddyMatch(conf0, ekeyVec, flagsQuiet, ptr, scratch) == KHSEL_MATCHING_TERMINATED ||      \

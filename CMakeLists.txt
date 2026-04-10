@@ -1197,7 +1197,6 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
         src/kunpeng-enhanced/khsel_ops.h
         src/kunpeng-enhanced/khsel_type.h
         src/kunpeng-enhanced/khsel_typebase.h
-        src/kunpeng-enhanced/khsel.h
         src/kunpeng-enhanced/shufti_enhanced.h
         src/kunpeng-enhanced/fdr_enhanced.c
         src/kunpeng-enhanced/runtime_lily.c
@@ -1205,9 +1204,6 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
         src/kunpeng-enhanced/lily.cpp
         src/kunpeng-enhanced/compare.h
         src/kunpeng-enhanced/core_precomp.h
-        src/kunpeng-enhanced/khsel_fdr_internal.h
-        src/kunpeng-enhanced/khsel_hwlm.h
-        src/kunpeng-enhanced/simd_arm.h
     )
 endif()
 

@@ -30,7 +30,7 @@
 #define SHUFTI_H
 
 #include "ue2common.h"
-#include "simd_arm.h"
+#include "../util/simd_arm.h"
 
 
 #ifdef __cplusplus
