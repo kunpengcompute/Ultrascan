@@ -461,16 +461,20 @@ void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan,
 
     entry->ruleIndex[localSlot] = verify_u16(plan.ruleIndex);
     entry->slotMask |= verify_u8(1U << localSlot);
+    entry->slotCount = verify_u8(entry->slotCount + 1U);
 
     for (u32 i = 0; i < HAO_COMPAT_BYTES_PER_RULE_SLOT; i++) {
         if (!(validMask & (1U << i))) {
             continue;
         }
         const u32 vecIndex = laneBase + i;
+        const u8 srcCtl = verify_u8(vecIndex & 0x0fU);
         entry->ruleVector[vecIndex] = plan.verifier.bytes[i];
-        /* tableControl is still a placeholder per-byte mapping at this stage.
-         * Later phases replace it with the final shuffle control bytes. */
-        entry->tableControl[vecIndex] = verify_u8(vecIndex & 0x0fU);
+        entry->tableControl[vecIndex] = srcCtl;
+        if (srcCtl != (vecIndex & 0x0fU)) {
+            entry->flags = verify_u8(entry->flags &
+                                     (u8)~HAO_SECONDARY_ENTRY_FLAG_IDENTITY_TBL);
+        }
         entry->tailMask |= (1U << vecIndex);
         if (i != lastValidBit) {
             entry->headMask |= (1U << vecIndex);
@@ -548,6 +552,7 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
         for (u32 chunk = 0; chunk < entryCount; chunk++) {
             HAOSecondaryHashEntry entry = {};
             memset(entry.tableControl, 0x80, sizeof(entry.tableControl));
+            entry.flags = HAO_SECONDARY_ENTRY_FLAG_IDENTITY_TBL;
             const size_t begin = chunk * HAO_COMPAT_RULE_SLOTS_PER_ENTRY;
             const size_t end = std::min(bucketRules.size(),
                                         begin + HAO_COMPAT_RULE_SLOTS_PER_ENTRY);
@@ -680,8 +685,12 @@ char dumpPrintableOrDot(u8 c) {
 }
 
 static
-u32 haoSecondarySlotCount(u8 slotMask) {
-    return popcount32(slotMask & ((1U << HAO_COMPAT_RULE_SLOTS_PER_ENTRY) - 1U));
+u32 haoSecondarySlotCount(const HAOSecondaryHashEntry &entry) {
+    if (entry.slotCount) {
+        return MIN((u32)entry.slotCount, HAO_COMPAT_RULE_SLOTS_PER_ENTRY);
+    }
+    return popcount32(entry.slotMask &
+                      ((1U << HAO_COMPAT_RULE_SLOTS_PER_ENTRY) - 1U));
 }
 
 static
@@ -749,7 +758,7 @@ void dumpHashTables(const HAOCompatCompileArtifacts &artifacts,
         for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size();
              i++) {
             const auto &e = artifacts.haoGlobalHash.secondaryHashTable[i];
-            const u32 ruleCount = haoSecondarySlotCount(e.slotMask);
+            const u32 ruleCount = haoSecondarySlotCount(e);
             printf("  HAO-L2[%u] ruleCount=%u entryCapacity=%u headMask=0x%08x tailMask=0x%08x\n",
                    i, ruleCount, HAO_COMPAT_RULE_SLOTS_PER_ENTRY, e.headMask,
                    e.tailMask);
@@ -2060,7 +2069,9 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
             dst.headMask = src.headMask;
             dst.tailMask = src.tailMask;
             dst.slotMask = src.slotMask;
-            memset(dst.reserved, 0, sizeof(dst.reserved));
+            dst.slotCount = src.slotCount;
+            dst.flags = src.flags;
+            dst.reserved = 0;
         }
     }
 

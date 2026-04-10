@@ -103,6 +103,7 @@ static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_AMBIG_LIMIT = 1U << 4;
 static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_EXPANSION_BUDGET = 1U << 5;
 static constexpr u32 HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT = 1U << 6;
 static constexpr u32 HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE = 1U << 7;
+static constexpr u8 HAO_SECONDARY_ENTRY_FLAG_IDENTITY_TBL = 1U << 0;
 
 struct Grey;
 struct target_t;
@@ -151,7 +152,9 @@ struct HAOSecondaryHashEntry {
     u32 headMask;
     u32 tailMask;
     u8 slotMask;
-    u8 reserved[3];
+    u8 slotCount;
+    u8 flags;
+    u8 reserved;
 };
 
 struct HAOCompatRuleMeta {

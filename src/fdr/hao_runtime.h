@@ -97,6 +97,7 @@
 #define HAO_RUNTIME_RULE_ANCHOR_CONFIRM 3U
 #define HAO_RUNTIME_RULE_UNSUPPORTED 4U
 #define HAO_RUNTIME_PLAN_FLAG_DIRECT_REPORT_SAFE (1U << 7)
+#define HAO_RUNTIME_SECONDARY_ENTRY_FLAG_IDENTITY_TBL (1U << 0)
 
 /* Legacy HAO compat runtime layout that still carries the v1/class-table format. */
 struct PBERuntimeHeader {
@@ -160,7 +161,9 @@ struct HAORuntimeSecondaryHashEntry {
     u32 headMask;
     u32 tailMask;
     u8 slotMask;
-    u8 reserved[3];
+    u8 slotCount;
+    u8 flags;
+    u8 reserved;
 };
 
 typedef struct PBERuntimeHeader HAOCompatRuntimeHeader;

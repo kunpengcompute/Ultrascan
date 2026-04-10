@@ -380,6 +380,7 @@ u64a haoLoadWindow64Normalized(const struct FDR_Runtime_Args *a,
     return window;
 }
 
+// TODO: 待优化：使用向量化的方式来处理
 // haoComputeValidMask8实现了根据当前扫描位置和历史数据长度计算出一个8位的有效位掩码，指示在当前窗口中哪些字节是有效的（即在输入数据范围内）。
 static really_inline
 u32 haoComputeValidMask8(const struct FDR_Runtime_Args *a, size_t endPos) {
