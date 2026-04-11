@@ -35,7 +35,7 @@ static int g_haoStatsActive;
         }                                                                 \
         int _pad = 42 - (_blen - _cjk);                                  \
         if (_pad < 1) _pad = 1;                                           \
-        fprintf(stderr, "\t%s%*s: " fmt "\n", label, _pad, "", val);     \
+        fprintf(stderr, "  %s%*s: " fmt "\n", label, _pad, "", val);     \
     } while(0)
 
 static void haoDumpRuntimeStats(void);
@@ -889,6 +889,111 @@ static u32 haoEntryMatchMaskFromContext(
             }
         }
     }
+#endif
+}
+
+static u32 haoEntryMatchMaskFromContextScalarForTest(
+    const struct HAORuntimeSecondaryHashEntry *entry,
+    struct HAOPositionContext *ctx) {
+    u32 shuffledValidMask = 0;
+    const u32 slotMask = haoEntrySlotMask(entry);
+    const u32 slotCount = haoEntrySlotCount(entry);
+    const int identityTableControl = haoEntryHasIdentityTableControl(entry);
+
+    if (!entry || !slotMask || !ctx) {
+        return 0;
+    }
+
+    haoEnsureLaneWindowContext(ctx);
+    if (identityTableControl) {
+        shuffledValidMask = ctx->validMask32 & entry->tailMask;
+    } else {
+        shuffledValidMask = haoBuildShuffledValidMask(entry, ctx);
+    }
+
+    if (slotCount == 1) {
+        return haoEntrySingleSlotMatchMaskFromContext(entry, ctx,
+                                                      shuffledValidMask);
+    }
+
+    {
+        u32 byteMatchMask = 0;
+        u32 i;
+
+        for (i = 0; i < HAO_RUNTIME_RULE_VECTOR_BYTES; i++) {
+            const u32 bit = 1U << i;
+            u8 got;
+
+            if (!(shuffledValidMask & bit)) {
+                continue;
+            }
+            if (identityTableControl) {
+                got = ctx->laneWindow32[i];
+            } else {
+                const u8 srcCtl = entry->tableControl[i];
+                const u32 chunkBase = i & 0x10U;
+                const u32 srcIndex = chunkBase + srcCtl;
+                got = ctx->laneWindow32[srcIndex];
+            }
+            if (got == entry->ruleVector[i]) {
+                byteMatchMask |= bit;
+            }
+        }
+
+        return haoEntryLaneMaskFromByteMatches(entry, byteMatchMask);
+    }
+}
+
+static u32 haoEntryMatchMaskFromContextVectorForTest(
+    const struct HAORuntimeSecondaryHashEntry *entry,
+    struct HAOPositionContext *ctx) {
+    u32 shuffledValidMask = 0;
+    const u32 slotMask = haoEntrySlotMask(entry);
+    const u32 slotCount = haoEntrySlotCount(entry);
+    const int identityTableControl = haoEntryHasIdentityTableControl(entry);
+
+    if (!entry || !slotMask || !ctx) {
+        return 0;
+    }
+
+    haoEnsureLaneWindowContext(ctx);
+    if (identityTableControl) {
+        shuffledValidMask = ctx->validMask32 & entry->tailMask;
+    } else {
+        shuffledValidMask = haoBuildShuffledValidMask(entry, ctx);
+    }
+
+    if (slotCount == 1) {
+        return haoEntrySingleSlotMatchMaskFromContext(entry, ctx,
+                                                      shuffledValidMask);
+    }
+
+#if defined(HAVE_NEON) || defined(HAVE_SSE2)
+    {
+        const m128 inputLo = loadu128(ctx->laneWindow32);
+        const m128 inputHi = loadu128(ctx->laneWindow32 + 16);
+        const m128 ruleLo = loadu128(entry->ruleVector);
+        const m128 ruleHi = loadu128(entry->ruleVector + 16);
+        u32 eqLo;
+        u32 eqHi;
+
+        if (identityTableControl) {
+            eqLo = movemask128(eq128(inputLo, ruleLo));
+            eqHi = movemask128(eq128(inputHi, ruleHi));
+        } else {
+            const m128 ctrlLo = loadu128(entry->tableControl);
+            const m128 ctrlHi = loadu128(entry->tableControl + 16);
+            const m128 shufLo = pshufb_m128(inputLo, ctrlLo);
+            const m128 shufHi = pshufb_m128(inputHi, ctrlHi);
+            eqLo = movemask128(eq128(shufLo, ruleLo));
+            eqHi = movemask128(eq128(shufHi, ruleHi));
+        }
+
+        return haoEntryLaneMaskFromByteMatches(
+            entry, (eqLo | (eqHi << 16)) & shuffledValidMask & entry->tailMask);
+    }
+#else
+    return haoEntryMatchMaskFromContextScalarForTest(entry, ctx);
 #endif
 }
 
@@ -1791,16 +1896,9 @@ hwlm_error_t HaoCompatEngineExecNaiveForTest(const struct FDR *fdr,
     {
         const u8 *base = (const u8 *)fdr;
         const void *blob = base + fdrMatcherBlobOffset(fdr);
-        u32 magic = 0;
-
-        if (haoReadBlobMagic(blob, fdrMatcherBlobSize(fdr), &magic) &&
-            magic == HAO_RUNTIME_MAGIC) {
-            return haoExecBlobWithPath(blob, fdrMatcherBlobSize(fdr), a,
-                                       control, 0);
-        }
+        return haoExecBlobWithPath(blob, fdrMatcherBlobSize(fdr), a,
+                                   control, 0);
     }
-
-    return haoCompatExecWithPath(fdr, a, control, 0);
 }
 
 u32 HaoCompatRuntimeEntryMatchMaskForTest(
@@ -1816,6 +1914,21 @@ u32 HaoCompatRuntimeEntryMatchMaskForTest(
 
     return useVector ? haoCompatEntryMatchMaskFromContextVector(entry, &ctx)
                      : haoCompatEntryMatchMaskFromContextScalar(entry, &ctx);
+}
+
+u32 HaoRuntimeEntryMatchMaskForTest(
+    const struct HAORuntimeSecondaryHashEntry *entry,
+    const struct FDR_Runtime_Args *a, size_t endPos, int useVector) {
+    struct HAOPositionContext ctx;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.endPos = endPos;
+    ctx.window64 =
+        haoLoadWindow64Normalized(a, endPos, HAO_RUNTIME_BYTES_PER_RULE_SLOT);
+    ctx.validMask8 = haoComputeValidMask8(a, endPos);
+
+    return useVector ? haoEntryMatchMaskFromContextVectorForTest(entry, &ctx)
+                     : haoEntryMatchMaskFromContextScalarForTest(entry, &ctx);
 }
 
 u32 HaoCompatRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
@@ -1886,48 +1999,15 @@ hwlm_error_t haoFamilyExec(const struct FDR *fdr,
     {
         const u8 *base = (const u8 *)fdr;
         const void *blob = base + fdrMatcherBlobOffset(fdr);
-        u32 magic = 0;
-
-        if (haoReadBlobMagic(blob, fdrMatcherBlobSize(fdr), &magic) &&
-            magic == HAO_RUNTIME_MAGIC) {
-            return haoExecBlobWithPath(blob, fdrMatcherBlobSize(fdr), a,
-                                       control, 1);
-        }
+        return haoExecBlobWithPath(blob, fdrMatcherBlobSize(fdr), a,
+                                   control, 1);
     }
-
-    return haoCompatExecWithPath(fdr, a, control, 1);
 }
 
 hwlm_error_t HaoEngineExec(const struct FDR *fdr,
                            const struct FDR_Runtime_Args *a,
                            hwlm_group_t control) {
     return haoFamilyExec(fdr, a, control);
-}
-
-hwlm_error_t PbeEngineExecNaiveForTest(const struct FDR *fdr,
-                                       const struct FDR_Runtime_Args *a,
-                                       hwlm_group_t control) {
-    return HaoCompatEngineExecNaiveForTest(fdr, a, control);
-}
-
-u32 PbeRuntimeEntryMatchMaskForTest(
-    const HAOCompatRuntimeSecondaryHashEntry *entry,
-    const struct FDR_Runtime_Args *a, size_t endPos, int useVector) {
-    return HaoCompatRuntimeEntryMatchMaskForTest(entry, a, endPos, useVector);
-}
-
-u32 PbeRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
-                                     const u32 *primaryIdx, u32 laneCount,
-                                     int usePacked) {
-    return HaoCompatRuntimeBitmapProbeMaskForTest(bitmap, bitmapSize,
-                                                  primaryIdx, laneCount,
-                                                  usePacked);
-}
-
-hwlm_error_t PbeEngineExec(const struct FDR *fdr,
-                           const struct FDR_Runtime_Args *a,
-                           hwlm_group_t control) {
-    return HaoEngineExec(fdr, a, control);
 }
 
 

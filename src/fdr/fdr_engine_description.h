@@ -70,12 +70,12 @@ std::unique_ptr<FDREngineDescription>
 chooseNeoFdrEngine(const target_t &target, const std::vector<hwlmLiteral> &vl,
              bool make_small);
 std::unique_ptr<FDREngineDescription>
-choosePbeEngine(const target_t &target, const std::vector<hwlmLiteral> &vl,
+chooseHaoEngine(const target_t &target, const std::vector<hwlmLiteral> &vl,
                 bool make_small);
 std::unique_ptr<FDREngineDescription> getFdrDescription(u32 engineID);
 void getFdrDescriptions(std::vector<FDREngineDescription> *out);
 void getNeoFdrDescriptions(std::vector<FDREngineDescription> *out);
-void getPbeDescriptions(std::vector<FDREngineDescription> *out);
+void getHaoDescriptions(std::vector<FDREngineDescription> *out);
 } // namespace ue2
 
 #endif

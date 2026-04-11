@@ -65,7 +65,7 @@ void getNeoFdrDescriptions(vector<FDREngineDescription> *out) {
     out->emplace_back(def);
 }
 
-void getPbeDescriptions(vector<FDREngineDescription> *out) {
+void getHaoDescriptions(vector<FDREngineDescription> *out) {
     static const FDREngineDef def = {2, 64, 8, 0};
     out->clear();
     out->emplace_back(def);
@@ -316,11 +316,11 @@ unique_ptr<FDREngineDescription> chooseNeoFdrEngine(const target_t &target,
     return ue2::make_unique<FDREngineDescription>(*best);
 }
 
-unique_ptr<FDREngineDescription> choosePbeEngine(const target_t &target,
+unique_ptr<FDREngineDescription> chooseHaoEngine(const target_t &target,
                                                  const vector<hwlmLiteral> &vl,
                                                  bool make_small) {
     vector<FDREngineDescription> allDescs;
-    getPbeDescriptions(&allDescs);
+    getHaoDescriptions(&allDescs);
 
     // find desired stride
     size_t count;
@@ -427,7 +427,7 @@ unique_ptr<FDREngineDescription> getFdrDescription(u32 engineID) {
     allDescs.insert(allDescs.end(), neoDescs.begin(), neoDescs.end());
 
     vector<FDREngineDescription> haoFamilyDescs;
-    getPbeDescriptions(&haoFamilyDescs);
+    getHaoDescriptions(&haoFamilyDescs);
     allDescs.insert(allDescs.end(), haoFamilyDescs.begin(),
                     haoFamilyDescs.end());
 

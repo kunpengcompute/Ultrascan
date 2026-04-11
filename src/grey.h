@@ -54,8 +54,7 @@ struct Grey {
     bool allowSheng;
     bool allowMcSheng;
     bool allowNeoFdr;
-    bool allowPbe;
-    /* 过渡阶段开关：允许 PBE 编译链直接输出 HAO v2 全局单表布局。 */
+    /* Enable the HAO v2 literal-matcher family. */
     bool allowHaoV2;
     bool allowPuff;
     bool allowLiteral;

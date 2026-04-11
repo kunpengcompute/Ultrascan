@@ -171,36 +171,6 @@ bool tryBuildHaoV2ProtoArtifacts(const target_t &target,
     return true;
 }
 
-static
-bool tryBuildHaoCompatProtoArtifacts(const target_t &target,
-                                     const std::vector<hwlmLiteral> &lits,
-                                     const Grey &grey,
-                                     HAOCompatCompileArtifacts *artifacts) {
-    if (!artifacts) {
-        return false;
-    }
-
-    HAOCompatFeasibilityResult compatResult;
-    const bool compatFeasible = analyzeHAOCompatFeasibility(target, lits, grey,
-                                                            &compatResult,
-                                                            artifacts);
-    DEBUG_PRINTF("HAO compat feasibility: canBuild=%u reason=%s flags=0x%x\n",
-                 compatFeasible ? 1 : 0,
-                 haoCompatFeasibilityReasonName(compatResult.reason),
-                 compatResult.flags);
-    if (!compatFeasible) {
-        return false;
-    }
-
-    artifacts->haoBlobLayoutMode = HAOBlobLayoutMode::HAO_BLOB_LAYOUT_V1_COMPAT;
-    return true;
-}
-
-static
-bool protoUsesHaoV2Layout(const HWLMProto &proto) {
-    return proto.useHaoV2Layout || !!proto.haoArtifacts;
-}
-
 class FDRCompiler : noncopyable {
 private:
     const FDREngineDescription &eng;
@@ -999,12 +969,10 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         }
     }
 
-    /* Engine-family 2 is still the shared FDR slot for legacy PBE compat and
-     * HAO v2. Phase 3 prefers HAO v2 selection first and only falls back to
-     * legacy compat when HAO cannot be used. */
+    /* Engine-family 2 is now reserved for HAO v2 only. */
     const bool haoFamilyHint = (hint == HAO_FAMILY_ENGINE_ID);
     auto haoFamilyDes = (hint == HINT_INVALID)
-                      ? choosePbeEngine(target, lits, make_small)
+                      ? chooseHaoEngine(target, lits, make_small)
                       : getFdrDescription(hint);
     if (haoFamilyDes && haoFamilyDes->getID() == HAO_FAMILY_ENGINE_ID) {
         // temporary hack for unit testing
@@ -1022,25 +990,11 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                 engType, move(haoFamilyDes), lits, haoFamilyBucketToLits,
                 make_small);
             proto->haoArtifacts = std::move(haoArtifacts);
-            proto->useHaoV2Layout = true;
-            return proto;
-        }
-
-        HAOCompatCompileArtifacts legacyCompatArtifacts;
-        if (tryBuildHaoCompatProtoArtifacts(target, lits, grey,
-                                            &legacyCompatArtifacts)) {
-            auto proto = ue2::make_unique<HWLMProto>(
-                engType, move(haoFamilyDes), lits, haoFamilyBucketToLits,
-                make_small);
-            proto->haoCompatArtifacts = ue2::make_unique<HAOCompatCompileArtifacts>(
-                std::move(legacyCompatArtifacts));
-            proto->useHaoV2Layout = false;
             return proto;
         }
 
         if (haoFamilyHint) {
-            // Explicit engine-family hint but neither HAO v2 nor legacy compat
-            // could accept this rule set.
+            // Explicit HAO family hint, but HAO v2 could not accept the rule set.
             return nullptr;
         }
     } else if (haoFamilyHint) {
@@ -1105,37 +1059,17 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
 
     bytecode_ptr<u8> matcherBlob = nullptr;
     if (proto.fdrEng && proto.fdrEng->getID() == HAO_FAMILY_ENGINE_ID) {
-        if (protoUsesHaoV2Layout(proto)) {
-            HAOCompileArtifacts rebuiltHaoArtifacts;
-            if (!buildHAOArtifacts(proto.lits, &rebuiltHaoArtifacts, false)) {
-                return nullptr;
-            }
-            if (!haoV2LayoutCanPreserveCoverage(rebuiltHaoArtifacts)) {
-                assert(0 && "HAO feasibility mismatch: invalid v2 coverage in table build");
-                return nullptr;
-            }
-            matcherBlob = buildHAOBlob(rebuiltHaoArtifacts);
-            if (!matcherBlob) {
-                return nullptr;
-            }
-        } else {
-            HAOCompatCompileArtifacts rebuiltCompatArtifacts;
-            // Rebuild from final proto.lits at table-build time. proto.lits may be
-            // updated after proto construction (e.g. Rose program offsets), so
-            // stale cached artifacts can carry invalid rule IDs.
-            if (!buildHAOCompatArtifacts(proto.lits, &rebuiltCompatArtifacts, false)) {
-                return nullptr;
-            }
-            const HAOCompatCompileArtifacts *artifacts = &rebuiltCompatArtifacts;
-            if (artifacts->flags &
-                HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
-                assert(0 && "HAO compat feasibility mismatch: partial coverage in table build");
-                return nullptr;
-            }
-            matcherBlob = buildHAOCompatBlob(*artifacts);
-            if (!matcherBlob) {
-                return nullptr;
-            }
+        HAOCompileArtifacts rebuiltHaoArtifacts;
+        if (!buildHAOArtifacts(proto.lits, &rebuiltHaoArtifacts, false)) {
+            return nullptr;
+        }
+        if (!haoV2LayoutCanPreserveCoverage(rebuiltHaoArtifacts)) {
+            assert(0 && "HAO feasibility mismatch: invalid v2 coverage in table build");
+            return nullptr;
+        }
+        matcherBlob = buildHAOBlob(rebuiltHaoArtifacts);
+        if (!matcherBlob) {
+            return nullptr;
         }
     }
 

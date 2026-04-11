@@ -108,9 +108,7 @@ bytecode_ptr<FDR> buildFdrWithHint(std::vector<hwlmLiteral> lits, u32 hint) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowPbe = true;
-    /* Keep legacy compatibility/Neo regression helpers pinned to HAO v1. */
-    grey.allowHaoV2 = false;
+    grey.allowHaoV2 = true;
 
     auto proto = fdrBuildProtoHinted(HWLM_ENGINE_FDR, std::move(lits), false,
                                      hint, get_current_target(), grey);
@@ -245,11 +243,11 @@ hwlm_error_t runHaoFamilyDirect(const FDR *fdr, const std::vector<u8> &data,
 }
 
 static
-const HAOCompatRuntimeHeader *getHaoCompatRuntimeHeader(const FDR *fdr) {
+const HAORuntimeHeader *getHaoRuntimeHeader(const FDR *fdr) {
     if (!fdr || !fdrMatcherBlobOffset(fdr)) {
         return nullptr;
     }
-    return reinterpret_cast<const HAOCompatRuntimeHeader *>(
+    return reinterpret_cast<const HAORuntimeHeader *>(
         reinterpret_cast<const u8 *>(fdr) + fdrMatcherBlobOffset(fdr));
 }
 
@@ -595,13 +593,11 @@ std::vector<hwlmLiteral> makeDuplicateLiterals(const std::string &s, bool nocase
 }
 
 static
-Grey makeHaoGrey(bool allowPbe = true) {
+Grey makeHaoGrey(bool allowHaoV2 = true) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowPbe = allowPbe;
-    /* Keep legacy compatibility feasibility/build helpers pinned to HAO v1. */
-    grey.allowHaoV2 = false;
+    grey.allowHaoV2 = allowHaoV2;
     return grey;
 }
 
@@ -2265,7 +2261,6 @@ TEST(HAOCompile, HAOProtoBuildPrefersHaoV2Artifacts) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowPbe = true;
     grey.allowHaoV2 = true;
 
     std::vector<hwlmLiteral> lits = {
@@ -2282,16 +2277,13 @@ TEST(HAOCompile, HAOProtoBuildPrefersHaoV2Artifacts) {
         return;
     }
 
-    EXPECT_TRUE(proto->useHaoV2Layout);
     EXPECT_NE(nullptr, proto->haoArtifacts.get());
-    EXPECT_EQ(nullptr, proto->haoCompatArtifacts.get());
 }
 
-TEST(HAOCompile, HAOProtoBuildFallsBackToLegacyCompatWhenV2Disabled) {
+TEST(HAOCompile, HAOProtoBuildRejectsHaoWhenV2Disabled) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowPbe = true;
     grey.allowHaoV2 = false;
 
     std::vector<hwlmLiteral> lits = {
@@ -2303,14 +2295,7 @@ TEST(HAOCompile, HAOProtoBuildFallsBackToLegacyCompatWhenV2Disabled) {
 
     auto proto = fdrBuildProtoHinted(HWLM_ENGINE_FDR, std::move(lits), false,
                                      ENGINE_ID_HAO, get_current_target(), grey);
-    if (!proto || !proto->fdrEng) {
-        skipIfNoHaoFamilySupport();
-        return;
-    }
-
-    EXPECT_FALSE(proto->useHaoV2Layout);
-    EXPECT_EQ(nullptr, proto->haoArtifacts.get());
-    EXPECT_NE(nullptr, proto->haoCompatArtifacts.get());
+    EXPECT_EQ(nullptr, proto.get());
 }
 
 TEST(HAOCompile, BuildHaoCompatBlobHeaderMatchesArtifacts) {
@@ -2867,7 +2852,6 @@ TEST(HAORuntime, BuildFdrWithHaoV2LayoutEmbedsHaoBlob) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowPbe = true;
     grey.allowHaoV2 = true;
 
     auto fdr = buildFdrWithHintAndGrey({
@@ -2892,7 +2876,6 @@ TEST(HAORuntime, AutoHaoFamilyBuildWithHaoV2LayoutEmbedsHaoBlob) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowPbe = true;
     grey.allowHaoV2 = true;
 
     auto fdr = buildFdrAutoWithGrey({
@@ -2917,7 +2900,6 @@ TEST(HAORuntime, AutoHaoFamilyBuildWithHaoV2LayoutEmbedsHaoBlobForAnchorConfirmR
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowPbe = true;
     grey.allowHaoV2 = true;
 
     auto fdr = buildFdrAutoWithGrey({
@@ -2944,7 +2926,6 @@ TEST(HAORuntime, AutoHaoFamilyBuildWithHaoV2LayoutEmbedsHaoBlobForResidualUnsupp
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowPbe = true;
     grey.allowHaoV2 = true;
 
     auto fdr = buildFdrAutoWithGrey({
@@ -3085,7 +3066,6 @@ TEST(HAORuntime, EmbeddedHaoV2FdrBatchMatchesNaive) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowPbe = true;
     grey.allowHaoV2 = true;
 
     auto fdr = buildFdrWithHintAndGrey({
@@ -3983,10 +3963,10 @@ TEST(HAOPrefilter, EntryLaneMaskMatchesScalar) {
         return;
     }
 
-    const auto *hdr = getHaoCompatRuntimeHeader(haoFamily.get());
+    const auto *hdr = getHaoRuntimeHeader(haoFamily.get());
     ASSERT_NE(nullptr, hdr);
-    const auto *secondary = reinterpret_cast<const HAOCompatRuntimeSecondaryHashEntry *>(
-        reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
+    ASSERT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
+    const auto *secondary = getHaoSecondaryTable(hdr);
 
     const std::vector<u8> data = {'a','l','p','h','a',' ',
                                   'B','E','T','A',' ',
@@ -3998,9 +3978,9 @@ TEST(HAOPrefilter, EntryLaneMaskMatchesScalar) {
 
     for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
         for (size_t endPos = 0; endPos < data.size(); endPos++) {
-            const u32 scalarMask = HaoCompatRuntimeEntryMatchMaskForTest(
+            const u32 scalarMask = HaoRuntimeEntryMatchMaskForTest(
                 &secondary[entry], &args, endPos, 0);
-            const u32 vectorMask = HaoCompatRuntimeEntryMatchMaskForTest(
+            const u32 vectorMask = HaoRuntimeEntryMatchMaskForTest(
                 &secondary[entry], &args, endPos, 1);
             EXPECT_EQ(scalarMask, vectorMask)
                 << "entry=" << entry << " endPos=" << endPos;
@@ -4021,10 +4001,10 @@ TEST(HAOPrefilter, EntryLaneMaskHistoryBoundaryConsistency) {
         return;
     }
 
-    const auto *hdr = getHaoCompatRuntimeHeader(haoFamily.get());
+    const auto *hdr = getHaoRuntimeHeader(haoFamily.get());
     ASSERT_NE(nullptr, hdr);
-    const auto *secondary = reinterpret_cast<const HAOCompatRuntimeSecondaryHashEntry *>(
-        reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
+    ASSERT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
+    const auto *secondary = getHaoSecondaryTable(hdr);
 
     const std::vector<u8> history = {'x', 'x', 'a', 'b'};
     const std::vector<u8> data = {'c', 'z', 'Y', 'Y', 'a', 'B', 'c', 'z'};
@@ -4034,9 +4014,9 @@ TEST(HAOPrefilter, EntryLaneMaskHistoryBoundaryConsistency) {
 
     for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
         for (size_t endPos = 0; endPos < data.size(); endPos++) {
-            const u32 scalarMask = HaoCompatRuntimeEntryMatchMaskForTest(
+            const u32 scalarMask = HaoRuntimeEntryMatchMaskForTest(
                 &secondary[entry], &args, endPos, 0);
-            const u32 vectorMask = HaoCompatRuntimeEntryMatchMaskForTest(
+            const u32 vectorMask = HaoRuntimeEntryMatchMaskForTest(
                 &secondary[entry], &args, endPos, 1);
             EXPECT_EQ(scalarMask, vectorMask)
                 << "entry=" << entry << " endPos=" << endPos;
@@ -4057,10 +4037,10 @@ TEST(HAOPrefilter, HeadTailMaskRejectsSameAsScalarForPartialSlots) {
         return;
     }
 
-    const auto *hdr = getHaoCompatRuntimeHeader(haoFamily.get());
+    const auto *hdr = getHaoRuntimeHeader(haoFamily.get());
     ASSERT_NE(nullptr, hdr);
-    const auto *secondary = reinterpret_cast<const HAOCompatRuntimeSecondaryHashEntry *>(
-        reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
+    ASSERT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
+    const auto *secondary = getHaoSecondaryTable(hdr);
 
     const std::vector<u8> data = {'A','b',' ','a','b','c',' ',
                                   'b','e','t','a',' ','z','z'};
@@ -4070,9 +4050,9 @@ TEST(HAOPrefilter, HeadTailMaskRejectsSameAsScalarForPartialSlots) {
 
     for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
         for (size_t endPos = 0; endPos < data.size(); endPos++) {
-            const u32 scalarMask = HaoCompatRuntimeEntryMatchMaskForTest(
+            const u32 scalarMask = HaoRuntimeEntryMatchMaskForTest(
                 &secondary[entry], &args, endPos, 0);
-            const u32 vectorMask = HaoCompatRuntimeEntryMatchMaskForTest(
+            const u32 vectorMask = HaoRuntimeEntryMatchMaskForTest(
                 &secondary[entry], &args, endPos, 1);
             EXPECT_EQ(scalarMask, vectorMask)
                 << "entry=" << entry << " endPos=" << endPos;
@@ -4093,10 +4073,10 @@ TEST(HAOPrefilter, SingleSlotFastPathMatchesScalar) {
         return;
     }
 
-    const auto *hdr = getHaoCompatRuntimeHeader(haoFamily.get());
+    const auto *hdr = getHaoRuntimeHeader(haoFamily.get());
     ASSERT_NE(nullptr, hdr);
-    const auto *secondary = reinterpret_cast<const HAOCompatRuntimeSecondaryHashEntry *>(
-        reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
+    ASSERT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
+    const auto *secondary = getHaoSecondaryTable(hdr);
 
     const std::vector<u8> data = {'x','x','a','l','p','h','a','x',
                                   'd','e','l','t','a','x',
@@ -4108,14 +4088,14 @@ TEST(HAOPrefilter, SingleSlotFastPathMatchesScalar) {
     bool sawSingleSlot = false;
 
     for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
-        if (secondary[entry].ruleCount != 1) {
+        if (secondary[entry].slotCount != 1) {
             continue;
         }
         sawSingleSlot = true;
         for (size_t endPos = 0; endPos < data.size(); endPos++) {
-            const u32 scalarMask = HaoCompatRuntimeEntryMatchMaskForTest(
+            const u32 scalarMask = HaoRuntimeEntryMatchMaskForTest(
                 &secondary[entry], &args, endPos, 0);
-            const u32 vectorMask = HaoCompatRuntimeEntryMatchMaskForTest(
+            const u32 vectorMask = HaoRuntimeEntryMatchMaskForTest(
                 &secondary[entry], &args, endPos, 1);
             EXPECT_EQ(scalarMask, vectorMask)
                 << "entry=" << entry << " endPos=" << endPos;
@@ -4137,9 +4117,10 @@ TEST(HAORuntime, Batch4MatchesNaiveDirect) {
         skipIfNoHaoFamilySupport();
         return;
     }
-    const auto *hdr = getHaoCompatRuntimeHeader(haoFamily.get());
+    const auto *hdr = getHaoRuntimeHeader(haoFamily.get());
     ASSERT_NE(nullptr, hdr);
-    EXPECT_LE(hdr->classCount, 2U);
+    EXPECT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
+    EXPECT_EQ(HAO_RUNTIME_VERSION, hdr->version);
 
     const std::vector<u8> data = {'a','l','p','h','a',' ',
                                   'd','e','l','t','a',' ',
@@ -4171,9 +4152,10 @@ TEST(HAORuntime, MaskClassBatchMatchesNaiveDirect) {
         skipIfNoHaoFamilySupport();
         return;
     }
-    const auto *hdr = getHaoCompatRuntimeHeader(haoFamily.get());
+    const auto *hdr = getHaoRuntimeHeader(haoFamily.get());
     ASSERT_NE(nullptr, hdr);
-    EXPECT_GT(hdr->classCount, 2U);
+    EXPECT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
+    EXPECT_EQ(HAO_RUNTIME_VERSION, hdr->version);
 
     const std::vector<u8> data = {'a','l','p','h','a',' ',
                                   'A','L','P','H','A',' ',

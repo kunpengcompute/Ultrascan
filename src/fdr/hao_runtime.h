@@ -295,15 +295,14 @@ u32 pbeExtractPackedBitsSveBitPermLaneCount(void);
 hwlm_error_t HaoEngineExec(const struct FDR *fdr,
                            const struct FDR_Runtime_Args *a,
                            hwlm_group_t control);
-/* Legacy wrapper entry points retained for compatibility. */
-hwlm_error_t PbeEngineExec(const struct FDR *fdr,
-                          const struct FDR_Runtime_Args *a,
-                          hwlm_group_t control);
 hwlm_error_t HaoCompatEngineExecNaiveForTest(const struct FDR *fdr,
                                        const struct FDR_Runtime_Args *a,
                                        hwlm_group_t control);
 u32 HaoCompatRuntimeEntryMatchMaskForTest(
     const HAOCompatRuntimeSecondaryHashEntry *entry,
+    const struct FDR_Runtime_Args *a, size_t endPos, int useVector);
+u32 HaoRuntimeEntryMatchMaskForTest(
+    const struct HAORuntimeSecondaryHashEntry *entry,
     const struct FDR_Runtime_Args *a, size_t endPos, int useVector);
 u32 HaoCompatRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
                                      const u32 *primaryIdx, u32 laneCount,
@@ -313,15 +312,6 @@ int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
                                  struct HAORuntimeInspectSummary *summary);
 void HaoRuntimeResetStatsForTest(void);
 void HaoRuntimeGetStatsForTest(struct HAORuntimeStats *summary);
-hwlm_error_t PbeEngineExecNaiveForTest(const struct FDR *fdr,
-                                       const struct FDR_Runtime_Args *a,
-                                       hwlm_group_t control);
-u32 PbeRuntimeEntryMatchMaskForTest(
-    const HAOCompatRuntimeSecondaryHashEntry *entry,
-    const struct FDR_Runtime_Args *a, size_t endPos, int useVector);
-u32 PbeRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
-                                     const u32 *primaryIdx, u32 laneCount,
-                                     int usePacked);
 hwlm_error_t HaoEngineExecBlobNaiveForTest(const void *blob, u32 blobSize,
                                            const struct FDR_Runtime_Args *a,
                                            hwlm_group_t control);

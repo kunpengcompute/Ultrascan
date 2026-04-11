@@ -859,7 +859,7 @@ void dumpHashTables(const HAOCompatCompileArtifacts &artifacts,
         }                                                                  \
         int _pad = 42 - (_blen - _cjk);                                   \
         if (_pad < 1) _pad = 1;                                            \
-        printf("\t%s%*s: " fmt "\n", label, _pad, "", val);               \
+        printf("  %s%*s: " fmt "\n", label, _pad, "", val);               \
     } while(0)
 
 
@@ -1504,7 +1504,7 @@ const char *haoFeasibilityReasonName(HAOFeasibilityReason reason) {
 }
 
 bool haoFamilyGreyEnabled(const Grey &grey) {
-    return grey.allowPbe;
+    return grey.allowHaoV2;
 }
 
 bool haoCanUseBextFastPath(const target_t &target) {
