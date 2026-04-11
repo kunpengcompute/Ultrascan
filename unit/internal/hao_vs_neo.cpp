@@ -14,6 +14,7 @@
 #include "fdr/fdr_enhanced.h"
 #include "fdr/hao_compile.h"
 #include "fdr/hao_runtime.h"
+#include "fdr/hao_runtime_inline.h"
 #include "hwlm/hwlm_internal.h"
 #include "scratch.h"
 #include "util/arch.h"
@@ -24,11 +25,22 @@
 
 #include "gtest/gtest.h"
 
+#ifdef HS_UNIT_HAS_HSBENCH_CORPUS_DB
+#include "tools/hsbench/data_corpus.h"
+#endif
+
 #include <algorithm>
 #include <bitset>
+#include <cctype>
+#include <cerrno>
+#include <cstdlib>
 #include <cstring>
+#include <exception>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -42,6 +54,7 @@ namespace {
 
 static constexpr u32 ENGINE_ID_NEO = 1;
 static constexpr u32 ENGINE_ID_HAO = ue2::HAO_ENGINE_ID;
+static constexpr size_t HAO_COLLISION_SAMPLE_COUNT = 1U << 20;
 
 struct Match {
     size_t end;
@@ -335,15 +348,6 @@ const HAORuntimeSecondaryHashEntry *getHaoSecondaryTable(
     }
     return reinterpret_cast<const HAORuntimeSecondaryHashEntry *>(
         reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
-}
-
-static
-const HAORuntimeRuleMeta *getHaoRuleMetaTable(const HAORuntimeHeader *hdr) {
-    if (!hdr) {
-        return nullptr;
-    }
-    return reinterpret_cast<const HAORuntimeRuleMeta *>(
-        reinterpret_cast<const u8 *>(hdr) + hdr->ruleMetaOffset);
 }
 
 static
@@ -767,6 +771,996 @@ u32 packedBitsToKeyForTest(const HAOCompatCompileArtifacts &artifacts, u64a pack
         return (u32)packed;
     }
     return (u32)(packed & ((1ULL << artifacts.bitSelectors.size()) - 1ULL));
+}
+
+static
+std::vector<u8> makeDeterministicCollisionCorpus(size_t count) {
+    std::vector<u8> data(count);
+    u64a state = 0x9e3779b97f4a7c15ULL;
+    for (size_t i = 0; i < count; i++) {
+        // xorshift64* keeps the corpus deterministic and cheap in UT.
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        const u64a mixed = state * 2685821657736338717ULL;
+        data[i] = verify_u8((mixed >> 56) & 0xffU);
+    }
+    return data;
+}
+
+static
+std::vector<u32> extractRuntimeKeysForBlocks(
+    const HAORuntimeHeader *hdr, const HAORuntimeBitSelector *selectors,
+    const std::vector<std::vector<u8>> &blocks);
+
+static
+std::vector<u32> extractScalarReferenceKeysForBlocks(
+    const HAOCompatCompileArtifacts &artifacts,
+    const std::vector<std::vector<u8>> &blocks);
+
+static
+std::vector<u32> extractRuntimeKeysForData(const HAORuntimeHeader *hdr,
+                                           const HAORuntimeBitSelector *selectors,
+                                           const std::vector<u8> &data) {
+    std::vector<std::vector<u8>> blocks;
+    if (!data.empty()) {
+        blocks.push_back(data);
+    }
+    return extractRuntimeKeysForBlocks(hdr, selectors, blocks);
+}
+
+static
+std::vector<u32> extractRuntimeKeysForBlocks(
+    const HAORuntimeHeader *hdr, const HAORuntimeBitSelector *selectors,
+    const std::vector<std::vector<u8>> &blocks) {
+    std::vector<u32> keys;
+    if (!hdr || !selectors || blocks.empty()) {
+        return keys;
+    }
+
+    size_t totalBytes = 0;
+    for (const auto &b : blocks) {
+        totalBytes += b.size();
+    }
+    keys.reserve(totalBytes);
+
+    for (const auto &data : blocks) {
+        if (data.empty()) {
+            continue;
+        }
+        hs_scratch scratch = {};
+        scratch.fdr_conf = nullptr;
+        const auto args = makeRuntimeArgs(data, {}, &scratch);
+        for (size_t endPos = 0; endPos < data.size(); endPos++) {
+            const u64a window = haoLoadWindow64Normalized(&args, endPos,
+                                                          hdr->windowBytes);
+            keys.push_back(haoExtractKeyFromWindow(hdr, selectors, window));
+        }
+    }
+    return keys;
+}
+
+static
+std::vector<u32> extractScalarReferenceKeysForData(
+    const HAOCompatCompileArtifacts &artifacts, const std::vector<u8> &data) {
+    std::vector<std::vector<u8>> blocks;
+    if (!data.empty()) {
+        blocks.push_back(data);
+    }
+    return extractScalarReferenceKeysForBlocks(artifacts, blocks);
+}
+
+static
+std::vector<u32> extractScalarReferenceKeysForBlocks(
+    const HAOCompatCompileArtifacts &artifacts,
+    const std::vector<std::vector<u8>> &blocks) {
+    std::vector<u32> keys;
+    if (blocks.empty()) {
+        return keys;
+    }
+
+    size_t totalBytes = 0;
+    for (const auto &b : blocks) {
+        totalBytes += b.size();
+    }
+    keys.reserve(totalBytes);
+
+    for (const auto &data : blocks) {
+        if (data.empty()) {
+            continue;
+        }
+        hs_scratch scratch = {};
+        scratch.fdr_conf = nullptr;
+        const auto args = makeRuntimeArgs(data, {}, &scratch);
+        for (size_t endPos = 0; endPos < data.size(); endPos++) {
+            const u64a window = haoLoadWindow64Normalized(&args, endPos,
+                                                          artifacts.windowBytes);
+            keys.push_back(extractScalarKeyFromWindowForTest(artifacts, window));
+        }
+    }
+    return keys;
+}
+
+static
+double collisionRateFromHashes(const std::vector<u32> &hashes, u32 tableSize,
+                               u32 *collisionsOut, u32 *nonEmptyOut) {
+    if (collisionsOut) {
+        *collisionsOut = 0;
+    }
+    if (nonEmptyOut) {
+        *nonEmptyOut = 0;
+    }
+    if (!tableSize || hashes.empty()) {
+        return 0.0;
+    }
+
+    std::vector<u32> hashCounts(tableSize, 0);
+    u32 collisions = 0;
+    u32 nonEmpty = 0;
+    for (u32 hash : hashes) {
+        if (hash >= tableSize) {
+            continue;
+        }
+        if (hashCounts[hash] > 0) {
+            collisions++;
+        } else {
+            nonEmpty++;
+        }
+        hashCounts[hash]++;
+    }
+
+    if (collisionsOut) {
+        *collisionsOut = collisions;
+    }
+    if (nonEmptyOut) {
+        *nonEmptyOut = nonEmpty;
+    }
+    return static_cast<double>(collisions) / hashes.size();
+}
+
+static
+std::string trimAscii(std::string s) {
+    auto isSpace = [](unsigned char c) { return std::isspace(c) != 0; };
+
+    while (!s.empty() && isSpace(static_cast<unsigned char>(s.front()))) {
+        s.erase(s.begin());
+    }
+    while (!s.empty() && isSpace(static_cast<unsigned char>(s.back()))) {
+        s.pop_back();
+    }
+    return s;
+}
+
+static
+bool parseUnsignedU64Token(const std::string &token, unsigned long long *out) {
+    if (!out) {
+        return false;
+    }
+    const std::string t = trimAscii(token);
+    if (t.empty()) {
+        return false;
+    }
+
+    errno = 0;
+    char *end = nullptr;
+    const unsigned long long v = std::strtoull(t.c_str(), &end, 0);
+    if (errno || !end || *end != '\0') {
+        return false;
+    }
+    *out = v;
+    return true;
+}
+
+static
+bool parseBoolToken(const std::string &token, bool *out) {
+    if (!out) {
+        return false;
+    }
+    std::string t = trimAscii(token);
+    for (auto &c : t) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+
+    if (t == "1" || t == "true" || t == "yes" || t == "y") {
+        *out = true;
+        return true;
+    }
+    if (t == "0" || t == "false" || t == "no" || t == "n") {
+        *out = false;
+        return true;
+    }
+    return false;
+}
+
+static
+bool decodeEscapedLiteral(const std::string &input, std::string *output,
+                          std::string *error) {
+    if (!output) {
+        return false;
+    }
+    output->clear();
+    output->reserve(input.size());
+
+    const auto hexValue = [](char c) -> int {
+        if (c >= '0' && c <= '9') {
+            return c - '0';
+        }
+        if (c >= 'a' && c <= 'f') {
+            return c - 'a' + 10;
+        }
+        if (c >= 'A' && c <= 'F') {
+            return c - 'A' + 10;
+        }
+        return -1;
+    };
+
+    for (size_t i = 0; i < input.size(); i++) {
+        if (input[i] != '\\') {
+            output->push_back(input[i]);
+            continue;
+        }
+        if (i + 1 >= input.size()) {
+            if (error) {
+                *error = "dangling escape at end of literal";
+            }
+            return false;
+        }
+
+        const char esc = input[++i];
+        switch (esc) {
+        case 'n':
+            output->push_back('\n');
+            break;
+        case 'r':
+            output->push_back('\r');
+            break;
+        case 't':
+            output->push_back('\t');
+            break;
+        case '\\':
+            output->push_back('\\');
+            break;
+        case 'x': {
+            if (i + 2 >= input.size()) {
+                if (error) {
+                    *error = "incomplete \\xNN escape";
+                }
+                return false;
+            }
+            const int hi = hexValue(input[i + 1]);
+            const int lo = hexValue(input[i + 2]);
+            if (hi < 0 || lo < 0) {
+                if (error) {
+                    *error = "invalid hex digit in \\xNN escape";
+                }
+                return false;
+            }
+            output->push_back(static_cast<char>((hi << 4) | lo));
+            i += 2;
+            break;
+        }
+        default:
+            // Keep unknown escapes usable for common punctuation.
+            output->push_back(esc);
+            break;
+        }
+    }
+    return true;
+}
+
+static
+std::vector<std::string> splitByPipe(const std::string &line) {
+    std::vector<std::string> fields;
+    size_t start = 0;
+    while (start <= line.size()) {
+        const size_t pos = line.find('|', start);
+        if (pos == std::string::npos) {
+            fields.push_back(line.substr(start));
+            break;
+        }
+        fields.push_back(line.substr(start, pos - start));
+        start = pos + 1;
+    }
+    return fields;
+}
+
+static
+bool isRegexMetaChar(char c) {
+    switch (c) {
+    case '.':
+    case '^':
+    case '$':
+    case '*':
+    case '+':
+    case '?':
+    case '(':
+    case ')':
+    case '[':
+    case ']':
+    case '{':
+    case '}':
+    case '|':
+        return true;
+    default:
+        return false;
+    }
+}
+
+static
+bool isEscapedAt(const std::string &s, size_t pos) {
+    size_t backslashCount = 0;
+    while (pos > 0 && s[pos - 1] == '\\') {
+        backslashCount++;
+        pos--;
+    }
+    return (backslashCount % 2U) != 0U;
+}
+
+static
+bool decodeHsbenchPcreLiteralBody(const std::string &body,
+                                  std::string *literalOut, bool *unsupportedOut,
+                                  std::string *error) {
+    if (!literalOut || !unsupportedOut) {
+        return false;
+    }
+    *unsupportedOut = false;
+    literalOut->clear();
+    literalOut->reserve(body.size());
+
+    const auto hexValue = [](char c) -> int {
+        if (c >= '0' && c <= '9') {
+            return c - '0';
+        }
+        if (c >= 'a' && c <= 'f') {
+            return c - 'a' + 10;
+        }
+        if (c >= 'A' && c <= 'F') {
+            return c - 'A' + 10;
+        }
+        return -1;
+    };
+
+    for (size_t i = 0; i < body.size(); i++) {
+        const char c = body[i];
+        if (c != '\\') {
+            if (isRegexMetaChar(c)) {
+                *unsupportedOut = true;
+                if (error) {
+                    std::ostringstream oss;
+                    oss << "unsupported regex metachar '" << c
+                        << "' in hsbench literal line";
+                    *error = oss.str();
+                }
+                return false;
+            }
+            literalOut->push_back(c);
+            continue;
+        }
+
+        if (i + 1 >= body.size()) {
+            if (error) {
+                *error = "dangling escape in hsbench regex literal";
+            }
+            return false;
+        }
+
+        const char esc = body[++i];
+        switch (esc) {
+        case 'n':
+            literalOut->push_back('\n');
+            break;
+        case 'r':
+            literalOut->push_back('\r');
+            break;
+        case 't':
+            literalOut->push_back('\t');
+            break;
+        case 'x': {
+            if (i + 2 >= body.size()) {
+                if (error) {
+                    *error = "incomplete \\xNN escape in hsbench regex literal";
+                }
+                return false;
+            }
+            const int hi = hexValue(body[i + 1]);
+            const int lo = hexValue(body[i + 2]);
+            if (hi < 0 || lo < 0) {
+                if (error) {
+                    *error = "invalid hex digit in hsbench \\xNN escape";
+                }
+                return false;
+            }
+            literalOut->push_back(static_cast<char>((hi << 4) | lo));
+            i += 2;
+            break;
+        }
+        default:
+            // Escaped punctuation (e.g. \. or \/) is treated as literal.
+            literalOut->push_back(esc);
+            break;
+        }
+    }
+
+    if (literalOut->empty()) {
+        if (error) {
+            *error = "empty literal after decoding hsbench regex";
+        }
+        return false;
+    }
+    return true;
+}
+
+static
+bool parseHsbenchPcreAsLiteral(const std::string &pcreToken,
+                               std::string *literalOut, bool *nocaseOut,
+                               bool *unsupportedOut, std::string *error) {
+    if (!literalOut || !nocaseOut || !unsupportedOut) {
+        return false;
+    }
+    *unsupportedOut = false;
+
+    const std::string token = trimAscii(pcreToken);
+    if (token.size() < 2 || token[0] != '/') {
+        if (error) {
+            *error = "hsbench rule must use /.../flags form";
+        }
+        return false;
+    }
+
+    size_t closingSlash = std::string::npos;
+    for (size_t i = token.size(); i-- > 1;) {
+        if (token[i] != '/') {
+            continue;
+        }
+        if (!isEscapedAt(token, i)) {
+            closingSlash = i;
+            break;
+        }
+    }
+    if (closingSlash == std::string::npos) {
+        if (error) {
+            *error = "cannot find closing '/' in hsbench regex token";
+        }
+        return false;
+    }
+
+    const std::string body = token.substr(1, closingSlash - 1);
+    const std::string flags = token.substr(closingSlash + 1);
+
+    bool nocase = false;
+    for (char f : flags) {
+        if (std::isspace(static_cast<unsigned char>(f))) {
+            continue;
+        }
+        switch (f) {
+        case 'i':
+            nocase = true;
+            break;
+        case 'm':
+        case 's':
+        case 'H':
+        case 'O':
+        case 'V':
+        case 'W':
+        case '8':
+        case 'P':
+        case 'L':
+        case 'C':
+        case 'Q':
+            // Accepted for compatibility with hsbench expression parser.
+            break;
+        default:
+            *unsupportedOut = true;
+            if (error) {
+                std::ostringstream oss;
+                oss << "unsupported hsbench flag '" << f
+                    << "' for literal-only collision test";
+                *error = oss.str();
+            }
+            return false;
+        }
+    }
+
+    std::string literal;
+    if (!decodeHsbenchPcreLiteralBody(body, &literal, unsupportedOut, error)) {
+        return false;
+    }
+
+    *literalOut = std::move(literal);
+    *nocaseOut = nocase;
+    return true;
+}
+
+enum class RuleLineParseResult {
+    PARSED,
+    UNSUPPORTED,
+    ERROR
+};
+
+struct LiteralLoadStats {
+    size_t totalNonCommentLines = 0;
+    size_t loadedLiteralCount = 0;
+    size_t skippedUnsupportedCount = 0;
+    size_t skippedTooLongCount = 0;
+};
+
+/* Rule-file format:
+ * 1) literal-only line: <literal>
+ *    -> nocase=0, noruns=0, id=auto, groups=HWLM_ALL_GROUPS
+ * 2) full line: <literal>|<nocase>|<noruns>|<id>|<groups>
+ *    bool accepts 0/1/true/false/yes/no; integers accept decimal/hex.
+ * 3) hsbench style: <id>:/literal/flags (literal-only subset).
+ * Literal supports escapes: \\n \\r \\t \\\\ \\xNN. */
+static
+RuleLineParseResult parseRuleLine(const std::string &line, u32 autoId,
+                                  std::string *literalOut, bool *nocaseOut,
+                                  bool *norunsOut, u32 *idOut,
+                                  hwlm_group_t *groupsOut, std::string *error) {
+    if (!literalOut || !nocaseOut || !norunsOut || !idOut || !groupsOut) {
+        return RuleLineParseResult::ERROR;
+    }
+
+    std::string literalToken;
+    bool nocase = false;
+    bool noruns = false;
+    u32 id = autoId;
+    hwlm_group_t groups = HWLM_ALL_GROUPS;
+    bool hsbenchDecoded = false;
+
+    const size_t pipePos = line.find('|');
+    if (pipePos != std::string::npos) {
+        const auto fields = splitByPipe(line);
+        if (fields.size() != 5) {
+            if (error) {
+                *error = "expected 5 pipe-separated fields";
+            }
+            return RuleLineParseResult::ERROR;
+        }
+
+        literalToken = trimAscii(fields[0]);
+        if (!parseBoolToken(fields[1], &nocase) ||
+            !parseBoolToken(fields[2], &noruns)) {
+            if (error) {
+                *error = "failed to parse bool fields nocase/noruns";
+            }
+            return RuleLineParseResult::ERROR;
+        }
+
+        unsigned long long idRaw = 0;
+        if (!parseUnsignedU64Token(fields[3], &idRaw) ||
+            idRaw > std::numeric_limits<u32>::max()) {
+            if (error) {
+                *error = "failed to parse id as u32";
+            }
+            return RuleLineParseResult::ERROR;
+        }
+        id = static_cast<u32>(idRaw);
+
+        unsigned long long groupsRaw = 0;
+        if (!parseUnsignedU64Token(fields[4], &groupsRaw)) {
+            if (error) {
+                *error = "failed to parse groups";
+            }
+            return RuleLineParseResult::ERROR;
+        }
+        groups = static_cast<hwlm_group_t>(groupsRaw);
+    } else {
+        const size_t colonPos = line.find(':');
+        bool hsbenchCandidate = false;
+        if (colonPos != std::string::npos) {
+            const std::string idToken = trimAscii(line.substr(0, colonPos));
+            const std::string pcreToken = trimAscii(line.substr(colonPos + 1));
+            if (!pcreToken.empty() && pcreToken[0] == '/') {
+                hsbenchCandidate = true;
+                unsigned long long idRaw = 0;
+                if (!parseUnsignedU64Token(idToken, &idRaw) ||
+                    idRaw > std::numeric_limits<u32>::max()) {
+                    if (error) {
+                        *error = "failed to parse hsbench id as u32";
+                    }
+                    return RuleLineParseResult::ERROR;
+                }
+                id = static_cast<u32>(idRaw);
+                bool unsupported = false;
+                if (!parseHsbenchPcreAsLiteral(pcreToken, &literalToken,
+                                               &nocase, &unsupported, error)) {
+                    return unsupported ? RuleLineParseResult::UNSUPPORTED
+                                       : RuleLineParseResult::ERROR;
+                }
+                hsbenchDecoded = true;
+            }
+        }
+
+        if (!hsbenchCandidate) {
+            literalToken = trimAscii(line);
+        }
+    }
+
+    if (literalToken.empty()) {
+        if (error) {
+            *error = "empty literal";
+        }
+        return RuleLineParseResult::ERROR;
+    }
+
+    std::string decodedLiteral = literalToken;
+    if (!hsbenchDecoded && !decodeEscapedLiteral(literalToken, &decodedLiteral,
+                                                 error)) {
+        return RuleLineParseResult::ERROR;
+    }
+    if (decodedLiteral.empty()) {
+        if (error) {
+            *error = "decoded literal is empty";
+        }
+        return RuleLineParseResult::ERROR;
+    }
+
+    *literalOut = std::move(decodedLiteral);
+    *nocaseOut = nocase;
+    *norunsOut = noruns;
+    *idOut = id;
+    *groupsOut = groups;
+    return RuleLineParseResult::PARSED;
+}
+
+static
+bool loadLiteralsFromFile(const std::string &path,
+                          std::vector<hwlmLiteral> *litsOut,
+                          LiteralLoadStats *statsOut,
+                          std::string *error) {
+    if (!litsOut) {
+        return false;
+    }
+    litsOut->clear();
+
+    LiteralLoadStats stats = {};
+
+    std::ifstream in(path);
+    if (!in) {
+        if (error) {
+            *error = "failed to open rules file: " + path;
+        }
+        return false;
+    }
+
+    std::string line;
+    u32 autoId = 1;
+    size_t lineNo = 0;
+    while (std::getline(in, line)) {
+        lineNo++;
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
+        const std::string trimmed = trimAscii(line);
+        if (trimmed.empty() || trimmed[0] == '#') {
+            continue;
+        }
+        stats.totalNonCommentLines++;
+
+        std::string literal;
+        bool nocase = false;
+        bool noruns = false;
+        u32 id = autoId;
+        hwlm_group_t groups = HWLM_ALL_GROUPS;
+        std::string lineError;
+        const auto parseResult = parseRuleLine(trimmed, autoId, &literal,
+                                               &nocase, &noruns, &id, &groups,
+                                               &lineError);
+        if (parseResult == RuleLineParseResult::UNSUPPORTED) {
+            stats.skippedUnsupportedCount++;
+            continue;
+        }
+        if (parseResult != RuleLineParseResult::PARSED) {
+            if (error) {
+                std::ostringstream oss;
+                oss << "rules parse error at line " << lineNo << ": "
+                    << lineError;
+                *error = oss.str();
+            }
+            return false;
+        }
+
+        if (literal.size() > HWLM_LITERAL_MAX_LEN) {
+            stats.skippedTooLongCount++;
+            continue;
+        }
+
+        litsOut->emplace_back(literal, nocase, noruns, id, groups,
+                              std::vector<u8>{}, std::vector<u8>{});
+        stats.loadedLiteralCount++;
+        if (autoId < std::numeric_limits<u32>::max()) {
+            autoId++;
+        }
+    }
+
+    if (litsOut->empty()) {
+        if (error) {
+            std::ostringstream oss;
+            oss << "rules file has no valid literals: " << path
+                << " (non-comment lines=" << stats.totalNonCommentLines
+                << ", unsupported=" << stats.skippedUnsupportedCount
+                << ", tooLong=" << stats.skippedTooLongCount << ")";
+            *error = oss.str();
+        }
+        return false;
+    }
+
+    if (statsOut) {
+        *statsOut = stats;
+    }
+    return true;
+}
+
+static
+bool loadBytesFromFile(const std::string &path, std::vector<u8> *bytesOut,
+                       std::string *error) {
+    if (!bytesOut) {
+        return false;
+    }
+    bytesOut->clear();
+
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        if (error) {
+            *error = "failed to open input file: " + path;
+        }
+        return false;
+    }
+
+    const std::vector<char> raw((std::istreambuf_iterator<char>(in)),
+                                std::istreambuf_iterator<char>());
+    bytesOut->reserve(raw.size());
+    for (char c : raw) {
+        bytesOut->push_back(verify_u8(static_cast<unsigned char>(c)));
+    }
+
+    if (bytesOut->empty()) {
+        if (error) {
+            *error = "input file is empty: " + path;
+        }
+        return false;
+    }
+    return true;
+}
+
+static
+size_t blockBytesCount(const std::vector<std::vector<u8>> &blocks) {
+    size_t total = 0;
+    for (const auto &block : blocks) {
+        total += block.size();
+    }
+    return total;
+}
+
+enum class CollisionInputMode {
+    AUTO,
+    RAW,
+    HSBENCH_DB
+};
+
+static
+std::string toLowerAscii(std::string s) {
+    for (auto &c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return s;
+}
+
+static
+bool pathLooksLikeHsbenchDb(const std::string &path) {
+    const std::string lower = toLowerAscii(path);
+    return (lower.size() >= 3 && lower.substr(lower.size() - 3) == ".db") ||
+           (lower.size() >= 7 && lower.substr(lower.size() - 7) == ".sqlite") ||
+           (lower.size() >= 8 && lower.substr(lower.size() - 8) == ".sqlite3");
+}
+
+static
+bool parseCollisionInputModeFromEnv(CollisionInputMode *modeOut) {
+    if (!modeOut) {
+        return false;
+    }
+    *modeOut = CollisionInputMode::AUTO;
+
+    const char *modeEnv = std::getenv("HS_HAO_COLLISION_INPUT_MODE");
+    if (!modeEnv || !*modeEnv) {
+        return true;
+    }
+
+    const std::string mode = toLowerAscii(trimAscii(modeEnv));
+    if (mode == "auto") {
+        *modeOut = CollisionInputMode::AUTO;
+        return true;
+    }
+    if (mode == "raw") {
+        *modeOut = CollisionInputMode::RAW;
+        return true;
+    }
+    if (mode == "hsbench_db") {
+        *modeOut = CollisionInputMode::HSBENCH_DB;
+        return true;
+    }
+    return false;
+}
+
+static
+bool loadRawInputBlocksFromFile(const std::string &path,
+                                std::vector<std::vector<u8>> *blocksOut,
+                                std::string *error) {
+    if (!blocksOut) {
+        return false;
+    }
+    blocksOut->clear();
+
+    std::vector<u8> bytes;
+    if (!loadBytesFromFile(path, &bytes, error)) {
+        return false;
+    }
+    if (bytes.empty()) {
+        if (error) {
+            *error = "input file is empty: " + path;
+        }
+        return false;
+    }
+    blocksOut->push_back(std::move(bytes));
+    return true;
+}
+
+static
+bool loadHsbenchCorpusBlocksFromFile(const std::string &path,
+                                     std::vector<std::vector<u8>> *blocksOut,
+                                     std::string *error) {
+    if (!blocksOut) {
+        return false;
+    }
+    blocksOut->clear();
+
+#ifdef HS_UNIT_HAS_HSBENCH_CORPUS_DB
+    try {
+        const auto corpusBlocks = readCorpus(path);
+        blocksOut->reserve(corpusBlocks.size());
+        for (const auto &block : corpusBlocks) {
+            if (block.payload.empty()) {
+                continue;
+            }
+            std::vector<u8> bytes;
+            bytes.reserve(block.payload.size());
+            for (char c : block.payload) {
+                bytes.push_back(verify_u8(static_cast<unsigned char>(c)));
+            }
+            if (!bytes.empty()) {
+                blocksOut->push_back(std::move(bytes));
+            }
+        }
+    } catch (const DataCorpusError &e) {
+        if (error) {
+            *error = e.msg;
+        }
+        return false;
+    } catch (const std::exception &e) {
+        if (error) {
+            *error = e.what();
+        }
+        return false;
+    }
+
+    if (blocksOut->empty()) {
+        if (error) {
+            *error = "hsbench corpus DB contains no non-empty blocks: " + path;
+        }
+        return false;
+    }
+    return true;
+#else
+    if (error) {
+        *error =
+            "hsbench corpus DB mode is unavailable (unit-internal built without sqlite support)";
+    }
+    (void)path;
+    return false;
+#endif
+}
+
+static
+bool loadInputBlocksFromFile(const std::string &path,
+                             std::vector<std::vector<u8>> *blocksOut,
+                             bool *usedHsbenchDbOut, std::string *error) {
+    if (!blocksOut) {
+        return false;
+    }
+    if (usedHsbenchDbOut) {
+        *usedHsbenchDbOut = false;
+    }
+    blocksOut->clear();
+
+    CollisionInputMode mode = CollisionInputMode::AUTO;
+    if (!parseCollisionInputModeFromEnv(&mode)) {
+        if (error) {
+            *error =
+                "invalid HS_HAO_COLLISION_INPUT_MODE (expected auto/raw/hsbench_db)";
+        }
+        return false;
+    }
+
+    if (mode == CollisionInputMode::RAW) {
+        return loadRawInputBlocksFromFile(path, blocksOut, error);
+    }
+
+    if (mode == CollisionInputMode::HSBENCH_DB) {
+        const bool ok = loadHsbenchCorpusBlocksFromFile(path, blocksOut, error);
+        if (ok && usedHsbenchDbOut) {
+            *usedHsbenchDbOut = true;
+        }
+        return ok;
+    }
+
+    if (pathLooksLikeHsbenchDb(path)) {
+        const bool ok = loadHsbenchCorpusBlocksFromFile(path, blocksOut, error);
+        if (ok && usedHsbenchDbOut) {
+            *usedHsbenchDbOut = true;
+        }
+        return ok;
+    }
+
+    return loadRawInputBlocksFromFile(path, blocksOut, error);
+}
+
+static
+bool maybeApplySampleCapFromEnv(std::vector<std::vector<u8>> *blocks,
+                                size_t *sampleCountOut) {
+    if (!blocks) {
+        return false;
+    }
+    if (sampleCountOut) {
+        *sampleCountOut = blockBytesCount(*blocks);
+    }
+
+    const char *capEnv = std::getenv("HS_HAO_COLLISION_SAMPLE_CAP");
+    if (!capEnv || !*capEnv) {
+        return true;
+    }
+
+    unsigned long long capRaw = 0;
+    if (!parseUnsignedU64Token(capEnv, &capRaw)) {
+        return false;
+    }
+    const size_t cap = static_cast<size_t>(
+        std::min<unsigned long long>(capRaw, std::numeric_limits<size_t>::max()));
+    if (cap == 0) {
+        return false;
+    }
+
+    if (blockBytesCount(*blocks) <= cap) {
+        if (sampleCountOut) {
+            *sampleCountOut = blockBytesCount(*blocks);
+        }
+        return true;
+    }
+
+    std::vector<std::vector<u8>> cappedBlocks;
+    cappedBlocks.reserve(blocks->size());
+    size_t remaining = cap;
+    for (const auto &block : *blocks) {
+        if (!remaining) {
+            break;
+        }
+        if (block.empty()) {
+            continue;
+        }
+        if (block.size() <= remaining) {
+            cappedBlocks.push_back(block);
+            remaining -= block.size();
+        } else {
+            cappedBlocks.emplace_back(block.begin(), block.begin() + remaining);
+            remaining = 0;
+        }
+    }
+    blocks->swap(cappedBlocks);
+
+    if (sampleCountOut) {
+        *sampleCountOut = blockBytesCount(*blocks);
+    }
+    return !blocks->empty();
 }
 
 TEST(HAOCompatVsNeo, BlockGroupsConsistency) {
@@ -2778,6 +3772,193 @@ TEST(HAOExtract, BextHistoryBoundaryConsistency) {
         const u32 bextKey = packedBitsToKeyForTest(artifacts, packed);
         EXPECT_EQ(scalarKey, bextKey) << "boundary endPos=" << endPos;
     }
+}
+
+TEST(HAOCollision, RuntimeExtractorReportsCollisionRateOnDeterministicCorpus) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 800, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true,  false, 801, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta",  false, false, 802, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 803, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 804, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("gamma", true,  false, 805, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 806, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("kappa", false, false, 807, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    HAOCompatCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOCompatArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    auto blob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+    const auto *hdr = getHaoRuntimeHeader(blob);
+    ASSERT_NE(nullptr, hdr);
+    const auto *selectors = getHaoSelectors(hdr);
+    ASSERT_NE(nullptr, selectors);
+    ASSERT_GT(hdr->selectorCount, 0U);
+    ASSERT_EQ(artifacts.bitSelectors.size(), hdr->selectorCount);
+
+    const auto data = makeDeterministicCollisionCorpus(HAO_COLLISION_SAMPLE_COUNT);
+    const auto runtimeHashes = extractRuntimeKeysForData(hdr, selectors, data);
+    ASSERT_EQ(data.size(), runtimeHashes.size());
+    for (u32 h : runtimeHashes) {
+        ASSERT_LT(h, hdr->primaryCount);
+    }
+
+    u32 collisions = 0;
+    u32 nonEmpty = 0;
+    const double collisionRate = collisionRateFromHashes(
+        runtimeHashes, hdr->primaryCount, &collisions, &nonEmpty);
+    const double usageRate = hdr->primaryCount
+                                 ? static_cast<double>(nonEmpty) / hdr->primaryCount
+                                 : 0.0;
+    std::cout << "[HAOCollision] samples=" << runtimeHashes.size()
+              << " collisions=" << collisions
+              << " collisionRate=" << collisionRate
+              << " usageRate=" << usageRate
+              << " keyBits=" << hdr->keyBits
+              << " selectorCount=" << hdr->selectorCount
+              << " extractMode="
+              << (hdr->extractMode == HAO_RUNTIME_EXTRACT_MODE_BEXT ? "bext"
+                                                                     : "scalar")
+              << "\n";
+
+    EXPECT_GE(collisionRate, 0.0);
+    EXPECT_LE(collisionRate, 1.0);
+    EXPECT_GT(nonEmpty, 0U);
+}
+
+TEST(HAOCollision, RuntimeCollisionRateMatchesScalarReference) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 810, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true,  false, 811, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("beta",  false, false, 812, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 813, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 814, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("gamma", true,  false, 815, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 816, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("kappa", false, false, 817, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    HAOCompatCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOCompatArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    auto blob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+    const auto *hdr = getHaoRuntimeHeader(blob);
+    ASSERT_NE(nullptr, hdr);
+    const auto *selectors = getHaoSelectors(hdr);
+    ASSERT_NE(nullptr, selectors);
+
+    const auto data = makeDeterministicCollisionCorpus(HAO_COLLISION_SAMPLE_COUNT);
+    const auto runtimeHashes = extractRuntimeKeysForData(hdr, selectors, data);
+    const auto scalarHashes = extractScalarReferenceKeysForData(artifacts, data);
+    ASSERT_EQ(runtimeHashes.size(), scalarHashes.size());
+    for (size_t i = 0; i < runtimeHashes.size(); i++) {
+        ASSERT_EQ(runtimeHashes[i], scalarHashes[i]) << "mismatch at sample " << i;
+    }
+
+    u32 runtimeCollisions = 0;
+    u32 runtimeNonEmpty = 0;
+    const double runtimeRate = collisionRateFromHashes(
+        runtimeHashes, hdr->primaryCount, &runtimeCollisions, &runtimeNonEmpty);
+
+    u32 scalarCollisions = 0;
+    u32 scalarNonEmpty = 0;
+    const double scalarRate = collisionRateFromHashes(
+        scalarHashes, hdr->primaryCount, &scalarCollisions, &scalarNonEmpty);
+
+    EXPECT_EQ(runtimeCollisions, scalarCollisions);
+    EXPECT_EQ(runtimeNonEmpty, scalarNonEmpty);
+    EXPECT_DOUBLE_EQ(runtimeRate, scalarRate);
+}
+
+TEST(HAOCollision, RuntimeExtractorFromRuleAndInputFiles) {
+    const char *rulesPath = std::getenv("HS_HAO_COLLISION_RULES_FILE");
+    const char *inputPath = std::getenv("HS_HAO_COLLISION_INPUT_FILE");
+    if (!rulesPath || !*rulesPath || !inputPath || !*inputPath) {
+#if defined(GTEST_SKIP)
+        GTEST_SKIP()
+            << "set HS_HAO_COLLISION_RULES_FILE and HS_HAO_COLLISION_INPUT_FILE";
+#else
+        return;
+#endif
+    }
+
+    std::vector<hwlmLiteral> lits;
+    LiteralLoadStats ruleStats = {};
+    std::string error;
+    ASSERT_TRUE(loadLiteralsFromFile(rulesPath, &lits, &ruleStats, &error))
+        << error;
+    ASSERT_FALSE(lits.empty());
+
+    std::vector<std::vector<u8>> blocks;
+    bool loadedFromHsbenchDb = false;
+    ASSERT_TRUE(loadInputBlocksFromFile(inputPath, &blocks, &loadedFromHsbenchDb,
+                                        &error))
+        << error;
+    ASSERT_FALSE(blocks.empty());
+
+    size_t sampleCount = 0;
+    ASSERT_TRUE(maybeApplySampleCapFromEnv(&blocks, &sampleCount))
+        << "failed to parse HS_HAO_COLLISION_SAMPLE_CAP";
+    ASSERT_FALSE(blocks.empty());
+    ASSERT_GT(sampleCount, 0U);
+
+    HAOCompatCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOCompatArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    auto blob = buildHAOGlobalBlob(artifacts);
+    ASSERT_NE(nullptr, blob.get());
+    const auto *hdr = getHaoRuntimeHeader(blob);
+    ASSERT_NE(nullptr, hdr);
+    const auto *selectors = getHaoSelectors(hdr);
+    ASSERT_NE(nullptr, selectors);
+    ASSERT_GT(hdr->selectorCount, 0U);
+
+    const auto runtimeHashes = extractRuntimeKeysForBlocks(hdr, selectors, blocks);
+    const auto scalarHashes = extractScalarReferenceKeysForBlocks(artifacts, blocks);
+    ASSERT_EQ(runtimeHashes.size(), sampleCount);
+    ASSERT_EQ(scalarHashes.size(), sampleCount);
+    for (size_t i = 0; i < runtimeHashes.size(); i++) {
+        ASSERT_EQ(runtimeHashes[i], scalarHashes[i])
+            << "runtime/scalar key mismatch at sample " << i;
+    }
+
+    u32 collisions = 0;
+    u32 nonEmpty = 0;
+    const double collisionRate = collisionRateFromHashes(
+        runtimeHashes, hdr->primaryCount, &collisions, &nonEmpty);
+    const double usageRate = hdr->primaryCount
+                                 ? static_cast<double>(nonEmpty) / hdr->primaryCount
+                                 : 0.0;
+
+    std::cout << "[HAOCollision][FileInput]"
+              << " rulesFile=\"" << rulesPath << "\""
+              << " inputFile=\"" << inputPath << "\""
+              << " inputMode=" << (loadedFromHsbenchDb ? "hsbench_db" : "raw")
+              << " blocks=" << blocks.size()
+              << " rules=" << lits.size()
+              << " parsedLines=" << ruleStats.totalNonCommentLines
+              << " skippedUnsupported=" << ruleStats.skippedUnsupportedCount
+              << " skippedTooLong=" << ruleStats.skippedTooLongCount
+              << " samples=" << sampleCount
+              << " collisions=" << collisions
+              << " collisionRate=" << collisionRate
+              << " usageRate=" << usageRate
+              << " keyBits=" << hdr->keyBits
+              << " selectorCount=" << hdr->selectorCount
+              << " extractMode="
+              << (hdr->extractMode == HAO_RUNTIME_EXTRACT_MODE_BEXT ? "bext"
+                                                                     : "scalar")
+              << "\n";
+
+    EXPECT_GE(collisionRate, 0.0);
+    EXPECT_LE(collisionRate, 1.0);
+    EXPECT_GT(nonEmpty, 0U);
 }
 
 TEST(HAOPrefilter, EntryLaneMaskMatchesScalar) {

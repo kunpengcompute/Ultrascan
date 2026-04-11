@@ -15,8 +15,8 @@ static struct HAORuntimeStats g_haoStats;
 
 #define haoStatsAdd(counter, delta) \
     do {                            \
-        UNUSED(counter);            \
-        UNUSED(delta);              \
+        (void)(counter);            \
+        (void)(delta);              \
     } while (0)
 
 struct HAOPositionContext {
