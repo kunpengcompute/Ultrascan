@@ -847,16 +847,41 @@ void dumpHashTables(const HAOCompatCompileArtifacts &artifacts,
     }
 }
 
+#define HAO_SUMMARY_FMT(label, fmt, val)                                  \
+    do {                                                                   \
+        int _blen = (int)strlen(label);                                    \
+        int _cjk  = 0;                                                     \
+        for (const char *_p = (label); *_p; ) {                           \
+            unsigned char _c = (unsigned char)*_p;                         \
+            if (_c >= 0xE0) { _cjk++; _p += 3; }                         \
+            else if (_c >= 0xC0) { _p += 2; }                             \
+            else { _p += 1; }                                              \
+        }                                                                  \
+        int _pad = 42 - (_blen - _cjk);                                   \
+        if (_pad < 1) _pad = 1;                                            \
+        printf("\t%s%*s: " fmt "\n", label, _pad, "", val);               \
+    } while(0)
+
+
 template <class ArtifactsT>
 static
 void dumpHAOSummary(const ArtifactsT &artifacts) {
     const auto &s = artifacts.haoSummary;
-    printf("[PBE][HAO-Summary] total=%u fastPath=%u residual=%u residualUnsupported=%u unsupported=%u exact=%u nocase=%u anchorConfirm=%u directReport=%u fastPathConfirm=%u keyExpanded=%u expandedKeys=%u maxSelectedAmbigBits=%u\n",
-           s.totalRules, s.fastPathRules, s.residualRules,
-           s.residualUnsupportedRules, s.unsupportedRules, s.exactRules,
-           s.nocaseRules, s.anchorConfirmRules, s.directReportRules,
-           s.fastPathConfirmRules, s.keyExpandedRules, s.totalExpandedKeys,
-           s.maxSelectedAmbigBits);
+
+    printf("[PBE][HAO-Summary/编译汇总]\n");
+    HAO_SUMMARY_FMT("total(规则总数)",                    "%u", s.totalRules);
+    HAO_SUMMARY_FMT("fastPath(快速路径规则数)",           "%u", s.fastPathRules);
+    HAO_SUMMARY_FMT("residual(兜底规则数)",               "%u", s.residualRules);
+    HAO_SUMMARY_FMT("residualUnsupported(兜底且不支持规则数)", "%u", s.residualUnsupportedRules);
+    HAO_SUMMARY_FMT("unsupported(不支持规则数)",          "%u", s.unsupportedRules);
+    HAO_SUMMARY_FMT("exact(精确规则数)",                  "%u", s.exactRules);
+    HAO_SUMMARY_FMT("nocase(忽略大小写规则数)",           "%u", s.nocaseRules);
+    HAO_SUMMARY_FMT("anchorConfirm(anchor确认规则数)",    "%u", s.anchorConfirmRules);
+    HAO_SUMMARY_FMT("directReport(可直接上报规则数)",     "%u", s.directReportRules);
+    HAO_SUMMARY_FMT("fastPathConfirm(快速路径需确认规则数)", "%u", s.fastPathConfirmRules);
+    HAO_SUMMARY_FMT("keyExpanded(发生key展开规则数)",     "%u", s.keyExpandedRules);
+    HAO_SUMMARY_FMT("expandedKeys(展开后的key总数)",      "%u", s.totalExpandedKeys);
+    HAO_SUMMARY_FMT("maxSelectedAmbigBits(最大选位歧义bit数)", "%u", s.maxSelectedAmbigBits);
 }
 
 static

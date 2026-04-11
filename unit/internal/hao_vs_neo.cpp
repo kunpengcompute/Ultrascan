@@ -2774,9 +2774,13 @@ TEST(HAORuntime, HaoRuntimeStatsTrackDirectReportPath) {
     HaoRuntimeGetStatsForTest(&stats);
 
     EXPECT_FALSE(matches.empty());
-    EXPECT_EQ(0U, stats.primaryProbeLanes);
-    EXPECT_EQ(0U, stats.directReports);
+    EXPECT_GT(stats.scanCalls, 0U);
+    EXPECT_EQ(data.size(), stats.scanInputBytes);
+    EXPECT_GT(stats.primaryProbeLanes, 0U);
+    EXPECT_EQ(matches.size(), stats.directReports);
+    EXPECT_EQ(matches.size(), stats.callbackReports);
     EXPECT_EQ(0U, stats.encodedConfirmCalls);
+    EXPECT_EQ(0U, stats.encodedConfirmRejects);
     EXPECT_EQ(0U, stats.residualRuleChecks);
     EXPECT_EQ(0U, stats.residualPosCalls);
 }
@@ -3068,10 +3072,13 @@ TEST(HAORuntime, HaoRuntimeStatsTrackResidualPath) {
     HaoRuntimeGetStatsForTest(&stats);
 
     EXPECT_FALSE(matches.empty());
-    EXPECT_EQ(0U, stats.residualPosCalls);
-    EXPECT_EQ(0U, stats.residualRuleChecks);
-    EXPECT_EQ(0U, stats.residualConfirmCalls);
-    EXPECT_EQ(0U, stats.residualConfirmMatches);
+    EXPECT_GT(stats.scanCalls, 0U);
+    EXPECT_EQ(data.size(), stats.scanInputBytes);
+    EXPECT_GT(stats.residualPosCalls, 0U);
+    EXPECT_GT(stats.residualRuleChecks, 0U);
+    EXPECT_GT(stats.residualConfirmCalls, 0U);
+    EXPECT_GT(stats.residualConfirmMatches, 0U);
+    EXPECT_EQ(matches.size(), stats.callbackReports);
 }
 
 TEST(HAORuntime, EmbeddedHaoV2FdrBatchMatchesNaive) {

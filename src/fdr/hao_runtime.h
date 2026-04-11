@@ -251,22 +251,30 @@ struct HAORuntimeInspectSummary {
 };
 
 struct HAORuntimeStats {
+    u64a scanCalls;
+    u64a scanInputBytes;
     u64a blockCalls;
     u64a blockLanes;
     u64a primaryProbeLanes;
     u64a primaryActiveLanes;
     u64a encodedRangeCalls;
+    u64a encodedRangeReportCalls;
     u64a encodedEntriesVisited;
     u64a verifierCalls;
     u64a verifierEntryHits;
     u64a verifierSlotHits;
+    u64a encodedGroupRejects;
     u64a directReports;
     u64a encodedConfirmCalls;
     u64a encodedConfirmMatches;
+    u64a encodedConfirmRejects;
     u64a residualPosCalls;
     u64a residualRuleChecks;
+    u64a residualGroupRejects;
     u64a residualConfirmCalls;
     u64a residualConfirmMatches;
+    u64a residualConfirmRejects;
+    u64a callbackReports;
 };
 
 struct FDR;

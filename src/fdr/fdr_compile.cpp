@@ -78,6 +78,20 @@ namespace ue2 {
 namespace {
 
 static
+bool haoStatsDumpEnabled(void) {
+    const char *env = getenv("HS_HAO_STATS");
+    return env && *env && *env != '0';
+}
+
+#define HAO_STATS_DUMP_BUILD_PROTO_LITS(lits, engType, hint, make_small) \
+    do {                                                                  \
+        if (haoStatsDumpEnabled()) {                                      \
+            dumpFdrBuildProtoInputLits((lits), (engType), (hint),         \
+                                       (make_small));                     \
+        }                                                                 \
+    } while (0)
+
+static
 void dumpFdrBuildProtoInputLits(const vector<hwlmLiteral> &lits, u8 engType,
                                 u32 hint, bool make_small) {
     printf("[fdrBuildProto] begin engType=%u hint=%u make_small=%u lits=%zu\n",
@@ -971,7 +985,7 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                                             bool make_small,
                                             const target_t &target,
                                             const Grey &grey, u32 hint) {
-    dumpFdrBuildProtoInputLits(lits, engType, hint, make_small);
+    HAO_STATS_DUMP_BUILD_PROTO_LITS(lits, engType, hint, make_small);
     DEBUG_PRINTF("cpu has %s\n", target.has_avx2() ? "avx2" : "no-avx2");
 
     if (grey.fdrAllowTeddy) {

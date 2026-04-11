@@ -9,15 +9,58 @@
 #include "util/bitutils.h"
 #include "util/simd_utils.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static struct HAORuntimeStats g_haoStats;
+static int g_haoStatsForceEnabled;
+static int g_haoStatsEnvEnabled = -1;
+static int g_haoStatsAtexitRegistered;
+static int g_haoStatsActive;
 
-#define haoStatsAdd(counter, delta) \
-    do {                            \
-        (void)(counter);            \
-        (void)(delta);              \
+/* 中文字符显示宽度=2，但 strlen 算3字节，需要补偿
+ * 补偿量 = (strlen(s) - display_width) / 2 * 1
+ * 用固定总显示列宽 = 42，右对齐冒号 */
+#define HAO_STAT_FMT(label, fmt, val)                                    \
+    do {                                                                  \
+        int _blen = (int)strlen(label);                                   \
+        /* 每个中文字符占3字节显示2列，多出1字节需从pad中扣除 */          \
+        int _cjk  = 0;                                                    \
+        for (const char *_p = (label); *_p; ) {                          \
+            unsigned char _c = (unsigned char)*_p;                        \
+            if (_c >= 0xE0) { _cjk++; _p += 3; }                        \
+            else if (_c >= 0xC0) { _p += 2; }                            \
+            else { _p += 1; }                                             \
+        }                                                                 \
+        int _pad = 42 - (_blen - _cjk);                                  \
+        if (_pad < 1) _pad = 1;                                           \
+        fprintf(stderr, "\t%s%*s: " fmt "\n", label, _pad, "", val);     \
+    } while(0)
+
+static void haoDumpRuntimeStats(void);
+
+static void haoRefreshStatsMode(void) {
+    if (g_haoStatsEnvEnabled < 0) {
+        const char *env = getenv("HS_HAO_STATS");
+        g_haoStatsEnvEnabled = env && *env && *env != '0';
+        if (g_haoStatsEnvEnabled && !g_haoStatsAtexitRegistered) {
+            atexit(haoDumpRuntimeStats);
+            g_haoStatsAtexitRegistered = 1;
+        }
+    }
+    g_haoStatsActive = g_haoStatsForceEnabled || g_haoStatsEnvEnabled;
+}
+
+#define HAO_STATS_IF_ENABLED(stmt) \
+    do {                           \
+        if (g_haoStatsActive) {    \
+            stmt;                  \
+        }                          \
     } while (0)
+
+#define HAO_STATS_ADD(field, delta) \
+    HAO_STATS_IF_ENABLED(g_haoStats.field += (u64a)(delta))
 
 struct HAOPositionContext {
     size_t endPos;
@@ -219,6 +262,94 @@ u32 haoProbeCompactAndLoadPrimary(const u8 *bitmap, u32 bitmapSize,
 
     return activeCount;
 #endif
+}
+
+static double haoStatsPct(u64a num, u64a den) {
+    if (!den) {
+        return 0.0;
+    }
+    return (100.0 * (double)num) / (double)den;
+}
+
+static double haoStatsPerMiB(u64a num, u64a bytes) {
+    if (!bytes) {
+        return 0.0;
+    }
+    return ((double)num * 1048576.0) / (double)bytes;
+}
+
+static void haoDumpRuntimeStats(void) {
+    const u64a l2EntryRejects =
+        g_haoStats.encodedEntriesVisited >= g_haoStats.verifierEntryHits
+            ? g_haoStats.encodedEntriesVisited - g_haoStats.verifierEntryHits
+            : 0;
+    const u64a l2LaneNoReport =
+        g_haoStats.encodedRangeCalls >= g_haoStats.encodedRangeReportCalls
+            ? g_haoStats.encodedRangeCalls - g_haoStats.encodedRangeReportCalls
+            : 0;
+    const u64a l2SlotEligible =
+        g_haoStats.verifierSlotHits >= g_haoStats.encodedGroupRejects
+            ? g_haoStats.verifierSlotHits - g_haoStats.encodedGroupRejects
+            : 0;
+    const u64a l2SlotFalsePos =
+        l2SlotEligible >= (g_haoStats.directReports +
+                           g_haoStats.encodedConfirmMatches)
+            ? l2SlotEligible - (g_haoStats.directReports +
+                                g_haoStats.encodedConfirmMatches)
+            : 0;
+
+    if (!g_haoStatsActive) {
+        return;
+    }
+    fprintf(stderr, "[HAO][Runtime/运行时]\n");
+    HAO_STAT_FMT("scans(扫描次数)",           "%llu", (unsigned long long)g_haoStats.scanCalls);
+    HAO_STAT_FMT("inputBytes(输入字节数)",    "%llu", (unsigned long long)g_haoStats.scanInputBytes);
+    HAO_STAT_FMT("callbackReports(回调上报次数)", "%llu", (unsigned long long)g_haoStats.callbackReports);
+
+    fprintf(stderr, "[HAO][L1/一级过滤]\n");
+    HAO_STAT_FMT("blockCalls(分块处理次数)",      "%llu", (unsigned long long)g_haoStats.blockCalls);
+    HAO_STAT_FMT("blockLanes(分块总lane数)",       "%llu", (unsigned long long)g_haoStats.blockLanes);
+    HAO_STAT_FMT("primaryProbeLanes(L1探测lane数)", "%llu", (unsigned long long)g_haoStats.primaryProbeLanes);
+    HAO_STAT_FMT("primaryActiveLanes(L1命中lane数)", "%llu", (unsigned long long)g_haoStats.primaryActiveLanes);
+    HAO_STAT_FMT("activePct(L1命中率)",            "%.5f",
+        haoStatsPct(g_haoStats.primaryActiveLanes, g_haoStats.primaryProbeLanes));
+
+    fprintf(stderr, "[HAO][L2/二级过滤]\n");
+    HAO_STAT_FMT("rangeCalls(L2范围处理次数)",         "%llu", (unsigned long long)g_haoStats.encodedRangeCalls);
+    HAO_STAT_FMT("rangeReportCalls(L2产生报告的lane数)", "%llu", (unsigned long long)g_haoStats.encodedRangeReportCalls);
+    HAO_STAT_FMT("entriesVisited(L2访问entry数)",       "%llu", (unsigned long long)g_haoStats.encodedEntriesVisited);
+    HAO_STAT_FMT("verifierCalls(verifier调用次数)",     "%llu", (unsigned long long)g_haoStats.verifierCalls);
+    HAO_STAT_FMT("verifierEntryHits(verifier命中的entry数)", "%llu", (unsigned long long)g_haoStats.verifierEntryHits);
+    HAO_STAT_FMT("verifierSlotHits(verifier命中的slot数)",   "%llu", (unsigned long long)g_haoStats.verifierSlotHits);
+    HAO_STAT_FMT("groupRejects(group过滤拒绝数)",       "%llu", (unsigned long long)g_haoStats.encodedGroupRejects);
+    HAO_STAT_FMT("directReports(直接上报次数)",         "%llu", (unsigned long long)g_haoStats.directReports);
+    HAO_STAT_FMT("confirmCalls(精确确认次数)",          "%llu", (unsigned long long)g_haoStats.encodedConfirmCalls);
+    HAO_STAT_FMT("confirmMatches(精确确认命中数)",      "%llu", (unsigned long long)g_haoStats.encodedConfirmMatches);
+    HAO_STAT_FMT("confirmRejects(精确确认拒绝数)",      "%llu", (unsigned long long)g_haoStats.encodedConfirmRejects);
+
+    fprintf(stderr, "[HAO][Residual/兜底路径]\n");
+    HAO_STAT_FMT("posCalls(兜底位置次数)",      "%llu", (unsigned long long)g_haoStats.residualPosCalls);
+    HAO_STAT_FMT("ruleChecks(兜底规则检查数)",  "%llu", (unsigned long long)g_haoStats.residualRuleChecks);
+    HAO_STAT_FMT("groupRejects(兜底group拒绝数)", "%llu", (unsigned long long)g_haoStats.residualGroupRejects);
+    HAO_STAT_FMT("confirmCalls(兜底确认次数)",  "%llu", (unsigned long long)g_haoStats.residualConfirmCalls);
+    HAO_STAT_FMT("confirmMatches(兜底确认命中数)", "%llu", (unsigned long long)g_haoStats.residualConfirmMatches);
+    HAO_STAT_FMT("confirmRejects(兜底确认拒绝数)", "%llu", (unsigned long long)g_haoStats.residualConfirmRejects);
+
+    fprintf(stderr, "[HAO][Rates/关键比率]\n");
+    HAO_STAT_FMT("l2EntryFalsePositivePct(L2表项假阳性率)",   "%.5f",
+        haoStatsPct(l2EntryRejects, g_haoStats.encodedEntriesVisited));
+    HAO_STAT_FMT("l2LaneNoReportPct(L2无报告lane占比)",        "%.5f",
+        haoStatsPct(l2LaneNoReport, g_haoStats.encodedRangeCalls));
+    HAO_STAT_FMT("l2ConfirmFalsePositivePct(L2确认假阳性率)", "%.5f",
+        haoStatsPct(g_haoStats.encodedConfirmRejects, g_haoStats.encodedConfirmCalls));
+    HAO_STAT_FMT("l2SlotFalsePositivePct(L2槽位假阳性率)",    "%.5f",
+        haoStatsPct(l2SlotFalsePos, l2SlotEligible));
+    HAO_STAT_FMT("l2EntriesPerMiB(每MiB访问L2表项数)",        "%.5f",
+        haoStatsPerMiB(g_haoStats.encodedEntriesVisited, g_haoStats.scanInputBytes));
+    HAO_STAT_FMT("l2ConfirmCallsPerMiB(每MiB精确确认次数)",   "%.5f",
+        haoStatsPerMiB(g_haoStats.encodedConfirmCalls, g_haoStats.scanInputBytes));
+    HAO_STAT_FMT("reportsPerMiB(每MiB报告次数)",               "%.5f",
+        haoStatsPerMiB(g_haoStats.callbackReports, g_haoStats.scanInputBytes));
 }
 
 static int haoCompatRuleExactMatch(const HAOCompatRuntimeRuleMeta *rm,
@@ -670,7 +801,7 @@ static u32 haoEntryMatchMaskFromContext(
         return 0;
     }
 
-    haoStatsAdd(&g_haoStats.verifierCalls, 1);
+    HAO_STATS_ADD(verifierCalls, 1);
     haoEnsureLaneWindowContext(ctx);
     if (identityTableControl) {
         shuffledValidMask = ctx->validMask32 & entry->tailMask;
@@ -683,8 +814,8 @@ static u32 haoEntryMatchMaskFromContext(
             haoEntrySingleSlotMatchMaskFromContext(entry, ctx,
                                                    shuffledValidMask);
         if (laneMask) {
-            haoStatsAdd(&g_haoStats.verifierEntryHits, 1);
-            haoStatsAdd(&g_haoStats.verifierSlotHits, 1);
+            HAO_STATS_ADD(verifierEntryHits, 1);
+            HAO_STATS_ADD(verifierSlotHits, 1);
         }
         return laneMask;
     }
@@ -716,8 +847,8 @@ static u32 haoEntryMatchMaskFromContext(
                 haoEntryLaneMaskFromByteMatches(entry, byteMatchMask);
 
             if (laneMask) {
-                haoStatsAdd(&g_haoStats.verifierEntryHits, 1);
-                haoStatsAdd(&g_haoStats.verifierSlotHits, popcount32(laneMask));
+                HAO_STATS_ADD(verifierEntryHits, 1);
+                HAO_STATS_ADD(verifierSlotHits, popcount32(laneMask));
             }
             return laneMask;
         }
@@ -751,9 +882,8 @@ static u32 haoEntryMatchMaskFromContext(
                 const u32 laneMask =
                     haoEntryLaneMaskFromByteMatches(entry, byteMatchMask);
                 if (laneMask) {
-                    haoStatsAdd(&g_haoStats.verifierEntryHits, 1);
-                    haoStatsAdd(&g_haoStats.verifierSlotHits,
-                                popcount32(laneMask));
+                    HAO_STATS_ADD(verifierEntryHits, 1);
+                    HAO_STATS_ADD(verifierSlotHits, popcount32(laneMask));
                 }
                 return laneMask;
             }
@@ -771,12 +901,13 @@ static int haoProcessEncodedRange(
     u32 offset = 0;
     u32 count = 0;
     u32 n;
+    int anyReport = 0;
 
     if (!encoded || !ctx) {
         return HWLM_SUCCESS;
     }
 
-    haoStatsAdd(&g_haoStats.encodedRangeCalls, 1);
+    HAO_STATS_ADD(encodedRangeCalls, 1);
     haoCompatDecodePrimaryValue(encoded, &offset, &count);
     for (n = 0; n < count; n++) {
         const u32 off = offset + n;
@@ -789,7 +920,7 @@ static int haoProcessEncodedRange(
         }
 
         entry = &secondaryHashTable[off];
-        haoStatsAdd(&g_haoStats.encodedEntriesVisited, 1);
+        HAO_STATS_ADD(encodedEntriesVisited, 1);
         laneMask = haoEntryMatchMaskFromContext(entry, ctx);
         if (!laneMask) {
             continue;
@@ -808,28 +939,35 @@ static int haoProcessEncodedRange(
 
             rm = &ruleMeta[ridx];
             if (!(rm->groups & *control)) {
+                HAO_STATS_ADD(encodedGroupRejects, 1);
                 matchMask &= matchMask - 1U;
                 continue;
             }
             if (haoRuleCanReportFromVerifier(rm)) {
-                haoStatsAdd(&g_haoStats.directReports, 1);
+                HAO_STATS_ADD(directReports, 1);
             } else {
-                haoStatsAdd(&g_haoStats.encodedConfirmCalls, 1);
+                HAO_STATS_ADD(encodedConfirmCalls, 1);
                 if (!haoRuleExactMatch(rm, a, ctx->endPos, literalBlob,
                                        literalBlobSize)) {
+                    HAO_STATS_ADD(encodedConfirmRejects, 1);
                     matchMask &= matchMask - 1U;
                     continue;
                 }
-                haoStatsAdd(&g_haoStats.encodedConfirmMatches, 1);
+                HAO_STATS_ADD(encodedConfirmMatches, 1);
             }
 
+            HAO_STATS_ADD(callbackReports, 1);
+            anyReport = 1;
             *control = a->cb(ctx->endPos, rm->id, a->scratch);
             if (*control == HWLM_TERMINATE_MATCHING) {
+                HAO_STATS_ADD(encodedRangeReportCalls, 1);
                 return HWLM_TERMINATED;
             }
             matchMask &= matchMask - 1U;
         }
     }
+
+    HAO_STATS_ADD(encodedRangeReportCalls, anyReport ? 1 : 0);
 
     return HWLM_SUCCESS;
 }
@@ -849,7 +987,7 @@ static int haoProcessResidualRulesAtPos(
         return HWLM_SUCCESS;
     }
 
-    haoStatsAdd(&g_haoStats.residualPosCalls, 1);
+    HAO_STATS_ADD(residualPosCalls, 1);
     for (i = 0; i < hdr->residualRuleCount; i++) {
         const u32 ridx = residualRuleIndexes[i];
         const struct HAORuntimeRuleMeta *rm;
@@ -860,15 +998,18 @@ static int haoProcessResidualRulesAtPos(
 
         rm = &ruleMeta[ridx];
         if (!(rm->groups & *control)) {
+            HAO_STATS_ADD(residualGroupRejects, 1);
             continue;
         }
-        haoStatsAdd(&g_haoStats.residualRuleChecks, 1);
-        haoStatsAdd(&g_haoStats.residualConfirmCalls, 1);
+        HAO_STATS_ADD(residualRuleChecks, 1);
+        HAO_STATS_ADD(residualConfirmCalls, 1);
         if (!haoRuleExactMatch(rm, a, endPos, literalBlob, literalBlobSize)) {
+            HAO_STATS_ADD(residualConfirmRejects, 1);
             continue;
         }
-        haoStatsAdd(&g_haoStats.residualConfirmMatches, 1);
+        HAO_STATS_ADD(residualConfirmMatches, 1);
 
+        HAO_STATS_ADD(callbackReports, 1);
         *control = a->cb(endPos, rm->id, a->scratch);
         if (*control == HWLM_TERMINATE_MATCHING) {
             return HWLM_TERMINATED;
@@ -895,6 +1036,10 @@ static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
     if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
         return HWLM_SUCCESS;
     }
+
+    haoRefreshStatsMode();
+    HAO_STATS_ADD(scanCalls, 1);
+    HAO_STATS_ADD(scanInputBytes, a->len - a->start_offset);
 
     selectors = (const struct HAORuntimeBitSelector *)((const u8 *)hdr +
                                                        hdr->selectorsOffset);
@@ -1238,20 +1383,20 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
         return HWLM_SUCCESS;
     }
 
-    haoStatsAdd(&g_haoStats.blockCalls, 1);
-    haoStatsAdd(&g_haoStats.blockLanes, block.laneCount);
+    HAO_STATS_ADD(blockCalls, 1);
+    HAO_STATS_ADD(blockLanes, block.laneCount);
 
     for (lane = 0; lane < block.laneCount; lane++) {
         primaryIdx[lane] = block.keys[lane];
     }
 
-    haoStatsAdd(&g_haoStats.primaryProbeLanes, block.laneCount);
+    HAO_STATS_ADD(primaryProbeLanes, block.laneCount);
     haoPreparePrimaryProbeStateFromPrimaryIdx(primaryIdx, block.laneCount,
                                               &probe);
     activeCount = haoProbeCompactAndLoadPrimary(primaryBitmap,
                                                 hdr->primaryBitmapSize,
                                                 primaryHashTable, &probe);
-    haoStatsAdd(&g_haoStats.primaryActiveLanes, activeCount);
+    HAO_STATS_ADD(primaryActiveLanes, activeCount);
 
     for (lane = 0; lane < activeCount; lane++) {
         encodedByLane[probe.activeLaneIndex[lane]] = probe.activeEncoded[lane];
@@ -1299,6 +1444,10 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
     if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
         return HWLM_SUCCESS;
     }
+
+    haoRefreshStatsMode();
+    HAO_STATS_ADD(scanCalls, 1);
+    HAO_STATS_ADD(scanInputBytes, a->len - a->start_offset);
 
     selectors = (const struct HAORuntimeBitSelector *)((const u8 *)hdr +
                                                        hdr->selectorsOffset);
@@ -1701,6 +1850,8 @@ int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
 
 void HaoRuntimeResetStatsForTest(void) {
     memset(&g_haoStats, 0, sizeof(g_haoStats));
+    g_haoStatsForceEnabled = 1;
+    haoRefreshStatsMode();
 }
 
 void HaoRuntimeGetStatsForTest(struct HAORuntimeStats *summary) {
@@ -1708,6 +1859,8 @@ void HaoRuntimeGetStatsForTest(struct HAORuntimeStats *summary) {
         return;
     }
     *summary = g_haoStats;
+    g_haoStatsForceEnabled = 0;
+    haoRefreshStatsMode();
 }
 
 hwlm_error_t HaoEngineExecBlobNaiveForTest(const void *blob, u32 blobSize,
