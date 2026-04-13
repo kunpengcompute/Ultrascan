@@ -75,11 +75,16 @@ struct HAOPositionContext {
 
 struct HAOPrimaryProbeState {
     u32 laneCount;
+    const u32 *primaryIdx;
     u32 byteIndex[HAO_COMPAT_BATCH_MAX_WIDTH];
     u8 bitMask[HAO_COMPAT_BATCH_MAX_WIDTH];
     u32 activeLaneIndex[HAO_COMPAT_BATCH_MAX_WIDTH];
-    u32 activePrimaryIdx[HAO_COMPAT_BATCH_MAX_WIDTH];
     u32 activeEncoded[HAO_COMPAT_BATCH_MAX_WIDTH];
+    u32 groupedBaseByte;
+    u8 groupedSpan;
+    u8 groupedReady;
+    u16 reserved0;
+    u32 groupedLaneMaskByByteBit[HAO_COMPAT_BITMAP_GROUPED_BYTES][8];
 };
 
 static really_inline
@@ -124,6 +129,8 @@ static really_inline
 void haoPreparePrimaryProbeStateFromPrimaryIdx(
     const u32 *primaryIdx, u32 laneCount, struct HAOPrimaryProbeState *state) {
     u32 lane;
+    u32 minByte = 0;
+    u32 maxByte = 0;
 
     if (!primaryIdx || !state || laneCount > HAO_COMPAT_BATCH_MAX_WIDTH) {
         return;
@@ -131,10 +138,41 @@ void haoPreparePrimaryProbeStateFromPrimaryIdx(
 
     memset(state, 0, sizeof(*state));
     state->laneCount = laneCount;
+    state->primaryIdx = primaryIdx;
     for (lane = 0; lane < laneCount; lane++) {
-        state->activePrimaryIdx[lane] = primaryIdx[lane];
-        state->byteIndex[lane] = primaryIdx[lane] >> 3;
-        state->bitMask[lane] = (u8)(1U << (primaryIdx[lane] & 7U));
+        const u32 idx = primaryIdx[lane];
+        const u32 byteIdx = idx >> 3;
+
+        state->byteIndex[lane] = byteIdx;
+        state->bitMask[lane] = (u8)(1U << (idx & 7U));
+        if (!lane) {
+            minByte = byteIdx;
+            maxByte = byteIdx;
+        } else {
+            if (byteIdx < minByte) {
+                minByte = byteIdx;
+            }
+            if (byteIdx > maxByte) {
+                maxByte = byteIdx;
+            }
+        }
+    }
+
+    if (laneCount) {
+        const u32 span = maxByte - minByte + 1U;
+
+        if (span <= HAO_COMPAT_BITMAP_GROUPED_BYTES) {
+            state->groupedBaseByte = minByte;
+            state->groupedSpan = (u8)span;
+            state->groupedReady = 1;
+
+            for (lane = 0; lane < laneCount; lane++) {
+                const u32 relByte = state->byteIndex[lane] - minByte;
+                const u32 bit = primaryIdx[lane] & 7U;
+
+                state->groupedLaneMaskByByteBit[relByte][bit] |= 1U << lane;
+            }
+        }
     }
 }
 
@@ -142,38 +180,28 @@ static really_inline
 int haoProbePrimaryBitmapGrouped(const u8 *bitmap, u32 bitmapSize,
                                  const struct HAOPrimaryProbeState *state,
                                  u32 *activeMaskOut) {
-    u32 lane;
-    u32 minByte;
-    u32 maxByte;
+    u32 relByte;
     u32 activeMask = 0;
 
     if (!bitmap || !state || !state->laneCount || !activeMaskOut) {
         return 0;
     }
 
-    minByte = state->byteIndex[0];
-    maxByte = state->byteIndex[0];
-    for (lane = 0; lane < state->laneCount; lane++) {
-        const u32 idx = state->byteIndex[lane];
-        if (idx >= bitmapSize) {
-            return 0;
-        }
-        if (idx < minByte) {
-            minByte = idx;
-        }
-        if (idx > maxByte) {
-            maxByte = idx;
-        }
+    if (!state->groupedReady || !state->groupedSpan) {
+        return 0;
     }
-
-    if (maxByte - minByte + 1 > HAO_COMPAT_BITMAP_GROUPED_BYTES) {
+    if (state->groupedBaseByte >= bitmapSize ||
+        state->groupedBaseByte + state->groupedSpan > bitmapSize) {
         return 0;
     }
 
-    for (lane = 0; lane < state->laneCount; lane++) {
-        const u8 byte = bitmap[state->byteIndex[lane]];
-        if (byte & state->bitMask[lane]) {
-            activeMask |= (1U << lane);
+    for (relByte = 0; relByte < state->groupedSpan; relByte++) {
+        u32 bits = bitmap[state->groupedBaseByte + relByte];
+
+        while (bits) {
+            const u32 bit = ctz32(bits);
+            activeMask |= state->groupedLaneMaskByByteBit[relByte][bit];
+            bits &= bits - 1U;
         }
     }
 
@@ -198,8 +226,7 @@ u32 haoProbeCompactAndLoadPrimary(const u8 *bitmap, u32 bitmapSize,
                                          &groupedActiveMask)) {
             while (groupedActiveMask) {
                 const u32 activeLane = ctz32(groupedActiveMask);
-                const u32 primaryIdx = state->activePrimaryIdx[activeLane];
-                state->activePrimaryIdx[activeCount] = primaryIdx;
+                const u32 primaryIdx = state->primaryIdx[activeLane];
                 state->activeLaneIndex[activeCount] = activeLane;
                 state->activeEncoded[activeCount] =
                     primaryHashTable[primaryIdx];
@@ -232,8 +259,7 @@ u32 haoProbeCompactAndLoadPrimary(const u8 *bitmap, u32 bitmapSize,
 
             while (activeMask) {
                 const u32 activeLane = lane + ctz32(activeMask);
-                const u32 primaryIdx = state->activePrimaryIdx[activeLane];
-                state->activePrimaryIdx[activeCount] = primaryIdx;
+                const u32 primaryIdx = state->primaryIdx[activeLane];
                 state->activeLaneIndex[activeCount] = activeLane;
                 state->activeEncoded[activeCount] =
                     primaryHashTable[primaryIdx];
@@ -254,8 +280,7 @@ u32 haoProbeCompactAndLoadPrimary(const u8 *bitmap, u32 bitmapSize,
         }
         state->activeLaneIndex[activeCount] = lane;
         state->activeEncoded[activeCount] =
-            primaryHashTable[state->activePrimaryIdx[lane]];
-        state->activePrimaryIdx[activeCount] = state->activePrimaryIdx[lane];
+            primaryHashTable[state->primaryIdx[lane]];
         activeCount++;
     }
 
@@ -1552,7 +1577,6 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
                                 u32 blockLaneCount) {
     struct HAOBlockState block;
     struct HAOPrimaryProbeState probe;
-    u32 primaryIdx[HAO_COMPAT_BATCH_MAX_WIDTH] = {0};
     u32 encodedByLane[HAO_COMPAT_BATCH_MAX_WIDTH] = {0};
     u32 activeCount = 0;
     u32 lane;
@@ -1571,17 +1595,31 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
     HAO_STATS_ADD(blockCalls, 1);
     HAO_STATS_ADD(blockLanes, block.laneCount);
 
-    for (lane = 0; lane < block.laneCount; lane++) {
-        primaryIdx[lane] = block.keys[lane];
-    }
-
     HAO_STATS_ADD(primaryProbeLanes, block.laneCount);
-    haoPreparePrimaryProbeStateFromPrimaryIdx(primaryIdx, block.laneCount,
+    haoPreparePrimaryProbeStateFromPrimaryIdx(block.keys, block.laneCount,
                                               &probe);
     activeCount = haoProbeCompactAndLoadPrimary(primaryBitmap,
                                                 hdr->primaryBitmapSize,
                                                 primaryHashTable, &probe);
     HAO_STATS_ADD(primaryActiveLanes, activeCount);
+
+    if (!hdr->residualRuleCount) {
+        for (lane = 0; lane < activeCount; lane++) {
+            const u32 activeLane = probe.activeLaneIndex[lane];
+            struct HAOPositionContext ctx;
+
+            haoBuildContextFromBlockState(&block, activeLane, &ctx);
+            if (haoProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
+                                       literalBlob, hdr->literalBlobSize, a,
+                                       control, &ctx,
+                                       probe.activeEncoded[lane]) ==
+                HWLM_TERMINATED) {
+                return HWLM_TERMINATED;
+            }
+        }
+
+        return HWLM_SUCCESS;
+    }
 
     for (lane = 0; lane < activeCount; lane++) {
         encodedByLane[probe.activeLaneIndex[lane]] = probe.activeEncoded[lane];
