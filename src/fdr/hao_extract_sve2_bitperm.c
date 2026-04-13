@@ -46,7 +46,7 @@ u64a haoExtractPackedBitsSveBitPerm(u64a window, u64a mask) {
     u64a packed = 0;
     u32 outBit = 0;
 
-    while (mask && outBit < HAO_COMPAT_RUNTIME_MAX_SELECTORS) {
+    while (mask && outBit < HAO_RUNTIME_MAX_SELECTORS) {
         const u64a lowest = mask & (0 - mask);
         if (window & lowest) {
             packed |= ((u64a)1 << outBit);
@@ -77,17 +77,3 @@ void haoExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
 
 #endif
 
-
-
-u64a pbeExtractPackedBitsSveBitPerm(u64a window, u64a mask) {
-    return haoExtractPackedBitsSveBitPerm(window, mask);
-}
-
-u32 pbeExtractPackedBitsSveBitPermLaneCount(void) {
-    return haoExtractPackedBitsSveBitPermLaneCount();
-}
-
-void pbeExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
-                                         u64a mask, u64a *packedOut) {
-    haoExtractPackedBitsSveBitPermBatch(windows, count, mask, packedOut);
-}

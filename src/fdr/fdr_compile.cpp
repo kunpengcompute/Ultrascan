@@ -121,7 +121,7 @@ bool haoV2LayoutCanPreserveCoverage(const HAOCompileArtifacts &artifacts) {
         return false;
     }
     if (artifacts.haoGlobalHash.flags &
-        HAO_COMPAT_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
+        HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
         return false;
     }
 
@@ -286,8 +286,8 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     fdr->domain = eng.bits;
     fdr->domainMask = (1 << eng.bits) - 1;
     fdr->tabSize = tabSize;
-    fdr->pbeOffset = 0;
-    fdr->pbeSize = 0;
+    fdr->matcherBlobOffset = 0;
+    fdr->matcherBlobSize = 0;
     fdr->stride = eng.stride;
     createInitialState(fdr.get());
 
@@ -300,8 +300,8 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     // Write embedded matcher blob if present.
     if (matcherBlob && matcherBlob.size()) {
         assert(ISALIGNED_CL(ptr));
-        fdr->pbeOffset = verify_u32(ptr - fdr_base);
-        fdr->pbeSize = verify_u32(matcherBlob.size());
+        fdr->matcherBlobOffset = verify_u32(ptr - fdr_base);
+        fdr->matcherBlobSize = verify_u32(matcherBlob.size());
         memcpy(ptr, matcherBlob.get(), matcherBlob.size());
         ptr += ROUNDUP_CL(matcherBlob.size());
     }
@@ -955,7 +955,7 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                                             bool make_small,
                                             const target_t &target,
                                             const Grey &grey, u32 hint) {
-    HAO_STATS_DUMP_BUILD_PROTO_LITS(lits, engType, hint, make_small);
+    // HAO_STATS_DUMP_BUILD_PROTO_LITS(lits, engType, hint, make_small);
     DEBUG_PRINTF("cpu has %s\n", target.has_avx2() ? "avx2" : "no-avx2");
 
     if (grey.fdrAllowTeddy) {
@@ -969,35 +969,35 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         }
     }
 
-    /* Engine-family 2 is now reserved for HAO v2 only. */
-    const bool haoFamilyHint = (hint == HAO_FAMILY_ENGINE_ID);
-    auto haoFamilyDes = (hint == HINT_INVALID)
-                      ? chooseHaoEngine(target, lits, make_small)
-                      : getFdrDescription(hint);
-    if (haoFamilyDes && haoFamilyDes->getID() == HAO_FAMILY_ENGINE_ID) {
+    /* Engine id 2 is now reserved for HAO v2 only. */
+    const bool haoHint = (hint == HAO_ENGINE_ID);
+    auto haoDes = (hint == HINT_INVALID)
+                  ? chooseHaoEngine(target, lits, make_small)
+                  : getFdrDescription(hint);
+    if (haoDes && haoDes->getID() == HAO_ENGINE_ID) {
         // temporary hack for unit testing
         if (hint != HINT_INVALID) {
-            haoFamilyDes->bits = 9;
-            haoFamilyDes->stride = 1;
+            haoDes->bits = 9;
+            haoDes->stride = 1;
         }
 
-        auto haoFamilyBucketToLits = assignStringsToBuckets(lits, *haoFamilyDes);
-        addIncludedInfo(lits, haoFamilyDes->getNumBuckets(), haoFamilyBucketToLits);
+        auto haoBucketToLits = assignStringsToBuckets(lits, *haoDes);
+        addIncludedInfo(lits, haoDes->getNumBuckets(), haoBucketToLits);
 
         std::unique_ptr<HAOCompileArtifacts> haoArtifacts;
         if (tryBuildHaoV2ProtoArtifacts(target, lits, grey, &haoArtifacts)) {
             auto proto = ue2::make_unique<HWLMProto>(
-                engType, move(haoFamilyDes), lits, haoFamilyBucketToLits,
+                engType, move(haoDes), lits, haoBucketToLits,
                 make_small);
             proto->haoArtifacts = std::move(haoArtifacts);
             return proto;
         }
 
-        if (haoFamilyHint) {
-            // Explicit HAO family hint, but HAO v2 could not accept the rule set.
+        if (haoHint) {
+            // Explicit HAO hint, but HAO v2 could not accept the rule set.
             return nullptr;
         }
-    } else if (haoFamilyHint) {
+    } else if (haoHint) {
         return nullptr;
     }
 
@@ -1058,7 +1058,7 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
     }
 
     bytecode_ptr<u8> matcherBlob = nullptr;
-    if (proto.fdrEng && proto.fdrEng->getID() == HAO_FAMILY_ENGINE_ID) {
+    if (proto.fdrEng && proto.fdrEng->getID() == HAO_ENGINE_ID) {
         HAOCompileArtifacts rebuiltHaoArtifacts;
         if (!buildHAOArtifacts(proto.lits, &rebuiltHaoArtifacts, false)) {
             return nullptr;
@@ -1101,4 +1101,5 @@ size_t fdrSize(const FDR *fdr) {
 }
 
 } // namespace ue2
+
 

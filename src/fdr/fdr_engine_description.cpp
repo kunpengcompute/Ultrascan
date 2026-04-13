@@ -426,10 +426,10 @@ unique_ptr<FDREngineDescription> getFdrDescription(u32 engineID) {
     getNeoFdrDescriptions(&neoDescs);
     allDescs.insert(allDescs.end(), neoDescs.begin(), neoDescs.end());
 
-    vector<FDREngineDescription> haoFamilyDescs;
-    getHaoDescriptions(&haoFamilyDescs);
-    allDescs.insert(allDescs.end(), haoFamilyDescs.begin(),
-                    haoFamilyDescs.end());
+    vector<FDREngineDescription> haoDescs;
+    getHaoDescriptions(&haoDescs);
+    allDescs.insert(allDescs.end(), haoDescs.begin(),
+                    haoDescs.end());
 
     for (const auto &desc : allDescs) {
         if (desc.getID() == engineID) {
@@ -441,3 +441,4 @@ unique_ptr<FDREngineDescription> getFdrDescription(u32 engineID) {
 }
 
 } // namespace ue2
+
