@@ -26,7 +26,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "shufti_enhanced.h"
+#include "../nfa/shufti.h"
 #include "ue2common.h"
 #include "core_precomp.h"
 
