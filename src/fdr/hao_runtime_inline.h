@@ -202,6 +202,33 @@ u32 haoExtractKeyBext(const struct HAORuntimeHeader *hdr, u64a window) {
 }
 
 static really_inline
+void haoExtractKeysFromBextWindows(const struct HAORuntimeHeader *hdr,
+                                   const u64a *windows, u32 count, u32 *keys) {
+    u32 i;
+    u64a packed[HAO_BATCH_MAX_WIDTH];
+    const u32 keyMask = haoPackedKeyMask(hdr->selectorCount);
+
+    if (!hdr || !windows || !keys) {
+        return;
+    }
+
+    assert(count <= HAO_BATCH_MAX_WIDTH);
+    if (haoRuntimeCanUseBextFastPath()) {
+        haoExtractPackedBitsSveBitPermBatch(windows, count, hdr->bextMask,
+                                            packed);
+    } else {
+        for (i = 0; i < count; i++) {
+            packed[i] = haoExtractPackedBitsFallback(windows[i],
+                                                     hdr->bextMask);
+        }
+    }
+
+    for (i = 0; i < count; i++) {
+        keys[i] = (u32)(packed[i] & keyMask);
+    }
+}
+
+static really_inline
 void haoExtractKeysFromWindows(const struct HAORuntimeHeader *hdr,
                                const struct HAORuntimeBitSelector *selectors,
                                const u64a *windows, u32 count, u32 *keys) {
@@ -212,23 +239,7 @@ void haoExtractKeysFromWindows(const struct HAORuntimeHeader *hdr,
     }
 
     if (hdr->extractMode == HAO_RUNTIME_EXTRACT_MODE_BEXT) {
-        u64a packed[HAO_BATCH_MAX_WIDTH] = {0};
-        const u32 keyMask = haoPackedKeyMask(hdr->selectorCount);
-
-        assert(count <= HAO_BATCH_MAX_WIDTH);
-        if (haoRuntimeCanUseBextFastPath()) {
-            haoExtractPackedBitsSveBitPermBatch(windows, count, hdr->bextMask,
-                                                packed);
-        } else {
-            for (i = 0; i < count; i++) {
-                packed[i] = haoExtractPackedBitsFallback(windows[i],
-                                                         hdr->bextMask);
-            }
-        }
-
-        for (i = 0; i < count; i++) {
-            keys[i] = (u32)(packed[i] & keyMask);
-        }
+        haoExtractKeysFromBextWindows(hdr, windows, count, keys);
         return;
     }
 
