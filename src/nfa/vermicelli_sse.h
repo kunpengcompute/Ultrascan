@@ -137,8 +137,77 @@ const u8 *vermUnalignNocase(m128 chars, const u8 *buf, char negate) {
 static really_inline
 const u8 *dvermSearchAligned(m128 chars1, m128 chars2, u8 c1, u8 c2,
                              const u8 *buf, const u8 *buf_end) {
+#if ((defined  __ARM_NEON) || (defined __ARM_NEON__))
+    for (; buf + 64 < buf_end; buf += 64) {
+        m128 data0 = load128(buf);
+        m128 data1 = load128(buf + 16);
+        m128 data2 = load128(buf + 32);
+        m128 data3 = load128(buf + 48);
+
+        u64a z0 = movemask128_half(eq128(chars1, data0));
+        u64a z0_c2 = movemask128_half(eq128(chars2, data0));
+        z0 = z0 & (z0_c2 >> 4);
+
+        u64a z1 = movemask128_half(eq128(chars1, data1));
+        u64a z1_c2 = movemask128_half(eq128(chars2, data1));
+        z1 = z1 & (z1_c2 >> 4);
+
+        u64a z2 = movemask128_half(eq128(chars1, data2));
+        u64a z2_c2 = movemask128_half(eq128(chars2, data2));
+        z2 = z2 & (z2_c2 >> 4);
+
+        u64a z3 = movemask128_half(eq128(chars1, data3));
+        u64a z3_c2 = movemask128_half(eq128(chars2, data3));
+        z3 = z3 & (z3_c2 >> 4);
+
+        if (vgetq_lane_u8(data0.vect_u8, 15) == c1 && buf[16] == c2) {
+            z0 |= (1ULL << 63);
+        }
+        if (vgetq_lane_u8(data1.vect_u8, 15) == c1 && buf[32] == c2) {
+            z1 |= (1ULL << 63);
+        }
+        if (vgetq_lane_u8(data2.vect_u8, 15) == c1 && buf[48] == c2) {
+            z2 |= (1ULL << 63);
+        }
+        if (vgetq_lane_u8(data3.vect_u8, 15) == c1 && buf[64] == c2) {
+            z3 |= (1ULL << 63);
+        }
+
+        u64a total = z0 | z1 | z2 | z3;
+        if (unlikely(total)) {
+            if (z0) {
+                u32 pos = ctz64(z0) >> 2;
+                return buf + pos;
+            }
+            if (z1) {
+                u32 pos = ctz64(z1) >> 2;
+                return buf + 16 + pos;
+            }
+            if (z2) {
+                u32 pos = ctz64(z2) >> 2;
+                return buf + 32 + pos;
+            }
+            if (z3) {
+                u32 pos = ctz64(z3) >> 2;
+                return buf + 48 + pos;
+            }
+        }
+    }
+#endif
     for (; buf + 16 < buf_end; buf += 16) {
         m128 data = load128(buf);
+#if ((defined  __ARM_NEON) || (defined __ARM_NEON__))
+        u64a z = movemask128_half(eq128(chars1, data));
+        u64a z2 = movemask128_half(eq128(chars2, data));
+        z = z & (z2 >> 4);
+        if (vgetq_lane_u8(data.vect_u8, 15) == c1 && buf[16] == c2) {
+            z |= (1ULL << 63);
+        }
+        if (unlikely(z)) {
+            u32 pos = ctz64(z) >> 2;
+            return buf + pos;
+        }
+#else
         u32 z = movemask128(and128(eq128(chars1, data),
                                    rshiftbyte_m128(eq128(chars2, data), 1)));
         if (buf[15] == c1 && buf[16] == c2) {
@@ -148,6 +217,7 @@ const u8 *dvermSearchAligned(m128 chars1, m128 chars2, u8 c1, u8 c2,
             u32 pos = ctz32(z);
             return buf + pos;
         }
+#endif
     }
 
     return NULL;
