@@ -275,6 +275,19 @@ struct HAORuntimeStats {
     u64a residualConfirmMatches;
     u64a residualConfirmRejects;
     u64a callbackReports;
+    u64a l2RangeEntryBucketsEq1;
+    u64a l2RangeEntryBuckets2To4;
+    u64a l2RangeEntryBucketsGt4;
+    u64a l2RangeRuleBucketsEq1;
+    u64a l2RangeRuleBuckets2To4;
+    u64a l2RangeRuleBucketsGt4;
+    u64a l2RangeCollisionBuckets;
+    u64a l2RangeTotalEntries;
+    u64a l2RangeTotalRules;
+    u64a l2RangeMinEntries;
+    u64a l2RangeMaxEntries;
+    u64a l2RangeMinRules;
+    u64a l2RangeMaxRules;
 };
 
 struct FDR;

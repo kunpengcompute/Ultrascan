@@ -19,13 +19,12 @@ static int g_haoStatsEnvEnabled = -1;
 static int g_haoStatsAtexitRegistered;
 static int g_haoStatsActive;
 
-/* 中文字符显示宽度=2，但 strlen 算3字节，需要补偿
- * 补偿量 = (strlen(s) - display_width) / 2 * 1
- * 用固定总显示列宽 = 42，右对齐冒号 */
+/* Labels contain mixed ASCII and CJK text. strlen() counts bytes rather than
+ * display columns, so we compensate to keep the colon column aligned. */
 #define HAO_STAT_FMT(label, fmt, val)                                    \
     do {                                                                  \
         int _blen = (int)strlen(label);                                   \
-        /* 每个中文字符占3字节显示2列，多出1字节需从pad中扣除 */          \
+        /* Count each 3-byte UTF-8 CJK code point as display width 2. */          \
         int _cjk  = 0;                                                    \
         for (const char *_p = (label); *_p; ) {                          \
             unsigned char _c = (unsigned char)*_p;                        \
@@ -278,6 +277,45 @@ static double haoStatsPerMiB(u64a num, u64a bytes) {
     return ((double)num * 1048576.0) / (double)bytes;
 }
 
+static void haoStatsObserveRangeShape(u32 entryCount, u32 ruleCount) {
+    HAO_STATS_IF_ENABLED({
+        g_haoStats.l2RangeTotalEntries += entryCount;
+        g_haoStats.l2RangeTotalRules += ruleCount;
+        if (!g_haoStats.l2RangeMinEntries || entryCount < g_haoStats.l2RangeMinEntries) {
+            g_haoStats.l2RangeMinEntries = entryCount;
+        }
+        if (entryCount > g_haoStats.l2RangeMaxEntries) {
+            g_haoStats.l2RangeMaxEntries = entryCount;
+        }
+        if (!g_haoStats.l2RangeMinRules || ruleCount < g_haoStats.l2RangeMinRules) {
+            g_haoStats.l2RangeMinRules = ruleCount;
+        }
+        if (ruleCount > g_haoStats.l2RangeMaxRules) {
+            g_haoStats.l2RangeMaxRules = ruleCount;
+        }
+
+        if (entryCount == 1) {
+            g_haoStats.l2RangeEntryBucketsEq1++;
+        } else if (entryCount <= 4) {
+            g_haoStats.l2RangeEntryBuckets2To4++;
+        } else {
+            g_haoStats.l2RangeEntryBucketsGt4++;
+        }
+
+        if (ruleCount == 1) {
+            g_haoStats.l2RangeRuleBucketsEq1++;
+        } else if (ruleCount <= 4) {
+            g_haoStats.l2RangeRuleBuckets2To4++;
+        } else {
+            g_haoStats.l2RangeRuleBucketsGt4++;
+        }
+
+        if (ruleCount > 1) {
+            g_haoStats.l2RangeCollisionBuckets++;
+        }
+    });
+}
+
 static void haoDumpRuntimeStats(void) {
     const u64a l2EntryRejects =
         g_haoStats.encodedEntriesVisited >= g_haoStats.verifierEntryHits
@@ -297,48 +335,82 @@ static void haoDumpRuntimeStats(void) {
             ? l2SlotEligible - (g_haoStats.directReports +
                                 g_haoStats.encodedConfirmMatches)
             : 0;
+    const double avgEntriesPerRange = g_haoStats.encodedRangeCalls
+        ? (double)g_haoStats.l2RangeTotalEntries / (double)g_haoStats.encodedRangeCalls
+        : 0.0;
+    const double avgRulesPerRange = g_haoStats.encodedRangeCalls
+        ? (double)g_haoStats.l2RangeTotalRules / (double)g_haoStats.encodedRangeCalls
+        : 0.0;
 
     if (!g_haoStatsActive) {
         return;
     }
     fprintf(stderr, "[HAO][Runtime/运行时]\n");
-    HAO_STAT_FMT("scans(扫描次数)",           "%llu", (unsigned long long)g_haoStats.scanCalls);
-    HAO_STAT_FMT("inputBytes(输入字节数)",    "%llu", (unsigned long long)g_haoStats.scanInputBytes);
-    HAO_STAT_FMT("callbackReports(回调上报次数)", "%llu", (unsigned long long)g_haoStats.callbackReports);
+    HAO_STAT_FMT("scans(扫描次数)",                           "%llu", (unsigned long long)g_haoStats.scanCalls);
+    HAO_STAT_FMT("inputBytes(输入字节数)",                    "%llu", (unsigned long long)g_haoStats.scanInputBytes);
+    HAO_STAT_FMT("callbackReports(回调上报次数)",             "%llu", (unsigned long long)g_haoStats.callbackReports);
 
     fprintf(stderr, "[HAO][L1/一级过滤]\n");
-    HAO_STAT_FMT("blockCalls(分块处理次数)",      "%llu", (unsigned long long)g_haoStats.blockCalls);
-    HAO_STAT_FMT("blockLanes(分块总lane数)",       "%llu", (unsigned long long)g_haoStats.blockLanes);
-    HAO_STAT_FMT("primaryProbeLanes(L1探测lane数)", "%llu", (unsigned long long)g_haoStats.primaryProbeLanes);
-    HAO_STAT_FMT("primaryActiveLanes(L1命中lane数)", "%llu", (unsigned long long)g_haoStats.primaryActiveLanes);
-    HAO_STAT_FMT("activePct(L1命中率)",            "%.5f",
+    HAO_STAT_FMT("blockCalls(分块处理次数)",                  "%llu", (unsigned long long)g_haoStats.blockCalls);
+    HAO_STAT_FMT("blockLanes(分块总lane数)",                  "%llu", (unsigned long long)g_haoStats.blockLanes);
+    HAO_STAT_FMT("primaryProbeLanes(L1探测lane数)",           "%llu", (unsigned long long)g_haoStats.primaryProbeLanes);
+    HAO_STAT_FMT("primaryActiveLanes(L1命中lane数)",          "%llu", (unsigned long long)g_haoStats.primaryActiveLanes);
+    HAO_STAT_FMT("activePct(L1命中率)",                       "%.5f",
         haoStatsPct(g_haoStats.primaryActiveLanes, g_haoStats.primaryProbeLanes));
 
     fprintf(stderr, "[HAO][L2/二级过滤]\n");
-    HAO_STAT_FMT("rangeCalls(L2范围处理次数)",         "%llu", (unsigned long long)g_haoStats.encodedRangeCalls);
-    HAO_STAT_FMT("rangeReportCalls(L2产生报告的lane数)", "%llu", (unsigned long long)g_haoStats.encodedRangeReportCalls);
-    HAO_STAT_FMT("entriesVisited(L2访问entry数)",       "%llu", (unsigned long long)g_haoStats.encodedEntriesVisited);
-    HAO_STAT_FMT("verifierCalls(verifier调用次数)",     "%llu", (unsigned long long)g_haoStats.verifierCalls);
-    HAO_STAT_FMT("verifierEntryHits(verifier命中的entry数)", "%llu", (unsigned long long)g_haoStats.verifierEntryHits);
-    HAO_STAT_FMT("verifierSlotHits(verifier命中的slot数)",   "%llu", (unsigned long long)g_haoStats.verifierSlotHits);
-    HAO_STAT_FMT("groupRejects(group过滤拒绝数)",       "%llu", (unsigned long long)g_haoStats.encodedGroupRejects);
-    HAO_STAT_FMT("directReports(直接上报次数)",         "%llu", (unsigned long long)g_haoStats.directReports);
-    HAO_STAT_FMT("confirmCalls(精确确认次数)",          "%llu", (unsigned long long)g_haoStats.encodedConfirmCalls);
-    HAO_STAT_FMT("confirmMatches(精确确认命中数)",      "%llu", (unsigned long long)g_haoStats.encodedConfirmMatches);
-    HAO_STAT_FMT("confirmRejects(精确确认拒绝数)",      "%llu", (unsigned long long)g_haoStats.encodedConfirmRejects);
+    HAO_STAT_FMT("rangeCalls(L2范围处理次数)",                "%llu", (unsigned long long)g_haoStats.encodedRangeCalls);
+    HAO_STAT_FMT("rangeReportCalls(L2产生报告的lane数)",      "%llu", (unsigned long long)g_haoStats.encodedRangeReportCalls);
+    HAO_STAT_FMT("entriesVisited(L2访问entry数)",             "%llu", (unsigned long long)g_haoStats.encodedEntriesVisited);
+    HAO_STAT_FMT("verifierCalls(verifier调用次数)",           "%llu", (unsigned long long)g_haoStats.verifierCalls);
+    HAO_STAT_FMT("verifierEntryHits(verifier命中的entry数)",  "%llu", (unsigned long long)g_haoStats.verifierEntryHits);
+    HAO_STAT_FMT("verifierSlotHits(verifier命中的slot数)",    "%llu", (unsigned long long)g_haoStats.verifierSlotHits);
+    HAO_STAT_FMT("groupRejects(group过滤拒绝数)",             "%llu", (unsigned long long)g_haoStats.encodedGroupRejects);
+    HAO_STAT_FMT("directReports(直接上报次数)",               "%llu", (unsigned long long)g_haoStats.directReports);
+    HAO_STAT_FMT("confirmCalls(精确确认次数)",                "%llu", (unsigned long long)g_haoStats.encodedConfirmCalls);
+    HAO_STAT_FMT("confirmMatches(精确确认命中数)",            "%llu", (unsigned long long)g_haoStats.encodedConfirmMatches);
+    HAO_STAT_FMT("confirmRejects(精确确认拒绝数)",            "%llu", (unsigned long long)g_haoStats.encodedConfirmRejects);
+
+    fprintf(stderr, "[HAO][L2-Buckets/二级桶分布]\n");
+    HAO_STAT_FMT("avgEntriesPerRange(每次L2平均entry数)",     "%.5f", avgEntriesPerRange);
+    HAO_STAT_FMT("minEntriesPerRange(每次L2最少entry数)",     "%llu", (unsigned long long)g_haoStats.l2RangeMinEntries);
+    HAO_STAT_FMT("maxEntriesPerRange(每次L2最多entry数)",     "%llu", (unsigned long long)g_haoStats.l2RangeMaxEntries);
+    HAO_STAT_FMT("rangeEntryBucketsEq1(L2命中1-entry桶次数)", "%llu", (unsigned long long)g_haoStats.l2RangeEntryBucketsEq1);
+    HAO_STAT_FMT("rangeEntryBucketsEq1Pct(L2命中1-entry桶占比)", "%.5f",
+        haoStatsPct(g_haoStats.l2RangeEntryBucketsEq1, g_haoStats.encodedRangeCalls));
+    HAO_STAT_FMT("rangeEntryBuckets2To4(L2命中2~4-entry桶次数)", "%llu", (unsigned long long)g_haoStats.l2RangeEntryBuckets2To4);
+    HAO_STAT_FMT("rangeEntryBuckets2To4Pct(L2命中2~4-entry桶占比)", "%.5f",
+        haoStatsPct(g_haoStats.l2RangeEntryBuckets2To4, g_haoStats.encodedRangeCalls));
+    HAO_STAT_FMT("rangeEntryBucketsGt4(L2命中>4-entry桶次数)", "%llu", (unsigned long long)g_haoStats.l2RangeEntryBucketsGt4);
+    HAO_STAT_FMT("rangeEntryBucketsGt4Pct(L2命中>4-entry桶占比)", "%.5f",
+        haoStatsPct(g_haoStats.l2RangeEntryBucketsGt4, g_haoStats.encodedRangeCalls));
+    HAO_STAT_FMT("avgRulesPerRange(每次L2平均规则数)",          "%.5f", avgRulesPerRange);
+    HAO_STAT_FMT("minRulesPerRange(每次L2最少规则数)",        "%llu", (unsigned long long)g_haoStats.l2RangeMinRules);
+    HAO_STAT_FMT("maxRulesPerRange(每次L2最多规则数)",        "%llu", (unsigned long long)g_haoStats.l2RangeMaxRules);
+    HAO_STAT_FMT("rangeRuleBucketsEq1(L2命中1规则桶次数)",    "%llu", (unsigned long long)g_haoStats.l2RangeRuleBucketsEq1);
+    HAO_STAT_FMT("rangeRuleBucketsEq1Pct(L2命中1规则桶占比)", "%.5f",
+        haoStatsPct(g_haoStats.l2RangeRuleBucketsEq1, g_haoStats.encodedRangeCalls));
+    HAO_STAT_FMT("rangeRuleBuckets2To4(L2命中2~4规则桶次数)", "%llu", (unsigned long long)g_haoStats.l2RangeRuleBuckets2To4);
+    HAO_STAT_FMT("rangeRuleBuckets2To4Pct(L2命中2~4规则桶占比)", "%.5f",
+        haoStatsPct(g_haoStats.l2RangeRuleBuckets2To4, g_haoStats.encodedRangeCalls));
+    HAO_STAT_FMT("rangeRuleBucketsGt4(L2命中>4规则桶次数)",   "%llu", (unsigned long long)g_haoStats.l2RangeRuleBucketsGt4);
+    HAO_STAT_FMT("rangeRuleBucketsGt4Pct(L2命中>4规则桶占比)", "%.5f",
+        haoStatsPct(g_haoStats.l2RangeRuleBucketsGt4, g_haoStats.encodedRangeCalls));
+    HAO_STAT_FMT("rangeCollisionPct(L2命中冲突桶占比)",       "%.5f",
+        haoStatsPct(g_haoStats.l2RangeCollisionBuckets, g_haoStats.encodedRangeCalls));
 
     fprintf(stderr, "[HAO][Residual/兜底路径]\n");
-    HAO_STAT_FMT("posCalls(兜底位置次数)",      "%llu", (unsigned long long)g_haoStats.residualPosCalls);
-    HAO_STAT_FMT("ruleChecks(兜底规则检查数)",  "%llu", (unsigned long long)g_haoStats.residualRuleChecks);
-    HAO_STAT_FMT("groupRejects(兜底group拒绝数)", "%llu", (unsigned long long)g_haoStats.residualGroupRejects);
-    HAO_STAT_FMT("confirmCalls(兜底确认次数)",  "%llu", (unsigned long long)g_haoStats.residualConfirmCalls);
-    HAO_STAT_FMT("confirmMatches(兜底确认命中数)", "%llu", (unsigned long long)g_haoStats.residualConfirmMatches);
-    HAO_STAT_FMT("confirmRejects(兜底确认拒绝数)", "%llu", (unsigned long long)g_haoStats.residualConfirmRejects);
+    HAO_STAT_FMT("posCalls(兜底位置次数)",                    "%llu", (unsigned long long)g_haoStats.residualPosCalls);
+    HAO_STAT_FMT("ruleChecks(兜底规则检查数)",                "%llu", (unsigned long long)g_haoStats.residualRuleChecks);
+    HAO_STAT_FMT("groupRejects(兜底group拒绝数)",             "%llu", (unsigned long long)g_haoStats.residualGroupRejects);
+    HAO_STAT_FMT("confirmCalls(兜底确认次数)",                "%llu", (unsigned long long)g_haoStats.residualConfirmCalls);
+    HAO_STAT_FMT("confirmMatches(兜底确认命中数)",            "%llu", (unsigned long long)g_haoStats.residualConfirmMatches);
+    HAO_STAT_FMT("confirmRejects(兜底确认拒绝数)",            "%llu", (unsigned long long)g_haoStats.residualConfirmRejects);
 
     fprintf(stderr, "[HAO][Rates/关键比率]\n");
     HAO_STAT_FMT("l2EntryFalsePositivePct(L2表项假阳性率)",   "%.5f",
         haoStatsPct(l2EntryRejects, g_haoStats.encodedEntriesVisited));
-    HAO_STAT_FMT("l2LaneNoReportPct(L2无报告lane占比)",        "%.5f",
+    HAO_STAT_FMT("l2LaneNoReportPct(L2无报告lane占比)",       "%.5f",
         haoStatsPct(l2LaneNoReport, g_haoStats.encodedRangeCalls));
     HAO_STAT_FMT("l2ConfirmFalsePositivePct(L2确认假阳性率)", "%.5f",
         haoStatsPct(g_haoStats.encodedConfirmRejects, g_haoStats.encodedConfirmCalls));
@@ -348,7 +420,7 @@ static void haoDumpRuntimeStats(void) {
         haoStatsPerMiB(g_haoStats.encodedEntriesVisited, g_haoStats.scanInputBytes));
     HAO_STAT_FMT("l2ConfirmCallsPerMiB(每MiB精确确认次数)",   "%.5f",
         haoStatsPerMiB(g_haoStats.encodedConfirmCalls, g_haoStats.scanInputBytes));
-    HAO_STAT_FMT("reportsPerMiB(每MiB报告次数)",               "%.5f",
+    HAO_STAT_FMT("reportsPerMiB(每MiB报告次数)",              "%.5f",
         haoStatsPerMiB(g_haoStats.callbackReports, g_haoStats.scanInputBytes));
 }
 
@@ -1006,6 +1078,8 @@ static int haoProcessEncodedRange(
     u32 offset = 0;
     u32 count = 0;
     u32 n;
+    u32 visitedCount = 0;
+    u32 bucketRuleCount = 0;
     int anyReport = 0;
 
     if (!encoded || !ctx) {
@@ -1025,6 +1099,10 @@ static int haoProcessEncodedRange(
         }
 
         entry = &secondaryHashTable[off];
+        HAO_STATS_IF_ENABLED({
+            visitedCount++;
+            bucketRuleCount += haoEntrySlotCount(entry);
+        });
         HAO_STATS_ADD(encodedEntriesVisited, 1);
         laneMask = haoEntryMatchMaskFromContext(entry, ctx);
         if (!laneMask) {
@@ -1065,6 +1143,7 @@ static int haoProcessEncodedRange(
             anyReport = 1;
             *control = a->cb(ctx->endPos, rm->id, a->scratch);
             if (*control == HWLM_TERMINATE_MATCHING) {
+                haoStatsObserveRangeShape(visitedCount, bucketRuleCount);
                 HAO_STATS_ADD(encodedRangeReportCalls, 1);
                 return HWLM_TERMINATED;
             }
@@ -1072,6 +1151,7 @@ static int haoProcessEncodedRange(
         }
     }
 
+    haoStatsObserveRangeShape(visitedCount, bucketRuleCount);
     HAO_STATS_ADD(encodedRangeReportCalls, anyReport ? 1 : 0);
 
     return HWLM_SUCCESS;
@@ -1296,7 +1376,7 @@ static void haoBuildByteLanesFromBlockBytes(
     }
 }
 
-// TODO: 待优化：使用向量化的方式来处理
+// TODO: Optimize this path with a wider vectorized window builder.
 static void haoBuildWindowsFromBlockBytes(const u8 *blockBytes, u32 laneCount,
                                           u32 windowBytes, u64a *windows) {
     u32 lane;

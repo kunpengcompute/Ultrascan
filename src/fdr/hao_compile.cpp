@@ -524,6 +524,7 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
     for (const auto &it : keyToRuleIndexes) {
         const u32 key = it.first;
         const auto &bucketRules = it.second;
+        const u32 ruleCount = verify_u32(bucketRules.size());
         const u32 entryCount = verify_u32(
             (bucketRules.size() + HAO_COMPAT_RULE_SLOTS_PER_ENTRY - 1) /
             HAO_COMPAT_RULE_SLOTS_PER_ENTRY);
@@ -544,10 +545,35 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
         out->primaryHashTable.offsets[key] =
             encodePrimaryValue(secondaryOffset, entryCount);
         out->stats.nonEmptyPrimary++;
-        out->stats.totalRulesInBuckets += verify_u32(bucketRules.size());
+        out->stats.totalRulesInBuckets += ruleCount;
         out->stats.totalSecondaryEntries += entryCount;
+        if (!out->stats.minRulesPerBucket || ruleCount < out->stats.minRulesPerBucket) {
+            out->stats.minRulesPerBucket = ruleCount;
+        }
+        out->stats.maxRulesPerBucket =
+            std::max(out->stats.maxRulesPerBucket, ruleCount);
+        if (!out->stats.minEntriesPerBucket || entryCount < out->stats.minEntriesPerBucket) {
+            out->stats.minEntriesPerBucket = entryCount;
+        }
         out->stats.maxEntriesPerKey =
             std::max(out->stats.maxEntriesPerKey, entryCount);
+        if (ruleCount > 1) {
+            out->stats.collisionBuckets++;
+        }
+        if (ruleCount == 1) {
+            out->stats.ruleBucketsEq1++;
+        } else if (ruleCount <= 4) {
+            out->stats.ruleBuckets2To4++;
+        } else {
+            out->stats.ruleBucketsGt4++;
+        }
+        if (entryCount == 1) {
+            out->stats.entryBucketsEq1++;
+        } else if (entryCount <= 4) {
+            out->stats.entryBuckets2To4++;
+        } else {
+            out->stats.entryBucketsGt4++;
+        }
 
         for (u32 chunk = 0; chunk < entryCount; chunk++) {
             HAOSecondaryHashEntry entry = {};
@@ -863,25 +889,77 @@ void dumpHashTables(const HAOCompatCompileArtifacts &artifacts,
     } while(0)
 
 
+
+static
+double haoCompilePct(u64a num, u64a den) {
+    if (!den) {
+        return 0.0;
+    }
+    return (100.0 * (double)num) / (double)den;
+}
+
 template <class ArtifactsT>
 static
 void dumpHAOSummary(const ArtifactsT &artifacts) {
     const auto &s = artifacts.haoSummary;
+    const auto &h = artifacts.haoGlobalHash.stats;
+    const double avgRulesPerBucket = h.nonEmptyPrimary
+                                     ? (double)h.totalRulesInBuckets /
+                                           (double)h.nonEmptyPrimary
+                                     : 0.0;
+    const double avgEntriesPerBucket = h.nonEmptyPrimary
+                                       ? (double)h.totalSecondaryEntries /
+                                             (double)h.nonEmptyPrimary
+                                       : 0.0;
 
     printf("[PBE][HAO-Summary/编译汇总]\n");
-    HAO_SUMMARY_FMT("total(规则总数)",                    "%u", s.totalRules);
-    HAO_SUMMARY_FMT("fastPath(快速路径规则数)",           "%u", s.fastPathRules);
-    HAO_SUMMARY_FMT("residual(兜底规则数)",               "%u", s.residualRules);
+    HAO_SUMMARY_FMT("total(规则总数)",                         "%u", s.totalRules);
+    HAO_SUMMARY_FMT("fastPath(快速路径规则数)",                "%u", s.fastPathRules);
+    HAO_SUMMARY_FMT("residual(兜底规则数)",                    "%u", s.residualRules);
     HAO_SUMMARY_FMT("residualUnsupported(兜底且不支持规则数)", "%u", s.residualUnsupportedRules);
-    HAO_SUMMARY_FMT("unsupported(不支持规则数)",          "%u", s.unsupportedRules);
-    HAO_SUMMARY_FMT("exact(精确规则数)",                  "%u", s.exactRules);
-    HAO_SUMMARY_FMT("nocase(忽略大小写规则数)",           "%u", s.nocaseRules);
-    HAO_SUMMARY_FMT("anchorConfirm(anchor确认规则数)",    "%u", s.anchorConfirmRules);
-    HAO_SUMMARY_FMT("directReport(可直接上报规则数)",     "%u", s.directReportRules);
-    HAO_SUMMARY_FMT("fastPathConfirm(快速路径需确认规则数)", "%u", s.fastPathConfirmRules);
-    HAO_SUMMARY_FMT("keyExpanded(发生key展开规则数)",     "%u", s.keyExpandedRules);
-    HAO_SUMMARY_FMT("expandedKeys(展开后的key总数)",      "%u", s.totalExpandedKeys);
+    HAO_SUMMARY_FMT("unsupported(不支持规则数)",               "%u", s.unsupportedRules);
+    HAO_SUMMARY_FMT("exact(精确规则数)",                       "%u", s.exactRules);
+    HAO_SUMMARY_FMT("nocase(忽略大小写规则数)",                "%u", s.nocaseRules);
+    HAO_SUMMARY_FMT("anchorConfirm(anchor确认规则数)",         "%u", s.anchorConfirmRules);
+    HAO_SUMMARY_FMT("directReport(可直接上报规则数)",          "%u", s.directReportRules);
+    HAO_SUMMARY_FMT("fastPathConfirm(快速路径需确认规则数)",   "%u", s.fastPathConfirmRules);
+    HAO_SUMMARY_FMT("keyExpanded(发生key展开规则数)",          "%u", s.keyExpandedRules);
+    HAO_SUMMARY_FMT("expandedKeys(展开后的key总数)",           "%u", s.totalExpandedKeys);
     HAO_SUMMARY_FMT("maxSelectedAmbigBits(最大选位歧义bit数)", "%u", s.maxSelectedAmbigBits);
+
+    if (!artifacts.haoGlobalHash.valid || !h.nonEmptyPrimary) {
+        return;
+    }
+
+    printf("[PBE][HAO-Hash/哈希分布]\n");
+    HAO_SUMMARY_FMT("nonEmptyPrimary(非空一级桶数)",           "%u", h.nonEmptyPrimary);
+    HAO_SUMMARY_FMT("collisionBuckets(冲突桶数)",              "%u", h.collisionBuckets);
+    HAO_SUMMARY_FMT("collisionBucketPct(冲突桶占比)",          "%.5f",
+                    haoCompilePct(h.collisionBuckets, h.nonEmptyPrimary));
+    HAO_SUMMARY_FMT("avgRulesPerBucket(每桶平均规则数)",       "%.5f", avgRulesPerBucket);
+    HAO_SUMMARY_FMT("minRulesPerBucket(每桶最少规则数)",       "%u", h.minRulesPerBucket);
+    HAO_SUMMARY_FMT("maxRulesPerBucket(每桶最多规则数)",       "%u", h.maxRulesPerBucket);
+    HAO_SUMMARY_FMT("ruleBucketsEq1(规则数=1的桶数)",         "%u", h.ruleBucketsEq1);
+    HAO_SUMMARY_FMT("ruleBucketsEq1Pct(规则数=1桶占比)",      "%.5f",
+                    haoCompilePct(h.ruleBucketsEq1, h.nonEmptyPrimary));
+    HAO_SUMMARY_FMT("ruleBuckets2To4(规则数2~4的桶数)",       "%u", h.ruleBuckets2To4);
+    HAO_SUMMARY_FMT("ruleBuckets2To4Pct(规则数2~4桶占比)",    "%.5f",
+                    haoCompilePct(h.ruleBuckets2To4, h.nonEmptyPrimary));
+    HAO_SUMMARY_FMT("ruleBucketsGt4(规则数>4的桶数)",         "%u", h.ruleBucketsGt4);
+    HAO_SUMMARY_FMT("ruleBucketsGt4Pct(规则数>4桶占比)",      "%.5f",
+                    haoCompilePct(h.ruleBucketsGt4, h.nonEmptyPrimary));
+    HAO_SUMMARY_FMT("avgEntriesPerBucket(每桶平均entry数)",   "%.5f", avgEntriesPerBucket);
+    HAO_SUMMARY_FMT("minEntriesPerBucket(每桶最少entry数)",   "%u", h.minEntriesPerBucket);
+    HAO_SUMMARY_FMT("maxEntriesPerBucket(每桶最多entry数)",   "%u", h.maxEntriesPerKey);
+    HAO_SUMMARY_FMT("entryBucketsEq1(entry数=1的桶数)",       "%u", h.entryBucketsEq1);
+    HAO_SUMMARY_FMT("entryBucketsEq1Pct(entry数=1桶占比)",    "%.5f",
+                    haoCompilePct(h.entryBucketsEq1, h.nonEmptyPrimary));
+    HAO_SUMMARY_FMT("entryBuckets2To4(entry数2~4的桶数)",     "%u", h.entryBuckets2To4);
+    HAO_SUMMARY_FMT("entryBuckets2To4Pct(entry数2~4桶占比)",  "%.5f",
+                    haoCompilePct(h.entryBuckets2To4, h.nonEmptyPrimary));
+    HAO_SUMMARY_FMT("entryBucketsGt4(entry数>4的桶数)",       "%u", h.entryBucketsGt4);
+    HAO_SUMMARY_FMT("entryBucketsGt4Pct(entry数>4桶占比)",    "%.5f",
+                    haoCompilePct(h.entryBucketsGt4, h.nonEmptyPrimary));
 }
 
 static

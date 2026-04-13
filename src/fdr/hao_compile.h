@@ -233,10 +233,20 @@ struct HAOCompileSummary {
 
 struct HAOGlobalHashStats {
     u32 nonEmptyPrimary = 0;
+    u32 collisionBuckets = 0;
     u32 totalRulesInBuckets = 0;
     u32 totalExpandedKeysInBuckets = 0;
     u32 totalSecondaryEntries = 0;
+    u32 minRulesPerBucket = 0;
+    u32 maxRulesPerBucket = 0;
+    u32 minEntriesPerBucket = 0;
     u32 maxEntriesPerKey = 0;
+    u32 ruleBucketsEq1 = 0;
+    u32 ruleBuckets2To4 = 0;
+    u32 ruleBucketsGt4 = 0;
+    u32 entryBucketsEq1 = 0;
+    u32 entryBuckets2To4 = 0;
+    u32 entryBucketsGt4 = 0;
 };
 
 /* Artifacts for the HAO v2 global single-table build. */
