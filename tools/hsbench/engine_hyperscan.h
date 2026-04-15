@@ -51,6 +51,11 @@ struct CompileHSStats {
     long double compileSecs = 0;
     unsigned int peakMemorySize = 0;
 };
+struct SplitDatabases {
+    hs_database_t* x86_db;
+    hs_database_t* arm_db;
+};
+
 
 /** Engine context which is allocated on a per-thread basis. */
 class EngineHSContext : public EngineContext {
@@ -115,5 +120,10 @@ std::unique_ptr<EngineHyperscan>
 buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
                      const std::string &name, const std::string &sigs_name,
                      const ue2::Grey &grey);
+std::unique_ptr<EngineHyperscan>
+fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
+                     const std::string &name, const std::string &sigs_name,
+                     UNUSED const ue2::Grey &grey);
+SplitDatabases splitDB(const fat_hs_database_t* fat_db);
 
 #endif // ENGINEHYPERSCAN_H

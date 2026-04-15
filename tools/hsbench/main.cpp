@@ -1094,7 +1094,9 @@ int HS_CDECL main(int argc, char *argv[]) {
                 engine = buildEnginePcre(exprMap, s.name, sigName);
 #endif
             } else {
-                engine = buildEngineHyperscan(exprMap, scan_mode, s.name,
+                // engine = buildEngineHyperscan(exprMap, scan_mode, s.name,
+                //                               sigName, *grey);
+                engine = fat_buildEngineHyperscan(exprMap, scan_mode, s.name,
                                               sigName, *grey);
             }
 

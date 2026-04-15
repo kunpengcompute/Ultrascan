@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Intel Corporation
+ * Copyright (c) 2015-2020, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -26,23 +26,72 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ROSE_BUILD_MISC_H
-#define ROSE_BUILD_MISC_H
+/** \file
+ * \brief Runtime code for hs_database manipulation.
+ */
 
+#ifndef FAT_DATABASE_H_D467FD6F343DDF
+#define FAT_DATABASE_H_D467FD6F343DDF
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+#include "database_common.h"
+#include "hs_compile.h" // for HS_MODE_ flags
+#include "hs_version.h"
 #include "ue2common.h"
+#include "util/arch.h"
 
-struct RoseEngine;
-struct x86_RoseEngine;
+/*
+ * a header to enclose the actual fat bytecode - useful for keeping info about the
+ * compiled data.
+ */
+struct fat_hs_database {
+    u32 magic;
+    u32 version;
+    u32 x86_length;
+    u32 arm_length;
+    u64a platform;
+    u32 crc32;
+    u32 reserved0;
+    u32 reserved1;
+    u32 x86_bytecode;
+    u32 arm_bytecode;
+    u32 padding[16];
+    char bytes[];
+};
 
-namespace ue2 {
-
-struct RoseResources;
-
-/* used by heuristics to determine the small write engine. High numbers are
- * intended to indicate a lightweight rose. */
-u32 roseQuality(const RoseResources &res, const RoseEngine *rose);
-u32 x86_roseQuality(const RoseResources &res, const x86_RoseEngine *rose);
-
+static really_inline
+const void *fat_hs_get_bytecode(const struct fat_hs_database *db) {
+#if defined(ARCH_X86_64)
+    return ((const char *)db + db->x86_bytecode);
+#elif defined(ARCH_AARCH64)
+    return ((const char *)db + db->arm_bytecode);
+#else
+    return ((const char *)db + db->x86_bytecode);
+#endif
 }
 
+/**
+ * Cheap database sanity checks used in block mode scan calls and streaming
+ * mode open calls.
+ */
+static really_inline
+hs_error_t fat_validDatabase(const fat_hs_database_t *db) {
+    if (!db || db->magic != HS_DB_MAGIC) {
+        return HS_INVALID;
+    }
+    if (db->version != HS_DB_VERSION) {
+        return HS_DB_VERSION_ERROR;
+    }
+
+    return HS_SUCCESS;
+}
+
+hs_error_t fat_dbIsValid(const struct fat_hs_database *db);
+
+#ifdef __cplusplus
+} /* extern "C" */
 #endif
+
+#endif /* DATABASE_H_D467FD6F343DDE */

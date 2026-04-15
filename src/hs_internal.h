@@ -41,6 +41,15 @@
 namespace ue2 {
 
 struct Grey;
+hs_error_t fat_hs_compile_multi_int(const char *const *expressions,
+                                    const unsigned int *flags,
+                                    const unsigned int *ids,
+                                    const hs_expr_ext_t *const *ext,
+                                    unsigned int elements, unsigned int mode,
+                                    const hs_platform_info_t *platform,
+                                    fat_hs_database_t **db,
+                                    hs_compile_error_t **error,
+                                    const Grey &g);
 
 /** \brief Internal use only: takes a Grey argument so that we can use it in
  * tools. */

@@ -38,6 +38,7 @@
 #include "timer.h"
 
 #include "database.h"
+#include "fat_database.h"
 #include "hs_compile.h"
 #include "hs_internal.h"
 #include "hs_runtime.h"
@@ -548,4 +549,236 @@ buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
     cs.peakMemorySize = peakMemorySize;
 
     return ue2::make_unique<EngineHyperscan>(db, std::move(cs));
+}
+
+SplitDatabases splitDB(const fat_hs_database_t* fat_db) {
+    SplitDatabases result = {nullptr, nullptr};
+    
+    if (!fat_db) {
+        return result;
+    }
+    
+    // 拆分 x86 数据库
+    if (fat_db->x86_length > 0) {
+        size_t x86_size = sizeof(hs_database) + fat_db->x86_length;
+        result.x86_db = (hs_database_t*)malloc(x86_size);
+        if (result.x86_db) {
+            result.x86_db->magic = fat_db->magic;
+            result.x86_db->version = fat_db->version;
+            result.x86_db->length = fat_db->x86_length;
+            result.x86_db->platform = fat_db->platform;
+            result.x86_db->crc32 = fat_db->crc32;
+            result.x86_db->reserved0 = fat_db->reserved0;
+            result.x86_db->reserved1 = fat_db->reserved1;
+            
+            uintptr_t shift = (uintptr_t)result.x86_db->bytes & 0x3f;
+            result.x86_db->bytecode = offsetof(struct hs_database, bytes) - shift;
+            
+            const char* x86_bytecode = (const char*)fat_db + fat_db->x86_bytecode;
+            char* x86_ptr = (char*)result.x86_db + result.x86_db->bytecode;
+            memcpy(x86_ptr, x86_bytecode, fat_db->x86_length);
+        }
+    }
+    
+    // 拆分 arm 数据库
+    if (fat_db->arm_length > 0) {
+        size_t arm_size = sizeof(hs_database) + fat_db->arm_length;
+        result.arm_db = (hs_database_t*)malloc(arm_size);
+        if (result.arm_db) {
+            result.arm_db->magic = fat_db->magic;
+            result.arm_db->version = fat_db->version;
+            result.arm_db->length = fat_db->arm_length;
+            result.arm_db->platform = fat_db->platform;
+            result.arm_db->crc32 = fat_db->crc32;
+            result.arm_db->reserved0 = fat_db->reserved0;
+            result.arm_db->reserved1 = fat_db->reserved1;
+            
+            uintptr_t shift = (uintptr_t)result.arm_db->bytes & 0x3f;
+            result.arm_db->bytecode = offsetof(struct hs_database, bytes) - shift;
+            
+            const char* arm_bytecode = (const char*)fat_db + fat_db->arm_bytecode;
+            char* arm_ptr = (char*)result.arm_db + result.arm_db->bytecode;
+            memcpy(arm_ptr, arm_bytecode, fat_db->arm_length);
+        }
+    }
+    
+    return result;
+}
+
+std::unique_ptr<EngineHyperscan>
+fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
+                     const std::string &name, const std::string &sigs_name,
+                     UNUSED const ue2::Grey &grey) {
+    if (expressions.empty()) {
+        assert(0);
+        return nullptr;
+    }
+
+    long double compileSecs = 0.0;
+    size_t compiledSize = 0.0;
+    size_t streamSize = 0;
+    size_t scratchSize = 0;
+    unsigned int peakMemorySize = 0;
+    std::string db_info;
+
+    unsigned int mode = makeModeFlags(scan_mode);
+
+    fat_hs_database_t *db;
+    hs_error_t err;
+    if (loadDatabases) {
+        db = fat_loadDatabase(dbFilename(name, mode).c_str());
+        if (!db) {
+            return nullptr;
+        }
+    } else {
+        const unsigned int count = expressions.size();
+
+        vector<string> exprs;
+        vector<unsigned int> flags, ids;
+        vector<hs_expr_ext> ext;
+
+        for (const auto &m : expressions) {
+            string expr;
+            unsigned int f = 0;
+            hs_expr_ext extparam;
+            extparam.flags = 0;
+            if (!readExpression(m.second, expr, &f, &extparam)) {
+                printf("Error parsing PCRE: %s (id %u)\n", m.second.c_str(),
+                       m.first);
+                return nullptr;
+            }
+            if (forceEditDistance) {
+                extparam.flags |= HS_EXT_FLAG_EDIT_DISTANCE;
+                extparam.edit_distance = editDistance;
+            }
+
+            exprs.push_back(expr);
+            ids.push_back(m.first);
+            flags.push_back(f);
+            ext.push_back(extparam);
+        }
+
+        unsigned full_mode = mode;
+        if (mode == HS_MODE_STREAM) {
+            full_mode |= somPrecisionMode;
+        }
+
+        // Our compiler takes an array of plain ol' C strings.
+        vector<const char *> patterns(count);
+        for (unsigned int i = 0; i < count; i++) {
+            patterns[i] = exprs[i].c_str();
+        }
+
+        // Extended parameters are passed as pointers to hs_expr_ext structures.
+        vector<const hs_expr_ext *> ext_ptr(count);
+        for (unsigned int i = 0; i < count; i++) {
+            ext_ptr[i] = &ext[i];
+        }
+
+        hs_compile_error_t *compile_err;
+        Timer timer;
+        timer.start();
+        err = fat_hs_compile_ext_multi(patterns.data(), flags.data(),
+                                   ids.data(), ext_ptr.data(), count,
+                                   full_mode, nullptr, &db, &compile_err);
+        timer.complete();
+        compileSecs = timer.seconds();
+        peakMemorySize = getPeakHeap();
+
+        if (err == HS_COMPILER_ERROR) {
+            if (compile_err->expression >= 0) {
+                printf("Compile error for signature #%u: %s\n",
+                       compile_err->expression, compile_err->message);
+            } else {
+                printf("Compile error: %s\n", compile_err->message);
+            }
+            hs_free_compile_error(compile_err);
+            return nullptr;
+        }
+    }
+    
+    //copy the db into huge pages (where available) to reduce TLB pressure
+    SplitDatabases split = splitDB(db);
+
+     // 根据当前架构选择数据库
+#if defined(ARCH_X86_64)
+    hs_database_t* target_db = split.x86_db;
+    if (split.arm_db) {
+        free(split.arm_db);
+    }
+#elif defined(ARCH_AARCH64)
+    hs_database_t* target_db = split.arm_db;
+    if (split.x86_db) {
+        free(split.x86_db);
+    }
+#else
+    hs_database_t* target_db = split.x86_db;
+    if (split.arm_db) {
+        free(split.arm_db);
+    }
+#endif
+    
+    if (!target_db) {
+        fat_hs_free_database(db);
+        return nullptr;
+    }
+
+    // 释放 fat_hs_database
+    fat_hs_free_database(db);
+
+    // 使用 get_huge 加载到大页内存
+    target_db = get_huge(target_db);
+    if (!target_db) {
+        return nullptr;
+    }
+
+    // sava database还是保存fat db，如果后续要load则load过程再拆；
+    if (saveDatabases) {
+        fat_saveDatabase(db, dbFilename(name, mode).c_str());
+    }   
+
+    if (mode & HS_MODE_STREAM) {
+        err = hs_stream_size(target_db, &streamSize);
+        if (err != HS_SUCCESS) {
+            return nullptr;
+        }
+    } else {
+            streamSize = 0;
+    }
+    char *info;
+    err = hs_database_info(target_db, &info);
+    if (err != HS_SUCCESS) {
+        return nullptr;
+    } else {
+        db_info = string(info);
+        free(info);
+    }
+    
+    hs_scratch_t *scratch = nullptr;
+    err = hs_scratch_size(scratch, &scratchSize);
+    if (err != HS_SUCCESS) {
+        return nullptr;
+    }
+    hs_free_scratch(scratch);
+
+    // Collect summary information.
+    CompileHSStats cs;
+    cs.sigs_name = sigs_name;
+    if (!sigs_name.empty()) {
+        const auto pos = name.find_last_of('/');
+        cs.signatures = name.substr(pos + 1);
+    } else {
+        cs.signatures = name;
+    }
+    cs.db_info = db_info;
+    cs.expressionCount = expressions.size();
+    cs.compiledSize = compiledSize;
+    cs.crc32 = target_db->crc32;
+    cs.streaming = mode & HS_MODE_STREAM;
+    cs.streamSize = streamSize;
+    cs.scratchSize = scratchSize;
+    cs.compileSecs = compileSecs;
+    cs.peakMemorySize = peakMemorySize;
+
+    return ue2::make_unique<EngineHyperscan>(target_db, std::move(cs));
 }

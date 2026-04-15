@@ -799,7 +799,10 @@ set (hs_exec_SRCS
     src/util/unaligned.h
     src/util/uniform_ops.h
     src/database.c
+    src/fat_database.c
     src/database.h
+    src/fat_database.h
+    src/database_common.h
 )
 
 set (hs_exec_avx2_SRCS
@@ -811,7 +814,9 @@ set (hs_exec_avx2_SRCS
 SET (hs_compile_SRCS
     ${hs_HEADERS}
     src/crc32.h
+    src/database_common.h
     src/database.h
+    src/fat_database.h
     src/grey.cpp
     src/grey.h
     src/hs.cpp
