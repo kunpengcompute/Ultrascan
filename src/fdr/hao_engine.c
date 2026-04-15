@@ -1467,129 +1467,167 @@ static void haoBuildContextFromBlockState(const struct HAORuntimeHeader *hdr,
     ctx->key = state->keys[lane];
 }
 
+
+#ifdef __ARM_FEATURE_SVE
+#include <arm_sve.h>
+
 static really_inline
-u32 haoProbeCompactAndLoadPrimaryDirect(const u8 *bitmap, u32 bitmapSize,
+svuint32_t sve_u8gather_u32(svbool_t pg, const u8 *base,
+                             svuint32_t byteIndices) {
+    svuint32_t result;
+    __asm__ volatile (
+        "ld1b {%[res].s}, %[pg]/z, [%[base], %[idx].s, uxtw]"
+        : [res] "=w" (result)
+        : [pg]  "Upa" (pg),
+          [base] "r"  (base),
+          [idx]  "w"  (byteIndices)
+        :
+    );
+    return result;
+}
+
+static really_inline
+u32 haoProbeCompactAndLoadPrimaryDirect_sve(
+        const u8 *bitmap, u32 bitmapSize,
+        const u32 *primaryHashTable,
+        const u32 *primaryIdx, u32 laneCount,
+        u32 *activeLaneIndex, u32 *activeEncoded) {
+
+    u32 activeCount = 0;
+    u32 lane        = 0;
+    const u32 vl    = (u32)svcntw();
+
+    while (lane + vl <= laneCount) {
+        svbool_t pg = svptrue_b32();
+
+        svuint32_t vidx     = svld1_u32(pg, primaryIdx + lane);
+        svuint32_t vbyteIdx = svlsr_n_u32_x(pg, vidx, 3);
+        svuint32_t vbitPos  = svand_n_u32_x(pg, vidx, 7U);
+
+        svuint32_t vbitmapBytes = sve_u8gather_u32(pg, bitmap, vbyteIdx);
+
+        svuint32_t vbitMask       = svlsl_u32_x(pg, svdup_n_u32(1U), vbitPos);
+        svuint32_t vhit           = svand_u32_x(pg, vbitmapBytes, vbitMask);
+        svbool_t   phit           = svcmpne_n_u32(pg, vhit, 0U);
+
+        svuint32_t vencoded       = svld1_gather_u32index_u32(
+                                        phit, primaryHashTable, vidx);
+        svuint32_t vlaneBase      = svindex_u32(lane, 1U);
+        svuint32_t vactiveLane    = svcompact_u32(phit, vlaneBase);
+        svuint32_t vactiveEncoded = svcompact_u32(phit, vencoded);
+
+        u32 hitCount = (u32)svcntp_b32(pg, phit);
+        if (hitCount > 0) {
+            svbool_t pgw = svwhilelt_b32((u32)0, hitCount);
+            svst1_u32(pgw, activeLaneIndex + activeCount, vactiveLane);
+            svst1_u32(pgw, activeEncoded   + activeCount, vactiveEncoded);
+            activeCount += hitCount;
+        }
+        lane += vl;
+    }
+
+    if (lane < laneCount) {
+        svbool_t pg_tail = svwhilelt_b32(lane, laneCount);
+
+        svuint32_t vidx     = svld1_u32(pg_tail, primaryIdx + lane);
+        svuint32_t vbyteIdx = svlsr_n_u32_x(pg_tail, vidx, 3);
+        svuint32_t vbitPos  = svand_n_u32_x(pg_tail, vidx, 7U);
+
+        svuint32_t vbitmapBytes = sve_u8gather_u32(pg_tail, bitmap, vbyteIdx);
+
+        svuint32_t vbitMask       = svlsl_u32_x(pg_tail, svdup_n_u32(1U), vbitPos);
+        svuint32_t vhit           = svand_u32_x(pg_tail, vbitmapBytes, vbitMask);
+        svbool_t   phit           = svcmpne_n_u32(pg_tail, vhit, 0U);
+
+        svuint32_t vencoded       = svld1_gather_u32index_u32(
+                                        phit, primaryHashTable, vidx);
+        svuint32_t vlaneBase      = svindex_u32(lane, 1U);
+        svuint32_t vactiveLane    = svcompact_u32(phit, vlaneBase);
+        svuint32_t vactiveEncoded = svcompact_u32(phit, vencoded);
+
+        u32 hitCount = (u32)svcntp_b32(pg_tail, phit);
+        if (hitCount > 0) {
+            svbool_t pgw = svwhilelt_b32((u32)0, hitCount);
+            svst1_u32(pgw, activeLaneIndex + activeCount, vactiveLane);
+            svst1_u32(pgw, activeEncoded   + activeCount, vactiveEncoded);
+            activeCount += hitCount;
+        }
+    }
+
+    return activeCount;
+}
+#endif
+
+
+
+static really_inline
+u32 haoProbeCompactAndLoadPrimaryDirect_scalar(const u8 *bitmap, u32 bitmapSize,
                                         const u32 *primaryHashTable,
                                         const u32 *primaryIdx, u32 laneCount,
                                         u32 *activeLaneIndex,
                                         u32 *activeEncoded) {
+    enum { HAO_PRIMARY_BITMAP_CACHE_SLOTS = 32 };
     u32 activeCount = 0;
     u32 lane;
-    u32 minByte = 0;
-    u32 maxByte = 0;
+    u32 cachedByteIndex[HAO_PRIMARY_BITMAP_CACHE_SLOTS];
+    u8 cachedByteValue[HAO_PRIMARY_BITMAP_CACHE_SLOTS];
 
     if (!bitmap || !primaryHashTable || !primaryIdx || !activeLaneIndex ||
         !activeEncoded || !laneCount || laneCount > HAO_BATCH_MAX_WIDTH) {
         return 0;
     }
 
-    for (lane = 0; lane < laneCount; lane++) {
-        const u32 byteIdx = primaryIdx[lane] >> 3;
-
-        if (!lane) {
-            minByte = byteIdx;
-            maxByte = byteIdx;
-        } else {
-            if (byteIdx < minByte) {
-                minByte = byteIdx;
-            }
-            if (byteIdx > maxByte) {
-                maxByte = byteIdx;
-            }
-        }
+    for (lane = 0; lane < HAO_PRIMARY_BITMAP_CACHE_SLOTS; lane++) {
+        cachedByteIndex[lane] = 0xffffffffU;
     }
 
-    if (laneCount) {
-        const u32 span = maxByte - minByte + 1U;
-
-        if (span <= HAO_BITMAP_GROUPED_BYTES && minByte + span <= bitmapSize) {
-            u32 groupedActiveMask = 0;
-            u32 groupedLaneMaskByByteBit[HAO_BITMAP_GROUPED_BYTES][8] = {{0}};
-            u32 relByte;
-
-            for (lane = 0; lane < laneCount; lane++) {
-                const u32 idx = primaryIdx[lane];
-                const u32 rel = (idx >> 3) - minByte;
-                const u32 bit = idx & 7U;
-
-                groupedLaneMaskByByteBit[rel][bit] |= 1U << lane;
-            }
-
-            for (relByte = 0; relByte < span; relByte++) {
-                u32 bits = bitmap[minByte + relByte];
-
-                while (bits) {
-                    const u32 bit = ctz32(bits);
-                    groupedActiveMask |= groupedLaneMaskByByteBit[relByte][bit];
-                    bits &= bits - 1U;
-                }
-            }
-
-            while (groupedActiveMask) {
-                const u32 activeLane = ctz32(groupedActiveMask);
-                activeLaneIndex[activeCount] = activeLane;
-                activeEncoded[activeCount] =
-                    primaryHashTable[primaryIdx[activeLane]];
-                activeCount++;
-                groupedActiveMask &= groupedActiveMask - 1U;
-            }
-            return activeCount;
-        }
-    }
-
-#if defined(HAVE_NEON) || defined(HAVE_SSE2)
-    {
-        u8 bitMask[HAO_BATCH_MAX_WIDTH] = {0};
-        u8 gatheredBytes[HAO_BATCH_MAX_WIDTH] = {0};
-
-        for (lane = 0; lane < laneCount; lane++) {
-            const u32 idx = primaryIdx[lane];
-            const u32 byteIdx = idx >> 3;
-
-            bitMask[lane] = (u8)(1U << (idx & 7U));
-            gatheredBytes[lane] = byteIdx < bitmapSize ? bitmap[byteIdx] : 0;
-        }
-
-        for (lane = 0; lane < laneCount; lane += 16U) {
-            const u32 lanesThisRound = MIN(16U, laneCount - lane);
-            const u32 laneMask = lanesThisRound == 16U
-                                     ? 0xffffU
-                                     : ((1U << lanesThisRound) - 1U);
-            const m128 gathered = loadu128(gatheredBytes + lane);
-            const m128 masks = loadu128(bitMask + lane);
-            const m128 masked = and128(gathered, masks);
-            u32 activeMask =
-                (~movemask128(eq128(masked, zeroes128()))) & laneMask;
-
-            while (activeMask) {
-                const u32 relLane = ctz32(activeMask);
-                const u32 activeLane = lane + relLane;
-
-                activeLaneIndex[activeCount] = activeLane;
-                activeEncoded[activeCount] = primaryHashTable[primaryIdx[activeLane]];
-                activeCount++;
-                activeMask &= activeMask - 1U;
-            }
-        }
-
-        return activeCount;
-    }
-#else
     for (lane = 0; lane < laneCount; lane++) {
         const u32 idx = primaryIdx[lane];
         const u32 byteIdx = idx >> 3;
         const u8 bit = (u8)(1U << (idx & 7U));
+        const u32 cacheSlot =
+            (byteIdx ^ (byteIdx >> 5)) & (HAO_PRIMARY_BITMAP_CACHE_SLOTS - 1U);
+        u8 bitmapByte;
 
-        if (byteIdx < bitmapSize && (bitmap[byteIdx] & bit)) {
+        if (cachedByteIndex[cacheSlot] != byteIdx) {
+            cachedByteIndex[cacheSlot] = byteIdx;
+            cachedByteValue[cacheSlot] =
+                byteIdx < bitmapSize ? bitmap[byteIdx] : 0;
+        }
+        bitmapByte = cachedByteValue[cacheSlot];
+
+        if (bitmapByte & bit) {
             activeLaneIndex[activeCount] = lane;
-            activeEncoded[activeCount] = primaryHashTable[idx];
             activeCount++;
         }
     }
 
+    for (lane = 0; lane < activeCount; lane++) {
+        const u32 activeLane = activeLaneIndex[lane];
+        activeEncoded[lane] = primaryHashTable[primaryIdx[activeLane]];
+    }
+
     return activeCount;
+}
+
+static really_inline
+u32 haoProbeCompactAndLoadPrimaryDirect(
+        const u8 *bitmap, u32 bitmapSize,
+        const u32 *primaryHashTable,
+        const u32 *primaryIdx, u32 laneCount,
+        u32 *activeLaneIndex, u32 *activeEncoded) {
+
+#if defined(__ARM_FEATURE_SVE)
+    return haoProbeCompactAndLoadPrimaryDirect_sve(
+        bitmap, bitmapSize, primaryHashTable,
+        primaryIdx, laneCount, activeLaneIndex, activeEncoded);
+#else
+    return haoProbeCompactAndLoadPrimaryDirect_scalar(
+        bitmap, bitmapSize, primaryHashTable,
+        primaryIdx, laneCount, activeLaneIndex, activeEncoded);
 #endif
 }
+
 
 static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
                                 const struct HAORuntimeBitSelector *selectors,
