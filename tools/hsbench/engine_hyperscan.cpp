@@ -53,7 +53,7 @@
 #include <string>
 #include <utility>
 #include <vector>
-
+#include <stdio.h>
 #include <boost/crc.hpp>
 
 using namespace std;
@@ -567,7 +567,7 @@ SplitDatabases splitDB(const fat_hs_database_t* fat_db) {
             result.x86_db->version = fat_db->version;
             result.x86_db->length = fat_db->x86_length;
             result.x86_db->platform = fat_db->platform;
-            result.x86_db->crc32 = fat_db->crc32;
+            result.x86_db->crc32 = fat_db->x86_crc32;
             result.x86_db->reserved0 = fat_db->reserved0;
             result.x86_db->reserved1 = fat_db->reserved1;
             
@@ -589,7 +589,7 @@ SplitDatabases splitDB(const fat_hs_database_t* fat_db) {
             result.arm_db->version = fat_db->version;
             result.arm_db->length = fat_db->arm_length;
             result.arm_db->platform = fat_db->platform;
-            result.arm_db->crc32 = fat_db->crc32;
+            result.arm_db->crc32 = fat_db->arm_crc32;
             result.arm_db->reserved0 = fat_db->reserved0;
             result.arm_db->reserved1 = fat_db->reserved1;
             
@@ -631,6 +631,7 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
             return nullptr;
         }
     } else {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         const unsigned int count = expressions.size();
 
         vector<string> exprs;
@@ -686,6 +687,7 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
         peakMemorySize = getPeakHeap();
 
         if (err == HS_COMPILER_ERROR) {
+            printf("%s %d\n", __FUNCTION__, __LINE__);
             if (compile_err->expression >= 0) {
                 printf("Compile error for signature #%u: %s\n",
                        compile_err->expression, compile_err->message);
@@ -697,6 +699,9 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
         }
     }
     
+    if (saveDatabases) {
+        fat_saveDatabase(db, dbFilename(name, mode).c_str());
+    }   
     //copy the db into huge pages (where available) to reduce TLB pressure
     SplitDatabases split = splitDB(db);
 
@@ -719,27 +724,25 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
 #endif
     
     if (!target_db) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         fat_hs_free_database(db);
         return nullptr;
     }
 
     // 释放 fat_hs_database
     fat_hs_free_database(db);
-
+    printf("%s %d\n", __FUNCTION__, __LINE__);
     // 使用 get_huge 加载到大页内存
     target_db = get_huge(target_db);
     if (!target_db) {
         return nullptr;
     }
 
-    // sava database还是保存fat db，如果后续要load则load过程再拆；
-    if (saveDatabases) {
-        fat_saveDatabase(db, dbFilename(name, mode).c_str());
-    }   
-
     if (mode & HS_MODE_STREAM) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         err = hs_stream_size(target_db, &streamSize);
         if (err != HS_SUCCESS) {
+            printf("%s %d\n", __FUNCTION__, __LINE__);
             return nullptr;
         }
     } else {
@@ -748,6 +751,7 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
     char *info;
     err = hs_database_info(target_db, &info);
     if (err != HS_SUCCESS) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         return nullptr;
     } else {
         db_info = string(info);
@@ -755,8 +759,15 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
     }
     
     hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(target_db, &scratch);
+    if (err != HS_SUCCESS) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
+        return nullptr;
+    }
+
     err = hs_scratch_size(scratch, &scratchSize);
     if (err != HS_SUCCESS) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         return nullptr;
     }
     hs_free_scratch(scratch);
@@ -779,6 +790,6 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
     cs.scratchSize = scratchSize;
     cs.compileSecs = compileSecs;
     cs.peakMemorySize = peakMemorySize;
-
+    printf("%s %d\n", __FUNCTION__, __LINE__);
     return ue2::make_unique<EngineHyperscan>(target_db, std::move(cs));
 }

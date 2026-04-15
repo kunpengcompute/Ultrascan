@@ -52,11 +52,12 @@ struct fat_hs_database {
     u32 x86_length;
     u32 arm_length;
     u64a platform;
-    u32 crc32;
+    u32 arm_crc32;
+    u32 x86_crc32;
     u32 reserved0;
     u32 reserved1;
-    u32 x86_bytecode;
-    u32 arm_bytecode;
+    u32 x86_bytecode; // offset of x86 bytecode relative to db start
+    u32 arm_bytecode; // offset of arm bytecode relative to db start
     u32 padding[16];
     char bytes[];
 };

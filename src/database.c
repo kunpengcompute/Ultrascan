@@ -32,6 +32,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "allocator.h"
 #include "hs_common.h"
@@ -178,6 +179,8 @@ static
 hs_error_t db_check_crc(const hs_database_t *db) {
     const char *bytecode = hs_get_bytecode(db);
     u32 crc = Crc32c_ComputeBuf(0, bytecode, db->length);
+    printf("%s %d crc 0x%x\n", __FUNCTION__, __LINE__, crc);
+    printf("%s %d db->crc32 0x%x\n", __FUNCTION__, __LINE__, db->crc32);
     if (crc != db->crc32) {
         DEBUG_PRINTF("crc mismatch! 0x%x != 0x%x\n", crc, db->crc32);
         return HS_INVALID;
@@ -325,27 +328,32 @@ hs_error_t HS_CDECL hs_serialized_database_size(const char *bytes,
 
 hs_error_t dbIsValid(const hs_database_t *db) {
     if (db->magic != HS_DB_MAGIC) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("bad magic\n");
         return HS_INVALID;
     }
 
     if (db->version != HS_DB_VERSION) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("bad version\n");
         return HS_DB_VERSION_ERROR;
     }
 
     if (db_check_platform(db->platform) != HS_SUCCESS) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("bad platform\n");
         return HS_DB_PLATFORM_ERROR;
     }
 
     if (!ISALIGNED_16(hs_get_bytecode(db))) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("bad alignment\n");
         return HS_INVALID;
     }
 
     hs_error_t rv = db_check_crc(db);
     if (rv != HS_SUCCESS) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("bad crc\n");
         return rv;
     }

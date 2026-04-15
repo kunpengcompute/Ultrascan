@@ -57,6 +57,7 @@
 #include <sstream>
 #include <set>
 #include <thread>
+#include <stdio.h>
 
 #ifndef _WIN32
 #include <getopt.h>
@@ -1096,6 +1097,7 @@ int HS_CDECL main(int argc, char *argv[]) {
             } else {
                 // engine = buildEngineHyperscan(exprMap, scan_mode, s.name,
                 //                               sigName, *grey);
+                printf("%s %d\n", __FUNCTION__, __LINE__);
                 engine = fat_buildEngineHyperscan(exprMap, scan_mode, s.name,
                                               sigName, *grey);
             }

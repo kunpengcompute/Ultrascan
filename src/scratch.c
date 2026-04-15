@@ -32,6 +32,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "allocator.h"
 #include "hs_internal.h"
@@ -267,6 +268,7 @@ HS_PUBLIC_API
 hs_error_t HS_CDECL hs_alloc_scratch(const hs_database_t *db,
                                      hs_scratch_t **scratch) {
     if (!db || !scratch) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         return HS_INVALID;
     }
 
@@ -276,6 +278,7 @@ hs_error_t HS_CDECL hs_alloc_scratch(const hs_database_t *db,
      */
     hs_error_t rv = dbIsValid(db);
     if (rv != HS_SUCCESS) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         return rv;
     }
 
@@ -284,12 +287,15 @@ hs_error_t HS_CDECL hs_alloc_scratch(const hs_database_t *db,
     if (*scratch != NULL) {
         /* has to be aligned before we can do anything with it */
         if (!ISALIGNED_CL(*scratch)) {
+            printf("%s %d\n", __FUNCTION__, __LINE__);
             return HS_INVALID;
         }
         if ((*scratch)->magic != SCRATCH_MAGIC) {
+            printf("%s %d\n", __FUNCTION__, __LINE__);
             return HS_INVALID;
         }
         if (markScratchInUse(*scratch)) {
+            printf("%s %d\n", __FUNCTION__, __LINE__);
             return HS_SCRATCH_IN_USE;
         }
     }
@@ -305,6 +311,7 @@ hs_error_t HS_CDECL hs_alloc_scratch(const hs_database_t *db,
         if (*scratch) {
             hs_scratch_free((*scratch)->scratch_alloc);
         }
+        printf("%s %d\n", __FUNCTION__, __LINE__);
         *scratch = NULL;
         return proto_ret;
     }
@@ -409,6 +416,7 @@ hs_error_t HS_CDECL hs_alloc_scratch(const hs_database_t *db,
         hs_error_t alloc_ret = alloc_scratch(proto, scratch);
         hs_scratch_free(proto_tmp); /* kill off temp used for sizing */
         if (alloc_ret != HS_SUCCESS) {
+            printf("%s %d\n", __FUNCTION__, __LINE__);
             *scratch = NULL;
             return alloc_ret;
         }
@@ -465,6 +473,19 @@ hs_error_t HS_CDECL hs_free_scratch(hs_scratch_t *scratch) {
 
 HS_PUBLIC_API
 hs_error_t HS_CDECL hs_scratch_size(const hs_scratch_t *scratch, size_t *size) {
+    if (!size) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
+    }
+    if (!scratch) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
+    }
+    if (!ISALIGNED_CL(scratch)) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
+    }
+    if (scratch->magic != SCRATCH_MAGIC) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
+    }
+
     if (!size || !scratch || !ISALIGNED_CL(scratch) ||
         scratch->magic != SCRATCH_MAGIC) {
         return HS_INVALID;

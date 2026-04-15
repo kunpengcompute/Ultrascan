@@ -562,8 +562,10 @@ size_t db_len = sizeof(struct fat_hs_database) + x86_len + arm_len + 128;
     assert(ISALIGNED_CL(arm_ptr));
     memcpy(arm_ptr, arm_bytecode, arm_len);
 
-    // 先算X86的CRC
-    db->crc32 = Crc32c_ComputeBuf(0, x86_ptr, x86_len);
+    // 先算X86的CRC32
+    db->x86_crc32 = Crc32c_ComputeBuf(0, x86_ptr, x86_len);
+    // 再算ARM的CRC32
+    db->arm_crc32 = Crc32c_ComputeBuf(0, arm_ptr, arm_len);
 
     return (fat_hs_database_t *)db;
 }
