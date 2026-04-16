@@ -374,65 +374,65 @@ static void haoDumpRuntimeStats(void) {
     }
     fprintf(stderr, "[HAO][Runtime/运行时]\n");
     HAO_STAT_FMT("scans(扫描次数)",                           "%llu", (unsigned long long)g_haoStats.scanCalls);
-    HAO_STAT_FMT("inputBytes(输入字节数)",                    "%llu", (unsigned long long)g_haoStats.scanInputBytes);
+    HAO_STAT_FMT("inputBytes(输入字节�?",                    "%llu", (unsigned long long)g_haoStats.scanInputBytes);
     HAO_STAT_FMT("callbackReports(回调上报次数)",             "%llu", (unsigned long long)g_haoStats.callbackReports);
 
     fprintf(stderr, "[HAO][L1/一级过滤]\n");
     HAO_STAT_FMT("blockCalls(分块处理次数)",                  "%llu", (unsigned long long)g_haoStats.blockCalls);
-    HAO_STAT_FMT("blockLanes(分块总lane数)",                  "%llu", (unsigned long long)g_haoStats.blockLanes);
-    HAO_STAT_FMT("primaryProbeLanes(L1探测lane数)",           "%llu", (unsigned long long)g_haoStats.primaryProbeLanes);
-    HAO_STAT_FMT("primaryActiveLanes(L1命中lane数)",          "%llu", (unsigned long long)g_haoStats.primaryActiveLanes);
-    HAO_STAT_FMT("activePct(L1命中率)",                       "%.5f",
+    HAO_STAT_FMT("blockLanes(分块总lane�?",                  "%llu", (unsigned long long)g_haoStats.blockLanes);
+    HAO_STAT_FMT("primaryProbeLanes(L1探测lane�?",           "%llu", (unsigned long long)g_haoStats.primaryProbeLanes);
+    HAO_STAT_FMT("primaryActiveLanes(L1命中lane�?",          "%llu", (unsigned long long)g_haoStats.primaryActiveLanes);
+    HAO_STAT_FMT("activePct(L1命中�?",                       "%.5f",
         haoStatsPct(g_haoStats.primaryActiveLanes, g_haoStats.primaryProbeLanes));
 
     fprintf(stderr, "[HAO][L2/二级过滤]\n");
     HAO_STAT_FMT("rangeCalls(L2范围处理次数)",                "%llu", (unsigned long long)g_haoStats.encodedRangeCalls);
-    HAO_STAT_FMT("rangeReportCalls(L2产生报告的lane数)",      "%llu", (unsigned long long)g_haoStats.encodedRangeReportCalls);
-    HAO_STAT_FMT("entriesVisited(L2访问entry数)",             "%llu", (unsigned long long)g_haoStats.encodedEntriesVisited);
+    HAO_STAT_FMT("rangeReportCalls(L2产生报告的lane�?",      "%llu", (unsigned long long)g_haoStats.encodedRangeReportCalls);
+    HAO_STAT_FMT("entriesVisited(L2访问entry�?",             "%llu", (unsigned long long)g_haoStats.encodedEntriesVisited);
     HAO_STAT_FMT("verifierCalls(verifier调用次数)",           "%llu", (unsigned long long)g_haoStats.verifierCalls);
-    HAO_STAT_FMT("verifierEntryHits(verifier命中的entry数)",  "%llu", (unsigned long long)g_haoStats.verifierEntryHits);
-    HAO_STAT_FMT("verifierSlotHits(verifier命中的slot数)",    "%llu", (unsigned long long)g_haoStats.verifierSlotHits);
-    HAO_STAT_FMT("groupRejects(group过滤拒绝数)",             "%llu", (unsigned long long)g_haoStats.encodedGroupRejects);
+    HAO_STAT_FMT("verifierEntryHits(verifier命中的entry�?",  "%llu", (unsigned long long)g_haoStats.verifierEntryHits);
+    HAO_STAT_FMT("verifierSlotHits(verifier命中的slot�?",    "%llu", (unsigned long long)g_haoStats.verifierSlotHits);
+    HAO_STAT_FMT("groupRejects(group过滤拒绝�?",             "%llu", (unsigned long long)g_haoStats.encodedGroupRejects);
     HAO_STAT_FMT("directReports(直接上报次数)",               "%llu", (unsigned long long)g_haoStats.directReports);
     HAO_STAT_FMT("confirmCalls(精确确认次数)",                "%llu", (unsigned long long)g_haoStats.encodedConfirmCalls);
-    HAO_STAT_FMT("confirmMatches(精确确认命中数)",            "%llu", (unsigned long long)g_haoStats.encodedConfirmMatches);
-    HAO_STAT_FMT("confirmRejects(精确确认拒绝数)",            "%llu", (unsigned long long)g_haoStats.encodedConfirmRejects);
+    HAO_STAT_FMT("confirmMatches(精确确认命中�?",            "%llu", (unsigned long long)g_haoStats.encodedConfirmMatches);
+    HAO_STAT_FMT("confirmRejects(精确确认拒绝�?",            "%llu", (unsigned long long)g_haoStats.encodedConfirmRejects);
 
     fprintf(stderr, "[HAO][L2-Buckets/二级桶分布]\n");
-    HAO_STAT_FMT("avgEntriesPerRange(每次L2平均entry数)",     "%.5f", avgEntriesPerRange);
-    HAO_STAT_FMT("minEntriesPerRange(每次L2最少entry数)",     "%llu", (unsigned long long)g_haoStats.l2RangeMinEntries);
-    HAO_STAT_FMT("maxEntriesPerRange(每次L2最多entry数)",     "%llu", (unsigned long long)g_haoStats.l2RangeMaxEntries);
-    HAO_STAT_FMT("rangeEntryBucketsEq1(L2命中1-entry桶次数)", "%llu", (unsigned long long)g_haoStats.l2RangeEntryBucketsEq1);
-    HAO_STAT_FMT("rangeEntryBucketsEq1Pct(L2命中1-entry桶占比)", "%.5f",
+    HAO_STAT_FMT("avgEntriesPerRange(每次L2平均entry�?",     "%.5f", avgEntriesPerRange);
+    HAO_STAT_FMT("minEntriesPerRange(每次L2最少entry�?",     "%llu", (unsigned long long)g_haoStats.l2RangeMinEntries);
+    HAO_STAT_FMT("maxEntriesPerRange(每次L2最多entry�?",     "%llu", (unsigned long long)g_haoStats.l2RangeMaxEntries);
+    HAO_STAT_FMT("rangeEntryBucketsEq1(L2命中1-entry桶次�?", "%llu", (unsigned long long)g_haoStats.l2RangeEntryBucketsEq1);
+    HAO_STAT_FMT("rangeEntryBucketsEq1Pct(L2命中1-entry桶占�?", "%.5f",
         haoStatsPct(g_haoStats.l2RangeEntryBucketsEq1, g_haoStats.encodedRangeCalls));
-    HAO_STAT_FMT("rangeEntryBuckets2To4(L2命中2~4-entry桶次数)", "%llu", (unsigned long long)g_haoStats.l2RangeEntryBuckets2To4);
-    HAO_STAT_FMT("rangeEntryBuckets2To4Pct(L2命中2~4-entry桶占比)", "%.5f",
+    HAO_STAT_FMT("rangeEntryBuckets2To4(L2命中2~4-entry桶次�?", "%llu", (unsigned long long)g_haoStats.l2RangeEntryBuckets2To4);
+    HAO_STAT_FMT("rangeEntryBuckets2To4Pct(L2命中2~4-entry桶占�?", "%.5f",
         haoStatsPct(g_haoStats.l2RangeEntryBuckets2To4, g_haoStats.encodedRangeCalls));
-    HAO_STAT_FMT("rangeEntryBucketsGt4(L2命中>4-entry桶次数)", "%llu", (unsigned long long)g_haoStats.l2RangeEntryBucketsGt4);
-    HAO_STAT_FMT("rangeEntryBucketsGt4Pct(L2命中>4-entry桶占比)", "%.5f",
+    HAO_STAT_FMT("rangeEntryBucketsGt4(L2命中>4-entry桶次�?", "%llu", (unsigned long long)g_haoStats.l2RangeEntryBucketsGt4);
+    HAO_STAT_FMT("rangeEntryBucketsGt4Pct(L2命中>4-entry桶占�?", "%.5f",
         haoStatsPct(g_haoStats.l2RangeEntryBucketsGt4, g_haoStats.encodedRangeCalls));
-    HAO_STAT_FMT("avgRulesPerRange(每次L2平均规则数)",          "%.5f", avgRulesPerRange);
+    HAO_STAT_FMT("avgRulesPerRange(每次L2平均规则�?",          "%.5f", avgRulesPerRange);
     HAO_STAT_FMT("minRulesPerRange(每次L2最少规则数)",        "%llu", (unsigned long long)g_haoStats.l2RangeMinRules);
     HAO_STAT_FMT("maxRulesPerRange(每次L2最多规则数)",        "%llu", (unsigned long long)g_haoStats.l2RangeMaxRules);
-    HAO_STAT_FMT("rangeRuleBucketsEq1(L2命中1规则桶次数)",    "%llu", (unsigned long long)g_haoStats.l2RangeRuleBucketsEq1);
-    HAO_STAT_FMT("rangeRuleBucketsEq1Pct(L2命中1规则桶占比)", "%.5f",
+    HAO_STAT_FMT("rangeRuleBucketsEq1(L2命中1规则桶次�?",    "%llu", (unsigned long long)g_haoStats.l2RangeRuleBucketsEq1);
+    HAO_STAT_FMT("rangeRuleBucketsEq1Pct(L2命中1规则桶占�?", "%.5f",
         haoStatsPct(g_haoStats.l2RangeRuleBucketsEq1, g_haoStats.encodedRangeCalls));
-    HAO_STAT_FMT("rangeRuleBuckets2To4(L2命中2~4规则桶次数)", "%llu", (unsigned long long)g_haoStats.l2RangeRuleBuckets2To4);
-    HAO_STAT_FMT("rangeRuleBuckets2To4Pct(L2命中2~4规则桶占比)", "%.5f",
+    HAO_STAT_FMT("rangeRuleBuckets2To4(L2命中2~4规则桶次�?", "%llu", (unsigned long long)g_haoStats.l2RangeRuleBuckets2To4);
+    HAO_STAT_FMT("rangeRuleBuckets2To4Pct(L2命中2~4规则桶占�?", "%.5f",
         haoStatsPct(g_haoStats.l2RangeRuleBuckets2To4, g_haoStats.encodedRangeCalls));
-    HAO_STAT_FMT("rangeRuleBucketsGt4(L2命中>4规则桶次数)",   "%llu", (unsigned long long)g_haoStats.l2RangeRuleBucketsGt4);
-    HAO_STAT_FMT("rangeRuleBucketsGt4Pct(L2命中>4规则桶占比)", "%.5f",
+    HAO_STAT_FMT("rangeRuleBucketsGt4(L2命中>4规则桶次�?",   "%llu", (unsigned long long)g_haoStats.l2RangeRuleBucketsGt4);
+    HAO_STAT_FMT("rangeRuleBucketsGt4Pct(L2命中>4规则桶占�?", "%.5f",
         haoStatsPct(g_haoStats.l2RangeRuleBucketsGt4, g_haoStats.encodedRangeCalls));
-    HAO_STAT_FMT("rangeCollisionPct(L2命中冲突桶占比)",       "%.5f",
+    HAO_STAT_FMT("rangeCollisionPct(L2命中冲突桶占�?",       "%.5f",
         haoStatsPct(g_haoStats.l2RangeCollisionBuckets, g_haoStats.encodedRangeCalls));
 
     fprintf(stderr, "[HAO][Residual/兜底路径]\n");
     HAO_STAT_FMT("posCalls(兜底位置次数)",                    "%llu", (unsigned long long)g_haoStats.residualPosCalls);
     HAO_STAT_FMT("ruleChecks(兜底规则检查数)",                "%llu", (unsigned long long)g_haoStats.residualRuleChecks);
-    HAO_STAT_FMT("groupRejects(兜底group拒绝数)",             "%llu", (unsigned long long)g_haoStats.residualGroupRejects);
+    HAO_STAT_FMT("groupRejects(兜底group拒绝�?",             "%llu", (unsigned long long)g_haoStats.residualGroupRejects);
     HAO_STAT_FMT("confirmCalls(兜底确认次数)",                "%llu", (unsigned long long)g_haoStats.residualConfirmCalls);
-    HAO_STAT_FMT("confirmMatches(兜底确认命中数)",            "%llu", (unsigned long long)g_haoStats.residualConfirmMatches);
-    HAO_STAT_FMT("confirmRejects(兜底确认拒绝数)",            "%llu", (unsigned long long)g_haoStats.residualConfirmRejects);
+    HAO_STAT_FMT("confirmMatches(兜底确认命中�?",            "%llu", (unsigned long long)g_haoStats.residualConfirmMatches);
+    HAO_STAT_FMT("confirmRejects(兜底确认拒绝�?",            "%llu", (unsigned long long)g_haoStats.residualConfirmRejects);
 
     fprintf(stderr, "[HAO][Rates/关键比率]\n");
     HAO_STAT_FMT("l2EntryFalsePositivePct(L2表项假阳性率)",   "%.5f",
@@ -443,7 +443,7 @@ static void haoDumpRuntimeStats(void) {
         haoStatsPct(g_haoStats.encodedConfirmRejects, g_haoStats.encodedConfirmCalls));
     HAO_STAT_FMT("l2SlotFalsePositivePct(L2槽位假阳性率)",    "%.5f",
         haoStatsPct(l2SlotFalsePos, l2SlotEligible));
-    HAO_STAT_FMT("l2EntriesPerMiB(每MiB访问L2表项数)",        "%.5f",
+    HAO_STAT_FMT("l2EntriesPerMiB(每MiB访问L2表项�?",        "%.5f",
         haoStatsPerMiB(g_haoStats.encodedEntriesVisited, g_haoStats.scanInputBytes));
     HAO_STAT_FMT("l2ConfirmCallsPerMiB(每MiB精确确认次数)",   "%.5f",
         haoStatsPerMiB(g_haoStats.encodedConfirmCalls, g_haoStats.scanInputBytes));
@@ -1471,6 +1471,10 @@ static void haoBuildContextFromBlockState(const struct HAORuntimeHeader *hdr,
 #ifdef __ARM_FEATURE_SVE
 #include <arm_sve.h>
 
+#ifndef HAO_SVE_WORD_LEVEL_BITMAP_PROBE
+#define HAO_SVE_WORD_LEVEL_BITMAP_PROBE 1
+#endif
+
 static really_inline
 svuint32_t sve_u8gather_u32(svbool_t pg, const u8 *base,
                              svuint32_t byteIndices) {
@@ -1487,7 +1491,7 @@ svuint32_t sve_u8gather_u32(svbool_t pg, const u8 *base,
 }
 
 static really_inline
-u32 haoProbeCompactAndLoadPrimaryDirect_sve(
+u32 haoProbeCompactAndLoadPrimaryDirect_sve_byte(
         const u8 *bitmap, u32 bitmapSize,
         const u32 *primaryHashTable,
         const u32 *primaryIdx, u32 laneCount,
@@ -1496,53 +1500,43 @@ u32 haoProbeCompactAndLoadPrimaryDirect_sve(
     u32 activeCount = 0;
     u32 lane        = 0;
     const u32 vl    = (u32)svcntw();
-    const u32 vl2   = vl * 2;  // 每次迭代处理 2 个向量宽度
-
+    const u32 vl2   = vl * 2;  
+    const svbool_t pg = svptrue_b32();
+    const svuint32_t vone = svdup_n_u32(1U);
     /* ── 主循环：2× 展开 ── */
     while (lane + vl2 <= laneCount) {
-        svbool_t pg = svptrue_b32();
-
-        /* ── 第 1 组：加载 + 地址计算 ── */
         svuint32_t vidx_a     = svld1_u32(pg, primaryIdx + lane);
         svuint32_t vbyteIdx_a = svlsr_n_u32_x(pg, vidx_a, 3);
         svuint32_t vbitPos_a  = svand_n_u32_x(pg, vidx_a, 7U);
 
-        /* ── 第 2 组：加载 + 地址计算（与第 1 组 gather 并行） ── */
         svuint32_t vidx_b     = svld1_u32(pg, primaryIdx + lane + vl);
         svuint32_t vbyteIdx_b = svlsr_n_u32_x(pg, vidx_b, 3);
         svuint32_t vbitPos_b  = svand_n_u32_x(pg, vidx_b, 7U);
 
-        /* ── 第 1 组：位图 gather（高延迟，发射后 CPU 可转去执行第 2 组） ── */
         svuint32_t vbitmapBytes_a = sve_u8gather_u32(pg, bitmap, vbyteIdx_a);
 
-        /* ── 第 2 组：位图 gather（与第 1 组 gather 流水并行） ── */
         svuint32_t vbitmapBytes_b = sve_u8gather_u32(pg, bitmap, vbyteIdx_b);
 
-        /* ── 第 1 组：位测试 ── */
-        svuint32_t vbitMask_a = svlsl_u32_x(pg, svdup_n_u32(1U), vbitPos_a);
+        svuint32_t vbitMask_a = svlsl_u32_x(pg, vone, vbitPos_a);
         svuint32_t vhit_a     = svand_u32_x(pg, vbitmapBytes_a, vbitMask_a);
         svbool_t   phit_a     = svcmpne_n_u32(pg, vhit_a, 0U);
 
-        /* ── 第 2 组：位测试 ── */
-        svuint32_t vbitMask_b = svlsl_u32_x(pg, svdup_n_u32(1U), vbitPos_b);
+        svuint32_t vbitMask_b = svlsl_u32_x(pg, vone, vbitPos_b);
         svuint32_t vhit_b     = svand_u32_x(pg, vbitmapBytes_b, vbitMask_b);
         svbool_t   phit_b     = svcmpne_n_u32(pg, vhit_b, 0U);
 
-        /* ── 第 1 组：哈希表 gather + compact ── */
         svuint32_t vencoded_a    = svld1_gather_u32index_u32(
                                        phit_a, primaryHashTable, vidx_a);
         svuint32_t vlaneBase_a   = svindex_u32(lane, 1U);
         svuint32_t vactiveLn_a   = svcompact_u32(phit_a, vlaneBase_a);
         svuint32_t vactiveEnc_a  = svcompact_u32(phit_a, vencoded_a);
 
-        /* ── 第 2 组：哈希表 gather + compact ── */
         svuint32_t vencoded_b    = svld1_gather_u32index_u32(
                                        phit_b, primaryHashTable, vidx_b);
         svuint32_t vlaneBase_b   = svindex_u32(lane + vl, 1U);
         svuint32_t vactiveLn_b   = svcompact_u32(phit_b, vlaneBase_b);
         svuint32_t vactiveEnc_b  = svcompact_u32(phit_b, vencoded_b);
 
-        /* ── 第 1 组：存储 ── */
         u32 hitCount_a = (u32)svcntp_b32(pg, phit_a);
         if (hitCount_a > 0) {
             svbool_t pgw_a = svwhilelt_b32((u32)0, hitCount_a);
@@ -1551,7 +1545,6 @@ u32 haoProbeCompactAndLoadPrimaryDirect_sve(
             activeCount += hitCount_a;
         }
 
-        /* ── 第 2 组：存储 ── */
         u32 hitCount_b = (u32)svcntp_b32(pg, phit_b);
         if (hitCount_b > 0) {
             svbool_t pgw_b = svwhilelt_b32((u32)0, hitCount_b);
@@ -1563,7 +1556,6 @@ u32 haoProbeCompactAndLoadPrimaryDirect_sve(
         lane += vl2;
     }
 
-    /* ── 尾部：逐个向量宽度处理剩余 ── */
     while (lane < laneCount) {
         svbool_t pg_tail = svwhilelt_b32(lane, laneCount);
 
@@ -1573,7 +1565,7 @@ u32 haoProbeCompactAndLoadPrimaryDirect_sve(
 
         svuint32_t vbitmapBytes = sve_u8gather_u32(pg_tail, bitmap, vbyteIdx);
 
-        svuint32_t vbitMask = svlsl_u32_x(pg_tail, svdup_n_u32(1U), vbitPos);
+        svuint32_t vbitMask = svlsl_u32_x(pg_tail, vone, vbitPos);
         svuint32_t vhit     = svand_u32_x(pg_tail, vbitmapBytes, vbitMask);
         svbool_t   phit     = svcmpne_n_u32(pg_tail, vhit, 0U);
 
@@ -1594,6 +1586,123 @@ u32 haoProbeCompactAndLoadPrimaryDirect_sve(
     }
 
     return activeCount;
+}
+
+static really_inline
+u32 haoProbeCompactAndLoadPrimaryDirect_sve_word(
+        const u8 *bitmap, u32 bitmapSize,
+        const u32 *primaryHashTable,
+        const u32 *primaryIdx, u32 laneCount,
+        u32 *activeLaneIndex, u32 *activeEncoded) {
+    const u32 *bitmapWords = (const u32 *)bitmap;
+    u32 activeCount = 0;
+    u32 lane        = 0;
+    const u32 vl    = (u32)svcntw();
+    const u32 vl2   = vl * 2;
+    const svbool_t pg = svptrue_b32();
+    const svuint32_t vone = svdup_n_u32(1U);
+
+    (void)bitmapSize;
+
+    while (lane + vl2 <= laneCount) {
+        svuint32_t vidx_a     = svld1_u32(pg, primaryIdx + lane);
+        svuint32_t vwordIdx_a = svlsr_n_u32_x(pg, vidx_a, 5);
+        svuint32_t vbitPos_a  = svand_n_u32_x(pg, vidx_a, 31U);
+
+        svuint32_t vidx_b     = svld1_u32(pg, primaryIdx + lane + vl);
+        svuint32_t vwordIdx_b = svlsr_n_u32_x(pg, vidx_b, 5);
+        svuint32_t vbitPos_b  = svand_n_u32_x(pg, vidx_b, 31U);
+
+        svuint32_t vbitmapWords_a = svld1_gather_u32index_u32(
+                                       pg, bitmapWords, vwordIdx_a);
+        svuint32_t vbitmapWords_b = svld1_gather_u32index_u32(
+                                       pg, bitmapWords, vwordIdx_b);
+
+        svuint32_t vbitMask_a = svlsl_u32_x(pg, vone, vbitPos_a);
+        svuint32_t vhit_a     = svand_u32_x(pg, vbitmapWords_a, vbitMask_a);
+        svbool_t   phit_a     = svcmpne_n_u32(pg, vhit_a, 0U);
+
+        svuint32_t vbitMask_b = svlsl_u32_x(pg, vone, vbitPos_b);
+        svuint32_t vhit_b     = svand_u32_x(pg, vbitmapWords_b, vbitMask_b);
+        svbool_t   phit_b     = svcmpne_n_u32(pg, vhit_b, 0U);
+
+        u32 hitCount_a = (u32)svcntp_b32(pg, phit_a);
+        if (hitCount_a > 0) {
+            svbool_t pgw_a = svwhilelt_b32((u32)0, hitCount_a);
+            svuint32_t vlaneBase_a = svindex_u32(lane, 1U);
+            svuint32_t vactiveLn_a = svcompact_u32(phit_a, vlaneBase_a);
+            svuint32_t vactiveIdx_a = svcompact_u32(phit_a, vidx_a);
+            svuint32_t vactiveEnc_a = svld1_gather_u32index_u32(
+                                           pgw_a, primaryHashTable,
+                                           vactiveIdx_a);
+            svst1_u32(pgw_a, activeLaneIndex + activeCount, vactiveLn_a);
+            svst1_u32(pgw_a, activeEncoded + activeCount, vactiveEnc_a);
+            activeCount += hitCount_a;
+        }
+
+        u32 hitCount_b = (u32)svcntp_b32(pg, phit_b);
+        if (hitCount_b > 0) {
+            svbool_t pgw_b = svwhilelt_b32((u32)0, hitCount_b);
+            svuint32_t vlaneBase_b = svindex_u32(lane + vl, 1U);
+            svuint32_t vactiveLn_b = svcompact_u32(phit_b, vlaneBase_b);
+            svuint32_t vactiveIdx_b = svcompact_u32(phit_b, vidx_b);
+            svuint32_t vactiveEnc_b = svld1_gather_u32index_u32(
+                                           pgw_b, primaryHashTable,
+                                           vactiveIdx_b);
+            svst1_u32(pgw_b, activeLaneIndex + activeCount, vactiveLn_b);
+            svst1_u32(pgw_b, activeEncoded + activeCount, vactiveEnc_b);
+            activeCount += hitCount_b;
+        }
+
+        lane += vl2;
+    }
+
+    while (lane < laneCount) {
+        svbool_t pg_tail = svwhilelt_b32(lane, laneCount);
+
+        svuint32_t vidx     = svld1_u32(pg_tail, primaryIdx + lane);
+        svuint32_t vwordIdx = svlsr_n_u32_x(pg_tail, vidx, 5);
+        svuint32_t vbitPos  = svand_n_u32_x(pg_tail, vidx, 31U);
+
+        svuint32_t vbitmapWords = svld1_gather_u32index_u32(
+                                      pg_tail, bitmapWords, vwordIdx);
+        svuint32_t vbitMask = svlsl_u32_x(pg_tail, vone, vbitPos);
+        svuint32_t vhit     = svand_u32_x(pg_tail, vbitmapWords, vbitMask);
+        svbool_t   phit     = svcmpne_n_u32(pg_tail, vhit, 0U);
+
+        u32 hitCount = (u32)svcntp_b32(pg_tail, phit);
+        if (hitCount > 0) {
+            svbool_t pgw = svwhilelt_b32((u32)0, hitCount);
+            svuint32_t vlaneBase = svindex_u32(lane, 1U);
+            svuint32_t vactiveLane = svcompact_u32(phit, vlaneBase);
+            svuint32_t vactiveIdx = svcompact_u32(phit, vidx);
+            svuint32_t vactiveEnc = svld1_gather_u32index_u32(
+                                        pgw, primaryHashTable, vactiveIdx);
+            svst1_u32(pgw, activeLaneIndex + activeCount, vactiveLane);
+            svst1_u32(pgw, activeEncoded + activeCount, vactiveEnc);
+            activeCount += hitCount;
+        }
+        lane += vl;
+    }
+
+    return activeCount;
+}
+
+static really_inline
+u32 haoProbeCompactAndLoadPrimaryDirect_sve(
+        const u8 *bitmap, u32 bitmapSize,
+        const u32 *primaryHashTable,
+        const u32 *primaryIdx, u32 laneCount,
+        u32 *activeLaneIndex, u32 *activeEncoded) {
+#if HAO_SVE_WORD_LEVEL_BITMAP_PROBE
+    return haoProbeCompactAndLoadPrimaryDirect_sve_word(
+        bitmap, bitmapSize, primaryHashTable, primaryIdx,
+        laneCount, activeLaneIndex, activeEncoded);
+#else
+    return haoProbeCompactAndLoadPrimaryDirect_sve_byte(
+        bitmap, bitmapSize, primaryHashTable, primaryIdx,
+        laneCount, activeLaneIndex, activeEncoded);
+#endif
 }
 #endif
 
