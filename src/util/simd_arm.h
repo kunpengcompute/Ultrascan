@@ -314,6 +314,11 @@ static really_really_inline u32 movemask128(m128 a) {
                  ((u32)vgetq_lane_u8(result.vect_u8, 8) << 8));
 }
 
+static really_really_inline u64a movemask128_half(m128 a) {
+    // Halve 128-bit to 64-bit by packing alternate 4 bits from each byte
+    return vget_lane_u64((uint64x1_t)vshrn_n_u16(a.vect_u16, 4), 0);
+}
+
 static really_really_inline m128 rshiftbyte_m128(m128 a, int imm8) {
     assert(imm8 >= 0 && imm8 <= 15);
     m128 result;
