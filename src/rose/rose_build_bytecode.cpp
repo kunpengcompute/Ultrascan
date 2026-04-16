@@ -4262,7 +4262,8 @@ bytecode_ptr<x86_RoseEngine> RoseBuildImpl::x86_buildFinalEngine(u32 minWidth) {
     // another pass by the caller. Set to zero (meaning no SMWR engine) for
     // now.
     proto.smallWriteOffset = 0;
-
+    proto.lilyOffset = 0;
+    proto.lilyForTeddyOffset = 0;
     proto.amatcherMinWidth = findMinWidth(*this, ROSE_ANCHORED);
     proto.fmatcherMinWidth = findMinWidth(*this, ROSE_FLOATING);
     proto.eodmatcherMinWidth = findMinWidth(*this, ROSE_EOD_ANCHORED);

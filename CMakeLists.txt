@@ -652,6 +652,8 @@ set (hs_exec_common_SRCS
     src/util/cpuid_flags.c
     src/util/cpuid_flags.h
     src/util/multibit.c
+    src/fat_database.c
+    src/fat_database.h
     )
 
 set (hs_exec_SRCS
@@ -799,9 +801,7 @@ set (hs_exec_SRCS
     src/util/unaligned.h
     src/util/uniform_ops.h
     src/database.c
-    src/fat_database.c
     src/database.h
-    src/fat_database.h
     src/database_common.h
 )
 

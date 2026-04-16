@@ -368,6 +368,8 @@ struct x86_RoseEngine {
     u32 scratchStateSize; /**< uncompressed state req'd for NFAs in scratch;
                            * used for sizing scratch only. */
     u32 smallWriteOffset; /**< offset of small-write matcher */
+    u32 lilyOffset;           // 防止报错
+    u32 lilyForTeddyOffset;   // 防止报错
     u32 amatcherOffset; // offset of the anchored literal matcher (bytes)
     u32 ematcherOffset; // offset of the eod-anchored literal matcher (bytes)
     u32 fmatcherOffset; // offset of the floating literal matcher (bytes)

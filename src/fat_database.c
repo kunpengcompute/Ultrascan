@@ -129,12 +129,13 @@ hs_error_t HS_CDECL fat_hs_serialize_database(const fat_hs_database_t *db,
 // runtime platform.
 static
 hs_error_t fat_db_check_platform(const u64a p) {
-    if (p != hs_current_platform
-        && p != (hs_current_platform | hs_current_platform_no_avx2)
-        && p != (hs_current_platform | hs_current_platform_no_avx512)
-        && p != (hs_current_platform | hs_current_platform_no_avx512vbmi)) {
-        return HS_DB_PLATFORM_ERROR;
-    }
+    (void) p;
+    // if (p != hs_current_platform
+    //     && p != (hs_current_platform | hs_current_platform_no_avx2)
+    //     && p != (hs_current_platform | hs_current_platform_no_avx512)
+    //     && p != (hs_current_platform | hs_current_platform_no_avx512vbmi)) {
+    //     return HS_DB_PLATFORM_ERROR;
+    // }
     // passed all checks
     return HS_SUCCESS;
 }

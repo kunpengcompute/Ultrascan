@@ -327,21 +327,18 @@ unsigned makeModeFlags(ScanMode scan_mode) {
  */
 static
 string dbSettingsHash(const string &filename, u32 mode) {
+    // 只使用文件名，不含路径
+    size_t pos = filename.find_last_of("/\\");
+    string basename = (pos == string::npos) ? filename : filename.substr(pos + 1);
+    
     ostringstream info_oss;
-
-    info_oss << filename.c_str() << ' ';
-    info_oss << mode << ' ';
-
-    string info = info_oss.str();
-
+    info_oss << basename << ' ' << mode << ' ';
+    
     boost::crc_32_type crc;
-
-    crc.process_bytes(info.data(), info.length());
-
-    // return STL string with printable version of digest
+    crc.process_bytes(info_oss.str().data(), info_oss.str().length());
+    
     ostringstream oss;
     oss << hex << setw(8) << setfill('0') << crc.checksum() << dec;
-
     return oss.str();
 }
 
