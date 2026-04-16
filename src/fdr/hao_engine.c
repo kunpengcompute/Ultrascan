@@ -1496,37 +1496,75 @@ u32 haoProbeCompactAndLoadPrimaryDirect_sve(
     u32 activeCount = 0;
     u32 lane        = 0;
     const u32 vl    = (u32)svcntw();
+    const u32 vl2   = vl * 2;  // 每次迭代处理 2 个向量宽度
 
-    while (lane + vl <= laneCount) {
+    /* ── 主循环：2× 展开 ── */
+    while (lane + vl2 <= laneCount) {
         svbool_t pg = svptrue_b32();
 
-        svuint32_t vidx     = svld1_u32(pg, primaryIdx + lane);
-        svuint32_t vbyteIdx = svlsr_n_u32_x(pg, vidx, 3);
-        svuint32_t vbitPos  = svand_n_u32_x(pg, vidx, 7U);
+        /* ── 第 1 组：加载 + 地址计算 ── */
+        svuint32_t vidx_a     = svld1_u32(pg, primaryIdx + lane);
+        svuint32_t vbyteIdx_a = svlsr_n_u32_x(pg, vidx_a, 3);
+        svuint32_t vbitPos_a  = svand_n_u32_x(pg, vidx_a, 7U);
 
-        svuint32_t vbitmapBytes = sve_u8gather_u32(pg, bitmap, vbyteIdx);
+        /* ── 第 2 组：加载 + 地址计算（与第 1 组 gather 并行） ── */
+        svuint32_t vidx_b     = svld1_u32(pg, primaryIdx + lane + vl);
+        svuint32_t vbyteIdx_b = svlsr_n_u32_x(pg, vidx_b, 3);
+        svuint32_t vbitPos_b  = svand_n_u32_x(pg, vidx_b, 7U);
 
-        svuint32_t vbitMask       = svlsl_u32_x(pg, svdup_n_u32(1U), vbitPos);
-        svuint32_t vhit           = svand_u32_x(pg, vbitmapBytes, vbitMask);
-        svbool_t   phit           = svcmpne_n_u32(pg, vhit, 0U);
+        /* ── 第 1 组：位图 gather（高延迟，发射后 CPU 可转去执行第 2 组） ── */
+        svuint32_t vbitmapBytes_a = sve_u8gather_u32(pg, bitmap, vbyteIdx_a);
 
-        svuint32_t vencoded       = svld1_gather_u32index_u32(
-                                        phit, primaryHashTable, vidx);
-        svuint32_t vlaneBase      = svindex_u32(lane, 1U);
-        svuint32_t vactiveLane    = svcompact_u32(phit, vlaneBase);
-        svuint32_t vactiveEncoded = svcompact_u32(phit, vencoded);
+        /* ── 第 2 组：位图 gather（与第 1 组 gather 流水并行） ── */
+        svuint32_t vbitmapBytes_b = sve_u8gather_u32(pg, bitmap, vbyteIdx_b);
 
-        u32 hitCount = (u32)svcntp_b32(pg, phit);
-        if (hitCount > 0) {
-            svbool_t pgw = svwhilelt_b32((u32)0, hitCount);
-            svst1_u32(pgw, activeLaneIndex + activeCount, vactiveLane);
-            svst1_u32(pgw, activeEncoded   + activeCount, vactiveEncoded);
-            activeCount += hitCount;
+        /* ── 第 1 组：位测试 ── */
+        svuint32_t vbitMask_a = svlsl_u32_x(pg, svdup_n_u32(1U), vbitPos_a);
+        svuint32_t vhit_a     = svand_u32_x(pg, vbitmapBytes_a, vbitMask_a);
+        svbool_t   phit_a     = svcmpne_n_u32(pg, vhit_a, 0U);
+
+        /* ── 第 2 组：位测试 ── */
+        svuint32_t vbitMask_b = svlsl_u32_x(pg, svdup_n_u32(1U), vbitPos_b);
+        svuint32_t vhit_b     = svand_u32_x(pg, vbitmapBytes_b, vbitMask_b);
+        svbool_t   phit_b     = svcmpne_n_u32(pg, vhit_b, 0U);
+
+        /* ── 第 1 组：哈希表 gather + compact ── */
+        svuint32_t vencoded_a    = svld1_gather_u32index_u32(
+                                       phit_a, primaryHashTable, vidx_a);
+        svuint32_t vlaneBase_a   = svindex_u32(lane, 1U);
+        svuint32_t vactiveLn_a   = svcompact_u32(phit_a, vlaneBase_a);
+        svuint32_t vactiveEnc_a  = svcompact_u32(phit_a, vencoded_a);
+
+        /* ── 第 2 组：哈希表 gather + compact ── */
+        svuint32_t vencoded_b    = svld1_gather_u32index_u32(
+                                       phit_b, primaryHashTable, vidx_b);
+        svuint32_t vlaneBase_b   = svindex_u32(lane + vl, 1U);
+        svuint32_t vactiveLn_b   = svcompact_u32(phit_b, vlaneBase_b);
+        svuint32_t vactiveEnc_b  = svcompact_u32(phit_b, vencoded_b);
+
+        /* ── 第 1 组：存储 ── */
+        u32 hitCount_a = (u32)svcntp_b32(pg, phit_a);
+        if (hitCount_a > 0) {
+            svbool_t pgw_a = svwhilelt_b32((u32)0, hitCount_a);
+            svst1_u32(pgw_a, activeLaneIndex + activeCount, vactiveLn_a);
+            svst1_u32(pgw_a, activeEncoded   + activeCount, vactiveEnc_a);
+            activeCount += hitCount_a;
         }
-        lane += vl;
+
+        /* ── 第 2 组：存储 ── */
+        u32 hitCount_b = (u32)svcntp_b32(pg, phit_b);
+        if (hitCount_b > 0) {
+            svbool_t pgw_b = svwhilelt_b32((u32)0, hitCount_b);
+            svst1_u32(pgw_b, activeLaneIndex + activeCount, vactiveLn_b);
+            svst1_u32(pgw_b, activeEncoded   + activeCount, vactiveEnc_b);
+            activeCount += hitCount_b;
+        }
+
+        lane += vl2;
     }
 
-    if (lane < laneCount) {
+    /* ── 尾部：逐个向量宽度处理剩余 ── */
+    while (lane < laneCount) {
         svbool_t pg_tail = svwhilelt_b32(lane, laneCount);
 
         svuint32_t vidx     = svld1_u32(pg_tail, primaryIdx + lane);
@@ -1535,29 +1573,29 @@ u32 haoProbeCompactAndLoadPrimaryDirect_sve(
 
         svuint32_t vbitmapBytes = sve_u8gather_u32(pg_tail, bitmap, vbyteIdx);
 
-        svuint32_t vbitMask       = svlsl_u32_x(pg_tail, svdup_n_u32(1U), vbitPos);
-        svuint32_t vhit           = svand_u32_x(pg_tail, vbitmapBytes, vbitMask);
-        svbool_t   phit           = svcmpne_n_u32(pg_tail, vhit, 0U);
+        svuint32_t vbitMask = svlsl_u32_x(pg_tail, svdup_n_u32(1U), vbitPos);
+        svuint32_t vhit     = svand_u32_x(pg_tail, vbitmapBytes, vbitMask);
+        svbool_t   phit     = svcmpne_n_u32(pg_tail, vhit, 0U);
 
-        svuint32_t vencoded       = svld1_gather_u32index_u32(
-                                        phit, primaryHashTable, vidx);
-        svuint32_t vlaneBase      = svindex_u32(lane, 1U);
-        svuint32_t vactiveLane    = svcompact_u32(phit, vlaneBase);
-        svuint32_t vactiveEncoded = svcompact_u32(phit, vencoded);
+        svuint32_t vencoded    = svld1_gather_u32index_u32(
+                                     phit, primaryHashTable, vidx);
+        svuint32_t vlaneBase   = svindex_u32(lane, 1U);
+        svuint32_t vactiveLane = svcompact_u32(phit, vlaneBase);
+        svuint32_t vactiveEnc  = svcompact_u32(phit, vencoded);
 
         u32 hitCount = (u32)svcntp_b32(pg_tail, phit);
         if (hitCount > 0) {
             svbool_t pgw = svwhilelt_b32((u32)0, hitCount);
             svst1_u32(pgw, activeLaneIndex + activeCount, vactiveLane);
-            svst1_u32(pgw, activeEncoded   + activeCount, vactiveEncoded);
+            svst1_u32(pgw, activeEncoded   + activeCount, vactiveEnc);
             activeCount += hitCount;
         }
+        lane += vl;
     }
 
     return activeCount;
 }
 #endif
-
 
 
 static really_inline
