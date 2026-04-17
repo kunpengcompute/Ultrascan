@@ -292,10 +292,8 @@ fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
         // Renumber and assign lkey to reports
         x86_ng.rm.logicalKeyRenumber();
 
-        //===== 编译arm字节码 ===================
+        //===== 编译arm字节码 根据config.txt获取===================
         Grey arm_grey = g;
-        arm_grey.allowLily = true;
-        arm_grey.allowNeoFdr = true;
 
         CompileContext arm_cc(isStreaming, isVectored, target_info, x86_grey);
         NG arm_ng(x86_cc, elements, somPrecision);
