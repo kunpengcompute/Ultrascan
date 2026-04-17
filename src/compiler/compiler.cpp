@@ -556,9 +556,12 @@ size_t db_len = sizeof(struct fat_hs_database) + x86_len + arm_len + 128;
     memcpy(x86_ptr, x86_bytecode, x86_len);
 
     // ARM 字节码偏移（64字节对齐）
-    size_t arm_offset = (db->x86_bytecode + x86_len + 63) & ~63;
-    db->arm_bytecode = arm_offset;
-    char *arm_ptr = (char *)db + db->arm_bytecode;
+    // 先计算 x86 字节码结束位置
+    char *x86_end = x86_ptr + x86_len;
+    // 将结束地址向上对齐到 64 字节边界
+    char *arm_ptr = (char *)(((uintptr_t)x86_end + 63) & ~63);
+    // 计算相对于 db 起始的偏移量
+    db->arm_bytecode = arm_ptr - (char *)db;
     assert(ISALIGNED_CL(arm_ptr));
     memcpy(arm_ptr, arm_bytecode, arm_len);
 
