@@ -183,6 +183,9 @@ extern "C" {
 u64a haoExtractPackedBitsSveBitPerm(u64a window, u64a mask);
 void haoExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
                                          u64a mask, u64a *packedOut);
+void haoExtractPackedBitsSveBitPermBatchToKeys(const u64a *windows, u32 count,
+                                               u64a mask, u32 keyMask,
+                                               u32 *keysOut);
 u32 haoExtractPackedBitsSveBitPermLaneCount(void);
 hwlm_error_t HaoEngineExec(const struct FDR *fdr,
                            const struct FDR_Runtime_Args *a,

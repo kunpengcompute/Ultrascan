@@ -205,7 +205,6 @@ static really_inline
 void haoExtractKeysFromBextWindows(const struct HAORuntimeHeader *hdr,
                                    const u64a *windows, u32 count, u32 *keys) {
     u32 i;
-    u64a packed[HAO_BATCH_MAX_WIDTH];
     const u32 keyMask = haoPackedKeyMask(hdr->selectorCount);
 
     if (!hdr || !windows || !keys) {
@@ -214,17 +213,15 @@ void haoExtractKeysFromBextWindows(const struct HAORuntimeHeader *hdr,
 
     assert(count <= HAO_BATCH_MAX_WIDTH);
     if (haoRuntimeCanUseBextFastPath()) {
-        haoExtractPackedBitsSveBitPermBatch(windows, count, hdr->bextMask,
-                                            packed);
+        haoExtractPackedBitsSveBitPermBatchToKeys(windows, count,
+                                                  hdr->bextMask, keyMask,
+                                                  keys);
     } else {
         for (i = 0; i < count; i++) {
-            packed[i] = haoExtractPackedBitsFallback(windows[i],
-                                                     hdr->bextMask);
+            keys[i] = (u32)(haoExtractPackedBitsFallback(windows[i],
+                                                         hdr->bextMask) &
+                            keyMask);
         }
-    }
-
-    for (i = 0; i < count; i++) {
-        keys[i] = (u32)(packed[i] & keyMask);
     }
 }
 
