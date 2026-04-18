@@ -1606,22 +1606,20 @@ svuint32_t haoExtractKeysFromBlockBytesFixed8_sve_chunk8(const u8 *chunkBytes,
     const svbool_t pg64 = svptrue_b64();
     const svbool_t pg32 = svptrue_b32();
     const uint64_t m = (uint64_t)bextMask;
-    const u64a rev0 = haoByteReverse64(unaligned_load_u64a(chunkBytes));
-    const u64a rev8 = haoByteReverse64(unaligned_load_u64a(chunkBytes + 8U));
     svuint64_t w0;
     svuint64_t w1;
     svuint64_t p0;
     svuint64_t p1;
     svuint32_t vkeys;
 
-    windows[0] = rev0;
-    windows[1] = (rev0 << 8)  | (rev8 >> 56);
-    windows[2] = (rev0 << 16) | (rev8 >> 48);
-    windows[3] = (rev0 << 24) | (rev8 >> 40);
-    windows[4] = (rev0 << 32) | (rev8 >> 32);
-    windows[5] = (rev0 << 40) | (rev8 >> 24);
-    windows[6] = (rev0 << 48) | (rev8 >> 16);
-    windows[7] = (rev0 << 56) | (rev8 >> 8);
+    windows[0] = haoByteReverse64(unaligned_load_u64a(chunkBytes));
+    windows[1] = haoByteReverse64(unaligned_load_u64a(chunkBytes + 1U));
+    windows[2] = haoByteReverse64(unaligned_load_u64a(chunkBytes + 2U));
+    windows[3] = haoByteReverse64(unaligned_load_u64a(chunkBytes + 3U));
+    windows[4] = haoByteReverse64(unaligned_load_u64a(chunkBytes + 4U));
+    windows[5] = haoByteReverse64(unaligned_load_u64a(chunkBytes + 5U));
+    windows[6] = haoByteReverse64(unaligned_load_u64a(chunkBytes + 6U));
+    windows[7] = haoByteReverse64(unaligned_load_u64a(chunkBytes + 7U));
 
     w0 = svld1_u64(pg64, (const uint64_t *)windows);
     w1 = svld1_u64(pg64, (const uint64_t *)(windows + 4));
