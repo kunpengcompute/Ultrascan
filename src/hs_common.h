@@ -288,10 +288,6 @@ hs_error_t HS_CDECL fat_hs_database_info(const fat_hs_database_t *db,
  */
 hs_error_t HS_CDECL hs_serialized_database_info(const char *bytes,
                                                 size_t length, char **info);
-hs_error_t HS_CDECL fat_hs_serialized_database_info(const char *bytes,
-                                                    size_t length, 
-                                                    char **info);
-
 /**
  * The type of the callback function that will be used by Hyperscan to allocate
  * more memory at runtime as required, for example in @ref hs_open_stream() to

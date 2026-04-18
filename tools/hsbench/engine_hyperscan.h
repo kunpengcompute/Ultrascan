@@ -117,13 +117,11 @@ struct Grey;
 }
 
 std::unique_ptr<EngineHyperscan>
-buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
-                     const std::string &name, const std::string &sigs_name,
-                     const ue2::Grey &grey);
-std::unique_ptr<EngineHyperscan>
 fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
                      const std::string &name, const std::string &sigs_name,
                      UNUSED const ue2::Grey &grey);
-SplitDatabases splitDB(const fat_hs_database_t* fat_db);
+SplitDatabases splitDB(const fat_hs_database_t* fat_db); 
+std::unique_ptr<EngineHyperscan>
+buildEngineFromSerialized(const std::string &dbPath, ScanMode scan_mode);
 
 #endif // ENGINEHYPERSCAN_H

@@ -680,19 +680,6 @@ hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
                                 platform, db, error, Grey());
 }
 
-// extern "C" HS_PUBLIC_API
-// hs_error_t HS_CDECL hs_compile_ext_multi(const char * const *expressions,
-//                                      const unsigned *flags, const unsigned *ids,
-//                                      const hs_expr_ext * const *ext,
-//                                      unsigned elements, unsigned mode,
-//                                      const hs_platform_info_t *platform,
-//                                      hs_database_t **db,
-//                                      hs_compile_error_t **error) {
-//     return hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
-//                                 platform, db, error, Grey());
-// }
-
-
 extern "C" HS_PUBLIC_API
 hs_error_t HS_CDECL hs_compile_ext_multi(const char * const *expressions,
                                      const unsigned *flags, const unsigned *ids,

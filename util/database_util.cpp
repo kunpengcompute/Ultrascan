@@ -228,20 +228,6 @@ fat_hs_database *fat_loadDatabase(const char *filename, bool verbose) {
 
     assert(bytes);
 
-    if (verbose) {
-        char *info = nullptr;
-        hs_error_t err = fat_hs_serialized_database_info(bytes, len, &info);
-        if (err) {
-            cout << "Unable to decode serialized FAT database info: " << err
-                 << endl;
-        } else if (info) {
-            cout << "Serialized FAT database info: " << info << endl;
-            std::free(info);
-        } else {
-            cout << "Unable to decode serialized FAT database info." << endl;
-        }
-    }
-
     fat_hs_database *db = nullptr;
     hs_error_t err = fat_hs_deserialize_database(bytes, len, &db);
 

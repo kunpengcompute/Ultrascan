@@ -349,205 +349,6 @@ string dbFilename(const std::string &name, unsigned mode) {
     return oss.str();
 }
 
-std::unique_ptr<EngineHyperscan>
-buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
-                     const std::string &name, const std::string &sigs_name,
-                     UNUSED const ue2::Grey &grey) {
-    if (expressions.empty()) {
-        assert(0);
-        return nullptr;
-    }
-
-    long double compileSecs = 0.0;
-    size_t compiledSize = 0.0;
-    size_t streamSize = 0;
-    size_t scratchSize = 0;
-    unsigned int peakMemorySize = 0;
-    std::string db_info;
-
-    unsigned int mode = makeModeFlags(scan_mode);
-
-    hs_database_t *db;
-    hs_error_t err;
-    if (loadDatabases) {
-        db = loadDatabase(dbFilename(name, mode).c_str());
-        if (!db) {
-            return nullptr;
-        }
-    } else {
-        const unsigned int count = expressions.size();
-
-        vector<string> exprs;
-        vector<unsigned int> flags, ids;
-        vector<hs_expr_ext> ext;
-
-        for (const auto &m : expressions) {
-            string expr;
-            unsigned int f = 0;
-            hs_expr_ext extparam;
-            extparam.flags = 0;
-            if (!readExpression(m.second, expr, &f, &extparam)) {
-                printf("Error parsing PCRE: %s (id %u)\n", m.second.c_str(),
-                       m.first);
-                return nullptr;
-            }
-            if (forceEditDistance) {
-                extparam.flags |= HS_EXT_FLAG_EDIT_DISTANCE;
-                extparam.edit_distance = editDistance;
-            }
-
-            exprs.push_back(expr);
-            ids.push_back(m.first);
-            flags.push_back(f);
-            ext.push_back(extparam);
-        }
-
-        unsigned full_mode = mode;
-        if (mode == HS_MODE_STREAM) {
-            full_mode |= somPrecisionMode;
-        }
-
-        // Our compiler takes an array of plain ol' C strings.
-        vector<const char *> patterns(count);
-        for (unsigned int i = 0; i < count; i++) {
-            patterns[i] = exprs[i].c_str();
-        }
-
-        // Extended parameters are passed as pointers to hs_expr_ext structures.
-        vector<const hs_expr_ext *> ext_ptr(count);
-        for (unsigned int i = 0; i < count; i++) {
-            ext_ptr[i] = &ext[i];
-        }
-
-        hs_compile_error_t *compile_err;
-        Timer timer;
-
-#ifndef RELEASE_BUILD
-        if (useLiteralApi) {
-            // Pattern length computation should be done before timer start.
-            vector<size_t> lens(count);
-            for (unsigned int i = 0; i < count; i++) {
-                lens[i] = strlen(patterns[i]);
-            }
-            timer.start();
-            err = hs_compile_lit_multi_int(patterns.data(), flags.data(),
-                                           ids.data(), ext_ptr.data(),
-                                           lens.data(), count, full_mode,
-                                           nullptr, &db, &compile_err, grey);
-            timer.complete();
-        } else {
-            timer.start();
-            err = hs_compile_multi_int(patterns.data(), flags.data(),
-                                       ids.data(), ext_ptr.data(), count,
-                                       full_mode, nullptr, &db, &compile_err,
-                                       grey);
-            timer.complete();
-        }
-#else
-        if (useLiteralApi) {
-            // Pattern length computation should be done before timer start.
-            vector<size_t> lens(count);
-            for (unsigned int i = 0; i < count; i++) {
-                lens[i] = strlen(patterns[i]);
-            }
-            timer.start();
-            err = hs_compile_lit_multi(patterns.data(), flags.data(),
-                                       ids.data(), lens.data(), count,
-                                       full_mode, nullptr, &db, &compile_err);
-            timer.complete();
-        } else {
-            timer.start();
-            err = hs_compile_ext_multi(patterns.data(), flags.data(),
-                                       ids.data(), ext_ptr.data(), count,
-                                       full_mode, nullptr, &db, &compile_err);
-            timer.complete();
-        }
-#endif
-        compileSecs = timer.seconds();
-        peakMemorySize = getPeakHeap();
-
-        if (err == HS_COMPILER_ERROR) {
-            if (compile_err->expression >= 0) {
-                printf("Compile error for signature #%u: %s\n",
-                       compile_err->expression, compile_err->message);
-            } else {
-                printf("Compile error: %s\n", compile_err->message);
-            }
-            hs_free_compile_error(compile_err);
-            return nullptr;
-        }
-    }
-
-    // copy the db into huge pages (where available) to reduce TLB pressure
-    db = get_huge(db);
-    if (!db) {
-        return nullptr;
-    }
-
-    err = hs_database_size(db, &compiledSize);
-    if (err != HS_SUCCESS) {
-        return nullptr;
-    }
-    assert(compiledSize > 0);
-
-    if (saveDatabases) {
-        saveDatabase(db, dbFilename(name, mode).c_str());
-    }
-
-    if (mode & HS_MODE_STREAM) {
-        err = hs_stream_size(db, &streamSize);
-        if (err != HS_SUCCESS) {
-            return nullptr;
-        }
-    } else {
-        streamSize = 0;
-    }
-
-    char *info;
-    err = hs_database_info(db, &info);
-    if (err != HS_SUCCESS) {
-        return nullptr;
-    } else {
-        db_info = string(info);
-        free(info);
-    }
-
-    // Allocate scratch temporarily to find its size: this is a good test
-    // anyway.
-    hs_scratch_t *scratch = nullptr;
-    err = hs_alloc_scratch(db, &scratch);
-    if (err != HS_SUCCESS) {
-        return nullptr;
-    }
-
-    err = hs_scratch_size(scratch, &scratchSize);
-    if (err != HS_SUCCESS) {
-        return nullptr;
-    }
-    hs_free_scratch(scratch);
-
-    // Collect summary information.
-    CompileHSStats cs;
-    cs.sigs_name = sigs_name;
-    if (!sigs_name.empty()) {
-        const auto pos = name.find_last_of('/');
-        cs.signatures = name.substr(pos + 1);
-    } else {
-        cs.signatures = name;
-    }
-    cs.db_info = db_info;
-    cs.expressionCount = expressions.size();
-    cs.compiledSize = compiledSize;
-    cs.crc32 = db->crc32;
-    cs.streaming = mode & HS_MODE_STREAM;
-    cs.streamSize = streamSize;
-    cs.scratchSize = scratchSize;
-    cs.compileSecs = compileSecs;
-    cs.peakMemorySize = peakMemorySize;
-
-    return ue2::make_unique<EngineHyperscan>(db, std::move(cs));
-}
-
 SplitDatabases splitDB(const fat_hs_database_t* fat_db) {
     SplitDatabases result = {nullptr, nullptr};
     
@@ -789,4 +590,130 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
     cs.peakMemorySize = peakMemorySize;
     printf("%s %d\n", __FUNCTION__, __LINE__);
     return ue2::make_unique<EngineHyperscan>(target_db, std::move(cs));
+}
+
+std::unique_ptr<EngineHyperscan>
+buildEngineFromSerialized(const std::string &dbPath, ScanMode scan_mode) {
+    
+    // 尝试加载 fat 数据库
+    fat_hs_database_t *fat_db = fat_loadDatabase(dbPath.c_str(), true);
+    hs_database_t *db = nullptr;
+    
+    if (fat_db) {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
+        // 成功加载 fat 数据库，拆分并选择当前架构
+        SplitDatabases split = splitDB(fat_db);
+        fat_hs_free_database(fat_db);
+        
+#if defined(ARCH_X86_64)
+        printf("%s %d\n", __FUNCTION__, __LINE__);
+        db = split.x86_db;
+        if (split.arm_db) free(split.arm_db);
+#elif defined(ARCH_AARCH64)
+        printf("%s %d\n", __FUNCTION__, __LINE__);
+        db = split.arm_db;
+        if (split.x86_db) free(split.x86_db);
+#else
+        db = split.x86_db;
+        if (split.arm_db) free(split.arm_db);
+#endif
+        
+        if (!db) {
+            printf("Error: no compatible database found for current architecture.\n");
+            return nullptr;
+        }
+    } else {
+        printf("%s %d\n", __FUNCTION__, __LINE__);
+        // 尝试加载普通数据库
+        db = loadDatabase(dbPath.c_str(), true);
+        if (!db) {
+            printf("Error: failed to load database.\n");
+            return nullptr;
+        }
+    }
+    
+    // 获取数据库信息
+    char *info = nullptr;
+    hs_error_t err = hs_database_info(db, &info);
+    if (err != HS_SUCCESS || !info) {
+        printf("Error: failed to get database info.\n");
+        hs_free_database(db);
+        return nullptr;
+    }
+    
+    std::string db_info = info;
+    free(info);
+    
+    // 从 db_info 字符串解析模式
+    // 格式: "Version: X.X.X Features: XXX Mode: STREAM/BLOCK/VECTORED"
+    std::string db_mode;
+    size_t mode_pos = db_info.find("Mode: ");
+    if (mode_pos != std::string::npos) {
+        mode_pos += 6; // "Mode: " 的长度
+        size_t mode_end = db_info.find_first_of(" \t\n", mode_pos);
+        if (mode_end == std::string::npos) {
+            db_mode = db_info.substr(mode_pos);
+        } else {
+            db_mode = db_info.substr(mode_pos, mode_end - mode_pos);
+        }
+    }
+    
+    // 检查模式匹配
+    std::string expected_mode_str;
+    switch (scan_mode) {
+        case ScanMode::BLOCK: expected_mode_str = "BLOCK"; break;
+        case ScanMode::STREAMING: expected_mode_str = "STREAM"; break;
+        case ScanMode::VECTORED: expected_mode_str = "VECTORED"; break;
+    }
+    
+    if (db_mode != expected_mode_str) {
+        printf("Error: database mode mismatch!\n");
+        printf("  Expected: %s\n", expected_mode_str.c_str());
+        printf("  Database: %s\n", db_mode.empty() ? "UNKNOWN" : db_mode.c_str());
+        hs_free_database(db);
+        return nullptr;
+    }
+    
+    // 加载到大页内存
+    db = get_huge(db);
+    if (!db) {
+        return nullptr;
+    }
+    
+    // 获取数据库大小信息
+    size_t compiledSize = 0, streamSize = 0, scratchSize = 0;
+    hs_database_size(db, &compiledSize);
+    
+    if (scan_mode == ScanMode::STREAMING) {
+        hs_stream_size(db, &streamSize);
+    }
+    
+    // 获取 scratch 大小
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    if (err != HS_SUCCESS) {
+        printf("Error: failed to allocate scratch.\n");
+        hs_free_database(db);
+        return nullptr;
+    }
+    
+    hs_scratch_size(scratch, &scratchSize);
+    hs_free_scratch(scratch);
+    
+    // 构建 CompileHSStats
+    CompileHSStats cs;
+    cs.sigs_name = dbPath;
+    size_t pos = dbPath.find_last_of("/\\");
+    cs.signatures = (pos == string::npos) ? dbPath : dbPath.substr(pos + 1);
+    cs.db_info = db_info;
+    cs.expressionCount = 0;  // 从序列化数据库无法获取
+    cs.compiledSize = compiledSize;
+    cs.crc32 = db->crc32;
+    cs.streaming = (scan_mode == ScanMode::STREAMING);
+    cs.streamSize = streamSize;
+    cs.scratchSize = scratchSize;
+    cs.compileSecs = 0;  // 无编译时间
+    cs.peakMemorySize = 0;
+    
+    return ue2::make_unique<EngineHyperscan>(db, std::move(cs));
 }

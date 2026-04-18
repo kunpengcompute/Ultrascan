@@ -192,7 +192,7 @@ void usage(const char *name, const char *error) {
     printf("                  WARNING: existing files in output directory are"
            " deleted.\n");
     printf("  -x NAME         Cross-compile for arch NAME\n");
-    printf("  -D, --dump_db   Dump the final database.\n");
+    printf("  -U, --dump_db   Dump the final database (fat database format).\n");
     printf("  -P, --print     Echo signature set to stdout.\n");
     printf("  -X, --no_intermediate\n");
     printf("                  Do not dump intermediate data.\n");
@@ -217,9 +217,9 @@ void usage(const char *name, const char *error) {
 
 static
 void processArgs(int argc, char *argv[], Grey &grey) {
-    static const char *options = "d:De:E:G:hLNo:Ps:VXx:z:8";
+    static const char *options = "d:e:E:G:hLNo:Ps:U:VXx:z:8";
     static struct option longOptions[] = {
-        {"dump_db",             no_argument,        nullptr, 'D'},
+        {"dump_db",             no_argument,        nullptr, 'U'},
         {"help",                no_argument,        nullptr, 'h'},
         {"output",              required_argument,  nullptr, 'o'},
         {"block",               no_argument,        nullptr, 'N'},
@@ -240,7 +240,7 @@ void processArgs(int argc, char *argv[], Grey &grey) {
             break;
         }
         switch (c) {
-        case 'D':
+        case 'U':
             dump_db = true;
             break;
 

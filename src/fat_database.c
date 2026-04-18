@@ -130,13 +130,6 @@ hs_error_t HS_CDECL fat_hs_serialize_database(const fat_hs_database_t *db,
 static
 hs_error_t fat_db_check_platform(const u64a p) {
     (void) p;
-    // if (p != hs_current_platform
-    //     && p != (hs_current_platform | hs_current_platform_no_avx2)
-    //     && p != (hs_current_platform | hs_current_platform_no_avx512)
-    //     && p != (hs_current_platform | hs_current_platform_no_avx512vbmi)) {
-    //     return HS_DB_PLATFORM_ERROR;
-    // }
-    // passed all checks
     return HS_SUCCESS;
 }
 
@@ -220,27 +213,34 @@ hs_error_t fat_db_check_crc(const fat_hs_database_t *db) {
     return HS_SUCCESS;
 }
 
-static
-void fat_db_copy_bytecode(const char *serialized, fat_hs_database_t *db) {
+static void fat_db_copy_bytecode(const char *serialized, fat_hs_database_t *db) {
     // x86 字节码对齐
     uintptr_t shift = (uintptr_t)db->bytes & 0x3f;
     db->x86_bytecode = offsetof(struct fat_hs_database, bytes) - shift;
     char *x86_ptr = (char *)db + db->x86_bytecode;
     assert(ISALIGNED_CL(x86_ptr));
     
-    // 从序列化数据中读取 x86 字节码（serialized 指向 header 之后的 bytecode 起始位置）
-    memcpy(x86_ptr, serialized, db->x86_length);
+    // 从序列化数据中读取 x86 字节码
+    if (db->x86_length > 0) {
+        memcpy(x86_ptr, serialized, db->x86_length);
+    }
 
-    // arm 字节码对齐（在 x86 之后 64 字节对齐）
-    size_t arm_offset = (db->x86_bytecode + db->x86_length + 63) & ~63;
-    db->arm_bytecode = arm_offset;
-    char *arm_ptr = (char *)db + db->arm_bytecode;
+    // arm 字节码对齐 - 基于 x86_ptr 的实际地址计算
+    char *arm_ptr;
+    if (db->x86_length > 0) {
+        uintptr_t arm_addr = ((uintptr_t)x86_ptr + db->x86_length + 63) & ~63ULL;
+        arm_ptr = (char *)arm_addr;
+    } else {
+        arm_ptr = x86_ptr;
+    }
+    db->arm_bytecode = arm_ptr - (char *)db;
     assert(ISALIGNED_CL(arm_ptr));
     
-    // 从序列化数据中读取 arm 字节码（紧跟 x86 之后）
-    memcpy(arm_ptr, serialized + db->x86_length, db->arm_length);
+    // 从序列化数据中读取 arm 字节码
+    if (db->arm_length > 0) {
+        memcpy(arm_ptr, serialized + db->x86_length, db->arm_length);
+    }
 }
-
 HS_PUBLIC_API
 hs_error_t HS_CDECL fat_hs_deserialize_database_at(const char *bytes,
                                                    const size_t length,
@@ -404,12 +404,6 @@ hs_error_t fat_print_database_string(char **s, u32 version, const platform_t pla
     u8 minor = (version >> 16) & 0xff;
     u8 major = (version >> 24) & 0xff;
 
-    const char *features = (plat & HS_PLATFORM_NOAVX512VBMI)
-                               ? (plat & HS_PLATFORM_NOAVX512)
-                                   ? (plat & HS_PLATFORM_NOAVX2) ? "" : "AVX2"
-                                   : "AVX512"
-                               : "AVX512VBMI";
-
     const char *mode = NULL;
 
     if (raw_mode == HS_MODE_STREAM) {
@@ -432,8 +426,8 @@ hs_error_t fat_print_database_string(char **s, u32 version, const platform_t pla
         }
 
         int p_len = SNPRINTF_COMPAT(
-            buf, len, "Version: %u.%u.%u Features: %s Mode: %s (FAT)",
-            major, minor, release, features, mode);
+            buf, len, "Version: %u.%u.%u Mode: %s (FAT)",
+            major, minor, release, mode);
         if (p_len < 0) {
             DEBUG_PRINTF("snprintf output error, returned %d\n", p_len);
             hs_misc_free(buf);
@@ -449,26 +443,6 @@ hs_error_t fat_print_database_string(char **s, u32 version, const platform_t pla
     }
 
     return HS_NOMEM;
-}
-
-HS_PUBLIC_API
-hs_error_t HS_CDECL fat_hs_serialized_database_info(const char *bytes,
-                                                    size_t length, char **info) {
-    if (!info) {
-        return HS_INVALID;
-    }
-    *info = NULL;
-
-    fat_hs_database_t header;
-    hs_error_t ret = fat_db_decode_header(&bytes, length, &header);
-    if (ret != HS_SUCCESS) {
-        return ret;
-    }
-
-    const struct RoseEngine *rose = fat_hs_get_bytecode(&header);
-    u32 mode = rose->mode;
-
-    return fat_print_database_string(info, header.version, header.platform, mode);
 }
 
 HS_PUBLIC_API
