@@ -139,6 +139,7 @@ const u8 *dvermSearchAligned(m128 chars1, m128 chars2, u8 c1, u8 c2,
                              const u8 *buf, const u8 *buf_end) {
 #if ((defined  __ARM_NEON) || (defined __ARM_NEON__))
     for (; buf + 64 < buf_end; buf += 64) {
+        __builtin_prefetch(buf + 128);
         m128 data0 = load128(buf);
         m128 data1 = load128(buf + 16);
         m128 data2 = load128(buf + 32);
@@ -160,16 +161,16 @@ const u8 *dvermSearchAligned(m128 chars1, m128 chars2, u8 c1, u8 c2,
         u64a z3_c2 = movemask128_half(eq128(chars2, data3));
         z3 = z3 & (z3_c2 >> 4);
 
-        if (vgetq_lane_u8(data0.vect_u8, 15) == c1 && buf[16] == c2) {
+        if (unlikely(buf[15] == c1 && buf[16] == c2)) {
             z0 |= (1ULL << 63);
         }
-        if (vgetq_lane_u8(data1.vect_u8, 15) == c1 && buf[32] == c2) {
+        if (unlikely(buf[31] == c1 && buf[32] == c2)) {
             z1 |= (1ULL << 63);
         }
-        if (vgetq_lane_u8(data2.vect_u8, 15) == c1 && buf[48] == c2) {
+        if (unlikely(buf[47] == c1 && buf[48] == c2)) {
             z2 |= (1ULL << 63);
         }
-        if (vgetq_lane_u8(data3.vect_u8, 15) == c1 && buf[64] == c2) {
+        if (unlikely(buf[63] == c1 && buf[64] == c2)) {
             z3 |= (1ULL << 63);
         }
 
