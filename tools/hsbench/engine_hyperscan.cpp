@@ -476,11 +476,46 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
 
         hs_compile_error_t *compile_err;
         Timer timer;
-        timer.start();
-        err = fat_hs_compile_ext_multi(patterns.data(), flags.data(),
-                                   ids.data(), ext_ptr.data(), count,
-                                   full_mode, nullptr, &db, &compile_err);
-        timer.complete();
+#ifndef RELEASE_BUILD
+        if (useLiteralApi) {
+            // Pattern length computation should be done before timer start.
+            vector<size_t> lens(count);
+            for (unsigned int i = 0; i < count; i++) {
+                lens[i] = strlen(patterns[i]);
+            }
+            timer.start();
+            err = fat_hs_compile_lit_multi_int(patterns.data(), flags.data(),
+                                               ids.data(), ext_ptr.data(),
+                                               lens.data(), count, full_mode,
+                                               nullptr, &db, &compile_err, grey);
+            timer.complete();
+        } else {
+            timer.start();
+            err = fat_hs_compile_ext_multi(patterns.data(), flags.data(),
+                                           ids.data(), ext_ptr.data(), count,
+                                           full_mode, nullptr, &db, &compile_err);
+            timer.complete();
+        }
+#else
+        if (useLiteralApi) {
+            // Pattern length computation should be done before timer start.
+            vector<size_t> lens(count);
+            for (unsigned int i = 0; i < count; i++) {
+                lens[i] = strlen(patterns[i]);
+            }
+            timer.start();
+            err = fat_hs_compile_lit_multi(patterns.data(), flags.data(),
+                                           ids.data(), lens.data(), count,
+                                           full_mode, nullptr, &db, &compile_err);
+            timer.complete();
+        } else {
+            timer.start();
+            err = fat_hs_compile_ext_multi(patterns.data(), flags.data(),
+                                           ids.data(), ext_ptr.data(), count,
+                                           full_mode, nullptr, &db, &compile_err);
+            timer.complete();
+        }
+#endif   
         compileSecs = timer.seconds();
         peakMemorySize = getPeakHeap();
 

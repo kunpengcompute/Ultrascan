@@ -368,6 +368,148 @@ fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
 }
 
 hs_error_t
+fat_hs_compile_lit_multi_int(const char *const *expressions,
+                     const unsigned *flags, const unsigned *ids,
+                     const hs_expr_ext *const *ext, const size_t *lens,
+                     unsigned elements, unsigned mode,
+                     const hs_platform_info_t *platform, fat_hs_database_t **db,
+                     hs_compile_error_t **comp_error, const Grey &g) {
+    // Check the args: note that it's OK for flags, ids or ext to be null.
+    if (!comp_error) {
+        if (db) {
+            *db = nullptr;
+        }
+        return HS_COMPILER_ERROR;
+    }
+    if (!db) {
+        *comp_error = generateCompileError("Invalid parameter: db is NULL", -1);
+        return HS_COMPILER_ERROR;
+    }
+    if (!expressions) {
+        *db = nullptr;
+        *comp_error
+            = generateCompileError("Invalid parameter: expressions is NULL", -1);
+        return HS_COMPILER_ERROR;
+    }
+    if (!lens) {
+        *db = nullptr;
+        *comp_error = generateCompileError("Invalid parameter: lens is NULL", -1);
+        return HS_COMPILER_ERROR;
+    }
+    if (elements == 0) {
+        *db = nullptr;
+        *comp_error = generateCompileError("Invalid parameter: elements is zero", -1);
+        return HS_COMPILER_ERROR;
+    }
+
+#if defined(FAT_RUNTIME)
+    if (!check_ssse3()) {
+        *db = nullptr;
+        *comp_error = generateCompileError("Unsupported architecture", -1);
+        return HS_ARCH_ERROR;
+    }
+#endif
+
+    if (!checkMode(mode, comp_error)) {
+        *db = nullptr;
+        assert(*comp_error);
+        return HS_COMPILER_ERROR;
+    }
+
+    if (!checkPlatform(platform, comp_error)) {
+        *db = nullptr;
+        assert(*comp_error);
+        return HS_COMPILER_ERROR;
+    }
+
+    if (elements > g.limitPatternCount) {
+        *db = nullptr;
+        *comp_error = generateCompileError("Number of patterns too large", -1);
+        return HS_COMPILER_ERROR;
+    }
+
+    bool isStreaming = mode & (HS_MODE_STREAM | HS_MODE_VECTORED);
+    bool isVectored = mode & HS_MODE_VECTORED;
+    unsigned somPrecision = getSomPrecision(mode);
+
+    target_t target_info = platform ? target_t(*platform)
+                                    : get_current_target();
+
+    try {
+        // =======1. 编译 x86 字节码===============
+        Grey x86_grey = g;
+        x86_grey.allowLily = false;
+        x86_grey.allowNeoFdr = false;
+        
+        CompileContext x86_cc(isStreaming, isVectored, target_info, x86_grey);
+        NG x86_ng(x86_cc, elements, somPrecision);
+        x86_ng.allowLilyForTeddy = false;
+
+        for (unsigned int i = 0; i < elements; i++) {
+            try {
+                addLitExpression(x86_ng, i, expressions[i], flags ? flags[i] : 0,
+                                 ext ? ext[i] : nullptr, ids ? ids[i] : 0,
+                                 lens[i]);
+            } catch (CompileError &e) {
+                e.setExpressionIndex(i);
+                throw;
+            }
+        }
+
+        x86_ng.rm.pl.validateSubIDs(ids, expressions, flags, elements);
+        x86_ng.rm.logicalKeyRenumber();
+
+        // =======2. 编译 arm 字节码===============
+        Grey arm_grey = g;
+        
+        CompileContext arm_cc(isStreaming, isVectored, target_info, arm_grey);
+        NG arm_ng(arm_cc, elements, somPrecision);
+
+        for (unsigned int i = 0; i < elements; i++) {
+            try {
+                addLitExpression(arm_ng, i, expressions[i], flags ? flags[i] : 0,
+                                 ext ? ext[i] : nullptr, ids ? ids[i] : 0,
+                                 lens[i]);
+            } catch (CompileError &e) {
+                e.setExpressionIndex(i);
+                throw;
+            }
+        }
+
+        arm_ng.rm.pl.validateSubIDs(ids, expressions, flags, elements);
+        arm_ng.rm.logicalKeyRenumber();
+
+        // =======3. 构建 FAT Database========
+        unsigned length = 0;
+        struct fat_hs_database *out = fat_build(x86_ng, arm_ng, &length, 0);
+        assert(out);
+        assert(length);
+        *db = out;
+        *comp_error = nullptr;
+
+        return HS_SUCCESS;
+    }
+    catch (const CompileError &e) {
+        *db = nullptr;
+        *comp_error = generateCompileError(e.reason,
+                                           e.hasIndex ? (int)e.index : -1);
+        return HS_COMPILER_ERROR;
+    }
+    catch (const std::bad_alloc &) {
+        *db = nullptr;
+        *comp_error = const_cast<hs_compile_error_t *>(&hs_enomem);
+        return HS_COMPILER_ERROR;
+    }
+    catch (...) {
+        assert(!"Internal error, unexpected exception");
+        *db = nullptr;
+        *comp_error = const_cast<hs_compile_error_t *>(&hs_einternal);
+        return HS_COMPILER_ERROR;
+    }
+}
+
+
+hs_error_t
 hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
                      const unsigned *ids, const hs_expr_ext *const *ext,
                      unsigned elements, unsigned mode,
@@ -738,6 +880,21 @@ hs_error_t HS_CDECL hs_compile_lit_multi(const char * const *expressions,
     return hs_compile_lit_multi_int(expressions, flags, ids, ext, lens,
                                     elements, mode, platform, db, error,
                                     Grey());
+}
+
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL fat_hs_compile_lit_multi(const char * const *expressions,
+                                         const unsigned *flags,
+                                         const unsigned *ids,
+                                         const size_t *lens,
+                                         unsigned elements, unsigned mode,
+                                         const hs_platform_info_t *platform,
+                                         fat_hs_database_t **db,
+                                         hs_compile_error_t **error) {
+    const hs_expr_ext * const *ext = nullptr;
+    return fat_hs_compile_lit_multi_int(expressions, flags, ids, ext, lens,
+                                        elements, mode, platform, db, error,
+                                        Grey());
 }
 
 static
