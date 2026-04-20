@@ -684,6 +684,20 @@ u32 haoEntrySlotCount(const struct HAORuntimeSecondaryHashEntry *entry) {
 }
 
 static really_inline
+u32 haoEntrySlotCountFromMask(const struct HAORuntimeSecondaryHashEntry *entry,
+                              u32 slotMask) {
+
+    if (!slotMask) {
+        return 0;
+    }
+    if (entry && entry->slotCount) {
+        return MIN(entry->slotCount,
+                   (u8)HAO_RUNTIME_RULE_SLOTS_PER_ENTRY);
+    }
+    return popcount32(slotMask);
+}
+
+static really_inline
 int haoEntryHasIdentityTableControl(
     const struct HAORuntimeSecondaryHashEntry *entry) {
     return entry &&
@@ -691,10 +705,11 @@ int haoEntryHasIdentityTableControl(
 }
 
 static really_inline
-u32 haoEntryLaneMaskFromByteMatches(
-    const struct HAORuntimeSecondaryHashEntry *entry, u32 byteMatchMask) {
+u32 haoEntryLaneMaskFromByteMatchesPrepared(
+    const struct HAORuntimeSecondaryHashEntry *entry, u32 slotMask,
+    u32 byteMatchMask) {
     u32 laneMask = 0;
-    u32 slotMask = haoEntrySlotMask(entry);
+
     while (slotMask) {
         const u32 slot = ctz32(slotMask);
         const u32 laneBase = slot * HAO_RUNTIME_BYTES_PER_RULE_SLOT;
@@ -712,18 +727,24 @@ u32 haoEntryLaneMaskFromByteMatches(
 }
 
 static really_inline
-u32 haoEntrySingleSlotMatchMaskFromContext(
+u32 haoEntryLaneMaskFromByteMatches(
+    const struct HAORuntimeSecondaryHashEntry *entry, u32 byteMatchMask) {
+    return haoEntryLaneMaskFromByteMatchesPrepared(entry, haoEntrySlotMask(entry),
+                                                   byteMatchMask);
+}
+
+static really_inline
+u32 haoEntrySingleSlotMatchMaskPrepared(
     const struct HAORuntimeSecondaryHashEntry *entry,
-    struct HAOPositionContext *ctx, u32 shuffledValidMask) {
+    struct HAOPositionContext *ctx, u32 slotMask, u32 shuffledValidMask,
+    int identityTableControl) {
     u32 mask = 0;
 
-    if (!entry || !ctx || !haoEntrySlotMask(entry)) {
+    if (!entry || !ctx || !slotMask) {
         return 0;
     }
 
-    haoEnsureLaneWindowContext(ctx);
-
-    if (haoEntryHasIdentityTableControl(entry)) {
+    if (identityTableControl) {
         mask = entry->tailMask;
         while (mask) {
             const u32 bit = mask & (0U - mask);
@@ -734,7 +755,7 @@ u32 haoEntrySingleSlotMatchMaskFromContext(
             }
             mask &= mask - 1;
         }
-        return haoEntrySlotMask(entry);
+        return slotMask;
     }
 
     mask = entry->tailMask;
@@ -753,7 +774,23 @@ u32 haoEntrySingleSlotMatchMaskFromContext(
         mask &= mask - 1;
     }
 
-    return haoEntrySlotMask(entry);
+    return slotMask;
+}
+
+static really_inline
+u32 haoEntrySingleSlotMatchMaskFromContext(
+    const struct HAORuntimeSecondaryHashEntry *entry,
+    struct HAOPositionContext *ctx, u32 shuffledValidMask) {
+    const u32 slotMask = haoEntrySlotMask(entry);
+
+    if (!entry || !ctx || !slotMask) {
+        return 0;
+    }
+
+    haoEnsureLaneWindowContext(ctx);
+    return haoEntrySingleSlotMatchMaskPrepared(
+        entry, ctx, slotMask, shuffledValidMask,
+        haoEntryHasIdentityTableControl(entry));
 }
 
 static u32 haoEntryMatchMaskFromContext(
@@ -761,7 +798,7 @@ static u32 haoEntryMatchMaskFromContext(
     struct HAOPositionContext *ctx) {
     u32 shuffledValidMask = 0;
     const u32 slotMask = haoEntrySlotMask(entry);
-    const u32 slotCount = haoEntrySlotCount(entry);
+    const u32 slotCount = haoEntrySlotCountFromMask(entry, slotMask);
     const int identityTableControl = haoEntryHasIdentityTableControl(entry);
 
     if (!entry || !slotMask || !ctx) {
@@ -778,8 +815,9 @@ static u32 haoEntryMatchMaskFromContext(
 
     if (slotCount == 1) {
         const u32 laneMask =
-            haoEntrySingleSlotMatchMaskFromContext(entry, ctx,
-                                                   shuffledValidMask);
+            haoEntrySingleSlotMatchMaskPrepared(entry, ctx, slotMask,
+                                                shuffledValidMask,
+                                                identityTableControl);
         if (laneMask) {
             HAO_STATS_ADD(verifierEntryHits, 1);
             HAO_STATS_ADD(verifierSlotHits, 1);
@@ -811,7 +849,8 @@ static u32 haoEntryMatchMaskFromContext(
             const u32 byteMatchMask = (eqLo | (eqHi << 16)) &
                                       shuffledValidMask & entry->tailMask;
             const u32 laneMask =
-                haoEntryLaneMaskFromByteMatches(entry, byteMatchMask);
+                haoEntryLaneMaskFromByteMatchesPrepared(entry, slotMask,
+                                                        byteMatchMask);
 
             if (laneMask) {
                 HAO_STATS_ADD(verifierEntryHits, 1);
@@ -847,7 +886,8 @@ static u32 haoEntryMatchMaskFromContext(
 
             {
                 const u32 laneMask =
-                    haoEntryLaneMaskFromByteMatches(entry, byteMatchMask);
+                    haoEntryLaneMaskFromByteMatchesPrepared(entry, slotMask,
+                                                            byteMatchMask);
                 if (laneMask) {
                     HAO_STATS_ADD(verifierEntryHits, 1);
                     HAO_STATS_ADD(verifierSlotHits, popcount32(laneMask));
@@ -864,7 +904,7 @@ static u32 haoEntryMatchMaskFromContextScalarForTest(
     struct HAOPositionContext *ctx) {
     u32 shuffledValidMask = 0;
     const u32 slotMask = haoEntrySlotMask(entry);
-    const u32 slotCount = haoEntrySlotCount(entry);
+    const u32 slotCount = haoEntrySlotCountFromMask(entry, slotMask);
     const int identityTableControl = haoEntryHasIdentityTableControl(entry);
 
     if (!entry || !slotMask || !ctx) {
@@ -879,8 +919,9 @@ static u32 haoEntryMatchMaskFromContextScalarForTest(
     }
 
     if (slotCount == 1) {
-        return haoEntrySingleSlotMatchMaskFromContext(entry, ctx,
-                                                      shuffledValidMask);
+        return haoEntrySingleSlotMatchMaskPrepared(entry, ctx, slotMask,
+                                                   shuffledValidMask,
+                                                   identityTableControl);
     }
 
     {
@@ -907,7 +948,8 @@ static u32 haoEntryMatchMaskFromContextScalarForTest(
             }
         }
 
-        return haoEntryLaneMaskFromByteMatches(entry, byteMatchMask);
+        return haoEntryLaneMaskFromByteMatchesPrepared(entry, slotMask,
+                                                       byteMatchMask);
     }
 }
 
@@ -916,7 +958,7 @@ static u32 haoEntryMatchMaskFromContextVectorForTest(
     struct HAOPositionContext *ctx) {
     u32 shuffledValidMask = 0;
     const u32 slotMask = haoEntrySlotMask(entry);
-    const u32 slotCount = haoEntrySlotCount(entry);
+    const u32 slotCount = haoEntrySlotCountFromMask(entry, slotMask);
     const int identityTableControl = haoEntryHasIdentityTableControl(entry);
 
     if (!entry || !slotMask || !ctx) {
@@ -931,8 +973,9 @@ static u32 haoEntryMatchMaskFromContextVectorForTest(
     }
 
     if (slotCount == 1) {
-        return haoEntrySingleSlotMatchMaskFromContext(entry, ctx,
-                                                      shuffledValidMask);
+        return haoEntrySingleSlotMatchMaskPrepared(entry, ctx, slotMask,
+                                                   shuffledValidMask,
+                                                   identityTableControl);
     }
 
 #if defined(HAVE_NEON) || defined(HAVE_SSE2)
@@ -956,8 +999,9 @@ static u32 haoEntryMatchMaskFromContextVectorForTest(
             eqHi = movemask128(eq128(shufHi, ruleHi));
         }
 
-        return haoEntryLaneMaskFromByteMatches(
-            entry, (eqLo | (eqHi << 16)) & shuffledValidMask & entry->tailMask);
+        return haoEntryLaneMaskFromByteMatchesPrepared(
+            entry, slotMask,
+            (eqLo | (eqHi << 16)) & shuffledValidMask & entry->tailMask);
     }
 #else
     return haoEntryMatchMaskFromContextScalarForTest(entry, ctx);
@@ -1004,7 +1048,7 @@ static int haoProcessEncodedRange(
             continue;
         }
 
-        matchMask = laneMask & haoEntrySlotMask(entry);
+        matchMask = laneMask;
         while (matchMask) {
             const u32 r = ctz32(matchMask);
             const u16 ridx = entry->ruleIndex[r];
