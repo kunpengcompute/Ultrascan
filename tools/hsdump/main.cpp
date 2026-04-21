@@ -217,7 +217,7 @@ void usage(const char *name, const char *error) {
 
 static
 void processArgs(int argc, char *argv[], Grey &grey) {
-    static const char *options = "d:e:E:G:hLNo:Ps:U:VXx:z:8";
+    static const char *options = "d:e:E:G:hLNo:Ps:UVXx:z:8";
     static struct option longOptions[] = {
         {"dump_db",             no_argument,        nullptr, 'U'},
         {"help",                no_argument,        nullptr, 'h'},
@@ -631,10 +631,10 @@ unsigned int dumpDataMulti(const vector<const char *> &patterns,
         for (unsigned int i = 0; i < count; i++) {
             lens[i] = strlen(patterns[i]);
         }
-        // err = hs_compile_lit_multi_int(patterns.data(), flags.data(),
-        //                                ids.data(), ext.c_array(), lens.data(),
-        //                                count, mode, plat_info.get(), &db,
-        //                                &compile_err, grey);
+        err = fat_hs_compile_lit_multi_int(patterns.data(), flags.data(),
+                                       ids.data(), ext.c_array(), lens.data(),
+                                       count, mode, plat_info.get(), &db,
+                                       &compile_err, grey);
     } else {
         err = fat_hs_compile_multi_int(patterns.data(), flags.data(), ids.data(),
                                ext.c_array(), count, mode, plat_info.get(),
