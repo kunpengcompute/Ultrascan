@@ -429,7 +429,6 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
             return nullptr;
         }
     } else {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         const unsigned int count = expressions.size();
 
         vector<string> exprs;
@@ -520,7 +519,6 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
         peakMemorySize = getPeakHeap();
 
         if (err == HS_COMPILER_ERROR) {
-            printf("%s %d\n", __FUNCTION__, __LINE__);
             if (compile_err->expression >= 0) {
                 printf("Compile error for signature #%u: %s\n",
                        compile_err->expression, compile_err->message);
@@ -557,14 +555,12 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
 #endif
     
     if (!target_db) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         fat_hs_free_database(db);
         return nullptr;
     }
 
     // 释放 fat_hs_database
     fat_hs_free_database(db);
-    printf("%s %d\n", __FUNCTION__, __LINE__);
     // 使用 get_huge 加载到大页内存
     target_db = get_huge(target_db);
     if (!target_db) {
@@ -572,10 +568,8 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
     }
 
     if (mode & HS_MODE_STREAM) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         err = hs_stream_size(target_db, &streamSize);
         if (err != HS_SUCCESS) {
-            printf("%s %d\n", __FUNCTION__, __LINE__);
             return nullptr;
         }
     } else {
@@ -584,7 +578,6 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
     char *info;
     err = hs_database_info(target_db, &info);
     if (err != HS_SUCCESS) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         return nullptr;
     } else {
         db_info = string(info);
@@ -594,13 +587,11 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
     hs_scratch_t *scratch = nullptr;
     err = hs_alloc_scratch(target_db, &scratch);
     if (err != HS_SUCCESS) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         return nullptr;
     }
 
     err = hs_scratch_size(scratch, &scratchSize);
     if (err != HS_SUCCESS) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         return nullptr;
     }
     hs_free_scratch(scratch);
@@ -623,7 +614,6 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
     cs.scratchSize = scratchSize;
     cs.compileSecs = compileSecs;
     cs.peakMemorySize = peakMemorySize;
-    printf("%s %d\n", __FUNCTION__, __LINE__);
     return ue2::make_unique<EngineHyperscan>(target_db, std::move(cs));
 }
 
@@ -635,17 +625,14 @@ buildEngineFromSerialized(const std::string &dbPath, ScanMode scan_mode) {
     hs_database_t *db = nullptr;
     
     if (fat_db) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         // 成功加载 fat 数据库，拆分并选择当前架构
         SplitDatabases split = splitDB(fat_db);
         fat_hs_free_database(fat_db);
         
 #if defined(ARCH_X86_64)
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         db = split.x86_db;
         if (split.arm_db) free(split.arm_db);
 #elif defined(ARCH_AARCH64)
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         db = split.arm_db;
         if (split.x86_db) free(split.x86_db);
 #else
@@ -658,7 +645,6 @@ buildEngineFromSerialized(const std::string &dbPath, ScanMode scan_mode) {
             return nullptr;
         }
     } else {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         // 尝试加载普通数据库
         db = loadDatabase(dbPath.c_str(), true);
         if (!db) {

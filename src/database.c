@@ -179,8 +179,6 @@ static
 hs_error_t db_check_crc(const hs_database_t *db) {
     const char *bytecode = hs_get_bytecode(db);
     u32 crc = Crc32c_ComputeBuf(0, bytecode, db->length);
-    printf("%s %d crc 0x%x\n", __FUNCTION__, __LINE__, crc);
-    printf("%s %d db->crc32 0x%x\n", __FUNCTION__, __LINE__, db->crc32);
     if (crc != db->crc32) {
         DEBUG_PRINTF("crc mismatch! 0x%x != 0x%x\n", crc, db->crc32);
         return HS_INVALID;
@@ -328,32 +326,27 @@ hs_error_t HS_CDECL hs_serialized_database_size(const char *bytes,
 
 hs_error_t dbIsValid(const hs_database_t *db) {
     if (db->magic != HS_DB_MAGIC) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("bad magic\n");
         return HS_INVALID;
     }
 
     if (db->version != HS_DB_VERSION) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("bad version\n");
         return HS_DB_VERSION_ERROR;
     }
 
     if (db_check_platform(db->platform) != HS_SUCCESS) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("bad platform\n");
         return HS_DB_PLATFORM_ERROR;
     }
 
     if (!ISALIGNED_16(hs_get_bytecode(db))) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("bad alignment\n");
         return HS_INVALID;
     }
 
     hs_error_t rv = db_check_crc(db);
     if (rv != HS_SUCCESS) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("bad crc\n");
         return rv;
     }
@@ -378,13 +371,6 @@ hs_error_t print_database_string(char **s, u32 version, const platform_t plat,
     u8 release = (version >> 8) & 0xff;
     u8 minor = (version >> 16) & 0xff;
     u8 major = (version >> 24) & 0xff;
-
-    const char *features = (plat & HS_PLATFORM_NOAVX512VBMI)
-                               ? (plat & HS_PLATFORM_NOAVX512)
-                                   ? (plat & HS_PLATFORM_NOAVX2) ? "" : "AVX2"
-                                   : "AVX512"
-                               : "AVX512VBMI";
-
     const char *mode = NULL;
 
     if (raw_mode == HS_MODE_STREAM) {
@@ -410,9 +396,7 @@ hs_error_t print_database_string(char **s, u32 version, const platform_t plat,
 
         // Note: SNPRINTF_COMPAT is a macro defined above, to cope with systems
         // that don't have snprintf but have a workalike.
-        int p_len = SNPRINTF_COMPAT(
-            buf, len, "Version: %u.%u.%u Features: %s Mode: %s",
-            major, minor, release, features, mode);
+        int p_len = SNPRINTF_COMPAT(buf, len, "Version: %u.%u.%u Mode: %s", major, minor, release, mode);
         if (p_len < 0) {
             DEBUG_PRINTF("snprintf output error, returned %d\n", p_len);
             hs_misc_free(buf);

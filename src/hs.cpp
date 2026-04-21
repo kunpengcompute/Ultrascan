@@ -165,19 +165,16 @@ unsigned getSomPrecision(unsigned mode) {
 }
 
 namespace ue2 {
-
-hs_error_t
-fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
-                     const unsigned *ids, const hs_expr_ext *const *ext,
-                     unsigned elements, unsigned mode,
-                     const hs_platform_info_t *platform, fat_hs_database_t **db,
-                     hs_compile_error_t **comp_error, const Grey &g) {
-    // Check the args: note that it's OK for flags, ids or ext to be null.
+static
+hs_error_t validate_fat_compile_args(fat_hs_database_t **db,
+                                     hs_compile_error_t **comp_error,
+                                     const char *const *expressions,
+                                     unsigned elements,
+                                     const Grey &g) {
     if (!comp_error) {
         if (db) {
             *db = nullptr;
         }
-        // nowhere to write the string, but we can still report an error code
         return HS_COMPILER_ERROR;
     }
     if (!db) {
@@ -186,9 +183,7 @@ fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
     }
     if (!expressions) {
         *db = nullptr;
-        *comp_error
-            = generateCompileError("Invalid parameter: expressions is NULL",
-                                   -1);
+        *comp_error = generateCompileError("Invalid parameter: expressions is NULL", -1);
         return HS_COMPILER_ERROR;
     }
     if (elements == 0) {
@@ -204,6 +199,28 @@ fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
         return HS_ARCH_ERROR;
     }
 #endif
+
+    if (elements > g.limitPatternCount) {
+        *db = nullptr;
+        *comp_error = generateCompileError("Number of patterns too large", -1);
+        return HS_COMPILER_ERROR;
+    }
+
+    return HS_SUCCESS;
+}
+
+
+hs_error_t
+fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
+                     const unsigned *ids, const hs_expr_ext *const *ext,
+                     unsigned elements, unsigned mode,
+                     const hs_platform_info_t *platform, fat_hs_database_t **db,
+                     hs_compile_error_t **comp_error, const Grey &g) {
+    // Check the args: note that it's OK for flags, ids or ext to be null.
+    hs_error_t err = validate_fat_compile_args(db, comp_error, expressions, elements, g);
+    if (err != HS_SUCCESS) {
+        return err;
+    }
 
     if (!checkMode(mode, comp_error)) {
         *db = nullptr;
@@ -375,40 +392,10 @@ fat_hs_compile_lit_multi_int(const char *const *expressions,
                      const hs_platform_info_t *platform, fat_hs_database_t **db,
                      hs_compile_error_t **comp_error, const Grey &g) {
     // Check the args: note that it's OK for flags, ids or ext to be null.
-    if (!comp_error) {
-        if (db) {
-            *db = nullptr;
-        }
-        return HS_COMPILER_ERROR;
+    hs_error_t err = validate_fat_compile_args(db, comp_error, expressions, elements, g);
+    if (err != HS_SUCCESS) {
+        return err;
     }
-    if (!db) {
-        *comp_error = generateCompileError("Invalid parameter: db is NULL", -1);
-        return HS_COMPILER_ERROR;
-    }
-    if (!expressions) {
-        *db = nullptr;
-        *comp_error
-            = generateCompileError("Invalid parameter: expressions is NULL", -1);
-        return HS_COMPILER_ERROR;
-    }
-    if (!lens) {
-        *db = nullptr;
-        *comp_error = generateCompileError("Invalid parameter: lens is NULL", -1);
-        return HS_COMPILER_ERROR;
-    }
-    if (elements == 0) {
-        *db = nullptr;
-        *comp_error = generateCompileError("Invalid parameter: elements is zero", -1);
-        return HS_COMPILER_ERROR;
-    }
-
-#if defined(FAT_RUNTIME)
-    if (!check_ssse3()) {
-        *db = nullptr;
-        *comp_error = generateCompileError("Unsupported architecture", -1);
-        return HS_ARCH_ERROR;
-    }
-#endif
 
     if (!checkMode(mode, comp_error)) {
         *db = nullptr;

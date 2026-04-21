@@ -193,10 +193,7 @@ hs_error_t fat_db_check_crc(const fat_hs_database_t *db) {
     // 计算 x86 bytecode 的 CRC32
     const char *x86_bytecode = (const char *)db + db->x86_bytecode;
     u32 x86_crc = Crc32c_ComputeBuf(0, x86_bytecode, db->x86_length);
-    printf("x86_crc: 0x%x\n", x86_crc);
-    printf("db->x86_crc32: 0x%x\n", db->x86_crc32);
     if (x86_crc != db->x86_crc32) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("x86 crc mismatch! 0x%x != 0x%x\n", x86_crc, db->x86_crc32);
         return HS_INVALID;
     }
@@ -205,7 +202,6 @@ hs_error_t fat_db_check_crc(const fat_hs_database_t *db) {
     const char *arm_bytecode = (const char *)db + db->arm_bytecode;
     u32 arm_crc = Crc32c_ComputeBuf(0, arm_bytecode, db->arm_length);
     if (arm_crc != db->arm_crc32) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         DEBUG_PRINTF("arm crc mismatch! 0x%x != 0x%x\n", arm_crc, db->arm_crc32);
         return HS_INVALID;
     }
@@ -284,7 +280,6 @@ hs_error_t HS_CDECL fat_hs_deserialize_database(const char *bytes,
                                                 const size_t length,
                                                 fat_hs_database_t **db) {
     if (!bytes || !db) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         return HS_INVALID;
     }
 
@@ -293,13 +288,11 @@ hs_error_t HS_CDECL fat_hs_deserialize_database(const char *bytes,
     fat_hs_database_t header;
     hs_error_t ret = fat_db_decode_header(&bytes, length, &header);
     if (ret != HS_SUCCESS) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         return ret;
     }
 
     ret = fat_db_check_platform(header.platform);
     if (ret != HS_SUCCESS) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         return ret;
     }
 
@@ -308,7 +301,6 @@ hs_error_t HS_CDECL fat_hs_deserialize_database(const char *bytes,
     struct fat_hs_database *tempdb = hs_database_alloc(dblength);
     ret = hs_check_alloc(tempdb);
     if (ret != HS_SUCCESS) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         hs_database_free(tempdb);
         return ret;
     }
@@ -320,7 +312,6 @@ hs_error_t HS_CDECL fat_hs_deserialize_database(const char *bytes,
     fat_db_copy_bytecode(bytes, tempdb);
 
     if (fat_db_check_crc(tempdb) != HS_SUCCESS) {
-        printf("%s %d\n", __FUNCTION__, __LINE__);
         hs_database_free(tempdb);
         return HS_INVALID;
     }
@@ -426,7 +417,7 @@ hs_error_t fat_print_database_string(char **s, u32 version, const platform_t pla
         }
 
         int p_len = SNPRINTF_COMPAT(
-            buf, len, "Version: %u.%u.%u Mode: %s (FAT)",
+            buf, len, "Version: %u.%u.%u Mode: %s",
             major, minor, release, mode);
         if (p_len < 0) {
             DEBUG_PRINTF("snprintf output error, returned %d\n", p_len);

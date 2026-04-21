@@ -1084,7 +1084,7 @@ int HS_CDECL main(int argc, char *argv[]) {
             out_db.open(sqloutFile);
         }
 
-        // ========== 新增：从序列化数据库加载的分支 ==========
+        // ========== 从序列化数据库加载的分支 ==========
         if (loadSerializedDb) {
             unique_ptr<Engine> engine;
             engine = buildEngineFromSerialized(serializedDbPath, scan_mode);
@@ -1138,7 +1138,6 @@ int HS_CDECL main(int argc, char *argv[]) {
                     engine = buildEnginePcre(exprMap, s.name, sigName);
 #endif
                 } else {
-                    printf("%s %d\n", __FUNCTION__, __LINE__);
                     engine = fat_buildEngineHyperscan(exprMap, scan_mode, s.name,
                                                   sigName, *grey);
                 }
