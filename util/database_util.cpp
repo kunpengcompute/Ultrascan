@@ -141,8 +141,19 @@ hs_database_t * loadDatabase(const char *filename, bool verbose) {
         cout << "Reading " << len << " bytes" << endl;
     }
     is.seekg(0, ios::beg);
-    bytes = new char[len];
+    try {
+        bytes = new char[len];
+    } catch (const std::bad_alloc &e) {
+        cout << "Memory allocation failed: " << e.what() << endl;
+        return nullptr;
+    }
     is.read(bytes, len);
+    if (!is) {  // 读取失败
+        delete[] bytes;
+        bytes = nullptr;
+        is.close();
+        return nullptr;
+    }
     is.close();
 #endif
 
