@@ -199,6 +199,8 @@ struct HAOGlobalHashArtifacts {
     u32 fullKeyMask = 0;
     HAOPrimaryHashTable primaryHashTable;
     HAOPrimaryHashBitmap primaryHashBitmap;
+    HAOPrimaryHashTable primaryHashTableRaw;
+    HAOPrimaryHashBitmap primaryHashBitmapRaw;
     std::vector<HAOSecondaryHashEntry> secondaryHashTable;
     HAOGlobalHashStats stats;
 };
@@ -209,6 +211,7 @@ struct HAOCompileArtifacts {
     u32 extractMode = HAO_EXTRACT_MODE_SCALAR;
     u32 windowBytes = HAO_LAYOUT_BYTES_PER_RULE_SLOT;
     u64a bextMask = 0;
+    u64a bextMaskRaw = 0;
     std::vector<HAOBitSelector> bitSelectors;
     std::vector<HAOCompiledRulePlan> haoRulePlans;
     HAOCompileSummary haoSummary;

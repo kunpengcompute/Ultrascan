@@ -5,7 +5,7 @@
 #include "hwlm/hwlm.h"
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 5U
+#define HAO_RUNTIME_VERSION 7U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 #define HAO_RUNTIME_KEY_BITS 22U
@@ -84,9 +84,12 @@ struct HAORuntimeHeader {
     u32 extractMode;
     u32 windowBytes;
     u64a bextMask;
+    u64a bextMaskRaw;
     u32 selectorsOffset;
     u32 primaryBitmapOffset;
     u32 primaryOffset;
+    u32 primaryBitmapRawOffset;
+    u32 primaryRawOffset;
     u32 secondaryOffset;
     u32 ruleMetaOffset;
     u32 literalBlobOffset;
