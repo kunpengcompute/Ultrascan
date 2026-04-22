@@ -56,6 +56,7 @@
 struct NFA;
 struct SmallWriteEngine;
 struct RoseEngine;
+struct x86_RoseEngine;
 
 namespace ue2 {
 
@@ -116,6 +117,8 @@ public:
 
     /** \brief Construct a runtime implementation. */
     virtual bytecode_ptr<RoseEngine> buildRose(u32 minWidth) = 0;
+    virtual bytecode_ptr<x86_RoseEngine> x86_buildRose(u32 minWidth) = 0;
+    virtual bytecode_ptr<RoseEngine> arm_buildRose(u32 minWidth) = 0;
 
     virtual std::unique_ptr<RoseDedupeAux> generateDedupeAux() const = 0;
 
@@ -144,6 +147,8 @@ bool roseCheckRose(const RoseInGraph &ig, bool prefilter,
                    const ReportManager &rm, const CompileContext &cc);
 
 bool roseIsPureLiteral(const RoseEngine *t);
+
+bool x86_roseIsPureLiteral(const x86_RoseEngine *t);
 
 size_t maxOverlap(const ue2_literal &a, const ue2_literal &b, u32 b_delay);
 

@@ -3530,6 +3530,44 @@ bytecode_ptr<RoseEngine> addSmallWriteEngine(const RoseBuildImpl &build,
     return rose2;
 }
 
+
+static
+bytecode_ptr<x86_RoseEngine> x86_addSmallWriteEngine(const RoseBuildImpl &build,
+                                             const RoseResources &res,
+                                             bytecode_ptr<x86_RoseEngine> rose) {
+    assert(rose);
+
+    if (x86_roseIsPureLiteral(rose.get())) {
+        DEBUG_PRINTF("pure literal case, not adding smwr\n");
+        return rose;
+    }
+
+    u32 qual = x86_roseQuality(res, rose.get());
+    auto smwr_engine = build.smwr.build(qual);
+    if (!smwr_engine) {
+        DEBUG_PRINTF("no smwr built\n");
+        return rose;
+    }
+
+    const size_t mainSize = rose.size();
+    const size_t smallWriteSize = smwr_engine.size();
+    DEBUG_PRINTF("adding smwr engine, size=%zu\n", smallWriteSize);
+
+    const size_t smwrOffset = ROUNDUP_CL(mainSize);
+    const size_t newSize = smwrOffset + smallWriteSize;
+
+    auto rose2 = make_zeroed_bytecode_ptr<x86_RoseEngine>(newSize, 64);
+    char *ptr = (char *)rose2.get();
+    memcpy(ptr, rose.get(), mainSize);
+    memcpy(ptr + smwrOffset, smwr_engine.get(), smallWriteSize);
+
+    rose2->smallWriteOffset = verify_u32(smwrOffset);
+    rose2->size = verify_u32(newSize);
+
+    return rose2;
+}
+
+
 static
 bytecode_ptr<RoseEngine> addLily(vector<u8> mask, vector<u32> reportVec, vector<u32> ekeyVec,
                                 u8 flagsQuiet, bytecode_ptr<RoseEngine> rose) {
@@ -3662,7 +3700,7 @@ map<left_id, u32> makeLeftQueueMap(const RoseGraph &g,
     return lqm;
 }
 
-bytecode_ptr<RoseEngine> RoseBuildImpl::buildFinalEngine(u32 minWidth) {
+bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildFinalEngine(u32 minWidth) {
     // We keep all our offsets, counts etc. in a prototype RoseEngine which we
     // will copy into the real one once it is allocated: we can't do this
     // until we know how big it will be.
@@ -3988,5 +4026,294 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::buildFinalEngine(u32 minWidth) {
 
     return engine;
 }
+
+bytecode_ptr<x86_RoseEngine> RoseBuildImpl::x86_buildFinalEngine(u32 minWidth) {
+    // We keep all our offsets, counts etc. in a prototype RoseEngine which we
+    // will copy into the real one once it is allocated: we can't do this
+    // until we know how big it will be.
+    RoseEngine proto;
+    memset(&proto, 0, sizeof(proto));
+
+    // Set scanning mode.
+    if (!cc.streaming) {
+        proto.mode = HS_MODE_BLOCK;
+    } else if (cc.vectored) {
+        proto.mode = HS_MODE_VECTORED;
+    } else {
+        proto.mode = HS_MODE_STREAM;
+    }
+
+    DerivedBoundaryReports dboundary(boundary);
+
+    size_t historyRequired = calcHistoryRequired(); // Updated by HWLM.
+    size_t longLitLengthThreshold = calcLongLitThreshold(*this,
+                                                         historyRequired);
+    DEBUG_PRINTF("longLitLengthThreshold=%zu\n", longLitLengthThreshold);
+
+    vector<LitFragment> fragments = groupByFragment(*this);
+
+    auto anchored_dfas = buildAnchoredDfas(*this, fragments);
+
+    build_context bc;
+    u32 floatingMinLiteralMatchOffset
+        = findMinFloatingLiteralMatch(*this, anchored_dfas);
+    recordResources(bc.resources, *this, anchored_dfas, fragments);
+    bc.needs_mpv_catchup = needsMpvCatchup(*this);
+
+    makeBoundaryPrograms(*this, bc, boundary, dboundary, proto.boundary);
+
+    tie(proto.reportProgramOffset, proto.reportProgramCount) =
+        buildReportPrograms(*this, bc);
+
+    // Build NFAs
+    bool mpv_as_outfix;
+    prepMpv(*this, bc, &historyRequired, &mpv_as_outfix);
+    proto.outfixBeginQueue = qif.allocated_count();
+    if (!prepOutfixes(*this, bc, &historyRequired)) {
+        return nullptr;
+    }
+    proto.outfixEndQueue = qif.allocated_count();
+    proto.leftfixBeginQueue = proto.outfixEndQueue;
+
+    set<u32> no_retrigger_queues;
+    set<u32> eager_queues;
+
+    /* Note: buildNfas may reduce the lag for vertices that have prefixes */
+    if (!buildNfas(*this, bc, qif, &no_retrigger_queues, &eager_queues,
+                   &proto.leftfixBeginQueue)) {
+        return nullptr;
+    }
+    u32 eodNfaIterOffset = buildEodNfaIterator(bc, proto.leftfixBeginQueue);
+    buildCountingMiracles(bc);
+
+    u32 queue_count = qif.allocated_count(); /* excludes anchored matcher q;
+                                              * som rev nfas */
+    if (queue_count > cc.grey.limitRoseEngineCount) {
+        throw ResourceLimitError();
+    }
+
+    // Enforce role table resource limit.
+    if (num_vertices(g) > cc.grey.limitRoseRoleCount) {
+        throw ResourceLimitError();
+    }
+
+    bc.roleStateIndices = assignStateIndices(*this);
+
+    u32 laggedRoseCount = 0;
+    vector<LeftNfaInfo> leftInfoTable;
+    buildLeftInfoTable(*this, bc, eager_queues, proto.leftfixBeginQueue,
+                       queue_count - proto.leftfixBeginQueue, leftInfoTable,
+                       &laggedRoseCount, &historyRequired);
+
+    // Information only needed for program construction.
+    ProgramBuild prog_build(floatingMinLiteralMatchOffset,
+                            longLitLengthThreshold, needsCatchup(*this));
+    prog_build.vertex_group_map = getVertexGroupMap(*this);
+    prog_build.squashable_groups = getSquashableGroups(*this);
+
+    tie(proto.anchoredProgramOffset, proto.anchored_count) =
+        writeAnchoredPrograms(*this, fragments, bc, prog_build);
+
+    tie(proto.delayProgramOffset, proto.delay_count) =
+        writeDelayPrograms(*this, fragments, bc, prog_build);
+
+    // Build floating HWLM matcher prototype.
+    rose_group fgroups = 0;
+    auto fproto = buildFloatingMatcherProto(*this, fragments,
+                                            longLitLengthThreshold,
+                                            &fgroups, &historyRequired);
+
+    // Build delay rebuild HWLM matcher prototype.
+    auto drproto = buildDelayRebuildMatcherProto(*this, fragments,
+                                                 longLitLengthThreshold);
+
+    // Build EOD-anchored HWLM matcher prototype.
+    auto eproto = buildEodAnchoredMatcherProto(*this, fragments);
+
+    // Build small-block HWLM matcher prototype.
+    auto sbproto = buildSmallBlockMatcherProto(*this, fragments);
+
+    buildLiteralPrograms(*this, fragments, bc, prog_build, fproto.get(),
+                         drproto.get(), eproto.get(), sbproto.get());
+
+    auto eod_prog = makeEodProgram(*this, bc, prog_build, eodNfaIterOffset);
+    proto.eodProgramOffset = writeProgram(bc, move(eod_prog));
+
+    size_t longLitStreamStateRequired = 0;
+    proto.longLitTableOffset
+        = buildLongLiteralTable(*this, bc.engine_blob, bc.longLiterals,
+                                longLitLengthThreshold, &historyRequired,
+                                &longLitStreamStateRequired);
+
+    proto.lastByteHistoryIterOffset = buildLastByteIter(g, bc);
+    proto.eagerIterOffset = writeEagerQueueIter(
+        eager_queues, proto.leftfixBeginQueue, queue_count, bc.engine_blob);
+
+    addSomRevNfas(bc, proto, ssm);
+
+    writeDkeyInfo(rm, bc.engine_blob, proto);
+    writeLeftInfo(bc.engine_blob, proto, leftInfoTable);
+    writeLogicalInfo(rm, bc.engine_blob, proto);
+
+    auto flushComb_prog = makeFlushCombProgram(proto);
+    proto.flushCombProgramOffset = writeProgram(bc, move(flushComb_prog));
+
+    auto lastFlushComb_prog = makeLastFlushCombProgram(proto);
+    proto.lastFlushCombProgramOffset =
+        writeProgram(bc, move(lastFlushComb_prog));
+
+    // Build anchored matcher.
+    auto atable = buildAnchoredMatcher(*this, fragments, anchored_dfas);
+    if (atable) {
+        proto.amatcherOffset = bc.engine_blob.add(atable);
+    }
+
+    // Build floating HWLM matcher.
+    auto ftable = buildHWLMMatcher(*this, fproto.get());
+    if (ftable) {
+        proto.fmatcherOffset = bc.engine_blob.add(ftable);
+        bc.resources.has_floating = true;
+    }
+
+    // Build delay rebuild HWLM matcher.
+    auto drtable = buildHWLMMatcher(*this, drproto.get());
+    if (drtable) {
+        proto.drmatcherOffset = bc.engine_blob.add(drtable);
+    }
+
+    // Build EOD-anchored HWLM matcher.
+    auto etable = buildHWLMMatcher(*this, eproto.get());
+    if (etable) {
+        proto.ematcherOffset = bc.engine_blob.add(etable);
+    }
+
+    // Build small-block HWLM matcher.
+    auto sbtable = buildHWLMMatcher(*this, sbproto.get());
+    if (sbtable) {
+        proto.sbmatcherOffset = bc.engine_blob.add(sbtable);
+    }
+
+    proto.activeArrayCount = proto.leftfixBeginQueue;
+
+    proto.anchorStateSize = atable ? anchoredStateSize(*atable) : 0;
+
+    DEBUG_PRINTF("rose history required %zu\n", historyRequired);
+    assert(!cc.streaming || historyRequired <= cc.grey.maxHistoryAvailable);
+
+    // Some SOM schemes (reverse NFAs, for example) may require more history.
+    historyRequired = max(historyRequired, (size_t)ssm.somHistoryRequired());
+
+    assert(!cc.streaming || historyRequired <=
+           max(cc.grey.maxHistoryAvailable, cc.grey.somMaxRevNfaLength));
+
+    fillStateOffsets(*this, bc.roleStateIndices.size(), proto.anchorStateSize,
+                     proto.activeArrayCount, proto.activeLeftCount,
+                     laggedRoseCount, longLitStreamStateRequired,
+                     historyRequired, &proto.stateOffsets);
+
+    // Write in NfaInfo structures. This will also update state size
+    // information in proto.
+    writeNfaInfo(*this, bc, proto, no_retrigger_queues);
+
+    scatter_plan_raw state_scatter = buildStateScatterPlan(
+        sizeof(u8), bc.roleStateIndices.size(), proto.activeLeftCount,
+        proto.rosePrefixCount, proto.stateOffsets, cc.streaming,
+        proto.activeArrayCount, proto.outfixBeginQueue, proto.outfixEndQueue);
+
+    u32 currOffset;  /* relative to base of RoseEngine */
+    if (!bc.engine_blob.empty()) {
+        currOffset = bc.engine_blob.base_offset + bc.engine_blob.size();
+    } else {
+        currOffset = sizeof(RoseEngine);
+    }
+
+    currOffset = ROUNDUP_CL(currOffset);
+    DEBUG_PRINTF("currOffset %u\n", currOffset);
+
+    currOffset = ROUNDUP_N(currOffset, alignof(scatter_unit_u64a));
+    u32 state_scatter_aux_offset = currOffset;
+    currOffset += aux_size(state_scatter);
+
+    proto.historyRequired = verify_u32(historyRequired);
+    proto.ekeyCount = rm.numEkeys();
+
+    proto.somHorizon = ssm.somPrecision();
+    proto.somLocationCount = ssm.numSomSlots();
+    proto.somLocationFatbitSize = fatbit_size(proto.somLocationCount);
+
+    proto.runtimeImpl = pickRuntimeImpl(*this, bc.resources,
+                                        proto.outfixEndQueue);
+    proto.mpvTriggeredByLeaf = anyEndfixMpvTriggers(*this);
+
+    proto.queueCount = queue_count;
+    proto.activeQueueArraySize = fatbit_size(queue_count);
+    proto.handledKeyCount = prog_build.handledKeys.size();
+    proto.handledKeyFatbitSize = fatbit_size(proto.handledKeyCount);
+
+    proto.rolesWithStateCount = bc.roleStateIndices.size();
+
+    proto.initMpvNfa = mpv_as_outfix ? 0 : MO_INVALID_IDX;
+    proto.stateSize = mmbit_size(bc.roleStateIndices.size());
+
+    proto.delay_fatbit_size = fatbit_size(proto.delay_count);
+    proto.anchored_fatbit_size = fatbit_size(proto.anchored_count);
+
+    // The Small Write matcher is (conditionally) added to the RoseEngine in
+    // another pass by the caller. Set to zero (meaning no SMWR engine) for
+    // now.
+    proto.smallWriteOffset = 0;
+    proto.lilyOffset = 0;
+    proto.lilyForTeddyOffset = 0;
+    proto.amatcherMinWidth = findMinWidth(*this, ROSE_ANCHORED);
+    proto.fmatcherMinWidth = findMinWidth(*this, ROSE_FLOATING);
+    proto.eodmatcherMinWidth = findMinWidth(*this, ROSE_EOD_ANCHORED);
+    proto.amatcherMaxBiAnchoredWidth = findMaxBAWidth(*this, ROSE_ANCHORED);
+    proto.fmatcherMaxBiAnchoredWidth = findMaxBAWidth(*this, ROSE_FLOATING);
+    proto.minWidth = hasBoundaryReports(boundary) ? 0 : minWidth;
+    proto.minWidthExcludingBoundaries = minWidth;
+    proto.floatingMinLiteralMatchOffset = floatingMinLiteralMatchOffset;
+
+    proto.maxBiAnchoredWidth = findMaxBAWidth(*this);
+    proto.noFloatingRoots = hasNoFloatingRoots();
+    proto.requiresEodCheck = hasEodAnchors(*this, bc, proto.outfixEndQueue);
+    proto.hasOutfixesInSmallBlock = hasNonSmallBlockOutfix(outfixes);
+    proto.canExhaust = rm.patternSetCanExhaust();
+    proto.hasSom = hasSom;
+
+    /* populate anchoredDistance, floatingDistance, floatingMinDistance, etc */
+    fillMatcherDistances(*this, &proto);
+
+    proto.initialGroups = getInitialGroups();
+    proto.floating_group_mask = fgroups;
+    proto.totalNumLiterals = verify_u32(literal_info.size());
+    proto.asize = verify_u32(atable.size());
+    proto.ematcherRegionSize = ematcher_region_size;
+
+    proto.size = currOffset;
+
+    // Time to allocate the real RoseEngine structure, at cacheline alignment.
+    auto engine = make_zeroed_bytecode_ptr<x86_RoseEngine>(currOffset, 64);
+    assert(engine); // will have thrown bad_alloc otherwise.
+
+    // Copy in our prototype engine data.
+    memcpy(engine.get(), &proto, sizeof(proto));
+
+    write_out(&engine->state_init, (char *)engine.get(), state_scatter,
+              state_scatter_aux_offset);
+
+    // Copy in the engine blob.
+    bc.engine_blob.x86_write_bytes(engine.get());
+
+    // Add a small write engine if appropriate.
+    engine = x86_addSmallWriteEngine(*this, bc.resources, move(engine));
+
+    DEBUG_PRINTF("rose done %p\n", engine.get());
+
+    // dumpRose(*this, fragments, makeLeftQueueMap(g, bc.leftfix_info),
+    //          bc.suffixes, engine.get());
+
+    return engine;
+}
+
 
 } // namespace ue2

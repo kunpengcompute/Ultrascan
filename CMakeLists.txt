@@ -652,6 +652,8 @@ set (hs_exec_common_SRCS
     src/util/cpuid_flags.c
     src/util/cpuid_flags.h
     src/util/multibit.c
+    src/fat_database.c
+    src/fat_database.h
     )
 
 set (hs_exec_SRCS
@@ -800,6 +802,7 @@ set (hs_exec_SRCS
     src/util/uniform_ops.h
     src/database.c
     src/database.h
+    src/database_common.h
 )
 
 set (hs_exec_avx2_SRCS
@@ -811,7 +814,9 @@ set (hs_exec_avx2_SRCS
 SET (hs_compile_SRCS
     ${hs_HEADERS}
     src/crc32.h
+    src/database_common.h
     src/database.h
+    src/fat_database.h
     src/grey.cpp
     src/grey.h
     src/hs.cpp

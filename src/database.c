@@ -32,6 +32,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "allocator.h"
 #include "hs_common.h"
@@ -370,13 +371,6 @@ hs_error_t print_database_string(char **s, u32 version, const platform_t plat,
     u8 release = (version >> 8) & 0xff;
     u8 minor = (version >> 16) & 0xff;
     u8 major = (version >> 24) & 0xff;
-
-    const char *features = (plat & HS_PLATFORM_NOAVX512VBMI)
-                               ? (plat & HS_PLATFORM_NOAVX512)
-                                   ? (plat & HS_PLATFORM_NOAVX2) ? "" : "AVX2"
-                                   : "AVX512"
-                               : "AVX512VBMI";
-
     const char *mode = NULL;
 
     if (raw_mode == HS_MODE_STREAM) {
@@ -402,9 +396,7 @@ hs_error_t print_database_string(char **s, u32 version, const platform_t plat,
 
         // Note: SNPRINTF_COMPAT is a macro defined above, to cope with systems
         // that don't have snprintf but have a workalike.
-        int p_len = SNPRINTF_COMPAT(
-            buf, len, "Version: %u.%u.%u Features: %s Mode: %s",
-            major, minor, release, features, mode);
+        int p_len = SNPRINTF_COMPAT(buf, len, "Version: %u.%u.%u Mode: %s", major, minor, release, mode);
         if (p_len < 0) {
             DEBUG_PRINTF("snprintf output error, returned %d\n", p_len);
             hs_misc_free(buf);

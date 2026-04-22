@@ -538,6 +538,14 @@ hs_error_t HS_CDECL hs_compile_ext_multi(const char *const *expressions,
                                 unsigned int elements, unsigned int mode,
                                 const hs_platform_info_t *platform,
                                 hs_database_t **db, hs_compile_error_t **error);
+hs_error_t HS_CDECL fat_hs_compile_ext_multi(const char *const *expressions,
+                                const unsigned int *flags,
+                                const unsigned int *ids,
+                                const hs_expr_ext_t *const *ext,
+                                unsigned int elements, unsigned int mode,
+                                const hs_platform_info_t *platform,
+                                fat_hs_database_t **db,
+                                hs_compile_error_t **error);
 
 /**
  * The basic pure literal expression compiler.
@@ -694,6 +702,14 @@ hs_error_t HS_CDECL hs_compile_lit_multi(const char * const *expressions,
                                          unsigned elements, unsigned mode,
                                          const hs_platform_info_t *platform,
                                          hs_database_t **db,
+                                         hs_compile_error_t **error);
+hs_error_t HS_CDECL fat_hs_compile_lit_multi(const char * const *expressions,
+                                         const unsigned *flags,
+                                         const unsigned *ids,
+                                         const size_t *lens,
+                                         unsigned elements, unsigned mode,
+                                         const hs_platform_info_t *platform,
+                                         fat_hs_database_t **db,
                                          hs_compile_error_t **error);
 
 /**

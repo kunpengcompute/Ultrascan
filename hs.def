@@ -41,3 +41,12 @@ EXPORTS
    hs_stream_size
    hs_valid_platform
    hs_version
+   fat_hs_database functions
+   fat_hs_free_database
+   fat_hs_serialize_database
+   fat_hs_deserialize_database
+   fat_hs_deserialize_database_at
+   fat_hs_database_size
+   fat_hs_serialized_database_size
+   fat_hs_serialized_database_info
+   fat_hs_database_info

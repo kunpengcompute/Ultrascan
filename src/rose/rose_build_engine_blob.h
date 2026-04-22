@@ -147,6 +147,10 @@ public:
         copy_bytes((char *)engine + base_offset, blob);
     }
 
+    void x86_write_bytes(x86_RoseEngine *engine) {
+        copy_bytes((char *)engine + base_offset, blob);
+    }
+
     lookaround_info lookaround_cache;
 
 private:

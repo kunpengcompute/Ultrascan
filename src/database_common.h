@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Intel Corporation
+ * Copyright (c) 2015-2020, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -26,23 +26,78 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ROSE_BUILD_MISC_H
-#define ROSE_BUILD_MISC_H
+/** \file
+ * \brief Runtime code for hs_database common manipulation.
+ */
 
-#include "ue2common.h"
+#ifndef DATABASE_COMMMON_H_D467FD6F343DDA
+#define DATABASE_COMMMON_H_D467FD6F343DDA
 
-struct RoseEngine;
-struct x86_RoseEngine;
-
-namespace ue2 {
-
-struct RoseResources;
-
-/* used by heuristics to determine the small write engine. High numbers are
- * intended to indicate a lightweight rose. */
-u32 roseQuality(const RoseResources &res, const RoseEngine *rose);
-u32 x86_roseQuality(const RoseResources &res, const x86_RoseEngine *rose);
-
-}
-
+#ifdef __cplusplus
+extern "C"
+{
 #endif
+
+#include "hs_compile.h" // for HS_MODE_ flags
+#include "hs_version.h"
+#include "ue2common.h"
+#include "util/arch.h"
+
+#define HS_DB_VERSION HS_VERSION_32BIT
+#define HS_DB_MAGIC   (0xdbdbdbdbU)
+
+// Values in here cannot (easily) change - add new ones!
+
+// CPU type is the low 6 bits (we can't need more than 64, surely!)
+
+#define HS_PLATFORM_INTEL           1
+#define HS_PLATFORM_CPU_MASK        0x3F
+
+#define HS_PLATFORM_NOAVX2          (4<<13)
+#define HS_PLATFORM_NOAVX512        (8<<13)
+#define HS_PLATFORM_NOAVX512VBMI    (0x10<<13)
+
+/** \brief Platform features bitmask. */
+typedef u64a platform_t;
+
+static UNUSED
+const platform_t hs_current_platform = {
+#if !defined(HAVE_AVX2)
+    HS_PLATFORM_NOAVX2 |
+#endif
+#if !defined(HAVE_AVX512)
+    HS_PLATFORM_NOAVX512 |
+#endif
+#if !defined(HAVE_AVX512VBMI)
+    HS_PLATFORM_NOAVX512VBMI |
+#endif
+    0,
+};
+
+static UNUSED
+const platform_t hs_current_platform_no_avx2 = {
+    HS_PLATFORM_NOAVX2 |
+    HS_PLATFORM_NOAVX512 |
+    HS_PLATFORM_NOAVX512VBMI |
+    0,
+};
+
+static UNUSED
+const platform_t hs_current_platform_no_avx512 = {
+    HS_PLATFORM_NOAVX512 |
+    HS_PLATFORM_NOAVX512VBMI |
+    0,
+};
+
+static UNUSED
+const platform_t hs_current_platform_no_avx512vbmi = {
+    HS_PLATFORM_NOAVX512VBMI |
+    0,
+};
+
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
+
+#endif /* DATABASE_H_D467FD6F343DDE */

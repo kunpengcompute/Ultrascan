@@ -30,13 +30,12 @@
  * \brief Runtime code for hs_database manipulation.
  */
 
-#ifndef DATABASE_H_D467FD6F343DDE
-#define DATABASE_H_D467FD6F343DDE
+#ifndef FAT_DATABASE_H_D467FD6F343DDF
+#define FAT_DATABASE_H_D467FD6F343DDF
 #ifdef __cplusplus
 extern "C"
 {
 #endif
-
 #include "database_common.h"
 #include "hs_compile.h" // for HS_MODE_ flags
 #include "hs_version.h"
@@ -44,25 +43,34 @@ extern "C"
 #include "util/arch.h"
 
 /*
- * a header to enclose the actual bytecode - useful for keeping info about the
+ * a header to enclose the actual fat bytecode - useful for keeping info about the
  * compiled data.
  */
-struct hs_database {
+struct fat_hs_database {
     u32 magic;
     u32 version;
-    u32 length;
+    u32 x86_length;
+    u32 arm_length;
     u64a platform;
-    u32 crc32;
+    u32 arm_crc32;
+    u32 x86_crc32;
     u32 reserved0;
     u32 reserved1;
-    u32 bytecode;    // offset relative to db start
+    u32 x86_bytecode; // offset of x86 bytecode relative to db start
+    u32 arm_bytecode; // offset of arm bytecode relative to db start
     u32 padding[16];
     char bytes[];
 };
 
 static really_inline
-const void *hs_get_bytecode(const struct hs_database *db) {
-    return ((const char *)db + db->bytecode);
+const void *fat_hs_get_bytecode(const struct fat_hs_database *db) {
+#if defined(ARCH_X86_64)
+    return ((const char *)db + db->x86_bytecode);
+#elif defined(ARCH_AARCH64)
+    return ((const char *)db + db->arm_bytecode);
+#else
+    return ((const char *)db + db->x86_bytecode);
+#endif
 }
 
 /**
@@ -70,7 +78,7 @@ const void *hs_get_bytecode(const struct hs_database *db) {
  * mode open calls.
  */
 static really_inline
-hs_error_t validDatabase(const hs_database_t *db) {
+hs_error_t fat_validDatabase(const fat_hs_database_t *db) {
     if (!db || db->magic != HS_DB_MAGIC) {
         return HS_INVALID;
     }
@@ -81,7 +89,7 @@ hs_error_t validDatabase(const hs_database_t *db) {
     return HS_SUCCESS;
 }
 
-hs_error_t dbIsValid(const struct hs_database *db);
+hs_error_t fat_dbIsValid(const struct fat_hs_database *db);
 
 #ifdef __cplusplus
 } /* extern "C" */

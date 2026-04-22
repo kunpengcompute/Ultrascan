@@ -241,6 +241,10 @@ bool roseIsPureLiteral(const RoseEngine *t) {
     return t->runtimeImpl == ROSE_RUNTIME_PURE_LITERAL;
 }
 
+bool x86_roseIsPureLiteral(const x86_RoseEngine *t) {
+    return t->runtimeImpl == ROSE_RUNTIME_PURE_LITERAL;
+}
+
 // Returns non-zero max overlap len if a suffix of the literal 'a' overlaps
 // with a prefix of the literal 'b' or 'a' can be contained in 'b'.
 size_t maxOverlap(const ue2_literal &a, const ue2_literal &b, u32 b_delay) {
@@ -854,6 +858,73 @@ u32 roseQuality(const RoseResources &res, const RoseEngine *t) {
     bool eod_prefix = false;
 
     const LeftNfaInfo *left = getLeftTable(t);
+    for (u32 i = 0; i < t->activeLeftCount; i++) {
+        if (left->eod_check) {
+            eod_prefix = true;
+            break;
+        }
+    }
+
+    if (eod_prefix) {
+        always_run++;
+        DEBUG_PRINTF("eod prefixes are slow");
+        return 0;
+    }
+
+    if (always_run > 1) {
+        DEBUG_PRINTF("we always run %u engines\n", always_run);
+        return 0;
+    }
+
+    return 1;
+}
+
+
+u32 x86_roseQuality(const RoseResources &res, const x86_RoseEngine *t) {
+    /* Rose is low quality if the atable is a Mcclellan 16 or has multiple DFAs
+     */
+    if (res.has_anchored) {
+        if (res.has_anchored_multiple) {
+            DEBUG_PRINTF("multiple atable engines\n");
+            return 0;
+        }
+
+        if (res.has_anchored_large) {
+            DEBUG_PRINTF("m16 atable engine\n");
+            return 0;
+        }
+    }
+
+    /* if we always run multiple engines then we are slow */
+    u32 always_run = 0;
+
+    if (res.has_anchored) {
+        always_run++;
+    }
+
+    if (t->eagerIterOffset) {
+        /* eager prefixes are always run */
+        always_run++;
+    }
+
+    if (res.has_floating) {
+        /* TODO: ignore conditional ftables, or ftables beyond smwr region */
+        always_run++;
+    }
+
+    if (t->ematcherOffset) {
+        always_run++;
+    }
+
+    /* ignore mpv outfixes as they are v good, mpv outfixes are before begin */
+    if (t->outfixBeginQueue != t->outfixEndQueue) {
+        /* TODO: ignore outfixes > smwr region */
+        always_run++;
+    }
+
+    bool eod_prefix = false;
+
+    const LeftNfaInfo *left = x86_getLeftTable(t);
     for (u32 i = 0; i < t->activeLeftCount; i++) {
         if (left->eod_check) {
             eod_prefix = true;
