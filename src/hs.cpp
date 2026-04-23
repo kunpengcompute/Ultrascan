@@ -312,8 +312,8 @@ fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
         //===== 编译arm字节码 根据config.txt获取===================
         Grey arm_grey = g;
 
-        CompileContext arm_cc(isStreaming, isVectored, target_info, x86_grey);
-        NG arm_ng(x86_cc, elements, somPrecision);
+        CompileContext arm_cc(isStreaming, isVectored, target_info, arm_grey);
+        NG arm_ng(arm_cc, elements, somPrecision);
 
         if (count_2_4_byte_literals > 8) {
             DEBUG_PRINTF("More than 8 2-4 rules exist, will not start lilyForTeddy\n");
