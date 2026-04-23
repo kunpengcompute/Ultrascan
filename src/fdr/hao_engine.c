@@ -19,7 +19,7 @@
 #include <stdint.h>
 #include <arm_sve.h>
 
-// #define HAO_BITMAP_CACHE_LOCK /* 取消注释开启L0 cache */
+#define HAO_BITMAP_CACHE_LOCK /* 取消注释开启L0 cache */
 
 #ifndef HAO_SVE_WORD_LEVEL_BITMAP_PROBE
 #define HAO_SVE_WORD_LEVEL_BITMAP_PROBE 0
@@ -42,7 +42,7 @@
 #endif
 
 #ifndef HAO_SVE_STREAM32_BYTE
-#define HAO_SVE_STREAM32_BYTE 1
+#define HAO_SVE_STREAM32_BYTE 0
 #endif
 
 #ifndef HAO_SVE_STREAM32_BYTE_V2
@@ -52,32 +52,35 @@
 #ifdef HAO_BITMAP_CACHE_LOCK
 #define DEV       "/dev/hisi_soc_cache_mgmt"
 #define ALIGN_1MB (1UL * 1024 * 1024)
-#define MAP_SIZE  (1UL * 1024 * 1024)   /* 若 512KB 触发 EINVAL 可改为 1MB */
+#define MAP_SIZE  (1UL * 1024 * 1024)
 #endif
 
-/* ═══════════════════════════════════════════════════
- * Cache 锁定内存管理（仅在开关打开时编译）
- * ═══════════════════════════════════════════════════ */
 #ifdef HAO_BITMAP_CACHE_LOCK
 
 typedef struct {
     void *addr;
-    int   fd;
+    int fd;
 } CacheMem;
 
 static CacheMem cache_alloc(size_t size)
 {
     CacheMem cm = {NULL, -1};
-    int retry   = 5;
+    int retry = 5;
 
     cm.fd = open(DEV, O_RDWR);
-    if (cm.fd < 0) { perror("open " DEV); return cm; }
+    if (cm.fd < 0) {
+        perror("open " DEV);
+        return cm;
+    }
 
     while (retry-- > 0) {
         void *probe = mmap(NULL, MAP_SIZE + ALIGN_1MB,
                            PROT_READ | PROT_WRITE,
                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (probe == MAP_FAILED) { perror("probe mmap"); break; }
+        if (probe == MAP_FAILED) {
+            perror("probe mmap");
+            break;
+        }
 
         void *aligned = ((uintptr_t)probe % ALIGN_1MB == 0)
             ? probe
@@ -86,17 +89,22 @@ static CacheMem cache_alloc(size_t size)
 
         munmap(probe, MAP_SIZE + ALIGN_1MB);
 
-        void *addr = mmap(aligned, MAP_SIZE,
-                          PROT_READ | PROT_WRITE,
-                          MAP_SHARED, cm.fd, 0);
-        if (addr == MAP_FAILED) {
-            if (errno == EINVAL) { continue; }
-            perror("device mmap"); break;
-        }
+        {
+            void *addr = mmap(aligned, MAP_SIZE,
+                              PROT_READ | PROT_WRITE,
+                              MAP_SHARED, cm.fd, 0);
+            if (addr == MAP_FAILED) {
+                if (errno == EINVAL) {
+                    continue;
+                }
+                perror("device mmap");
+                break;
+            }
 
-        memset(addr, 0, MAP_SIZE);
-        cm.addr = addr;
-        return cm;
+            memset(addr, 0, MAP_SIZE);
+            cm.addr = addr;
+            return cm;
+        }
     }
 
     close(cm.fd);
@@ -106,18 +114,33 @@ static CacheMem cache_alloc(size_t size)
 
 static void cache_free(CacheMem *cm)
 {
-    if (cm->addr)  { munmap(cm->addr, MAP_SIZE); cm->addr = NULL; }
-    if (cm->fd >= 0) { close(cm->fd);            cm->fd   = -1;  }
+    if (cm->addr) {
+        munmap(cm->addr, MAP_SIZE);
+        cm->addr = NULL;
+    }
+    if (cm->fd >= 0) {
+        close(cm->fd);
+        cm->fd = -1;
+    }
 }
 
 typedef struct {
-    CacheMem  cm;
-    u8       *bitmap;
-    u32       bitmapSize;
+    CacheMem cm;
+    u8 *bitmap;
+    u32 bitmapSize;
 } HaoBitmapCtx;
 
+typedef struct {
+    const struct HAORuntimeHeader *hdr;
+    const u8 *srcBitmap;
+    u32 srcSize;
+    HaoBitmapCtx ctx;
+    u8 initialized;
+    u8 destroyRegistered;
+} HaoBitmapCache;
+
 static int hao_bitmap_ctx_init(HaoBitmapCtx *ctx,
-                                const u8 *src_bitmap, u32 src_size)
+                               const u8 *src_bitmap, u32 src_size)
 {
     if (src_size > MAP_SIZE) {
         fprintf(stderr, "[cache] bitmap too large: %u > %lu\n",
@@ -125,10 +148,12 @@ static int hao_bitmap_ctx_init(HaoBitmapCtx *ctx,
         return -1;
     }
     ctx->cm = cache_alloc(src_size);
-    if (!ctx->cm.addr) return -1;
+    if (!ctx->cm.addr) {
+        return -1;
+    }
 
     memcpy(ctx->cm.addr, src_bitmap, src_size);
-    ctx->bitmap     = (u8 *)ctx->cm.addr;
+    ctx->bitmap = (u8 *)ctx->cm.addr;
     ctx->bitmapSize = src_size;
     return 0;
 }
@@ -136,45 +161,80 @@ static int hao_bitmap_ctx_init(HaoBitmapCtx *ctx,
 static void hao_bitmap_ctx_destroy(HaoBitmapCtx *ctx)
 {
     cache_free(&ctx->cm);
-    ctx->bitmap     = NULL;
+    ctx->bitmap = NULL;
     ctx->bitmapSize = 0;
 }
 
-/* 内部宏：初始化 Cache 锁定 bitmap，失败自动降级 */
-#define HAO_BITMAP_INIT(ctx, src_bitmap, src_size)                      \
-    HaoBitmapCtx ctx;                                                   \
-    do {                                                                \
-        if (hao_bitmap_ctx_init(&ctx, src_bitmap, src_size) != 0) {    \
-            fprintf(stderr, "[cache] init failed, fallback\n");        \
-            ctx.bitmap     = (u8 *)(src_bitmap);                       \
-            ctx.bitmapSize = (src_size);                               \
-            ctx.cm.addr    = NULL;                                      \
-            ctx.cm.fd      = -1;                                        \
-        }                                                               \
-    } while (0)
+static HaoBitmapCache g_haoBitmapCache = {0};
 
-#define HAO_BITMAP_PTR(ctx)     ((ctx).bitmap)
-#define HAO_BITMAP_DESTROY(ctx) hao_bitmap_ctx_destroy(&(ctx))
-
-#else  /* HAO_BITMAP_CACHE_LOCK 未定义：零开销路径 */
-
-/* 退化为普通指针，编译器会完全优化掉所有开销 */
-typedef struct {
-    u8  *bitmap;
-    u32  bitmapSize;
-} HaoBitmapCtx;
-
-#define HAO_BITMAP_INIT(ctx, src_bitmap, src_size)  \
-    HaoBitmapCtx ctx = {                            \
-        .bitmap     = (u8 *)(src_bitmap),           \
-        .bitmapSize = (src_size),                   \
+static void hao_bitmap_cache_destroy(void)
+{
+    if (!g_haoBitmapCache.initialized) {
+        return;
     }
 
-#define HAO_BITMAP_PTR(ctx)     ((ctx).bitmap)
-#define HAO_BITMAP_DESTROY(ctx) ((void)0)           /* 空操作 */
+    hao_bitmap_ctx_destroy(&g_haoBitmapCache.ctx);
+    g_haoBitmapCache.hdr = NULL;
+    g_haoBitmapCache.srcBitmap = NULL;
+    g_haoBitmapCache.srcSize = 0;
+    g_haoBitmapCache.initialized = 0;
+}
+
+static const u8 *hao_bitmap_cache_get(const struct HAORuntimeHeader *hdr,
+                                      const u8 *src_bitmap, u32 src_size)
+{
+    if (!hdr || !src_bitmap || !src_size) {
+        return src_bitmap;
+    }
+
+    if (g_haoBitmapCache.initialized &&
+        g_haoBitmapCache.hdr == hdr &&
+        g_haoBitmapCache.srcBitmap == src_bitmap &&
+        g_haoBitmapCache.srcSize == src_size &&
+        g_haoBitmapCache.ctx.bitmap) {
+        return g_haoBitmapCache.ctx.bitmap;
+    }
+
+    if (g_haoBitmapCache.initialized) {
+        hao_bitmap_cache_destroy();
+    }
+
+    if (!g_haoBitmapCache.destroyRegistered) {
+        atexit(hao_bitmap_cache_destroy);
+        g_haoBitmapCache.destroyRegistered = 1;
+    }
+
+    if (hao_bitmap_ctx_init(&g_haoBitmapCache.ctx, src_bitmap, src_size) != 0) {
+        fprintf(stderr, "[cache] init failed, fallback\n");
+        g_haoBitmapCache.ctx.bitmap = (u8 *)src_bitmap;
+        g_haoBitmapCache.ctx.bitmapSize = src_size;
+        g_haoBitmapCache.ctx.cm.addr = NULL;
+        g_haoBitmapCache.ctx.cm.fd = -1;
+    }
+
+    g_haoBitmapCache.hdr = hdr;
+    g_haoBitmapCache.srcBitmap = src_bitmap;
+    g_haoBitmapCache.srcSize = src_size;
+    g_haoBitmapCache.initialized = 1;
+    return g_haoBitmapCache.ctx.bitmap;
+}
+
+#else
+
+typedef struct {
+    u8 *bitmap;
+    u32 bitmapSize;
+} HaoBitmapCtx;
+
+static const u8 *hao_bitmap_cache_get(const struct HAORuntimeHeader *hdr,
+                                      const u8 *src_bitmap, u32 src_size)
+{
+    (void)hdr;
+    (void)src_size;
+    return src_bitmap;
+}
 
 #endif /* HAO_BITMAP_CACHE_LOCK */
-
 static struct HAORuntimeStats g_haoStats;
 static int g_haoStatsForceEnabled;
 static int g_haoStatsEnvEnabled = -1;
@@ -547,7 +607,7 @@ static void haoDumpRuntimeStats(void) {
     HAO_STAT_FMT("activePct(L1命中率)",                       "%.5f",
         haoStatsPct(g_haoStats.primaryActiveLanes, g_haoStats.primaryProbeLanes));
 
-    fprintf(stderr, "[HAO][L2/二级过滤]\n");
+    fprintf(stderr, "[HAO][L2/二级哈希]\n");
     HAO_STAT_FMT("rangeCalls(L2范围处理次数)",                "%llu", (unsigned long long)g_haoStats.encodedRangeCalls);
     HAO_STAT_FMT("rangeReportCalls(L2产生报告的lane数)",      "%llu", (unsigned long long)g_haoStats.encodedRangeReportCalls);
     HAO_STAT_FMT("entriesVisited(L2访问entry数)",             "%llu", (unsigned long long)g_haoStats.encodedEntriesVisited);
@@ -588,13 +648,13 @@ static void haoDumpRuntimeStats(void) {
     HAO_STAT_FMT("rangeCollisionPct(L2命中冲突桶占比)",       "%.5f",
         haoStatsPct(g_haoStats.l2RangeCollisionBuckets, g_haoStats.encodedRangeCalls));
 
-    fprintf(stderr, "[HAO][Residual/兜底路径]\n");
-    HAO_STAT_FMT("posCalls(兜底位置次数)",                    "%llu", (unsigned long long)g_haoStats.residualPosCalls);
-    HAO_STAT_FMT("ruleChecks(兜底规则检查数)",                "%llu", (unsigned long long)g_haoStats.residualRuleChecks);
-    HAO_STAT_FMT("groupRejects(兜底group拒绝数)",             "%llu", (unsigned long long)g_haoStats.residualGroupRejects);
-    HAO_STAT_FMT("confirmCalls(兜底确认次数)",                "%llu", (unsigned long long)g_haoStats.residualConfirmCalls);
-    HAO_STAT_FMT("confirmMatches(兜底确认命中数)",            "%llu", (unsigned long long)g_haoStats.residualConfirmMatches);
-    HAO_STAT_FMT("confirmRejects(兜底确认拒绝数)",            "%llu", (unsigned long long)g_haoStats.residualConfirmRejects);
+    // fprintf(stderr, "[HAO][Residual/兜底路径]\n");
+    // HAO_STAT_FMT("posCalls(兜底位置次数)",                    "%llu", (unsigned long long)g_haoStats.residualPosCalls);
+    // HAO_STAT_FMT("ruleChecks(兜底规则检查数)",                "%llu", (unsigned long long)g_haoStats.residualRuleChecks);
+    // HAO_STAT_FMT("groupRejects(兜底group拒绝数)",             "%llu", (unsigned long long)g_haoStats.residualGroupRejects);
+    // HAO_STAT_FMT("confirmCalls(兜底确认次数)",                "%llu", (unsigned long long)g_haoStats.residualConfirmCalls);
+    // HAO_STAT_FMT("confirmMatches(兜底确认命中数)",            "%llu", (unsigned long long)g_haoStats.residualConfirmMatches);
+    // HAO_STAT_FMT("confirmRejects(兜底确认拒绝数)",            "%llu", (unsigned long long)g_haoStats.residualConfirmRejects);
 
     fprintf(stderr, "[HAO][Rates/关键比率]\n");
     HAO_STAT_FMT("l2EntryFalsePositivePct(L2表项假阳性率)",   "%.5f",
@@ -2129,14 +2189,13 @@ svuint32_t haoExtractRawKeys4(svuint8_t vrow, u64a bextMaskRaw) {
 static really_inline
 void haoFillRawCtx(struct HAOPositionContext *ctx,
                    const struct FDR_Runtime_Args *a, size_t endPos,
-                   svuint8_t vrow, u32 group) {
+                   const u8 *rowBytes, u32 group) {
     u8 laneBytes[HAO_RUNTIME_BYTES_PER_RULE_SLOT];
-    const svbool_t pg8 = svwhilelt_b8((uint64_t)0, (uint64_t)8);
-    svuint8_t vlane;
     u32 slot;
     u32 j;
 
     assert(ctx);
+    assert(rowBytes);
     assert(group < 4U);
 
     memset(ctx, 0, sizeof(*ctx));
@@ -2144,25 +2203,9 @@ void haoFillRawCtx(struct HAOPositionContext *ctx,
     ctx->validMask8 = haoComputeValidMask8(a, endPos);
     ctx->laneWindowReady = 1;
 
-    switch (group) {
-    case 0:
-        vlane = vrow;
-        break;
-    case 1:
-        vlane = svext_u8(vrow, vrow, 8);
-        break;
-    case 2:
-        vlane = svext_u8(vrow, vrow, 16);
-        break;
-    default:
-        vlane = svext_u8(vrow, vrow, 24);
-        break;
-    }
-
-    svst1_u8(pg8, laneBytes, vlane);
-
     for (j = 0; j < HAO_RUNTIME_BYTES_PER_RULE_SLOT; j++) {
-        laneBytes[j] = haoNormalizeByte(laneBytes[j]);
+        laneBytes[j] = haoNormalizeByte(
+            rowBytes[group * HAO_RUNTIME_BYTES_PER_RULE_SLOT + j]);
     }
 
     for (slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
@@ -2353,7 +2396,8 @@ int haoRunRaw32V2(const struct HAORuntimeHeader *hdr, const u8 *primaryBitmap,
 
     {
         u32 lane;
-
+        u8 rowBytes[8][32];
+        u8 rowReady[8] = {0};
         for (lane = 0; lane < HAO_BATCH_MAX_WIDTH; lane++) {
             struct HAOPositionContext ctx;
             const u32 encoded = encodedByLane[lane];
@@ -2365,34 +2409,37 @@ int haoRunRaw32V2(const struct HAORuntimeHeader *hdr, const u8 *primaryBitmap,
                 continue;
             }
 
-            switch (shift) {
-            case 0:
-                vrow = vrow0;
-                break;
-            case 1:
-                vrow = vrow1;
-                break;
-            case 2:
-                vrow = vrow2;
-                break;
-            case 3:
-                vrow = vrow3;
-                break;
-            case 4:
-                vrow = vrow4;
-                break;
-            case 5:
-                vrow = vrow5;
-                break;
-            case 6:
-                vrow = vrow6;
-                break;
-            default:
-                vrow = vrow7;
-                break;
+            if (!rowReady[shift]) {
+                switch (shift) {
+                case 0:
+                    svst1_u8(pgb, rowBytes[0], vrow0);
+                    break;
+                case 1:
+                    svst1_u8(pgb, rowBytes[1], vrow1);
+                    break;
+                case 2:
+                    svst1_u8(pgb, rowBytes[2], vrow2);
+                    break;
+                case 3:
+                    svst1_u8(pgb, rowBytes[3], vrow3);
+                    break;
+                case 4:
+                    svst1_u8(pgb, rowBytes[4], vrow4);
+                    break;
+                case 5:
+                    svst1_u8(pgb, rowBytes[5], vrow5);
+                    break;
+                case 6:
+                    svst1_u8(pgb, rowBytes[6], vrow6);
+                    break;
+                default:
+                    svst1_u8(pgb, rowBytes[7], vrow7);
+                    break;
+                }
+                rowReady[shift] = 1;
             }
 
-            haoFillRawCtx(&ctx, a, blockStart + lane, vrow, group);
+            haoFillRawCtx(&ctx, a, blockStart + lane, rowBytes[shift], group);
             if (haoProcessEncodedRange(hdr, secondaryHashTable, ruleMeta,
                                        literalBlob, hdr->literalBlobSize, a,
                                        control, &ctx, encoded) ==
@@ -3052,6 +3099,7 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
                            hwlm_group_t *control) {
     const struct HAORuntimeBitSelector *selectors;
     const u8 *primaryBitmap;
+    const u8 *cachedPrimaryBitmap;
     const u32 *primaryHashTable;
     const u8 *primaryBitmapRaw;
     const u32 *primaryHashTableRaw;
@@ -3083,7 +3131,8 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
     literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
     residualRuleIndexes = (const u32 *)((const u8 *)hdr +
                                         hdr->residualRuleIndexOffset);
-    HAO_BITMAP_INIT(bitmapCtx, primaryBitmap, hdr->primaryBitmapSize);
+    cachedPrimaryBitmap =
+        hao_bitmap_cache_get(hdr, primaryBitmap, hdr->primaryBitmapSize);
     
     for (i = a->start_offset; i < a->len; i += HAO_RUNTIME_BLOCK_BYTES) {
         const size_t remaining = a->len - i;
@@ -3092,17 +3141,15 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
                                        : (u32)remaining;
 
         if (haoProcessBlockBatch(hdr, selectors,
-                                 HAO_BITMAP_PTR(bitmapCtx),  /* ← 统一入口 */
+                                 cachedPrimaryBitmap,
                                  primaryHashTable, primaryBitmapRaw,
                                  primaryHashTableRaw, secondaryHashTable,
                                  ruleMeta, literalBlob, residualRuleIndexes,
                                  a, control, i,
                                  blockLaneCount) == HWLM_TERMINATED) {
-            HAO_BITMAP_DESTROY(bitmapCtx);
             return HWLM_TERMINATED;
         }
     }
-    HAO_BITMAP_DESTROY(bitmapCtx);
     return HWLM_SUCCESS;
 }
 
