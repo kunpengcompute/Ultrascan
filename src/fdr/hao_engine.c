@@ -12,6 +12,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <stdint.h>
+#include <arm_sve.h>
+
+#define HAO_BITMAP_CACHE_LOCK /* 取消注释开启L0 cache */
 
 #ifndef HAO_SVE_WORD_LEVEL_BITMAP_PROBE
 #define HAO_SVE_WORD_LEVEL_BITMAP_PROBE 0
@@ -34,12 +42,138 @@
 #endif
 
 #ifndef HAO_SVE_STREAM32_BYTE
-#define HAO_SVE_STREAM32_BYTE 1
+#define HAO_SVE_STREAM32_BYTE 0
 #endif
 
 #ifndef HAO_SVE_STREAM32_BYTE_V2
 #define HAO_SVE_STREAM32_BYTE_V2 1
 #endif
+
+#ifdef HAO_BITMAP_CACHE_LOCK
+#define DEV       "/dev/hisi_soc_cache_mgmt"
+#define ALIGN_1MB (1UL * 1024 * 1024)
+#define MAP_SIZE  (1UL * 1024 * 1024)   /* 若 512KB 触发 EINVAL 可改为 1MB */
+#endif
+
+/* ═══════════════════════════════════════════════════
+ * Cache 锁定内存管理（仅在开关打开时编译）
+ * ═══════════════════════════════════════════════════ */
+#ifdef HAO_BITMAP_CACHE_LOCK
+
+typedef struct {
+    void *addr;
+    int   fd;
+} CacheMem;
+
+static CacheMem cache_alloc(size_t size)
+{
+    CacheMem cm = {NULL, -1};
+    int retry   = 5;
+
+    cm.fd = open(DEV, O_RDWR);
+    if (cm.fd < 0) { perror("open " DEV); return cm; }
+
+    while (retry-- > 0) {
+        void *probe = mmap(NULL, MAP_SIZE + ALIGN_1MB,
+                           PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (probe == MAP_FAILED) { perror("probe mmap"); break; }
+
+        void *aligned = ((uintptr_t)probe % ALIGN_1MB == 0)
+            ? probe
+            : (void *)((uintptr_t)probe + ALIGN_1MB
+                       - (uintptr_t)probe % ALIGN_1MB);
+
+        munmap(probe, MAP_SIZE + ALIGN_1MB);
+
+        void *addr = mmap(aligned, MAP_SIZE,
+                          PROT_READ | PROT_WRITE,
+                          MAP_SHARED, cm.fd, 0);
+        if (addr == MAP_FAILED) {
+            if (errno == EINVAL) { continue; }
+            perror("device mmap"); break;
+        }
+
+        memset(addr, 0, MAP_SIZE);
+        cm.addr = addr;
+        return cm;
+    }
+
+    close(cm.fd);
+    cm.fd = -1;
+    return cm;
+}
+
+static void cache_free(CacheMem *cm)
+{
+    if (cm->addr)  { munmap(cm->addr, MAP_SIZE); cm->addr = NULL; }
+    if (cm->fd >= 0) { close(cm->fd);            cm->fd   = -1;  }
+}
+
+typedef struct {
+    CacheMem  cm;
+    u8       *bitmap;
+    u32       bitmapSize;
+} HaoBitmapCtx;
+
+static int hao_bitmap_ctx_init(HaoBitmapCtx *ctx,
+                                const u8 *src_bitmap, u32 src_size)
+{
+    if (src_size > MAP_SIZE) {
+        fprintf(stderr, "[cache] bitmap too large: %u > %lu\n",
+                src_size, MAP_SIZE);
+        return -1;
+    }
+    ctx->cm = cache_alloc(src_size);
+    if (!ctx->cm.addr) return -1;
+
+    memcpy(ctx->cm.addr, src_bitmap, src_size);
+    ctx->bitmap     = (u8 *)ctx->cm.addr;
+    ctx->bitmapSize = src_size;
+    return 0;
+}
+
+static void hao_bitmap_ctx_destroy(HaoBitmapCtx *ctx)
+{
+    cache_free(&ctx->cm);
+    ctx->bitmap     = NULL;
+    ctx->bitmapSize = 0;
+}
+
+/* 内部宏：初始化 Cache 锁定 bitmap，失败自动降级 */
+#define HAO_BITMAP_INIT(ctx, src_bitmap, src_size)                      \
+    HaoBitmapCtx ctx;                                                   \
+    do {                                                                \
+        if (hao_bitmap_ctx_init(&ctx, src_bitmap, src_size) != 0) {    \
+            fprintf(stderr, "[cache] init failed, fallback\n");        \
+            ctx.bitmap     = (u8 *)(src_bitmap);                       \
+            ctx.bitmapSize = (src_size);                               \
+            ctx.cm.addr    = NULL;                                      \
+            ctx.cm.fd      = -1;                                        \
+        }                                                               \
+    } while (0)
+
+#define HAO_BITMAP_PTR(ctx)     ((ctx).bitmap)
+#define HAO_BITMAP_DESTROY(ctx) hao_bitmap_ctx_destroy(&(ctx))
+
+#else  /* HAO_BITMAP_CACHE_LOCK 未定义：零开销路径 */
+
+/* 退化为普通指针，编译器会完全优化掉所有开销 */
+typedef struct {
+    u8  *bitmap;
+    u32  bitmapSize;
+} HaoBitmapCtx;
+
+#define HAO_BITMAP_INIT(ctx, src_bitmap, src_size)  \
+    HaoBitmapCtx ctx = {                            \
+        .bitmap     = (u8 *)(src_bitmap),           \
+        .bitmapSize = (src_size),                   \
+    }
+
+#define HAO_BITMAP_PTR(ctx)     ((ctx).bitmap)
+#define HAO_BITMAP_DESTROY(ctx) ((void)0)           /* 空操作 */
+
+#endif /* HAO_BITMAP_CACHE_LOCK */
 
 static struct HAORuntimeStats g_haoStats;
 static int g_haoStatsForceEnabled;
@@ -2937,22 +3071,26 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
     literalBlob = (const u8 *)hdr + hdr->literalBlobOffset;
     residualRuleIndexes = (const u32 *)((const u8 *)hdr +
                                         hdr->residualRuleIndexOffset);
+    HAO_BITMAP_INIT(bitmapCtx, primaryBitmap, hdr->primaryBitmapSize);
+    
     for (i = a->start_offset; i < a->len; i += HAO_RUNTIME_BLOCK_BYTES) {
         const size_t remaining = a->len - i;
         const u32 blockLaneCount = remaining > HAO_RUNTIME_BLOCK_BYTES
                                        ? HAO_RUNTIME_BLOCK_BYTES
                                        : (u32)remaining;
 
-        if (haoProcessBlockBatch(hdr, selectors, primaryBitmap,
+        if (haoProcessBlockBatch(hdr, selectors,
+                                 HAO_BITMAP_PTR(bitmapCtx),  /* ← 统一入口 */
                                  primaryHashTable, primaryBitmapRaw,
                                  primaryHashTableRaw, secondaryHashTable,
                                  ruleMeta, literalBlob, residualRuleIndexes,
                                  a, control, i,
                                  blockLaneCount) == HWLM_TERMINATED) {
+            HAO_BITMAP_DESTROY(bitmapCtx);
             return HWLM_TERMINATED;
         }
     }
-
+    HAO_BITMAP_DESTROY(bitmapCtx);
     return HWLM_SUCCESS;
 }
 
