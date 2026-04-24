@@ -363,8 +363,7 @@ hs_error_t dbIsValid(const hs_database_t *db) {
 /** Allocate a buffer and prints the database info into it. Returns an
  * appropriate error code on failure, or HS_SUCCESS on success. */
 static
-hs_error_t print_database_string(char **s, u32 version, const platform_t plat,
-                                 u32 raw_mode) {
+hs_error_t print_database_string(char **s, u32 version, u32 raw_mode) {
     assert(s);
     *s = NULL;
 
@@ -431,7 +430,7 @@ hs_error_t HS_CDECL hs_serialized_database_info(const char *bytes,
 
     u32 mode = unaligned_load_u32(bytes + offsetof(struct RoseEngine, mode));
 
-    return print_database_string(info, header.version, header.platform, mode);
+    return print_database_string(info, header.version, mode);
 }
 
 HS_PUBLIC_API
@@ -445,10 +444,7 @@ hs_error_t HS_CDECL hs_database_info(const hs_database_t *db, char **info) {
         return HS_INVALID;
     }
 
-    platform_t plat;
-    plat = db->platform;
-
     const struct RoseEngine *rose = hs_get_bytecode(db);
 
-    return print_database_string(info, db->version, plat, rose->mode);
+    return print_database_string(info, db->version, rose->mode);
 }
