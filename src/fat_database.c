@@ -386,8 +386,7 @@ hs_error_t fat_dbIsValid(const struct fat_hs_database *db) {
 #endif
 
 static
-hs_error_t fat_print_database_string(char **s, u32 version, const platform_t plat,
-                                     u32 raw_mode) {
+hs_error_t fat_print_database_string(char **s, u32 version, u32 raw_mode) {
     assert(s);
     *s = NULL;
 
@@ -447,9 +446,8 @@ hs_error_t HS_CDECL fat_hs_database_info(const fat_hs_database_t *db, char **inf
         return HS_INVALID;
     }
 
-    platform_t plat = db->platform;
 
     const struct RoseEngine *rose = fat_hs_get_bytecode(db);
 
-    return fat_print_database_string(info, db->version, plat, rose->mode);
+    return fat_print_database_string(info, db->version, rose->mode);
 }

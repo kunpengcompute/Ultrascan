@@ -798,6 +798,26 @@ hs_error_t HS_CDECL hs_compile(const char *expression, unsigned flags,
 }
 
 extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL fat_hs_compile(const char *expression, unsigned flags,
+                               unsigned mode,
+                               const hs_platform_info_t *platform,
+                               fat_hs_database_t **db, hs_compile_error_t **error) {
+    if (expression == nullptr) {
+        *db = nullptr;
+        *error = generateCompileError("Invalid parameter: expression is NULL",
+                                      -1);
+        return HS_COMPILER_ERROR;
+    }
+
+    unsigned id = 0; // single expressions get zero as an ID
+    const hs_expr_ext * const *ext = nullptr; // unused for this call.
+
+    return fat_hs_compile_multi_int(&expression, &flags, &id, ext, 1, mode,
+                                platform, db, error, Grey());
+}
+
+
+extern "C" HS_PUBLIC_API
 hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
                                      const unsigned *flags, const unsigned *ids,
                                      unsigned elements, unsigned mode,
@@ -806,6 +826,17 @@ hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
                                      hs_compile_error_t **error) {
     const hs_expr_ext * const *ext = nullptr; // unused for this call.
     return hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
+                                platform, db, error, Grey());
+}
+
+hs_error_t HS_CDECL fat_hs_compile_multi(const char *const *expressions,
+                                     const unsigned *flags, const unsigned *ids,
+                                     unsigned elements, unsigned mode,
+                                     const hs_platform_info_t *platform,
+                                     fat_hs_database_t **db,
+                                     hs_compile_error_t **error) {
+    const hs_expr_ext * const *ext = nullptr; // unused for this call.
+    return fat_hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
                                 platform, db, error, Grey());
 }
 
@@ -853,6 +884,29 @@ hs_error_t HS_CDECL hs_compile_lit(const char *expression, unsigned flags,
     return hs_compile_lit_multi_int(&expression, &flags, &id, ext, &len, 1,
                                     mode, platform, db, error, Grey());
 }
+
+
+
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL fat_hs_compile_lit(const char *expression, unsigned flags,
+                                   const size_t len, unsigned mode,
+                                   const hs_platform_info_t *platform,
+                                   fat_hs_database_t **db,
+                                   hs_compile_error_t **error) {
+    if (expression == nullptr) {
+        *db = nullptr;
+        *error = generateCompileError("Invalid parameter: expression is NULL",
+                                      -1);
+        return HS_COMPILER_ERROR;
+    }
+
+    unsigned id = 0; // single expressions get zero as an ID
+    const hs_expr_ext * const *ext = nullptr; // unused for this call.
+
+    return fat_hs_compile_lit_multi_int(&expression, &flags, &id, ext, &len, 1,
+                                    mode, platform, db, error, Grey());
+}
+
 
 extern "C" HS_PUBLIC_API
 hs_error_t HS_CDECL hs_compile_lit_multi(const char * const *expressions,
