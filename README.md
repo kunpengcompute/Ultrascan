@@ -6,7 +6,6 @@
 
 \[2025-12-30\]: 发布Hyperscan KHSEL 2.5.3。优化Hyperscan多模匹配算法。优化Rose解释器后端长字符串校验。增加短规则旁路算法开关。
 
-
 ## 项目介绍<a name="ZH-CN_TOPIC_0000002549772085"></a>
 
 Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的大部分语法的前提下，增加了特定的语法和工作模式来保证其在真实网络场景下的实用性。Hyperscan针对不同使用场景设计了短规则旁路、假阳性阻断等高效匹配算法，以及结合SIMD指令，实现了正则表达式的高性能匹配。Hyperscan适用于部署在诸如DPI/IPS/IDS/FW等场景中。在鲲鹏平台上，华为基于NEON指令集对Hyperscan进行了改造，以适配AAarch64架构，同时针对算法进行了优化。
@@ -36,7 +35,6 @@ Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │       ├── compilation_guide.md                              # 编译指南
 │       ├── developer_guide.md                                # 开发指南
 │       ├── user_guide.md                                     # 用户指南
-│       ├── api_reference.md                                  # API参考
 ├── examples                                                   # 示例代码目录
 │   ├── CMakeLists.txt                                        # 示例代码构建配置
 │   ├── README.md                                             # 示例代码说明文档
@@ -87,7 +85,7 @@ Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 
 ## 版本说明<a name="ZH-CN_TOPIC_0000002518252296"></a>
 
-每个版本的特性变更详细信息，具体请参见[版本说明书](docs/zh/release_notes.md)。
+每个版本的特性变更详细信息，具体请参见《[版本说明书](docs/zh/release_notes.md)》。
 
 ## 约束与限制
 Arm平台上，Hyperscan使用lily引擎对单字节规则、2-4字节短规则匹配场景进行性能增强，该优化特性存在如下约束：
@@ -98,24 +96,23 @@ lily单字节、2-4字节短规则匹配引擎各自仅能处理至多8条单字
 
 ## 环境部署<a name="ZH-CN_TOPIC_0000002549772083"></a>
 
-介绍Hyperscan的环境依赖及安装方式和编译方法，具体请参见[安装指南](./docs/zh/installation_guide.md)。
+介绍Hyperscan的环境依赖及安装方式和编译方法，具体请参见《[安装指南](./docs/zh/installation_guide.md)》。
 
 
 ## 快速入门<a name="ZH-CN_TOPIC_0000002549892057"></a>
 
-Hyperscan的快速入门通过使用Hyperscan官方提供的性能Benchmark工具hsbench，具体请参见[快速入门](./docs/zh/quick_start.md)。
+Hyperscan的快速入门通过使用Hyperscan官方提供的性能Benchmark工具hsbench，具体请参见《[快速入门](./docs/zh/quick_start.md)》。
 
 
 ## 学习文档<a name="ZH-CN_TOPIC_0000002518252300"></a>
 
 |名称|简介|
 |--|--|
-|《[快速入门](./docs/zh/quick_start.md)》|提供快速上手验证指导。|
-|《[版本说明书](docs/zh/release_notes.md)》|提供Hyperscan每个发布版本的基础信息和特性更新信息。|
-|《[安装指南](./docs/zh/installation_guide.md)》|指导用户如何安装部署及编译软件。|
-|《[开发指南](./docs/zh/developer_guide.md)》|提供Hyperscan特性相关接口说明及定义等。|
-|《[用户指南](./docs/zh/user_guide.md)》|提供Hyperscan特性使用指导。|
-|《[API参考](./docs/zh/api_reference.md)》|提供Hyperscan静态库接口说明及使用指导。|
+|[快速入门](./docs/zh/quick_start.md)|提供快速上手验证指导。|
+|[版本说明书](docs/zh/release_notes.md)|提供Hyperscan每个发布版本的基础信息和特性更新信息。|
+|[安装指南](./docs/zh/installation_guide.md)|指导用户如何安装部署及编译软件。|
+|[开发指南](./docs/zh/developer_guide.md)|提供Hyperscan特性相关接口说明及定义等。|
+|[用户指南](./docs/zh/user_guide.md)|提供Hyperscan特性使用指导。|
 
 
 ## 贡献声明<a name="ZH-CN_TOPIC_0000002518412216"></a>
