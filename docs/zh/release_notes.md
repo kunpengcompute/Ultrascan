@@ -4,8 +4,7 @@
 
 |文档版本|发布日期|修改说明|
 |--|--|--|
-|02|2026-03-30|第二次正式发布，基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短字节规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
-|01|2025-12-30|第一次正式发布。|
+|01|2026-03-30|第一次正式发布，基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短字节规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
 
 ## 版本配套说明<a name="ZH-CN_TOPIC_0000002518405392"></a>
 

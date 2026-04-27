@@ -4,4 +4,3 @@
 - [安装指南](installation_guide.md)
 - [用户指南](user_guide.md)
 - [开发指南](developer_guide.md)
-- [API参考](api_reference.md)
