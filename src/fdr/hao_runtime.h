@@ -5,7 +5,7 @@
 #include "hwlm/hwlm.h"
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 7U
+#define HAO_RUNTIME_VERSION 8U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 #define HAO_RUNTIME_KEY_BITS 22U
@@ -24,6 +24,9 @@
 #define HAO_BATCH_FALLBACK_WIDTH 4U
 #define HAO_BATCH_MAX_WIDTH 32U
 #define HAO_BITMAP_GROUPED_BYTES 4U
+#define HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT 3U
+#define HAO_RUNTIME_PRIMARY_COARSE_KEY_GROUP \
+    (1U << HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT)
 
 /* Shared HAO tuning knobs used by compile-time and runtime code paths. */
 /* These remain part of the public HAO contract for the HAO v2-only path. */
@@ -78,6 +81,7 @@ struct HAORuntimeHeader {
     u32 selectorCount;
     u32 primaryCount;
     u32 primaryBitmapSize;
+    u32 primaryCoarseBitmapSize;
     u32 secondaryCount;
     u32 ruleMetaCount;
     u32 literalBlobSize;
@@ -87,8 +91,10 @@ struct HAORuntimeHeader {
     u64a bextMaskRaw;
     u32 selectorsOffset;
     u32 primaryBitmapOffset;
+    u32 primaryBitmapCoarseOffset;
     u32 primaryOffset;
     u32 primaryBitmapRawOffset;
+    u32 primaryBitmapRawCoarseOffset;
     u32 primaryRawOffset;
     u32 secondaryOffset;
     u32 ruleMetaOffset;
@@ -127,6 +133,7 @@ struct HAORuntimeInspectSummary {
     u32 selectorCount;
     u32 primaryCount;
     u32 primaryBitmapSize;
+    u32 primaryCoarseBitmapSize;
     u32 secondaryCount;
     u32 ruleMetaCount;
     u32 residualRuleCount;

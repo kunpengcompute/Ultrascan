@@ -49,6 +49,10 @@
 #define HAO_SVE_STREAM32_BYTE_V2 1
 #endif
 
+#ifndef HAO_RAW32_V2_COARSE_BITMAP
+#define HAO_RAW32_V2_COARSE_BITMAP 1
+#endif
+
 #ifdef HAO_BITMAP_CACHE_LOCK
 #define DEV       "/dev/hisi_soc_cache_mgmt"
 #define ALIGN_1MB (1UL * 1024 * 1024)
@@ -708,11 +712,21 @@ static int haoValidateLayout(const void *blob, u32 blobSize,
         (u64a)blobSize) {
         return 0;
     }
+    if ((u64a)hdr->primaryBitmapCoarseOffset +
+            (u64a)hdr->primaryCoarseBitmapSize >
+        (u64a)blobSize) {
+        return 0;
+    }
     if ((u64a)hdr->primaryOffset + (u64a)hdr->primaryCount * sizeof(u32) >
         (u64a)blobSize) {
         return 0;
     }
     if ((u64a)hdr->primaryBitmapRawOffset + (u64a)hdr->primaryBitmapSize >
+        (u64a)blobSize) {
+        return 0;
+    }
+    if ((u64a)hdr->primaryBitmapRawCoarseOffset +
+            (u64a)hdr->primaryCoarseBitmapSize >
         (u64a)blobSize) {
         return 0;
     }
@@ -761,6 +775,7 @@ static void haoInspectLayout(const struct HAORuntimeHeader *hdr,
     summary->selectorCount = hdr->selectorCount;
     summary->primaryCount = hdr->primaryCount;
     summary->primaryBitmapSize = hdr->primaryBitmapSize;
+    summary->primaryCoarseBitmapSize = hdr->primaryCoarseBitmapSize;
     summary->secondaryCount = hdr->secondaryCount;
     summary->ruleMetaCount = hdr->ruleMetaCount;
     summary->residualRuleCount = hdr->residualRuleCount;
@@ -2452,6 +2467,52 @@ void haoPrepareRawKeysVec(const u8 *primaryBitmap, svuint32_t vkeys,
 }
 
 static really_inline
+void haoPrepareRawKeysVecCoarse8(const u8 *primaryBitmap,
+                                 const u8 *primaryBitmapCoarse,
+                                 svuint32_t vkeys, svuint32_t *vbitPos,
+                                 svuint32_t *vbitmapBytes) {
+#if HAO_RAW32_V2_COARSE_BITMAP
+    const svbool_t pg32 = svptrue_b32();
+    const svuint32_t vone = svdup_n_u32(1U);
+    const svuint32_t vcoarseKey =
+        svlsr_n_u32_x(pg32, vkeys, HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT);
+    const svuint32_t vcoarseByteIdx = svlsr_n_u32_x(pg32, vcoarseKey, 3);
+    const svuint32_t vcoarseBitPos = svand_n_u32_x(pg32, vcoarseKey, 7U);
+    svuint32_t vcoarseBytes;
+    svuint32_t vcoarseMask;
+    svuint32_t vcoarseHit;
+    svbool_t pcoarse;
+
+    assert(vbitPos);
+    assert(vbitmapBytes);
+
+    if (!primaryBitmapCoarse) {
+        haoPrepareRawKeysVec(primaryBitmap, vkeys, vbitPos, vbitmapBytes);
+        return;
+    }
+
+    *vbitPos = svand_n_u32_x(pg32, vkeys, 7U);
+    vcoarseBytes = sve_u8gather_u32(pg32, primaryBitmapCoarse, vcoarseByteIdx);
+    vcoarseMask = svlsl_u32_x(pg32, vone, vcoarseBitPos);
+    vcoarseHit = svand_u32_x(pg32, vcoarseBytes, vcoarseMask);
+    pcoarse = svcmpne_n_u32(pg32, vcoarseHit, 0U);
+
+    if (!svcntp_b32(pg32, pcoarse)) {
+        *vbitmapBytes = svdup_n_u32(0U);
+        return;
+    }
+
+    {
+        const svuint32_t vbyteIdx = svlsr_n_u32_x(pg32, vkeys, 3);
+        *vbitmapBytes = sve_u8gather_u32(pcoarse, primaryBitmap, vbyteIdx);
+    }
+#else
+    (void)primaryBitmapCoarse;
+    haoPrepareRawKeysVec(primaryBitmap, vkeys, vbitPos, vbitmapBytes);
+#endif
+}
+
+static really_inline
 void haoAppendRawActiveSorted(u32 lane, u32 encoded, u32 *activeLaneIndex,
                               u32 *activeEncoded, u32 *activeCount) {
     u32 pos;
@@ -2543,6 +2604,7 @@ u32 haoRetireRawKeysVec(const u32 *primaryHashTable, svuint32_t vkeys,
 
 static really_inline
 int haoRunRaw32V2(const struct HAORuntimeHeader *hdr, const u8 *primaryBitmap,
+                  const u8 *primaryBitmapCoarse,
                   const u32 *primaryHashTable,
                   const struct HAORuntimeSecondaryHashEntry *secondaryHashTable,
                   const struct HAORuntimeRuleMeta *ruleMeta,
@@ -2594,17 +2656,21 @@ int haoRunRaw32V2(const struct HAORuntimeHeader *hdr, const u8 *primaryBitmap,
     const svuint32_t vlanes45 = svzip1_u32(svindex_u32(4U, 8U), svindex_u32(5U, 8U));
     const svuint32_t vlanes67 = svzip1_u32(svindex_u32(6U, 8U), svindex_u32(7U, 8U));
 
-    haoPrepareRawKeysVec(primaryBitmap, vkeys01, &vbitPos01, &vbitmapBytes01);
-    haoPrepareRawKeysVec(primaryBitmap, vkeys23, &vbitPos23, &vbitmapBytes23);
+    haoPrepareRawKeysVecCoarse8(primaryBitmap, primaryBitmapCoarse, vkeys01,
+                                &vbitPos01, &vbitmapBytes01);
+    haoPrepareRawKeysVecCoarse8(primaryBitmap, primaryBitmapCoarse, vkeys23,
+                                &vbitPos23, &vbitmapBytes23);
     haoRetireRawKeysVec(primaryHashTable, vkeys01, vlanes01, vbitPos01,
                         vbitmapBytes01, blockActiveLaneIndex,
                         blockActiveEncoded, &blockActiveCount);
-    haoPrepareRawKeysVec(primaryBitmap, vkeys45, &vbitPos45, &vbitmapBytes45);
+    haoPrepareRawKeysVecCoarse8(primaryBitmap, primaryBitmapCoarse, vkeys45,
+                                &vbitPos45, &vbitmapBytes45);
 
     haoRetireRawKeysVec(primaryHashTable, vkeys23, vlanes23, vbitPos23,
                         vbitmapBytes23, blockActiveLaneIndex,
                         blockActiveEncoded, &blockActiveCount);
-    haoPrepareRawKeysVec(primaryBitmap, vkeys67, &vbitPos67, &vbitmapBytes67);
+    haoPrepareRawKeysVecCoarse8(primaryBitmap, primaryBitmapCoarse, vkeys67,
+                                &vbitPos67, &vbitmapBytes67);
 
     haoRetireRawKeysVec(primaryHashTable, vkeys45, vlanes45, vbitPos45,
                         vbitmapBytes45, blockActiveLaneIndex,
@@ -3177,6 +3243,7 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
                                 const u8 *primaryBitmap,
                                 const u32 *primaryHashTable,
                                 const u8 *primaryBitmapRaw,
+                                const u8 *primaryBitmapRawCoarse,
                                 const u32 *primaryHashTableRaw,
                                 const struct HAORuntimeSecondaryHashEntry *secondaryHashTable,
                                 const struct HAORuntimeRuleMeta *ruleMeta,
@@ -3194,7 +3261,7 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
     u32 lane;
 
     if (!hdr || !selectors || !primaryBitmap || !primaryHashTable ||
-        !primaryBitmapRaw || !primaryHashTableRaw ||
+        !primaryBitmapRaw || !primaryBitmapRawCoarse || !primaryHashTableRaw ||
         !secondaryHashTable || !ruleMeta || !literalBlob || !a || !control ||
         !blockLaneCount || blockLaneCount > HAO_BATCH_MAX_WIDTH) {
         return HWLM_SUCCESS;
@@ -3209,9 +3276,10 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
 
 #if HAO_SVE_STREAM32_BYTE_V2
         if (haoCanRunRaw32V2(hdr, a, blockStart, blockLaneCount)) {
-            return haoRunRaw32V2(hdr, primaryBitmapRaw, primaryHashTableRaw,
-                                 secondaryHashTable, ruleMeta, literalBlob, a,
-                                 control, blockStart);
+            return haoRunRaw32V2(hdr, primaryBitmapRaw, primaryBitmapRawCoarse,
+                                 primaryHashTableRaw, secondaryHashTable,
+                                 ruleMeta, literalBlob, a, control,
+                                 blockStart);
         }
 #endif
         return haoRunRaw32(hdr, primaryBitmapRaw, primaryHashTableRaw,
@@ -3319,9 +3387,11 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
                            hwlm_group_t *control) {
     const struct HAORuntimeBitSelector *selectors;
     const u8 *primaryBitmap;
+    const u8 *primaryBitmapCoarse;
     const u8 *cachedPrimaryBitmap;
     const u32 *primaryHashTable;
     const u8 *primaryBitmapRaw;
+    const u8 *primaryBitmapRawCoarse;
     const u32 *primaryHashTableRaw;
     const struct HAORuntimeSecondaryHashEntry *secondaryHashTable;
     const struct HAORuntimeRuleMeta *ruleMeta;
@@ -3340,8 +3410,11 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
     selectors = (const struct HAORuntimeBitSelector *)((const u8 *)hdr +
                                                        hdr->selectorsOffset);
     primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
+    primaryBitmapCoarse = (const u8 *)hdr + hdr->primaryBitmapCoarseOffset;
     primaryHashTable = (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
     primaryBitmapRaw = (const u8 *)hdr + hdr->primaryBitmapRawOffset;
+    primaryBitmapRawCoarse =
+        (const u8 *)hdr + hdr->primaryBitmapRawCoarseOffset;
     primaryHashTableRaw =
         (const u32 *)((const u8 *)hdr + hdr->primaryRawOffset);
     secondaryHashTable = (const struct HAORuntimeSecondaryHashEntry *)(
@@ -3353,6 +3426,7 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
                                         hdr->residualRuleIndexOffset);
     cachedPrimaryBitmap =
         hao_bitmap_cache_get(hdr, primaryBitmap, hdr->primaryBitmapSize);
+    (void)primaryBitmapCoarse;
     
     for (i = a->start_offset; i < a->len; i += HAO_RUNTIME_BLOCK_BYTES) {
         const size_t remaining = a->len - i;
@@ -3363,6 +3437,7 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
         if (haoProcessBlockBatch(hdr, selectors,
                                  cachedPrimaryBitmap,
                                  primaryHashTable, primaryBitmapRaw,
+                                 primaryBitmapRawCoarse,
                                  primaryHashTableRaw, secondaryHashTable,
                                  ruleMeta, literalBlob, residualRuleIndexes,
                                  a, control, i,
