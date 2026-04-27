@@ -53,6 +53,10 @@
 #define HAO_RAW32_V2_COARSE_BITMAP 1
 #endif
 
+#ifndef HAO_RAW32_V2_WORD_BITMAP
+#define HAO_RAW32_V2_WORD_BITMAP 1
+#endif
+
 #ifdef HAO_BITMAP_CACHE_LOCK
 #define DEV       "/dev/hisi_soc_cache_mgmt"
 #define ALIGN_1MB (1UL * 1024 * 1024)
@@ -2458,12 +2462,26 @@ void haoPrepareRawKeysVec(const u8 *primaryBitmap, svuint32_t vkeys,
                           svuint32_t *vbitPos,
                           svuint32_t *vbitmapBytes) {
     const svbool_t pg32 = svptrue_b32();
-    const svuint32_t vbyteIdx = svlsr_n_u32_x(pg32, vkeys, 3);
     assert(vbitPos);
     assert(vbitmapBytes);
 
-    *vbitPos = svand_n_u32_x(pg32, vkeys, 7U);
-    *vbitmapBytes = sve_u8gather_u32(pg32, primaryBitmap, vbyteIdx);
+#if HAO_RAW32_V2_WORD_BITMAP
+    {
+        const u32 *primaryBitmapWords = (const u32 *)primaryBitmap;
+        const svuint32_t vwordIdx = svlsr_n_u32_x(pg32, vkeys, 5);
+
+        *vbitPos = svand_n_u32_x(pg32, vkeys, 31U);
+        *vbitmapBytes = svld1_gather_u32index_u32(pg32, primaryBitmapWords,
+                                                  vwordIdx);
+    }
+#else
+    {
+        const svuint32_t vbyteIdx = svlsr_n_u32_x(pg32, vkeys, 3);
+
+        *vbitPos = svand_n_u32_x(pg32, vkeys, 7U);
+        *vbitmapBytes = sve_u8gather_u32(pg32, primaryBitmap, vbyteIdx);
+    }
+#endif
 }
 
 static really_inline
@@ -2476,9 +2494,16 @@ void haoPrepareRawKeysVecCoarse8(const u8 *primaryBitmap,
     const svuint32_t vone = svdup_n_u32(1U);
     const svuint32_t vcoarseKey =
         svlsr_n_u32_x(pg32, vkeys, HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT);
+#if HAO_RAW32_V2_WORD_BITMAP
+    const u32 *primaryBitmapCoarseWords = (const u32 *)primaryBitmapCoarse;
+    const svuint32_t vcoarseWordIdx = svlsr_n_u32_x(pg32, vcoarseKey, 5);
+    const svuint32_t vcoarseBitPos = svand_n_u32_x(pg32, vcoarseKey, 31U);
+    svuint32_t vcoarseWords;
+#else
     const svuint32_t vcoarseByteIdx = svlsr_n_u32_x(pg32, vcoarseKey, 3);
     const svuint32_t vcoarseBitPos = svand_n_u32_x(pg32, vcoarseKey, 7U);
     svuint32_t vcoarseBytes;
+#endif
     svuint32_t vcoarseMask;
     svuint32_t vcoarseHit;
     svbool_t pcoarse;
@@ -2491,10 +2516,18 @@ void haoPrepareRawKeysVecCoarse8(const u8 *primaryBitmap,
         return;
     }
 
+#if HAO_RAW32_V2_WORD_BITMAP
+    *vbitPos = svand_n_u32_x(pg32, vkeys, 31U);
+    vcoarseWords = svld1_gather_u32index_u32(pg32, primaryBitmapCoarseWords,
+                                             vcoarseWordIdx);
+    vcoarseMask = svlsl_u32_x(pg32, vone, vcoarseBitPos);
+    vcoarseHit = svand_u32_x(pg32, vcoarseWords, vcoarseMask);
+#else
     *vbitPos = svand_n_u32_x(pg32, vkeys, 7U);
     vcoarseBytes = sve_u8gather_u32(pg32, primaryBitmapCoarse, vcoarseByteIdx);
     vcoarseMask = svlsl_u32_x(pg32, vone, vcoarseBitPos);
     vcoarseHit = svand_u32_x(pg32, vcoarseBytes, vcoarseMask);
+#endif
     pcoarse = svcmpne_n_u32(pg32, vcoarseHit, 0U);
 
     if (!svcntp_b32(pg32, pcoarse)) {
@@ -2503,8 +2536,16 @@ void haoPrepareRawKeysVecCoarse8(const u8 *primaryBitmap,
     }
 
     {
+#if HAO_RAW32_V2_WORD_BITMAP
+        const u32 *primaryBitmapWords = (const u32 *)primaryBitmap;
+        const svuint32_t vwordIdx = svlsr_n_u32_x(pg32, vkeys, 5);
+        *vbitmapBytes = svld1_gather_u32index_u32(pcoarse,
+                                                  primaryBitmapWords,
+                                                  vwordIdx);
+#else
         const svuint32_t vbyteIdx = svlsr_n_u32_x(pg32, vkeys, 3);
         *vbitmapBytes = sve_u8gather_u32(pcoarse, primaryBitmap, vbyteIdx);
+#endif
     }
 #else
     (void)primaryBitmapCoarse;
