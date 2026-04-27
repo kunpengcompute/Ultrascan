@@ -380,7 +380,11 @@ hs_error_t print_database_string(char **s, u32 version, u32 raw_mode) {
         assert(raw_mode == HS_MODE_BLOCK);
         mode = "BLOCK";
     }
-
+#if defined(__arm__) || defined(__aarch64__)
+    major = 1;
+    minor = 0;
+    release = 3;
+#endif
     // Initial allocation size, which should be large enough to print our info.
     // If it isn't, snprintf will tell us and we can resize appropriately.
     size_t len = 256;

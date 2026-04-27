@@ -197,7 +197,7 @@ void usage(const char *error) {
     printf("  -h              Display help and exit.\n");
     printf("  -G OVERRIDES    Overrides for the grey box.\n");
     printf("  -e PATH         Path to expression directory.\n");
-    printf("  -U FILE         Load serialized database from FILE (hsdump -D output).\n");
+    printf("  -U FILE         Load serialized database from FILE (hsdump -U output).\n");
     printf("  -s FILE         Signature file to use.\n");
     printf("  -z NUM          Signature ID to use.\n");
     printf("  -c FILE         File to use as corpus.\n");
