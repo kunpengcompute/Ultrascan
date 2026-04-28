@@ -55,13 +55,11 @@ u32 FDREngineDescription::getDefaultFloodSuffixLength() const {
 
 void getFdrDescriptions(vector<FDREngineDescription> *out) {
     static const FDREngineDef def = {0, 64, 8, 0};
-    out->clear();
     out->emplace_back(def);
 }
 
 void getNeoFdrDescriptions(vector<FDREngineDescription> *out) {
     static const FDREngineDef def = {1, 64, 8, 0};
-    out->clear();
     out->emplace_back(def);
 }
 
@@ -326,14 +324,17 @@ u32 FDREngineDescription::getBucketWidth(BucketIndex) const {
 }
 
 unique_ptr<FDREngineDescription> getFdrDescription(u32 engineID) {
-    vector<FDREngineDescription> allDescs;
-    getFdrDescriptions(&allDescs);
-
-    if (engineID >= allDescs.size()) {
-        return nullptr;
+    vector<FDREngineDescription> descs;
+    
+    getFdrDescriptions(&descs);
+    getNeoFdrDescriptions(&descs);
+    
+    for (const auto &desc : descs) {
+        if (desc.getID() == engineID) {
+            return ue2::make_unique<FDREngineDescription>(desc);
+        }
     }
-
-    return ue2::make_unique<FDREngineDescription>(allDescs[engineID]);
+    return nullptr;
 }
 
 } // namespace ue2
