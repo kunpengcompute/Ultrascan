@@ -33,6 +33,10 @@
 #define HAO_MIN_FAST_RULE_COVERAGE_PCT 80U
 #endif
 
+#ifndef HAO_L2_PACKED_VERIFY
+#define HAO_L2_PACKED_VERIFY 1
+#endif
+
 namespace ue2 {
 
 static constexpr u32 HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE = 1U << 0;
@@ -91,12 +95,13 @@ struct HAOSecondaryHashEntry {
     u8 ruleVector[HAO_LAYOUT_RULE_VECTOR_BYTES];
     u8 tableControl[HAO_LAYOUT_TBL_CONTROL_BYTES];
     u16 ruleIndex[HAO_LAYOUT_RULE_SLOTS_PER_ENTRY];
+    /* Packed mode: headMask=end bits, tailMask=start bits. */
     u32 headMask;
     u32 tailMask;
     u8 slotMask;
     u8 slotCount;
     u8 flags;
-    u8 reserved;
+    u8 packedBytes;
 };
 
 struct HAOCompileRuleMeta {

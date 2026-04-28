@@ -459,6 +459,39 @@ u32 haoSlotCount(u8 slotMask) {
 }
 
 static
+u32 nthSetBitForTest(u32 mask, u32 rank) {
+    while (mask) {
+        const u32 bit = ctz32(mask);
+        if (!rank) {
+            return bit;
+        }
+        rank--;
+        mask &= mask - 1U;
+    }
+    return 32U;
+}
+
+static
+u32 verifierPackedIndexForTest(const HAOSecondaryHashEntry &entry, u32 slot,
+                               u8 validMask, u32 byteIndex) {
+#if HAO_L2_PACKED_VERIFY
+    const u32 rank = popcount32(entry.slotMask & ((1U << slot) - 1U));
+    const u32 start = nthSetBitForTest(entry.tailMask, rank);
+    u32 ordinal = 0;
+
+    for (u32 i = 0; i < byteIndex; i++) {
+        if (validMask & (1U << i)) {
+            ordinal++;
+        }
+    }
+    return start + ordinal;
+#else
+    (void)validMask;
+    return slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + byteIndex;
+#endif
+}
+
+static
 void dumpBitmapBytes(std::ostream &os, const std::vector<u8> &bytes,
                      const std::string &indent) {
     bool sawNonZero = false;
@@ -2145,6 +2178,7 @@ TEST(HAOCompile, BuildHaoGlobalBlobSecondaryEntriesMatchArtifacts) {
         EXPECT_EQ(src.slotMask, dst.slotMask) << "entry=" << i;
         EXPECT_EQ(src.headMask, dst.headMask) << "entry=" << i;
         EXPECT_EQ(src.tailMask, dst.tailMask) << "entry=" << i;
+        EXPECT_EQ(src.packedBytes, dst.packedBytes) << "entry=" << i;
         for (u32 j = 0; j < HAO_RUNTIME_RULE_VECTOR_BYTES; j++) {
             EXPECT_EQ(src.ruleVector[j], dst.ruleVector[j])
                 << "entry=" << i << " byte=" << j;
@@ -3073,13 +3107,14 @@ TEST(HAOCompile, HaoGlobalHashStoresAnchorConfirmFragments) {
             }
 
             found = true;
-            const u32 laneBase = slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT;
             for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
                 if (!(plan.verifier.validByteMask & (1U << j))) {
                     continue;
                 }
+                const u32 idx = verifierPackedIndexForTest(
+                    entry, slot, plan.verifier.validByteMask, j);
                 EXPECT_EQ(plan.verifier.bytes[j],
-                          entry.ruleVector[laneBase + j]);
+                          entry.ruleVector[idx]);
             }
         }
     }
@@ -3112,13 +3147,18 @@ TEST(HAOCompile, HaoGlobalHashStoresVerifierFragments) {
                 continue;
             }
             found = true;
-            const u32 laneBase = slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT;
             for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
                 if (plan.verifier.validByteMask & (1U << j)) {
+                    const u32 idx = verifierPackedIndexForTest(
+                        entry, slot, plan.verifier.validByteMask, j);
                     EXPECT_EQ(plan.verifier.bytes[j],
-                              entry.ruleVector[laneBase + j]);
-                    EXPECT_EQ(((laneBase + j) & 0x0fU),
-                              entry.tableControl[laneBase + j]);
+                              entry.ruleVector[idx]);
+#if HAO_L2_PACKED_VERIFY
+                    EXPECT_EQ(j, entry.tableControl[idx]);
+#else
+                    EXPECT_EQ(((slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j) &
+                               0x0fU), entry.tableControl[idx]);
+#endif
                 }
             }
         }
@@ -3154,13 +3194,18 @@ TEST(HAOCompile, HaoGlobalHashTableControlEncodesShuffleBytes) {
             }
 
             found = true;
-            const u32 laneBase = slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT;
             for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
                 if (!(plan.verifier.validByteMask & (1U << j))) {
                     continue;
                 }
-                EXPECT_EQ(((laneBase + j) & 0x0fU),
-                          entry.tableControl[laneBase + j]);
+                const u32 idx = verifierPackedIndexForTest(
+                    entry, slot, plan.verifier.validByteMask, j);
+#if HAO_L2_PACKED_VERIFY
+                EXPECT_EQ(j, entry.tableControl[idx]);
+#else
+                EXPECT_EQ(((slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j) &
+                           0x0fU), entry.tableControl[idx]);
+#endif
             }
         }
     }

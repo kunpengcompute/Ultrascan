@@ -443,6 +443,38 @@ void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan,
                                   u32 localSlot,
                                   HAOSecondaryHashEntry *entry) {
     assert(entry);
+#if HAO_L2_PACKED_VERIFY
+    const u8 validMask = plan.verifier.validByteMask;
+    const u32 start = entry->packedBytes;
+    u32 end = start;
+    u32 count = 0;
+
+    assert(localSlot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY);
+    assert(validMask);
+
+    entry->ruleIndex[localSlot] = verify_u16(plan.ruleIndex);
+    entry->slotMask |= verify_u8(1U << localSlot);
+    entry->slotCount = verify_u8(entry->slotCount + 1U);
+
+    for (u32 i = 0; i < HAO_LAYOUT_BYTES_PER_RULE_SLOT; i++) {
+        if (!(validMask & (1U << i))) {
+            continue;
+        }
+
+        const u32 vecIndex = entry->packedBytes++;
+        assert(vecIndex < HAO_LAYOUT_RULE_VECTOR_BYTES);
+        entry->ruleVector[vecIndex] = plan.verifier.bytes[i];
+        entry->tableControl[vecIndex] = verify_u8(i);
+        end = vecIndex;
+        count++;
+    }
+
+    assert(count);
+    entry->tailMask |= (1U << start);
+    entry->headMask |= (1U << end);
+    entry->flags = verify_u8(entry->flags &
+                             (u8)~HAO_SECONDARY_ENTRY_FLAG_IDENTITY_TBL);
+#else
     const u32 laneBase = localSlot * HAO_LAYOUT_BYTES_PER_RULE_SLOT;
     const u8 validMask = plan.verifier.validByteMask;
     u32 lastValidBit = HAO_LAYOUT_BYTES_PER_RULE_SLOT;
@@ -474,6 +506,7 @@ void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan,
             entry->headMask |= (1U << vecIndex);
         }
     }
+#endif
 }
 
 /* Build the HAO global single-table hash. Expanded keys go straight into the
@@ -576,7 +609,11 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
         for (u32 chunk = 0; chunk < entryCount; chunk++) {
             HAOSecondaryHashEntry entry = {};
             memset(entry.tableControl, 0x80, sizeof(entry.tableControl));
+#if HAO_L2_PACKED_VERIFY
+            entry.flags = 0;
+#else
             entry.flags = HAO_SECONDARY_ENTRY_FLAG_IDENTITY_TBL;
+#endif
             const size_t begin = chunk * HAO_LAYOUT_RULE_SLOTS_PER_ENTRY;
             const size_t end = std::min(bucketRules.size(),
                                         begin + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY);
@@ -1598,7 +1635,7 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
             dst.slotMask = src.slotMask;
             dst.slotCount = src.slotCount;
             dst.flags = src.flags;
-            dst.reserved = 0;
+            dst.packedBytes = src.packedBytes;
         }
     }
 

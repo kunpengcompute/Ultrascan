@@ -5,7 +5,7 @@
 #include "hwlm/hwlm.h"
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 8U
+#define HAO_RUNTIME_VERSION 9U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 #define HAO_RUNTIME_KEY_BITS 22U
@@ -27,6 +27,10 @@
 #define HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT 3U
 #define HAO_RUNTIME_PRIMARY_COARSE_KEY_GROUP \
     (1U << HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT)
+
+#ifndef HAO_L2_PACKED_VERIFY
+#define HAO_L2_PACKED_VERIFY 1
+#endif
 
 /* Shared HAO tuning knobs used by compile-time and runtime code paths. */
 /* These remain part of the public HAO contract for the HAO v2-only path. */
@@ -65,12 +69,13 @@ struct HAORuntimeSecondaryHashEntry {
     u8 ruleVector[HAO_RUNTIME_RULE_VECTOR_BYTES];
     u8 tableControl[HAO_RUNTIME_TBL_CONTROL_BYTES];
     u16 ruleIndex[HAO_RUNTIME_RULE_SLOTS_PER_ENTRY];
+    /* Packed mode: headMask=end bits, tailMask=start bits. */
     u32 headMask;
     u32 tailMask;
     u8 slotMask;
     u8 slotCount;
     u8 flags;
-    u8 reserved;
+    u8 packedBytes;
 };
 
 struct HAORuntimeHeader {
