@@ -413,9 +413,19 @@ void clearDir(const string &path) {
             continue;
         }
         string f = path + '/' + name;
-        if (unlink(f.c_str()) < 0) {
-            printf("ERROR: couldn't remove file %s: %s\n", f.c_str(),
-                   strerror(errno));
+        struct stat st;
+        if (stat(f.c_str(), &st) == 0) {
+            if (S_ISDIR(st.st_mode)) {
+                // 递归删除子目录
+                clearDir(f);
+                rmdir(f.c_str());
+            } else {
+                // 删除文件
+                if (unlink(f.c_str()) < 0) {
+                    printf("ERROR: couldn't remove file %s: %s\n", f.c_str(),
+                           strerror(errno));
+                }
+            }
         }
     }
     closedir(dir);
@@ -442,8 +452,16 @@ void clearDir(const string &path) {
             continue;
         }
 
-        if (!DeleteFile(fname.c_str())) {
-            printf("ERROR: couldn't remove file %s\n", fname.c_str());
+        // Check if it's a directory
+        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            // Recursively clear subdirectory
+            clearDir(fname);
+            RemoveDirectory(fname.c_str());
+        } else {
+            // Delete file
+            if (!DeleteFile(fname.c_str())) {
+                printf("ERROR: couldn't remove file %s\n", fname.c_str());
+            }
         }
 
     } while (FindNextFile(hFind, &ffd) != 0);
