@@ -36,6 +36,7 @@
 #include <vector>
 
 struct RoseEngine;
+struct x86_RoseEngine;
 
 namespace ue2 {
 
@@ -50,11 +51,15 @@ struct suffix_id;
 // Dump the Rose graph in graphviz representation.
 void dumpRoseGraph(const RoseBuildImpl &build, const char *filename);
 
-void dumpRose(const RoseBuildImpl &build,
-              const std::vector<LitFragment> &fragments,
+void dumpRose(const RoseBuildImpl &build, const std::vector<LitFragment> &fragments,
               const std::map<left_id, u32> &leftfix_queue_map,
               const std::map<suffix_id, u32> &suffix_queue_map,
-              const RoseEngine *t);
+              const RoseEngine *t, const std::string &platform = "");
+
+void dumpRose(const RoseBuildImpl &build, const std::vector<LitFragment> &fragments,
+              const std::map<left_id, u32> &leftfix_queue_map,
+              const std::map<suffix_id, u32> &suffix_queue_map,
+              const x86_RoseEngine *t, const std::string &platform = "");
 
 void dumpMatcherLiterals(const std::vector<hwlmLiteral> &lits,
                          const std::string &name, const Grey &grey);
