@@ -219,6 +219,7 @@ int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
                                  struct HAORuntimeInspectSummary *summary);
 void HaoRuntimeResetStatsForTest(void);
 void HaoRuntimeGetStatsForTest(struct HAORuntimeStats *summary);
+int HaoRuntimeStatsEnabledForTest(void);
 hwlm_error_t HaoEngineExecBlobNaiveForTest(const void *blob, u32 blobSize,
                                            const struct FDR_Runtime_Args *a,
                                            hwlm_group_t control);

@@ -2361,6 +2361,10 @@ TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveForSimpleRules) {
 }
 
 TEST(HAORuntime, HaoRuntimeStatsTrackDirectReportPath) {
+    if (!HaoRuntimeStatsEnabledForTest()) {
+        return;
+    }
+
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("12345", false, false, 8692, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 8693, HWLM_ALL_GROUPS, {}, {}),
@@ -2652,6 +2656,10 @@ TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectWithResidualUnsupportedRules) {
 }
 
 TEST(HAORuntime, HaoRuntimeStatsTrackResidualPath) {
+    if (!HaoRuntimeStatsEnabledForTest()) {
+        return;
+    }
+
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 8791, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 8792, HWLM_ALL_GROUPS, {}, {}),
