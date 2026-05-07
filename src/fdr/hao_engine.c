@@ -2737,10 +2737,17 @@ void haoFillRawCtxFast(struct HAOPositionContext *ctx, size_t endPos,
     ctx->window64 = 0;
     ctx->validMask32 = validMask32;
 
+#if defined(HAVE_SVE)
+    {
+        const svuint64_t vword = svdup_n_u64(laneWord);
+        svst1_u64(svptrue_b64(), (uint64_t *)ctx->laneWindow32, vword);
+    }
+#else
     unaligned_store_u64a(ctx->laneWindow32, laneWord);
     unaligned_store_u64a(ctx->laneWindow32 + 8, laneWord);
     unaligned_store_u64a(ctx->laneWindow32 + 16, laneWord);
     unaligned_store_u64a(ctx->laneWindow32 + 24, laneWord);
+#endif
 }
 
 static really_inline
@@ -2875,22 +2882,19 @@ void haoMergeRawPairActive(const u32 laneByPair[4][8],
                            u32 *activeCount) {
     u32 pos[4] = {0};
     u32 out = 0;
+    u32 total = countByPair[0] + countByPair[1] + countByPair[2] + countByPair[3];
 
-    for (;;) {
-        u32 bestPair = 4U;
-        u32 bestLane = HAO_BATCH_MAX_WIDTH;
-        u32 p;
+    while (out < total) {
+        u32 l0 = (pos[0] < countByPair[0]) ? laneByPair[0][pos[0]] : 0xffffffffU;
+        u32 l1 = (pos[1] < countByPair[1]) ? laneByPair[1][pos[1]] : 0xffffffffU;
+        u32 l2 = (pos[2] < countByPair[2]) ? laneByPair[2][pos[2]] : 0xffffffffU;
+        u32 l3 = (pos[3] < countByPair[3]) ? laneByPair[3][pos[3]] : 0xffffffffU;
+        u32 bestLane = l0;
+        u32 bestPair = 0;
 
-        for (p = 0; p < 4U; p++) {
-            if (pos[p] < countByPair[p] &&
-                laneByPair[p][pos[p]] < bestLane) {
-                bestLane = laneByPair[p][pos[p]];
-                bestPair = p;
-            }
-        }
-        if (bestPair == 4U) {
-            break;
-        }
+        if (l1 < bestLane) { bestLane = l1; bestPair = 1; }
+        if (l2 < bestLane) { bestLane = l2; bestPair = 2; }
+        if (l3 < bestLane) { bestLane = l3; bestPair = 3; }
 
         activeLaneIndex[out] = bestLane;
         activeEncoded[out] = encodedByPair[bestPair][pos[bestPair]];
@@ -2902,15 +2906,12 @@ void haoMergeRawPairActive(const u32 laneByPair[4][8],
 }
 
 static really_inline
-u32 haoRetireRawKeysVecLocal(const u32 *primaryHashTable, svuint32_t vkeys,
-                             u32 pairBase, svuint32_t vbitPos,
-                             svuint32_t vbitmapBytes, u32 *activeLaneIndex,
-                             u32 *activeEncoded) {
+u32 haoRetireRawKeysVecLocalWithIds(const u32 *primaryHashTable,
+                                    svuint32_t vkeys, svuint32_t vlaneIds,
+                                    svuint32_t vbitPos, svuint32_t vbitmapBytes,
+                                    u32 *activeLaneIndex, u32 *activeEncoded) {
     const svbool_t pg32 = svptrue_b32();
     const svuint32_t vone = svdup_n_u32(1U);
-#if !HAO_RAW32_V2_DELAY_LANE_IDS
-    const svuint32_t vlaneIds = haoRawPairLaneIds(pairBase);
-#endif
     u32 activeCount = 0;
 
     assert(activeLaneIndex);
@@ -2920,9 +2921,6 @@ u32 haoRetireRawKeysVecLocal(const u32 *primaryHashTable, svuint32_t vkeys,
     {
         const svuint32_t vbitMask = svlsl_u32_x(pg32, vone, vbitPos);
         const svuint32_t vhit = svand_u32_x(pg32, vbitmapBytes, vbitMask);
-#if HAO_RAW32_V2_DELAY_LANE_IDS
-        const svuint32_t vlaneIds = haoRawPairLaneIds(pairBase);
-#endif
         activeCount = haoStoreActivePrimaryScalarStride(primaryHashTable, pg32,
                                                         vhit, vkeys, vlaneIds,
                                                         8U, activeLaneIndex,
@@ -2936,9 +2934,6 @@ u32 haoRetireRawKeysVecLocal(const u32 *primaryHashTable, svuint32_t vkeys,
         const u32 hitCount = (u32)svcntp_b32(pg32, phit);
 
         if (hitCount) {
-#if HAO_RAW32_V2_DELAY_LANE_IDS
-            const svuint32_t vlaneIds = haoRawPairLaneIds(pairBase);
-#endif
 #if HAO_SVE_BYTE_RETIRE_HYBRID_PRIMARY_LOAD
             if (hitCount <= HAO_SVE_BYTE_RETIRE_HYBRID_THRESHOLD) {
                 activeCount = haoStoreActivePrimaryScalarStride(
@@ -2966,6 +2961,17 @@ u32 haoRetireRawKeysVecLocal(const u32 *primaryHashTable, svuint32_t vkeys,
 
     HAO_STATS_ADD(primaryActiveLanes, activeCount);
     return activeCount;
+}
+
+static really_inline
+u32 haoRetireRawKeysVecLocal(const u32 *primaryHashTable, svuint32_t vkeys,
+                             u32 pairBase, svuint32_t vbitPos,
+                             svuint32_t vbitmapBytes, u32 *activeLaneIndex,
+                             u32 *activeEncoded) {
+    const svuint32_t vlaneIds = haoRawPairLaneIds(pairBase);
+    return haoRetireRawKeysVecLocalWithIds(primaryHashTable, vkeys, vlaneIds,
+                                           vbitPos, vbitmapBytes,
+                                           activeLaneIndex, activeEncoded);
 }
 
 static really_inline
@@ -3058,18 +3064,22 @@ int haoRunRaw32V2(const struct HAORuntimeHeader *hdr, const u8 *primaryBitmap,
         u32 laneByPair[4][8];
         u32 encodedByPair[4][8];
         u32 countByPair[4];
+        const svuint32_t vlaneIds01 = haoRawPairLaneIds(0U);
+        const svuint32_t vlaneIds23 = haoRawPairLaneIds(2U);
+        const svuint32_t vlaneIds45 = haoRawPairLaneIds(4U);
+        const svuint32_t vlaneIds67 = haoRawPairLaneIds(6U);
 
-        countByPair[0] = haoRetireRawKeysVecLocal(
-            primaryHashTable, vkeys01, 0U, vbitPos01, vbitmapBytes01,
+        countByPair[0] = haoRetireRawKeysVecLocalWithIds(
+            primaryHashTable, vkeys01, vlaneIds01, vbitPos01, vbitmapBytes01,
             laneByPair[0], encodedByPair[0]);
-        countByPair[1] = haoRetireRawKeysVecLocal(
-            primaryHashTable, vkeys23, 2U, vbitPos23, vbitmapBytes23,
+        countByPair[1] = haoRetireRawKeysVecLocalWithIds(
+            primaryHashTable, vkeys23, vlaneIds23, vbitPos23, vbitmapBytes23,
             laneByPair[1], encodedByPair[1]);
-        countByPair[2] = haoRetireRawKeysVecLocal(
-            primaryHashTable, vkeys45, 4U, vbitPos45, vbitmapBytes45,
+        countByPair[2] = haoRetireRawKeysVecLocalWithIds(
+            primaryHashTable, vkeys45, vlaneIds45, vbitPos45, vbitmapBytes45,
             laneByPair[2], encodedByPair[2]);
-        countByPair[3] = haoRetireRawKeysVecLocal(
-            primaryHashTable, vkeys67, 6U, vbitPos67, vbitmapBytes67,
+        countByPair[3] = haoRetireRawKeysVecLocalWithIds(
+            primaryHashTable, vkeys67, vlaneIds67, vbitPos67, vbitmapBytes67,
             laneByPair[3], encodedByPair[3]);
 
         haoMergeRawPairActive((const u32 (*)[8])laneByPair,
