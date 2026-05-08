@@ -203,11 +203,8 @@ struct HAOGlobalHashArtifacts {
     u32 keyBits = 0;
     u32 fullKeyMask = 0;
     HAOPrimaryHashTable primaryHashTable;
-    HAOPrimaryHashBitmap primaryHashBitmap;
-    HAOPrimaryHashBitmap primaryHashBitmapCoarse;
     HAOPrimaryHashTable primaryHashTableRaw;
     HAOPrimaryHashBitmap primaryHashBitmapRaw;
-    HAOPrimaryHashBitmap primaryHashBitmapRawCoarse;
     std::vector<HAOSecondaryHashEntry> secondaryHashTable;
     HAOGlobalHashStats stats;
 };

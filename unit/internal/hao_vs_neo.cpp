@@ -2058,9 +2058,9 @@ TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
     EXPECT_EQ(artifacts.haoGlobalHash.flags, hdr->flags);
     EXPECT_EQ(artifacts.haoGlobalHash.keyBits, hdr->keyBits);
     EXPECT_EQ(artifacts.bitSelectors.size(), hdr->selectorCount);
-    EXPECT_EQ(artifacts.haoGlobalHash.primaryHashTable.offsets.size(),
+    EXPECT_EQ(artifacts.haoGlobalHash.primaryHashTableRaw.offsets.size(),
               hdr->primaryCount);
-    EXPECT_EQ(artifacts.haoGlobalHash.primaryHashBitmap.bits.size(),
+    EXPECT_EQ(artifacts.haoGlobalHash.primaryHashBitmapRaw.bits.size(),
               hdr->primaryBitmapSize);
     EXPECT_EQ(artifacts.haoGlobalHash.secondaryHashTable.size(),
               hdr->secondaryCount);
@@ -2137,10 +2137,12 @@ TEST(HAOCompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {
         EXPECT_EQ(artifacts.bitSelectors[i].bitOffset, selectors[i].bitOffset);
     }
     for (u32 i = 0; i < hdr->primaryCount; i++) {
-        EXPECT_EQ(artifacts.haoGlobalHash.primaryHashTable.offsets[i], primary[i]);
+        EXPECT_EQ(artifacts.haoGlobalHash.primaryHashTableRaw.offsets[i],
+                  primary[i]);
     }
     for (u32 i = 0; i < hdr->primaryBitmapSize; i++) {
-        EXPECT_EQ(artifacts.haoGlobalHash.primaryHashBitmap.bits[i], bitmap[i]);
+        EXPECT_EQ(artifacts.haoGlobalHash.primaryHashBitmapRaw.bits[i],
+                  bitmap[i]);
     }
 
     const HAOInspectStats stats = computeHaoInspectStats(blob);
@@ -3078,9 +3080,9 @@ TEST(HAOCompile, HaoGlobalHashBuildsSinglePrimarySpace) {
     const u32 primaryCount = 1U << artifacts.keyBits;
     EXPECT_EQ(artifacts.keyBits, artifacts.haoGlobalHash.keyBits);
     EXPECT_EQ(primaryCount,
-              artifacts.haoGlobalHash.primaryHashTable.offsets.size());
+              artifacts.haoGlobalHash.primaryHashTableRaw.offsets.size());
     EXPECT_EQ((primaryCount + 7U) / 8U,
-              artifacts.haoGlobalHash.primaryHashBitmap.bits.size());
+              artifacts.haoGlobalHash.primaryHashBitmapRaw.bits.size());
     EXPECT_EQ(nonResidualExpandedKeys,
               artifacts.haoGlobalHash.stats.totalExpandedKeysInBuckets);
     EXPECT_GT(artifacts.haoGlobalHash.stats.nonEmptyPrimary, 0U);

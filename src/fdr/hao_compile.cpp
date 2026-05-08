@@ -132,10 +132,6 @@ void buildPrimaryBitmap(const HAOPrimaryHashTable &primaryHashTable,
                         HAOPrimaryHashBitmap *primaryHashBitmap);
 
 static
-void buildPrimaryCoarseBitmap(const HAOPrimaryHashTable &primaryHashTable,
-                              HAOPrimaryHashBitmap *primaryCoarseBitmap);
-
-static
 u32 haoPrimaryCountForKeyBits(u32 keyBits) {
     if (!keyBits) {
         return 1U;
@@ -523,11 +519,8 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
     out->keyBits = keyBits;
     out->fullKeyMask = haoFullKeyMask(keyBits);
     out->primaryHashTable.offsets.clear();
-    out->primaryHashBitmap.bits.clear();
-    out->primaryHashBitmapCoarse.bits.clear();
     out->primaryHashTableRaw.offsets.clear();
     out->primaryHashBitmapRaw.bits.clear();
-    out->primaryHashBitmapRawCoarse.bits.clear();
     out->secondaryHashTable.clear();
     out->stats = {};
 
@@ -629,10 +622,6 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
             out->secondaryHashTable.push_back(entry);
         }
     }
-
-    buildPrimaryBitmap(out->primaryHashTable, &out->primaryHashBitmap);
-    buildPrimaryCoarseBitmap(out->primaryHashTable,
-                             &out->primaryHashBitmapCoarse);
     out->valid = true;
 }
 
@@ -693,33 +682,6 @@ void buildPrimaryBitmap(const HAOPrimaryHashTable &primaryHashTable,
 }
 
 static
-u32 haoPrimaryCoarseBitmapBytes(u32 primaryCount) {
-    const u32 coarseCount =
-        (primaryCount + HAO_RUNTIME_PRIMARY_COARSE_KEY_GROUP - 1U) >>
-        HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT;
-    return haoPrimaryBitmapBytes(coarseCount);
-}
-
-static
-void buildPrimaryCoarseBitmap(const HAOPrimaryHashTable &primaryHashTable,
-                              HAOPrimaryHashBitmap *primaryCoarseBitmap) {
-    if (!primaryCoarseBitmap) {
-        return;
-    }
-
-    primaryCoarseBitmap->bits.clear();
-    const u32 primaryCount = verify_u32(primaryHashTable.offsets.size());
-    primaryCoarseBitmap->bits.assign(haoPrimaryCoarseBitmapBytes(primaryCount),
-                                     0);
-    for (u32 i = 0; i < primaryCount; i++) {
-        if (primaryHashTable.offsets[i]) {
-            haoPrimaryBitmapSet(&primaryCoarseBitmap->bits,
-                                i >> HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT);
-        }
-    }
-}
-
-static
 u32 haoRawSelectorBitIndex(const HAOBitSelector &selector) {
     return (HAO_LAYOUT_BYTES_PER_RULE_SLOT - 1U - (u32)selector.byteOffset) *
                8U +
@@ -771,15 +733,13 @@ static
 void buildHAORawPrimaryTables(const std::vector<HAOBitSelector> &selectors,
                               const HAOGlobalHashArtifacts &logical,
                               HAOPrimaryHashTable *rawTable,
-                              HAOPrimaryHashBitmap *rawBitmap,
-                              HAOPrimaryHashBitmap *rawCoarseBitmap) {
-    if (!rawTable || !rawBitmap || !rawCoarseBitmap) {
+                              HAOPrimaryHashBitmap *rawBitmap) {
+    if (!rawTable || !rawBitmap) {
         return;
     }
 
     rawTable->offsets.clear();
     rawBitmap->bits.clear();
-    rawCoarseBitmap->bits.clear();
 
     if (selectors.empty() || logical.primaryHashTable.offsets.empty()) {
         return;
@@ -801,7 +761,6 @@ void buildHAORawPrimaryTables(const std::vector<HAOBitSelector> &selectors,
     }
 
     buildPrimaryBitmap(*rawTable, rawBitmap);
-    buildPrimaryCoarseBitmap(*rawTable, rawCoarseBitmap);
 }
 
 static
@@ -1088,7 +1047,7 @@ std::vector<HAOBitCandidate> buildBitCandidates(
         const double careRatio =
             static_cast<double>(careCount) / std::max<size_t>(1, lits.size());
         const double entropy = entropyScore(zeros, ones);
-        c.score = (careRatio * 0.7) + (entropy * 0.3);
+        c.score = (careRatio * 0.8) + (entropy * 0.2);
         out.push_back(std::move(c));
     }
 
@@ -1256,9 +1215,7 @@ bool buildSharedHAOArtifacts(const std::vector<hwlmLiteral> &lits,
                              &artifacts->haoGlobalHash);
     buildHAORawPrimaryTables(artifacts->bitSelectors, artifacts->haoGlobalHash,
                              &artifacts->haoGlobalHash.primaryHashTableRaw,
-                             &artifacts->haoGlobalHash.primaryHashBitmapRaw,
-                             &(artifacts->haoGlobalHash
-                                   .primaryHashBitmapRawCoarse));
+                             &artifacts->haoGlobalHash.primaryHashBitmapRaw);
     buildRuleMeta(lits, &artifacts->ruleMeta, &artifacts->literalBlob);
     artifacts->flags = artifacts->haoGlobalHash.flags;
     return true;
@@ -1479,17 +1436,14 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
 
     const u32 selectorCount = verify_u32(artifacts.bitSelectors.size());
     const u32 primaryCount =
-        verify_u32(artifacts.haoGlobalHash.primaryHashTable.offsets.size());
+        verify_u32(artifacts.haoGlobalHash.primaryHashTableRaw.offsets.size());
     const u32 primaryBitmapSize =
-        verify_u32(artifacts.haoGlobalHash.primaryHashBitmap.bits.size());
-    const u32 primaryCoarseBitmapSize = verify_u32(
-        artifacts.haoGlobalHash.primaryHashBitmapCoarse.bits.size());
+        verify_u32(artifacts.haoGlobalHash.primaryHashBitmapRaw.bits.size());
+    const u32 primaryCoarseBitmapSize = 0;
     const u32 primaryRawCount = verify_u32(
         artifacts.haoGlobalHash.primaryHashTableRaw.offsets.size());
     const u32 primaryBitmapRawSize = verify_u32(
         artifacts.haoGlobalHash.primaryHashBitmapRaw.bits.size());
-    const u32 primaryCoarseBitmapRawSize = verify_u32(
-        artifacts.haoGlobalHash.primaryHashBitmapRawCoarse.bits.size());
     const u32 secondaryCount =
         verify_u32(artifacts.haoGlobalHash.secondaryHashTable.size());
     const u32 ruleMetaCount = verify_u32(artifacts.ruleMeta.size());
@@ -1499,16 +1453,9 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
     const size_t selectorBytes =
         sizeof(HAORuntimeBitSelector) * artifacts.bitSelectors.size();
     const size_t primaryBitmapBytes =
-        artifacts.haoGlobalHash.primaryHashBitmap.bits.size();
-    const size_t primaryCoarseBitmapBytes =
-        artifacts.haoGlobalHash.primaryHashBitmapCoarse.bits.size();
-    const size_t primaryBytes =
-        sizeof(u32) * artifacts.haoGlobalHash.primaryHashTable.offsets.size();
-    const size_t primaryBitmapRawBytes =
         artifacts.haoGlobalHash.primaryHashBitmapRaw.bits.size();
-    const size_t primaryCoarseBitmapRawBytes =
-        artifacts.haoGlobalHash.primaryHashBitmapRawCoarse.bits.size();
-    const size_t primaryRawBytes =
+    const size_t primaryCoarseBitmapBytes = 0;
+    const size_t primaryBytes =
         sizeof(u32) * artifacts.haoGlobalHash.primaryHashTableRaw.offsets.size();
     const size_t secondaryBytes =
         sizeof(HAORuntimeSecondaryHashEntry) *
@@ -1519,8 +1466,7 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
     const size_t residualRuleBytes = sizeof(u32) * residualRuleIndexes.size();
 
     if (primaryRawCount != primaryCount ||
-        primaryBitmapRawSize != primaryBitmapSize ||
-        primaryCoarseBitmapRawSize != primaryCoarseBitmapSize) {
+        primaryBitmapRawSize != primaryBitmapSize) {
         return nullptr;
     }
 
@@ -1533,12 +1479,9 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
     totalSize += ROUNDUP_N(primaryCoarseBitmapBytes, alignof(u32));
     const u32 primaryOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(primaryBytes, alignof(u32));
-    const u32 primaryBitmapRawOffset = verify_u32(totalSize);
-    totalSize += ROUNDUP_N(primaryBitmapRawBytes, alignof(u32));
-    const u32 primaryBitmapRawCoarseOffset = verify_u32(totalSize);
-    totalSize += ROUNDUP_N(primaryCoarseBitmapRawBytes, alignof(u32));
-    const u32 primaryRawOffset = verify_u32(totalSize);
-    totalSize += ROUNDUP_N(primaryRawBytes, alignof(u32));
+    const u32 primaryBitmapRawOffset = primaryBitmapOffset;
+    const u32 primaryBitmapRawCoarseOffset = primaryBitmapCoarseOffset;
+    const u32 primaryRawOffset = primaryOffset;
     const u32 secondaryOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(secondaryBytes, alignof(u32));
     const u32 ruleMetaOffset = verify_u32(totalSize);
@@ -1593,33 +1536,13 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
 
     if (primaryBitmapBytes) {
         memcpy(base + primaryBitmapOffset,
-               artifacts.haoGlobalHash.primaryHashBitmap.bits.data(),
+               artifacts.haoGlobalHash.primaryHashBitmapRaw.bits.data(),
                primaryBitmapBytes);
-    }
-    if (primaryCoarseBitmapBytes) {
-        memcpy(base + primaryBitmapCoarseOffset,
-               artifacts.haoGlobalHash.primaryHashBitmapCoarse.bits.data(),
-               primaryCoarseBitmapBytes);
     }
     if (primaryBytes) {
         memcpy(base + primaryOffset,
-               artifacts.haoGlobalHash.primaryHashTable.offsets.data(),
-               primaryBytes);
-    }
-    if (primaryBitmapRawBytes) {
-        memcpy(base + primaryBitmapRawOffset,
-               artifacts.haoGlobalHash.primaryHashBitmapRaw.bits.data(),
-               primaryBitmapRawBytes);
-    }
-    if (primaryCoarseBitmapRawBytes) {
-        memcpy(base + primaryBitmapRawCoarseOffset,
-               artifacts.haoGlobalHash.primaryHashBitmapRawCoarse.bits.data(),
-               primaryCoarseBitmapRawBytes);
-    }
-    if (primaryRawBytes) {
-        memcpy(base + primaryRawOffset,
                artifacts.haoGlobalHash.primaryHashTableRaw.offsets.data(),
-               primaryRawBytes);
+               primaryBytes);
     }
     if (secondaryBytes) {
         auto *secondaryOut =
