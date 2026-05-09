@@ -151,5 +151,49 @@ None
 
 None
 
+## Related Documentation
+### Related Documentation
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: left;">Document</th>
+      <th style="text-align: left;">Description</th>
+      <th style="text-align: left;">Delivery Method</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: left;">2.6.0 Release Notes</td>
+      <td style="text-align: left;">Provides Hyperscan version update and release information.</td>
+      <td style="text-align: left;">Open-source repository</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">Quick Start</td>
+      <td style="text-align: left;">Provides quick start tutorials to help users quickly understand and use Hyperscan.</td>
+      <td style="text-align: left;">Open-source repository</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">Installation Guide</td>
+      <td style="text-align: left;">Provides guidance on how to install and deploy Hyperscan.</td>
+      <td style="text-align: left;">Open-source repository</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">User Guide</td>
+      <td style="text-align: left;">Provides guidance on how to use Hyperscan.</td>
+      <td style="text-align: left;">Open-source repository</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">Developer Guide</td>
+      <td style="text-align: left;">Provides development and adaptation of Hyperscan short rule bypass technology.</td>
+      <td style="text-align: left;">Open-source repository</td>
+    </tr>       
+  </tbody>
+</table>
+
+
+### Obtaining Documentation<a name="EN-US_TOPIC_0000002547210757"></a>
+
+Visit the [Open-source repository](https://gitcode.com/boostkit/hyperscan/tree/master) to view or download related documents.
 
 

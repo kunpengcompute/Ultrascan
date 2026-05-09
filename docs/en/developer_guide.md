@@ -5,16 +5,16 @@
 >![](public_sys-resources/icon-notice.gif) **NOTICE:** 
 >Functions \(KHSEL\__xxx_\) in the KHSEL\_core library do not need to be explicitly called. They are used as internal interfaces of Hyperscan.
 
-[Table 1](#table1711314810458)  lists the optimized function in the KHSEL\_ops library.  [Table 2](#table11769195010347)  lists the optimized functions in the KHSEL\_core library.
+[Table 1](#table_1)  lists the optimized function in the KHSEL\_ops library.  [Table 2](#table_2)  lists the optimized functions in the KHSEL\_core library.
 
-**Table  1**  Optimized function in KHSEL\_ops
+**Table  1**  Optimized function in KHSEL\_ops<a id="table_1"></a>
 
 |Function|Description|
 |--|--|
 |ReplaceAllAcc|Performs string match and Replace All operations according to the fixed regular expression rule "[^A-Za-z0-9_/.]+".|
 
 
-**Table  2**  Optimized functions in KHSEL\_core
+**Table  2**  Optimized functions in KHSEL\_core<a id="table_2"></a>
 
 |Function|Description|
 |--|--|

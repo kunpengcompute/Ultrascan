@@ -86,12 +86,12 @@ For more information about Hyperscan, visit the  [Kunpeng repository on GitCode]
 
 ## Release Notes<a name="EN-US_TOPIC_0000002518252296"></a>
 
-For details about feature changes in each version, see \[release\_notes.md\]\(./docs/en/release\_notes.md\).
+For details about feature changes in each version, see [Release Notes](./docs/en/release\_notes.md).
 
 
 ## Environment Deployment<a name="EN-US_TOPIC_0000002549772083"></a>
 
-For details about the environment dependencies, installation methods, and compilation methods of Hyperscan, see \[compilation\_guide.md\]\(./docs/en/compilation\_guide.md\).
+For details about the environment dependencies, installation methods, and compilation methods of Hyperscan, see [Compilation Guide](./docs/en/compilation\_guide.md).
 
 
 ## Quick Start<a name="EN-US_TOPIC_0000002549892057"></a>
@@ -101,13 +101,13 @@ The Hyperscan quick start guide uses the performance benchmark tool hsbench prov
 
 ## Helpful Links<a name="EN-US_TOPIC_0000002518252300"></a>
 
-|Name|Path|Overview|
-|--|--|--|
-|Quick Start|[quick_start.md](./docs/en/quick_start.md)|Provides guidance for a quick start and verification.|
-|Release Notes|[release_notes.md](./docs/en/release_notes.md)|Provides basic information and feature updates of each Hyperscan version.|
-|Compilation Guide|[compilation_guide.md](./docs/en/compile_guide.md)|Describes how to install, deploy, and compile the software.|
-|User Guide|[user_guide.md](./docs/en/user_guide.md)|Provides guidance on how to use the Hyperscan feature.|
-|Developer Guide|[developer_guide.md](./docs/en/developer_guide.md)|Provides descriptions and definitions of APIs related to the Hyperscan feature.|
+|Name|Overview|
+|--|--|
+|[Quick Start](./docs/en/quick_start.md)|Provides guidance for a quick start and verification.|
+|[Release Notes](./docs/en/release_notes.md)|Provides basic information and feature updates of each Hyperscan version.|
+|[Compilation Guide](./docs/en/compile_guide.md)|Describes how to install, deploy, and compile the software.|
+|[User Guide](./docs/en/user_guide.md)|Provides guidance on how to use the Hyperscan feature.|
+|[Developer Guide](./docs/en/developer_guide.md)|Provides descriptions and definitions of APIs related to the Hyperscan feature.|
 
 
 
@@ -123,6 +123,6 @@ This code repository contributes to the Hyperscan open source project solely for
 
 ## License<a name="EN-US_TOPIC_0000002549892075"></a>
 
-This project uses the BSD license. For details, see \[LICENSE\]\(LICENSE\).
+This project uses the BSD license. For details, see [LICENSE](LICENSE).
 
 
