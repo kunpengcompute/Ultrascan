@@ -73,7 +73,13 @@ void dumpRoseGraph(const RoseBuildImpl &, const char *) {
 static UNUSED
 void dumpRose(const RoseBuildImpl &, const std::vector<LitFragment> &,
               const std::map<left_id, u32> &, const std::map<suffix_id, u32> &,
-              const RoseEngine *) {
+              const RoseEngine *, const std::string & = "") {
+}
+
+static UNUSED
+void dumpRose(const RoseBuildImpl &, const std::vector<LitFragment> &,
+              const std::map<left_id, u32> &, const std::map<suffix_id, u32> &,
+              const x86_RoseEngine *, const std::string & = "") {
 }
 
 static UNUSED
