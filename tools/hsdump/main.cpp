@@ -154,7 +154,7 @@ static SplitDatabases splitDB(const fat_hs_database_t* fat_db) {
             result.arm_db->magic = fat_db->magic;
             result.arm_db->version = fat_db->version;
             result.arm_db->length = fat_db->arm_length;
-            result.arm_db->platform = fat_db->platform;
+            result.arm_db->platform = fat_db->arm_platform;
             result.arm_db->crc32 = fat_db->arm_crc32;
             result.arm_db->reserved0 = fat_db->reserved0;
             result.arm_db->reserved1 = fat_db->reserved1;

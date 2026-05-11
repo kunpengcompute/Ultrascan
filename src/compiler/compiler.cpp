@@ -530,7 +530,7 @@ hs_database_t *dbCreate(const char *in_bytecode, size_t len, u64a platform) {
 static
 fat_hs_database_t *FatdbCreate(const char *x86_bytecode, size_t x86_len,
                            const char *arm_bytecode, size_t arm_len,
-                           u64a platform) {
+                           u64a platform, u64a arm_platform) {
 size_t db_len = sizeof(struct fat_hs_database) + x86_len + arm_len + 128;
     DEBUG_PRINTF("fat db size %zu\n", db_len);
 
@@ -547,6 +547,7 @@ size_t db_len = sizeof(struct fat_hs_database) + x86_len + arm_len + 128;
     db->x86_length = x86_len;
     db->arm_length = arm_len;
     db->platform = platform;
+    db->arm_platform = arm_platform;
 
     // x86 字节码偏移（64字节对齐）
     size_t shift = (uintptr_t)db->bytes & 0x3f;
@@ -638,9 +639,10 @@ struct fat_hs_database *fat_build(NG &x86_ng, NG &arm_ng, unsigned int *length, 
     const char *x86_bytecode = (const char *)(x86_rose.get());
     const char *arm_bytecode = (const char *)(arm_rose.get());
     const platform_t p = target_to_platform(x86_ng.cc.target_info);
+    const platform_t arm_p = target_to_platform(arm_ng.cc.target_info);
     
     struct fat_hs_database *db = FatdbCreate(x86_bytecode, x86_len, 
-                                         arm_bytecode, arm_len, p);
+                                         arm_bytecode, arm_len, p, arm_p);
     if (!db) {
         throw CompileError("Could not allocate memory for bytecode.");
     }
