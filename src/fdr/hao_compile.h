@@ -14,7 +14,7 @@
 #endif
 
 #ifndef HAO_MAX_KEY_AMBIG_BITS
-#define HAO_MAX_KEY_AMBIG_BITS 10U
+#define HAO_MAX_KEY_AMBIG_BITS 15U
 #endif
 
 #ifndef HAO_MAX_KEY_EXPANSION

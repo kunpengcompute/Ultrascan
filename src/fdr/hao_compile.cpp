@@ -21,7 +21,9 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <fstream>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -37,10 +39,95 @@ static constexpr u64a HAO_BUILD_MAX_TOTAL_PRIMARY_FOOTPRINT =
     128ULL * 1024ULL * 1024ULL;
 static constexpr u8 HAO_BUILD_STATE_DONT_CARE = 2;
 
+// 0: baseline score plus ambiguity cap.
+// 4: baseline-seeded local search driven by HS_HAO_SELECTOR_PROFILE samples.
+#ifndef HAO_SELECTOR_SCORE_MODE
+#define HAO_SELECTOR_SCORE_MODE 4
+#endif
+
+#ifndef HAO_SELECTOR_LOCAL_SEARCH_ROUNDS
+#define HAO_SELECTOR_LOCAL_SEARCH_ROUNDS 2U
+#endif
+
+#ifndef HAO_SELECTOR_LOCAL_SEARCH_TOPK
+#define HAO_SELECTOR_LOCAL_SEARCH_TOPK 0U
+#endif
+
+#ifndef HAO_SELECTOR_LOCAL_MIN_NONEMPTY_PCT
+#define HAO_SELECTOR_LOCAL_MIN_NONEMPTY_PCT 98U
+#endif
+
+#ifndef HAO_SELECTOR_LOCAL_MIN_GAIN_PCT
+#define HAO_SELECTOR_LOCAL_MIN_GAIN_PCT 5.0
+#endif
+
+#ifndef HAO_SELECTOR_REL_ACTIVE_WEIGHT
+#define HAO_SELECTOR_REL_ACTIVE_WEIGHT 100.0
+#endif
+
+#ifndef HAO_SELECTOR_REL_ENTRY_WEIGHT
+#define HAO_SELECTOR_REL_ENTRY_WEIGHT 90.0
+#endif
+
+#ifndef HAO_SELECTOR_REL_GT4_WEIGHT
+#define HAO_SELECTOR_REL_GT4_WEIGHT 35.0
+#endif
+
+#ifndef HAO_SELECTOR_REL_EXPANDED_KEY_WEIGHT
+#define HAO_SELECTOR_REL_EXPANDED_KEY_WEIGHT 8.0
+#endif
+
+#ifndef HAO_SELECTOR_REL_COLLISION_WEIGHT
+#define HAO_SELECTOR_REL_COLLISION_WEIGHT 8.0
+#endif
+
+#ifndef HAO_SELECTOR_REL_DEEP_BUCKET_WEIGHT
+#define HAO_SELECTOR_REL_DEEP_BUCKET_WEIGHT 12.0
+#endif
+
+#ifndef HAO_SELECTOR_REL_MAX_RULE_WEIGHT
+#define HAO_SELECTOR_REL_MAX_RULE_WEIGHT 4.0
+#endif
+
+#ifndef HAO_SELECTOR_PROFILE_MAX_BYTES
+#define HAO_SELECTOR_PROFILE_MAX_BYTES (16U * 1024U * 1024U)
+#endif
+
+#ifndef HAO_SELECTOR_PROFILE_MAX_WINDOWS
+#define HAO_SELECTOR_PROFILE_MAX_WINDOWS 65536U
+#endif
+
 struct HAOBitCandidate {
     u32 bitIndex = 0;
     double score = 0.0;
+    u32 fixedCount = 0;
+    u32 ambiguousCount = 0;
+    double careRatio = 0.0;
+    double fixedRatio = 0.0;
+    double ambiguousRatio = 0.0;
+    double entropy = 0.0;
     std::vector<u8> states; // 0, 1, or HAO_BUILD_STATE_DONT_CARE
+};
+
+struct HAOSelectorCostEval {
+    bool valid = false;
+    u32 totalExpandedKeys = 0;
+    u32 nonEmptyPrimary = 0;
+    u32 collisionBuckets = 0;
+    u32 totalSecondaryEntries = 0;
+    u32 ruleBucketsGt4 = 0;
+    u32 entryBucketsGt4 = 0;
+    u32 maxRulesPerBucket = 0;
+    double expectedActive = 0.0;
+    double expectedEntries = 0.0;
+    double expectedGt4 = 0.0;
+    double cost = std::numeric_limits<double>::infinity();
+};
+
+struct HAOSelectorInputProfile {
+    bool initialized = false;
+    bool loaded = false;
+    std::vector<u64a> windows;
 };
 
 static
@@ -1009,6 +1096,276 @@ u64a signatureOfStates(const std::vector<u8> &states) {
 }
 
 static
+bool haoCandidateFitsAmbigBudget(const HAOBitCandidate &cand,
+                                 const std::vector<u8> &selectedAmbigs) {
+    assert(cand.states.size() == selectedAmbigs.size());
+    for (u32 i = 0; i < cand.states.size(); i++) {
+        if (cand.states[i] != HAO_BUILD_STATE_DONT_CARE) {
+            continue;
+        }
+        if (selectedAmbigs[i] >= HAO_MAX_KEY_AMBIG_BITS) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static
+void haoApplyCandidateAmbigBudget(const HAOBitCandidate &cand,
+                                  std::vector<u8> *selectedAmbigs) {
+    assert(selectedAmbigs);
+    assert(cand.states.size() == selectedAmbigs->size());
+    for (u32 i = 0; i < cand.states.size(); i++) {
+        if (cand.states[i] == HAO_BUILD_STATE_DONT_CARE) {
+            (*selectedAmbigs)[i]++;
+        }
+    }
+}
+
+#if HAO_SELECTOR_SCORE_MODE == 4
+static
+u64a haoParseU64Env(const char *name, u64a fallback) {
+    const char *value = getenv(name);
+    if (!value || !*value) {
+        return fallback;
+    }
+
+    char *end = nullptr;
+    const unsigned long long parsed = strtoull(value, &end, 0);
+    if (end == value) {
+        return fallback;
+    }
+    return (u64a)parsed;
+}
+
+static
+u64a haoBuildProfileWindow(const std::vector<u8> &data, size_t endPos) {
+    u64a window = 0;
+    for (u32 byteFromEnd = 0; byteFromEnd < HAO_BUILD_MAX_SUFFIX_BYTES;
+         byteFromEnd++) {
+        const u8 c = data[endPos - byteFromEnd];
+        window |= (u64a)c << (byteFromEnd * 8U);
+    }
+    return window;
+}
+
+static
+void haoLoadSelectorInputProfile(HAOSelectorInputProfile *profile) {
+    assert(profile);
+    profile->initialized = true;
+
+    const char *path = getenv("HS_HAO_SELECTOR_PROFILE");
+    if (!path || !*path) {
+        path = getenv("HAO_SELECTOR_PROFILE");
+    }
+    if (!path || !*path) {
+        return;
+    }
+
+    const u64a maxBytes = haoParseU64Env("HS_HAO_SELECTOR_PROFILE_MAX_BYTES",
+                                         HAO_SELECTOR_PROFILE_MAX_BYTES);
+    const u64a maxWindows =
+        haoParseU64Env("HS_HAO_SELECTOR_PROFILE_MAX_WINDOWS",
+                       HAO_SELECTOR_PROFILE_MAX_WINDOWS);
+    if (!maxBytes || !maxWindows) {
+        return;
+    }
+
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        return;
+    }
+
+    std::vector<u8> data;
+    data.reserve((size_t)std::min<u64a>(maxBytes, 1U << 20));
+    char ch = 0;
+    while ((u64a)data.size() < maxBytes && in.get(ch)) {
+        data.push_back((u8)(unsigned char)ch);
+    }
+    if (data.size() < HAO_BUILD_MAX_SUFFIX_BYTES) {
+        return;
+    }
+
+    const size_t windowCount = data.size() - HAO_BUILD_MAX_SUFFIX_BYTES + 1;
+    const size_t maxSampleWindows = (size_t)maxWindows;
+    const size_t stride =
+        std::max<size_t>(1, (windowCount + maxSampleWindows - 1) /
+                                maxSampleWindows);
+    u64a total = 0;
+
+    profile->windows.reserve((size_t)std::min<u64a>(maxWindows, windowCount));
+    for (size_t start = 0;
+         start + HAO_BUILD_MAX_SUFFIX_BYTES <= data.size() &&
+         profile->windows.size() < maxWindows;
+         start += stride) {
+        const size_t endPos = start + HAO_BUILD_MAX_SUFFIX_BYTES - 1;
+        const u64a window = haoBuildProfileWindow(data, endPos);
+        profile->windows.push_back(window);
+        total++;
+    }
+
+    if (!total || profile->windows.empty()) {
+        profile->windows.clear();
+        return;
+    }
+
+    profile->loaded = true;
+}
+
+static
+const HAOSelectorInputProfile &haoGetSelectorInputProfile(void) {
+    static HAOSelectorInputProfile profile;
+    if (!profile.initialized) {
+        haoLoadSelectorInputProfile(&profile);
+    }
+    return profile;
+}
+
+static
+bool haoSelectorInputProfileLoaded(void) {
+    const HAOSelectorInputProfile &profile = haoGetSelectorInputProfile();
+    return profile.loaded && !profile.windows.empty();
+}
+
+static
+u32 haoProfileWindowKey(const std::vector<const HAOBitCandidate *> &selected,
+                        u64a window) {
+    u32 key = 0;
+    for (u32 i = 0; i < selected.size(); i++) {
+        if (window & (1ULL << selected[i]->bitIndex)) {
+            key |= (1U << i);
+        }
+    }
+    return key;
+}
+
+static
+std::vector<const HAOBitCandidate *> haoSortedSelectedCandidates(
+    const std::vector<const HAOBitCandidate *> &selected) {
+    std::vector<const HAOBitCandidate *> ordered = selected;
+    std::sort(ordered.begin(), ordered.end(),
+              [](const HAOBitCandidate *a, const HAOBitCandidate *b) {
+                  return a->bitIndex < b->bitIndex;
+              });
+    return ordered;
+}
+#endif
+
+#if HAO_SELECTOR_SCORE_MODE == 4
+static
+HAOSelectorCostEval haoEvaluateSelectorRuntimeCost(
+    const std::vector<const HAOBitCandidate *> &selected,
+    size_t literalCount) {
+    HAOSelectorCostEval eval;
+    if (selected.empty() || selected.size() > HAO_LAYOUT_KEY_BITS ||
+        selected.size() > 31U) {
+        return eval;
+    }
+
+    const std::vector<const HAOBitCandidate *> ordered =
+        haoSortedSelectedCandidates(selected);
+    std::unordered_map<u32, u32> bucketCounts;
+    bucketCounts.reserve(literalCount * 4);
+
+    for (u32 litIndex = 0; litIndex < literalCount; litIndex++) {
+        u32 baseKey = 0;
+        u32 ambiguousBits[HAO_LAYOUT_MAX_SELECTORS] = {};
+        u32 ambiguousCount = 0;
+
+        for (u32 selectorPos = 0; selectorPos < ordered.size(); selectorPos++) {
+            const u8 state = ordered[selectorPos]->states[litIndex];
+            if (state == HAO_BUILD_STATE_DONT_CARE) {
+                if (ambiguousCount >= HAO_MAX_KEY_AMBIG_BITS ||
+                    ambiguousCount >= HAO_LAYOUT_MAX_SELECTORS) {
+                    return eval;
+                }
+                ambiguousBits[ambiguousCount++] = selectorPos;
+            } else if (state) {
+                baseKey |= (1U << selectorPos);
+            }
+        }
+
+        const u32 variantCount = 1U << ambiguousCount;
+        if ((u64a)eval.totalExpandedKeys + variantCount >
+            HAO_MAX_TOTAL_EXPANDED_KEYS) {
+            return eval;
+        }
+        eval.totalExpandedKeys += variantCount;
+
+        for (u32 variant = 0; variant < variantCount; variant++) {
+            u32 key = baseKey;
+            for (u32 j = 0; j < ambiguousCount; j++) {
+                const u32 bit = ambiguousBits[j];
+                if (variant & (1U << j)) {
+                    key |= (1U << bit);
+                } else {
+                    key &= ~(1U << bit);
+                }
+            }
+            bucketCounts[key]++;
+        }
+    }
+
+    eval.nonEmptyPrimary = verify_u32(bucketCounts.size());
+    const HAOSelectorInputProfile &profile = haoGetSelectorInputProfile();
+    for (const auto &it : bucketCounts) {
+        const u32 ruleCount = it.second;
+        const u32 entryCount =
+            (ruleCount + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY - 1) /
+            HAO_LAYOUT_RULE_SLOTS_PER_ENTRY;
+
+        eval.totalSecondaryEntries += entryCount;
+        eval.maxRulesPerBucket = std::max(eval.maxRulesPerBucket, ruleCount);
+        if (ruleCount > 1) {
+            eval.collisionBuckets++;
+        }
+        if (ruleCount > HAO_LAYOUT_RULE_SLOTS_PER_ENTRY) {
+            eval.ruleBucketsGt4++;
+        }
+        if (entryCount > HAO_LAYOUT_RULE_SLOTS_PER_ENTRY) {
+            eval.entryBucketsGt4++;
+        }
+    }
+
+    if (!profile.loaded || profile.windows.empty()) {
+        return eval;
+    }
+
+    u64a active = 0;
+    u64a gt4 = 0;
+    long double entries = 0.0;
+    for (u64a window : profile.windows) {
+        const u32 key = haoProfileWindowKey(ordered, window);
+        const auto it = bucketCounts.find(key);
+        if (it == bucketCounts.end()) {
+            continue;
+        }
+        const u32 ruleCount = it->second;
+        const u32 entryCount =
+            (ruleCount + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY - 1) /
+            HAO_LAYOUT_RULE_SLOTS_PER_ENTRY;
+        active++;
+        entries += entryCount;
+        if (ruleCount > HAO_LAYOUT_RULE_SLOTS_PER_ENTRY ||
+            entryCount > HAO_LAYOUT_RULE_SLOTS_PER_ENTRY) {
+            gt4++;
+        }
+    }
+
+    const double denom = (double)profile.windows.size();
+    eval.expectedActive = (double)active / denom;
+    eval.expectedEntries = (double)entries / denom;
+    eval.expectedGt4 = (double)gt4 / denom;
+
+    // The final search cost is normalized against the baseline selector, so
+    // keep this field as a simple absolute fallback/debug summary.
+    eval.cost = eval.expectedActive + eval.expectedEntries + eval.expectedGt4;
+    eval.valid = true;
+    return eval;
+}
+#endif
+
+static
 std::vector<HAOBitCandidate> buildBitCandidates(
     const std::vector<hwlmLiteral> &lits) {
     std::vector<HAOBitCandidate> out;
@@ -1019,7 +1376,8 @@ std::vector<HAOBitCandidate> buildBitCandidates(
         c.bitIndex = bit;
         c.states.reserve(lits.size());
 
-        u32 careCount = 0;
+        u32 fixedCount = 0;
+        u32 ambiguousCount = 0;
         u32 zeros = 0;
         u32 ones = 0;
 
@@ -1027,32 +1385,244 @@ std::vector<HAOBitCandidate> buildBitCandidates(
             u8 state = HAO_BUILD_STATE_DONT_CARE;
             getBitState(lit, bit, &state); // 0, 1, or don't care.
             c.states.push_back(state);
-            // Skip don't-care bits when collecting statistics.
             if (state == HAO_BUILD_STATE_DONT_CARE) {
+                ambiguousCount++;
                 continue;
             }
-            careCount++;
+            fixedCount++;
             if (state) {
                 ones++;
             } else {
                 zeros++;
             }
         }
-        // Skip bit positions that no literal cares about.
-        if (!careCount) {
+        // Bits with no fixed contribution cannot improve the primary key.
+        if (!fixedCount) {
             continue;
         }
-        // Heuristic scoring prefers widely cared-about bits with balanced
-        // 0/1 distributions.
-        const double careRatio =
-            static_cast<double>(careCount) / std::max<size_t>(1, lits.size());
-        const double entropy = entropyScore(zeros, ones);
-        c.score = (careRatio * 0.8) + (entropy * 0.2);
+        c.fixedCount = fixedCount;
+        c.ambiguousCount = ambiguousCount;
+        c.careRatio =
+            static_cast<double>(fixedCount) / std::max<size_t>(1, lits.size());
+        c.fixedRatio =
+            static_cast<double>(fixedCount) / std::max<size_t>(1, lits.size());
+        c.ambiguousRatio =
+            static_cast<double>(ambiguousCount) /
+            std::max<size_t>(1, lits.size());
+        c.entropy = entropyScore(zeros, ones);
+
+        // Baseline selector quality: broad fixed coverage plus distribution
+        // balance. Profile mode uses this only to seed the local search.
+        c.score = (c.fixedRatio * 0.8) + (c.entropy * 0.2);
+
         out.push_back(std::move(c));
     }
 
     return out;
 }
+
+#if HAO_SELECTOR_SCORE_MODE == 4
+static
+bool haoSelectedContainsBit(
+    const std::vector<const HAOBitCandidate *> &selected, u32 bitIndex) {
+    for (const HAOBitCandidate *cand : selected) {
+        if (cand->bitIndex == bitIndex) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static
+bool haoSelectedHasDuplicateSignature(
+    const std::vector<const HAOBitCandidate *> &selected) {
+    std::unordered_set<u64a> signatures;
+    for (const HAOBitCandidate *cand : selected) {
+        if (!signatures.insert(signatureOfStates(cand->states)).second) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static
+bool haoSelectedFitsAmbigBudget(
+    const std::vector<const HAOBitCandidate *> &selected,
+    size_t literalCount) {
+    std::vector<u8> ambigs(literalCount, 0);
+    for (const HAOBitCandidate *cand : selected) {
+        if (!haoCandidateFitsAmbigBudget(*cand, ambigs)) {
+            return false;
+        }
+        haoApplyCandidateAmbigBudget(*cand, &ambigs);
+    }
+    return true;
+}
+
+static
+bool haoSelectorLocalTrialAllowed(const HAOSelectorCostEval &eval,
+                                  const HAOSelectorCostEval &baseline) {
+    if (!eval.valid || !baseline.valid || !baseline.nonEmptyPrimary) {
+        return false;
+    }
+
+    const u64a minNonEmpty =
+        (u64a)baseline.nonEmptyPrimary * HAO_SELECTOR_LOCAL_MIN_NONEMPTY_PCT;
+    if ((u64a)eval.nonEmptyPrimary * 100U < minNonEmpty) {
+        return false;
+    }
+
+    // Keep the rule-side structure at least as healthy as the baseline. The
+    // profile tells us which buckets are hot, but it must not be allowed to
+    // collapse the key space or create deeper worst-case buckets.
+    if (eval.ruleBucketsGt4 > baseline.ruleBucketsGt4 ||
+        eval.entryBucketsGt4 > baseline.entryBucketsGt4 ||
+        eval.maxRulesPerBucket > baseline.maxRulesPerBucket) {
+        return false;
+    }
+    if ((u64a)eval.collisionBuckets * baseline.nonEmptyPrimary >
+        (u64a)baseline.collisionBuckets * eval.nonEmptyPrimary) {
+        return false;
+    }
+
+    return true;
+}
+
+static
+double haoRatioToBaseline(double value, double baseline) {
+    static constexpr double eps = 0.000000001;
+    if (baseline > eps) {
+        return value / baseline;
+    }
+    return value <= eps ? 1.0 : 8.0;
+}
+
+static
+double haoRatioToBaselineU32(u32 value, u32 baseline) {
+    if (baseline) {
+        return (double)value / (double)baseline;
+    }
+    return value ? 8.0 : 1.0;
+}
+
+static
+double haoSelectorRelativeCost(const HAOSelectorCostEval &eval,
+                               const HAOSelectorCostEval &baseline) {
+    const u32 evalDeepBuckets = eval.ruleBucketsGt4 + eval.entryBucketsGt4;
+    const u32 baselineDeepBuckets =
+        baseline.ruleBucketsGt4 + baseline.entryBucketsGt4;
+
+    double cost = 0.0;
+    cost += HAO_SELECTOR_REL_ACTIVE_WEIGHT *
+            haoRatioToBaseline(eval.expectedActive, baseline.expectedActive);
+    cost += HAO_SELECTOR_REL_ENTRY_WEIGHT *
+            haoRatioToBaseline(eval.expectedEntries, baseline.expectedEntries);
+    cost += HAO_SELECTOR_REL_GT4_WEIGHT *
+            haoRatioToBaseline(eval.expectedGt4, baseline.expectedGt4);
+    cost += HAO_SELECTOR_REL_EXPANDED_KEY_WEIGHT *
+            haoRatioToBaselineU32(eval.totalExpandedKeys,
+                                  baseline.totalExpandedKeys);
+    cost += HAO_SELECTOR_REL_COLLISION_WEIGHT *
+            haoRatioToBaselineU32(eval.collisionBuckets,
+                                  baseline.collisionBuckets);
+    cost += HAO_SELECTOR_REL_DEEP_BUCKET_WEIGHT *
+            haoRatioToBaselineU32(evalDeepBuckets, baselineDeepBuckets);
+    cost += HAO_SELECTOR_REL_MAX_RULE_WEIGHT *
+            haoRatioToBaselineU32(eval.maxRulesPerBucket,
+                                  baseline.maxRulesPerBucket);
+    return cost;
+}
+#endif
+
+static
+void haoAppendSelectorFromCandidate(const HAOBitCandidate &cand,
+                                    std::vector<HAOBitSelector> *selectors) {
+    HAOBitSelector s;
+    s.byteOffset = verify_u8(cand.bitIndex / 8);
+    s.bitOffset = verify_u8(cand.bitIndex % 8);
+    selectors->push_back(s);
+}
+
+#if HAO_SELECTOR_SCORE_MODE == 4
+static
+void haoRunSelectorLocalSearch(
+    const std::vector<HAOBitCandidate> &candidates, size_t literalCount,
+    std::vector<const HAOBitCandidate *> *selected) {
+    if (!selected || selected->empty()) {
+        return;
+    }
+    if (!haoSelectorInputProfileLoaded()) {
+        return;
+    }
+
+    const std::vector<const HAOBitCandidate *> baselineSelected = *selected;
+    HAOSelectorCostEval current =
+        haoEvaluateSelectorRuntimeCost(*selected, literalCount);
+    if (!current.valid) {
+        return;
+    }
+    const HAOSelectorCostEval baseline = current;
+    current.cost = haoSelectorRelativeCost(current, baseline);
+    const double baselineCost = current.cost;
+
+    for (u32 round = 0; round < HAO_SELECTOR_LOCAL_SEARCH_ROUNDS; round++) {
+        bool improved = false;
+        HAOSelectorCostEval bestEval = current;
+        std::vector<const HAOBitCandidate *> bestSelected;
+
+        for (u32 pos = 0; pos < selected->size(); pos++) {
+            u32 considered = 0;
+            for (const auto &cand : candidates) {
+                if (cand.bitIndex == (*selected)[pos]->bitIndex) {
+                    continue;
+                }
+                if (haoSelectedContainsBit(*selected, cand.bitIndex)) {
+                    continue;
+                }
+                if (HAO_SELECTOR_LOCAL_SEARCH_TOPK &&
+                    considered >= HAO_SELECTOR_LOCAL_SEARCH_TOPK) {
+                    break;
+                }
+                considered++;
+
+                std::vector<const HAOBitCandidate *> trial = *selected;
+                trial[pos] = &cand;
+                if (haoSelectedHasDuplicateSignature(trial) ||
+                    !haoSelectedFitsAmbigBudget(trial, literalCount)) {
+                    continue;
+                }
+
+                HAOSelectorCostEval eval =
+                    haoEvaluateSelectorRuntimeCost(trial, literalCount);
+                if (!eval.valid) {
+                    continue;
+                }
+                if (!haoSelectorLocalTrialAllowed(eval, baseline)) {
+                    continue;
+                }
+                eval.cost = haoSelectorRelativeCost(eval, baseline);
+                if (eval.cost + 0.000001 < bestEval.cost) {
+                    bestEval = eval;
+                    bestSelected = std::move(trial);
+                    improved = true;
+                }
+            }
+        }
+
+        if (!improved) {
+            break;
+        }
+        *selected = std::move(bestSelected);
+        current = bestEval;
+    }
+
+    const double minGainCost =
+        baselineCost * (100.0 - HAO_SELECTOR_LOCAL_MIN_GAIN_PCT) / 100.0;
+    if (current.cost > minGainCost) {
+        *selected = baselineSelected;
+    }
+}
+#endif
 
 static
 void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
@@ -1077,6 +1647,12 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
                   if (a.score != b.score) {
                       return a.score > b.score;
                   }
+                  if (a.fixedCount != b.fixedCount) {
+                      return a.fixedCount > b.fixedCount;
+                  }
+                  if (a.ambiguousCount != b.ambiguousCount) {
+                      return a.ambiguousCount < b.ambiguousCount;
+                  }
                   return a.bitIndex < b.bitIndex;
               });
 
@@ -1085,9 +1661,57 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
 
     std::unordered_set<u64a> signatures;
     std::unordered_set<u32> chosenBits;
+    std::vector<u8> selectedAmbigs(lits.size(), 0);
+#if HAO_SELECTOR_SCORE_MODE == 4
+    std::vector<const HAOBitCandidate *> selectedCands;
+    selectedCands.reserve(targetBits);
+
+    for (const auto &cand : candidates) {
+        if (selectedCands.size() >= targetBits) {
+            break;
+        }
+        if (!haoCandidateFitsAmbigBudget(cand, selectedAmbigs)) {
+            continue;
+        }
+
+        const u64a sig = signatureOfStates(cand.states);
+        if (!signatures.insert(sig).second) {
+            continue;
+        }
+
+        selectedCands.push_back(&cand);
+        chosenBits.insert(cand.bitIndex);
+        haoApplyCandidateAmbigBudget(cand, &selectedAmbigs);
+    }
+
+    if (selectedCands.size() < targetBits) {
+        for (const auto &cand : candidates) {
+            if (selectedCands.size() >= targetBits) {
+                break;
+            }
+            if (chosenBits.find(cand.bitIndex) != chosenBits.end()) {
+                continue;
+            }
+            if (!haoCandidateFitsAmbigBudget(cand, selectedAmbigs)) {
+                continue;
+            }
+            selectedCands.push_back(&cand);
+            chosenBits.insert(cand.bitIndex);
+            haoApplyCandidateAmbigBudget(cand, &selectedAmbigs);
+        }
+    }
+
+    haoRunSelectorLocalSearch(candidates, lits.size(), &selectedCands);
+    for (const HAOBitCandidate *cand : selectedCands) {
+        haoAppendSelectorFromCandidate(*cand, selectors);
+    }
+#else
     for (const auto &cand : candidates) {
         if (selectors->size() >= targetBits) {
             break;
+        }
+        if (!haoCandidateFitsAmbigBudget(cand, selectedAmbigs)) {
+            continue;
         }
 
         // Principle 3: keep only one from identical-feature columns. 
@@ -1096,11 +1720,9 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
             continue;
         }
 
-        HAOBitSelector s;
-        s.byteOffset = verify_u8(cand.bitIndex / 8);
-        s.bitOffset = verify_u8(cand.bitIndex % 8);
-        selectors->push_back(s);
+        haoAppendSelectorFromCandidate(cand, selectors);
         chosenBits.insert(cand.bitIndex);
+        haoApplyCandidateAmbigBudget(cand, &selectedAmbigs);
     }
     // If heuristic selection did not fill the target bit budget,
     // take additional candidates in bit-order until the budget is met.
@@ -1112,13 +1734,15 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
             if (chosenBits.find(cand.bitIndex) != chosenBits.end()) {
                 continue;
             }
-            HAOBitSelector s;
-            s.byteOffset = verify_u8(cand.bitIndex / 8);
-            s.bitOffset = verify_u8(cand.bitIndex % 8);
-            selectors->push_back(s);
+            if (!haoCandidateFitsAmbigBudget(cand, selectedAmbigs)) {
+                continue;
+            }
+            haoAppendSelectorFromCandidate(cand, selectors);
             chosenBits.insert(cand.bitIndex);
+            haoApplyCandidateAmbigBudget(cand, &selectedAmbigs);
         }
     }
+#endif
 
     std::sort(selectors->begin(), selectors->end(),
               [](const HAOBitSelector &a, const HAOBitSelector &b) {

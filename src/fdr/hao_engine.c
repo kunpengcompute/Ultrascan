@@ -16,7 +16,7 @@
 #include <arm_sve.h>
 
 #ifndef HAO_ENABLE_RUNTIME_STATS
-#define HAO_ENABLE_RUNTIME_STATS 0
+#define HAO_ENABLE_RUNTIME_STATS 1
 #endif
 
 #ifndef HAO_L2_COUNT1_FAST

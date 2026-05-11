@@ -3037,7 +3037,7 @@ TEST(HAOCompile, HaoDirectReportSafetyFollowsSelectorCoverage) {
     }
 }
 
-TEST(HAOCompile, HaoSummaryTracksResidualUnsupportedRules) {
+TEST(HAOCompile, HaoBudgetedSelectorsAvoidResidualUnsupportedRules) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 7396, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 7397, HWLM_ALL_GROUPS, {}, {}),
@@ -3051,8 +3051,17 @@ TEST(HAOCompile, HaoSummaryTracksResidualUnsupportedRules) {
     HAOCompileArtifacts artifacts;
     ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
 
-    EXPECT_GT(artifacts.haoSummary.residualRules, 0U);
-    EXPECT_GT(artifacts.haoSummary.residualUnsupportedRules, 0U);
+    EXPECT_EQ(0U, artifacts.haoSummary.residualRules);
+    EXPECT_EQ(0U, artifacts.haoSummary.residualUnsupportedRules);
+    EXPECT_EQ(0U, artifacts.haoSummary.unsupportedRules);
+    EXPECT_LE(artifacts.haoSummary.maxSelectedAmbigBits,
+              HAO_MAX_KEY_AMBIG_BITS);
+
+    for (const auto &plan : artifacts.haoRulePlans) {
+        EXPECT_NE(HAORuleCategory::HAO_RULE_UNSUPPORTED, plan.category);
+        EXPECT_LE(plan.keyExpansion.selectedAmbigBits,
+                  HAO_MAX_KEY_AMBIG_BITS);
+    }
 }
 
 TEST(HAOCompile, HaoGlobalHashBuildsSinglePrimarySpace) {
