@@ -311,8 +311,13 @@ fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
 
         //===== 编译arm字节码 根据config.txt获取===================
         Grey arm_grey = g;
+        // 为ARM创建单独的target_info，不包含AVX2/AVX512特性
+        hs_platform_info arm_platform;
+        arm_platform.tune = HS_TUNE_FAMILY_GENERIC;
+        arm_platform.cpu_features = 0;  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
+        target_t arm_target_info(arm_platform);
 
-        CompileContext arm_cc(isStreaming, isVectored, target_info, arm_grey);
+        CompileContext arm_cc(isStreaming, isVectored, arm_target_info, arm_grey);
         NG arm_ng(arm_cc, elements, somPrecision);
 
         if (count_2_4_byte_literals > 8) {
@@ -448,8 +453,13 @@ fat_hs_compile_lit_multi_int(const char *const *expressions,
 
         // =======2. 编译 arm 字节码===============
         Grey arm_grey = g;
-        
-        CompileContext arm_cc(isStreaming, isVectored, target_info, arm_grey);
+        // 为ARM创建单独的target_info，不包含AVX2/AVX512特性
+        hs_platform_info arm_platform;
+        arm_platform.tune = HS_TUNE_FAMILY_GENERIC;
+        arm_platform.cpu_features = 0;  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
+        target_t arm_target_info(arm_platform);
+
+        CompileContext arm_cc(isStreaming, isVectored, arm_target_info, arm_grey);
         NG arm_ng(arm_cc, elements, somPrecision);
 
         for (unsigned int i = 0; i < elements; i++) {
