@@ -3745,19 +3745,15 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildFinalEngine(u32 minWidth) {
     u8 maskZero[32] = {0};
 
     vector<u8> maskLily;
-#ifdef HAVE_NEON
-     maskLily = KHSEL_BuildLily((*this).lily, reportVec, ekeyVec, flagsQuiet);
-#endif
+    maskLily = KHSEL_BuildLily((*this).lily, reportVec, ekeyVec, flagsQuiet);
 
     vector<u32> reportVecLilyForTeddy(LILY_VEC_LEN);
     vector<u32> ekeyVecLilyForTeddy(LILY_VEC_LEN);
     vector<u32> lenVecLilyForTeddy(LILY_VEC_LEN);
     bytecode_ptr<lilyTeddy> lilyForTeddyFdr;
-#ifdef HAVE_NEON
     if ((*this).lilyForTeddyPQ.size() > 0) {
         lilyForTeddyFdr = KHSEL_BuildLilyForTeddy((*this).lilyForTeddy, (*this).lilyForTeddyPQ, reportVecLilyForTeddy, ekeyVecLilyForTeddy, lenVecLilyForTeddy);
     }
-#endif
     // Build NFAs
     bool mpv_as_outfix;
     prepMpv(*this, bc, &historyRequired, &mpv_as_outfix);
@@ -3966,7 +3962,6 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildFinalEngine(u32 minWidth) {
     proto.floatingMinLiteralMatchOffset = floatingMinLiteralMatchOffset;
 
     proto.maxBiAnchoredWidth = findMaxBAWidth(*this);
-#ifdef HAVE_NEON
     if ((*this).lilyForTeddy.size() > 0) {
         proto.maxBiAnchoredWidth = ROSE_BOUND_INF;
     }
@@ -3974,7 +3969,6 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildFinalEngine(u32 minWidth) {
         proto.maxBiAnchoredWidth = ROSE_BOUND_INF;
         lilyRun = true;
     }
-#endif
     proto.noFloatingRoots = hasNoFloatingRoots();
     proto.requiresEodCheck = hasEodAnchors(*this, bc, proto.outfixEndQueue);
     proto.hasOutfixesInSmallBlock = hasNonSmallBlockOutfix(outfixes);
@@ -4009,7 +4003,6 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildFinalEngine(u32 minWidth) {
     engine = addSmallWriteEngine(*this, bc.resources, move(engine));
 
     // Add a lily engine
-#ifdef HAVE_NEON
     if (lilyRun) {
         engine = addLily(maskLily, reportVec, ekeyVec, flagsQuiet, move(engine));
     }
@@ -4018,7 +4011,6 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildFinalEngine(u32 minWidth) {
     if ((*this).lilyForTeddy.size() > 0) {
         engine = addLilyForTeddy(move(lilyForTeddyFdr), move(engine));
     }
-#endif
     DEBUG_PRINTF("rose done %p\n", engine.get());
 
     dumpRose(*this, fragments, makeLeftQueueMap(g, bc.leftfix_info),

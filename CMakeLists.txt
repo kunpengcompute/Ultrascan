@@ -1196,6 +1196,11 @@ SET (hs_compile_SRCS
     src/util/verify_types.h
 )
 
+# 始终编译 lily.cpp，支持交叉编译
+list(APPEND hs_compile_SRCS
+    src/kunpeng-enhanced/lily.cpp
+)
+
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
     list(APPEND hs_compile_SRCS
         src/kunpeng-enhanced/khsel_core.h
@@ -1205,7 +1210,6 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
         src/kunpeng-enhanced/fdr_enhanced.c
         src/kunpeng-enhanced/runtime_lily.c
         src/kunpeng-enhanced/shufti.c
-        src/kunpeng-enhanced/lily.cpp
         src/kunpeng-enhanced/compare.h
         src/kunpeng-enhanced/core_precomp.h
     )
