@@ -1423,101 +1423,59 @@ int haoCanRunRawTailVec(const struct HAORuntimeHeader *hdr,
 }
 
 static really_inline
-void haoLoadRawSrc32(const struct FDR_Runtime_Args *a, size_t blockStart,
-                     svuint8_t *vlo, svuint8_t *vhi) {
+void haoLoadRawPrev32(const struct FDR_Runtime_Args *a, size_t blockStart,
+                      svuint8_t *vlo) {
     const svbool_t pgb = svptrue_b8();
-    u8 loBytes[32];
+    u8 prevBytes[HAO_RUNTIME_BLOCK_BYTES] = {0};
     u32 i;
 
     assert(a);
     assert(vlo);
-    assert(vhi);
 
-    if (blockStart >= HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U) {
+    if (blockStart >= HAO_RUNTIME_BLOCK_BYTES) {
         *vlo = svld1_u8(
-            pgb,
-            (const uint8_t *)(a->buf + blockStart -
-                              (HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U)));
-    } else {
-        for (i = 0; i < 32U; i++) {
-            u8 b = 0;
-            haoGetByteAt(a,
-                         (s64a)blockStart -
-                             (s64a)(HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U) + i,
-                         &b);
-            loBytes[i] = b;
-        }
-        *vlo = svld1_u8(pgb, loBytes);
+            pgb, (const uint8_t *)(a->buf + blockStart -
+                                    HAO_RUNTIME_BLOCK_BYTES));
+        return;
+    }
+    if (!blockStart && (!a->buf_history || !a->len_history)) {
+        *vlo = svdup_n_u8(0);
+        return;
     }
 
-    {
-        const svbool_t pgTail = svwhilelt_b8((u32)0, 7U);
-        *vhi = svld1_u8(pgTail,
-                        (const uint8_t *)(a->buf + blockStart + 25U));
-    }
-}
-
-static really_inline
-void haoLoadRawTailSrc32(const struct FDR_Runtime_Args *a, size_t blockStart,
-                         svuint8_t *vlo, svuint8_t *vhi) {
-    const svbool_t pgb = svptrue_b8();
-    u8 loBytes[32];
-    u8 hiBytes[32] = {0};
-    u32 i;
-
-    assert(a);
-    assert(vlo);
-    assert(vhi);
-
-    if (blockStart >= HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U &&
-        blockStart + 25U <= a->len) {
-        *vlo = svld1_u8(
-            pgb,
-            (const uint8_t *)(a->buf + blockStart -
-                              (HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U)));
-    } else {
-        for (i = 0; i < 32U; i++) {
-            u8 b = 0;
-            haoGetByteAt(a,
-                         (s64a)blockStart -
-                             (s64a)(HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U) + i,
-                         &b);
-            loBytes[i] = b;
-        }
-        *vlo = svld1_u8(pgb, loBytes);
-    }
-
-    for (i = 0; i < HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U; i++) {
+    for (i = 0; i < HAO_RUNTIME_BLOCK_BYTES; i++) {
         u8 b = 0;
-        haoGetByteAt(a, (s64a)blockStart + 25 + i, &b);
-        hiBytes[i] = b;
+        haoGetByteAt(a,
+                     (s64a)blockStart - (s64a)HAO_RUNTIME_BLOCK_BYTES + i,
+                     &b);
+        prevBytes[i] = b;
     }
 
-    *vhi = svld1_u8(pgb, hiBytes);
+    *vlo = svld1_u8(pgb, prevBytes);
 }
 
 static really_inline
-svuint8_t haoExtRawBytes32(svuint8_t vlo, svuint8_t vhi, u32 shift) {
-    switch (shift) {
-    case 0:
-        return svext_u8(vlo, vhi, 0);
-    case 1:
-        return svext_u8(vlo, vhi, 1);
-    case 2:
-        return svext_u8(vlo, vhi, 2);
-    case 3:
-        return svext_u8(vlo, vhi, 3);
-    case 4:
-        return svext_u8(vlo, vhi, 4);
-    case 5:
-        return svext_u8(vlo, vhi, 5);
-    case 6:
-        return svext_u8(vlo, vhi, 6);
-    case 7:
-        return svext_u8(vlo, vhi, 7);
-    default:
-        return vlo;
+void haoLoadRawCurr32(const struct FDR_Runtime_Args *a, size_t blockStart,
+                      u32 blockLaneCount, svuint8_t *vhi) {
+    const svbool_t pgb = svptrue_b8();
+    u8 currBytes[HAO_RUNTIME_BLOCK_BYTES] = {0};
+    u32 i;
+
+    assert(a);
+    assert(vhi);
+
+    if (blockLaneCount == HAO_RUNTIME_BLOCK_BYTES) {
+        *vhi = svld1_u8(pgb, (const uint8_t *)(a->buf + blockStart));
+        return;
     }
+
+    for (i = 0; i < blockLaneCount; i++) {
+        if (blockStart + i < a->len) {
+            currBytes[i] = a->buf[blockStart + i];
+        }
+    }
+
+    *vhi = svld1_u8(pgb, currBytes);
 }
 
 static really_inline
@@ -1546,18 +1504,12 @@ u64a haoBuildRawLaneWord(svuint8_t vrow, u32 group) {
 
     vrow = haoNormalizeRawRowVec(vrow);
 
-    switch (group) {
-    case 1:
+    if (group == 1U) {
         vrow = svext_u8(vrow, vrow, 8);
-        break;
-    case 2:
+    } else if (group == 2U) {
         vrow = svext_u8(vrow, vrow, 16);
-        break;
-    case 3:
+    } else if (group == 3U) {
         vrow = svext_u8(vrow, vrow, 24);
-        break;
-    default:
-        break;
     }
 
     return (u64a)svlastb_u64(pg64, svreinterpret_u64_u8(vrow));
@@ -1722,24 +1674,28 @@ u64a haoSelectRawLaneWord(svuint8_t vrow0, svuint8_t vrow1,
                           svuint8_t vrow4, svuint8_t vrow5,
                           svuint8_t vrow6, svuint8_t vrow7, u32 shift,
                           u32 group) {
-    switch (shift) {
-    case 0:
+    if (shift == 0U) {
         return haoBuildRawLaneWord(vrow0, group);
-    case 1:
-        return haoBuildRawLaneWord(vrow1, group);
-    case 2:
-        return haoBuildRawLaneWord(vrow2, group);
-    case 3:
-        return haoBuildRawLaneWord(vrow3, group);
-    case 4:
-        return haoBuildRawLaneWord(vrow4, group);
-    case 5:
-        return haoBuildRawLaneWord(vrow5, group);
-    case 6:
-        return haoBuildRawLaneWord(vrow6, group);
-    default:
-        return haoBuildRawLaneWord(vrow7, group);
     }
+    if (shift == 1U) {
+        return haoBuildRawLaneWord(vrow1, group);
+    }
+    if (shift == 2U) {
+        return haoBuildRawLaneWord(vrow2, group);
+    }
+    if (shift == 3U) {
+        return haoBuildRawLaneWord(vrow3, group);
+    }
+    if (shift == 4U) {
+        return haoBuildRawLaneWord(vrow4, group);
+    }
+    if (shift == 5U) {
+        return haoBuildRawLaneWord(vrow5, group);
+    }
+    if (shift == 6U) {
+        return haoBuildRawLaneWord(vrow6, group);
+    }
+    return haoBuildRawLaneWord(vrow7, group);
 }
 
 static really_inline
@@ -1789,14 +1745,14 @@ int haoRunRaw32V2(const struct HAORuntimeHeader *hdr, const u8 *primaryBitmap,
                   const struct HAORuntimeSecondaryHashEntry *secondaryHashTable,
                   const struct HAORuntimeRuleMeta *ruleMeta,
                   const u8 *literalBlob, const struct FDR_Runtime_Args *a,
-                  hwlm_group_t *control, size_t blockStart) {
+                  hwlm_group_t *control, size_t blockStart, svuint8_t vlo,
+                  svuint8_t vhi) {
     u32 blockActiveLaneIndex[HAO_BATCH_MAX_WIDTH];
     u32 blockActiveEncoded[HAO_BATCH_MAX_WIDTH];
     u32 blockActiveCount = 0;
     const u32 fullValidBlock = blockStart + a->len_history >=
                                HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U;
-    svuint8_t vlo;
-    svuint8_t vhi;
+
     svuint32_t vbitPos01;
     svuint32_t vbitPos23;
     svuint32_t vbitPos45;
@@ -1806,17 +1762,14 @@ int haoRunRaw32V2(const struct HAORuntimeHeader *hdr, const u8 *primaryBitmap,
     svuint32_t vbitmapBytes45;
     svuint32_t vbitmapBytes67;
     const u64a bextMask = hdr->bextMaskRaw;
-
-    haoLoadRawSrc32(a, blockStart, &vlo, &vhi);
-
-    const svuint8_t vrow0 = svext_u8(vlo, vhi, 0);
-    const svuint8_t vrow1 = svext_u8(vlo, vhi, 1);
-    const svuint8_t vrow2 = svext_u8(vlo, vhi, 2);
-    const svuint8_t vrow3 = svext_u8(vlo, vhi, 3);
-    const svuint8_t vrow4 = svext_u8(vlo, vhi, 4);
-    const svuint8_t vrow5 = svext_u8(vlo, vhi, 5);
-    const svuint8_t vrow6 = svext_u8(vlo, vhi, 6);
-    const svuint8_t vrow7 = svext_u8(vlo, vhi, 7);
+    const svuint8_t vrow0 = svext_u8(vlo, vhi, 25);
+    const svuint8_t vrow1 = svext_u8(vlo, vhi, 26);
+    const svuint8_t vrow2 = svext_u8(vlo, vhi, 27);
+    const svuint8_t vrow3 = svext_u8(vlo, vhi, 28);
+    const svuint8_t vrow4 = svext_u8(vlo, vhi, 29);
+    const svuint8_t vrow5 = svext_u8(vlo, vhi, 30);
+    const svuint8_t vrow6 = svext_u8(vlo, vhi, 31);
+    const svuint8_t vrow7 = vhi;
 
     const svuint32_t vkeys0 = haoExtractRawKeys4(vrow0, bextMask);
     const svuint32_t vkeys1 = haoExtractRawKeys4(vrow1, bextMask);
@@ -1884,14 +1837,20 @@ int haoRunRawTailVec(
     const struct HAORuntimeSecondaryHashEntry *secondaryHashTable,
     const struct HAORuntimeRuleMeta *ruleMeta, const u8 *literalBlob,
     const struct FDR_Runtime_Args *a, hwlm_group_t *control,
-    size_t blockStart, u32 blockLaneCount) {
+    size_t blockStart, u32 blockLaneCount, svuint8_t vlo, svuint8_t vhi) {
     u32 blockActiveLaneIndex[HAO_BATCH_MAX_WIDTH];
     u32 blockActiveEncoded[HAO_BATCH_MAX_WIDTH];
     u32 blockActiveCount = 0;
     const u32 fullValidBlock = blockStart + a->len_history >=
                                HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U;
-    svuint8_t vlo;
-    svuint8_t vhi;
+    const svuint8_t vrow0 = svext_u8(vlo, vhi, 25);
+    const svuint8_t vrow1 = svext_u8(vlo, vhi, 26);
+    const svuint8_t vrow2 = svext_u8(vlo, vhi, 27);
+    const svuint8_t vrow3 = svext_u8(vlo, vhi, 28);
+    const svuint8_t vrow4 = svext_u8(vlo, vhi, 29);
+    const svuint8_t vrow5 = svext_u8(vlo, vhi, 30);
+    const svuint8_t vrow6 = svext_u8(vlo, vhi, 31);
+    const svuint8_t vrow7 = vhi;
     svuint32_t vbitPos01;
     svuint32_t vbitPos23;
     svuint32_t vbitPos45;
@@ -1901,17 +1860,6 @@ int haoRunRawTailVec(
     svuint32_t vbitmapBytes45;
     svuint32_t vbitmapBytes67;
     const u64a bextMask = hdr->bextMaskRaw;
-
-    haoLoadRawTailSrc32(a, blockStart, &vlo, &vhi);
-
-    const svuint8_t vrow0 = svext_u8(vlo, vhi, 0);
-    const svuint8_t vrow1 = svext_u8(vlo, vhi, 1);
-    const svuint8_t vrow2 = svext_u8(vlo, vhi, 2);
-    const svuint8_t vrow3 = svext_u8(vlo, vhi, 3);
-    const svuint8_t vrow4 = svext_u8(vlo, vhi, 4);
-    const svuint8_t vrow5 = svext_u8(vlo, vhi, 5);
-    const svuint8_t vrow6 = svext_u8(vlo, vhi, 6);
-    const svuint8_t vrow7 = svext_u8(vlo, vhi, 7);
 
     const svuint32_t vkeys0 = haoExtractRawKeys4(vrow0, bextMask);
     const svuint32_t vkeys1 = haoExtractRawKeys4(vrow1, bextMask);
@@ -2096,28 +2044,6 @@ static int haoProcessBlockBatch(const struct HAORuntimeHeader *hdr,
         return HWLM_SUCCESS;
     }
 
-#if defined(__ARM_FEATURE_SVE) && defined(HS_BUILD_HAVE_SVEBITPERM) && \
-    defined(__ARM_FEATURE_SVE2_BITPERM)
-    if (haoCanRunRaw32V2(hdr, a, blockStart, blockLaneCount)) {
-        HAO_STATS_ADD(blockCalls, 1);
-        HAO_STATS_ADD(blockLanes, HAO_BATCH_MAX_WIDTH);
-        HAO_STATS_ADD(primaryProbeLanes, HAO_BATCH_MAX_WIDTH);
-
-        return haoRunRaw32V2(hdr, primaryBitmapRaw, primaryHashTableRaw,
-                             secondaryHashTable, ruleMeta, literalBlob, a,
-                             control, blockStart);
-    }
-    if (haoCanRunRawTailVec(hdr, a, blockStart, blockLaneCount)) {
-        HAO_STATS_ADD(blockCalls, 1);
-        HAO_STATS_ADD(blockLanes, blockLaneCount);
-        HAO_STATS_ADD(primaryProbeLanes, blockLaneCount);
-
-        return haoRunRawTailVec(hdr, primaryBitmapRaw, primaryHashTableRaw,
-                                secondaryHashTable, ruleMeta, literalBlob, a,
-                                control, blockStart, blockLaneCount);
-    }
-#endif
-
     HAO_STATS_ADD(blockCalls, 1);
     HAO_STATS_ADD(blockLanes, blockLaneCount);
     HAO_STATS_ADD(primaryProbeLanes, blockLaneCount);
@@ -2141,6 +2067,11 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
     const u8 *literalBlob;
     const u32 *residualRuleIndexes;
     size_t i;
+#if defined(__ARM_FEATURE_SVE) && defined(HS_BUILD_HAVE_SVEBITPERM) && \
+    defined(__ARM_FEATURE_SVE2_BITPERM)
+    svuint8_t rawPrev = svdup_n_u8(0);
+    int rawPrevReady = 0;
+#endif
 
     if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
         return HWLM_SUCCESS;
@@ -2166,6 +2097,55 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
         const u32 blockLaneCount = remaining > HAO_RUNTIME_BLOCK_BYTES
                                        ? HAO_RUNTIME_BLOCK_BYTES
                                        : (u32)remaining;
+
+#if defined(__ARM_FEATURE_SVE) && defined(HS_BUILD_HAVE_SVEBITPERM) && \
+    defined(__ARM_FEATURE_SVE2_BITPERM)
+        if (haoCanRunRaw32V2(hdr, a, i, blockLaneCount)) {
+            svuint8_t rawCurr;
+
+            if (!rawPrevReady) {
+                haoLoadRawPrev32(a, i, &rawPrev);
+                rawPrevReady = 1;
+            }
+            haoLoadRawCurr32(a, i, HAO_RUNTIME_BLOCK_BYTES, &rawCurr);
+
+            HAO_STATS_ADD(blockCalls, 1);
+            HAO_STATS_ADD(blockLanes, HAO_BATCH_MAX_WIDTH);
+            HAO_STATS_ADD(primaryProbeLanes, HAO_BATCH_MAX_WIDTH);
+
+            if (haoRunRaw32V2(hdr, primaryBitmapRaw, primaryHashTableRaw,
+                              secondaryHashTable, ruleMeta, literalBlob, a,
+                              control, i, rawPrev, rawCurr) ==
+                HWLM_TERMINATED) {
+                return HWLM_TERMINATED;
+            }
+            rawPrev = rawCurr;
+            continue;
+        }
+        if (haoCanRunRawTailVec(hdr, a, i, blockLaneCount)) {
+            svuint8_t rawCurr;
+
+            if (!rawPrevReady) {
+                haoLoadRawPrev32(a, i, &rawPrev);
+                rawPrevReady = 1;
+            }
+            haoLoadRawCurr32(a, i, blockLaneCount, &rawCurr);
+
+            HAO_STATS_ADD(blockCalls, 1);
+            HAO_STATS_ADD(blockLanes, blockLaneCount);
+            HAO_STATS_ADD(primaryProbeLanes, blockLaneCount);
+
+            if (haoRunRawTailVec(hdr, primaryBitmapRaw, primaryHashTableRaw,
+                                 secondaryHashTable, ruleMeta, literalBlob, a,
+                                 control, i, blockLaneCount, rawPrev,
+                                 rawCurr) == HWLM_TERMINATED) {
+                return HWLM_TERMINATED;
+            }
+            rawPrev = rawCurr;
+            continue;
+        }
+        rawPrevReady = 0;
+#endif
 
         if (haoProcessBlockBatch(hdr, primaryBitmapRaw,
                                  primaryHashTableRaw, secondaryHashTable,
