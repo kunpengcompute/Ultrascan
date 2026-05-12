@@ -59,7 +59,7 @@ struct fat_hs_database {
     u32 reserved1;
     u32 x86_bytecode; // offset of x86 bytecode relative to db start
     u32 arm_bytecode; // offset of arm bytecode relative to db start
-    u32 padding[14];
+    u32 padding[16];
     char bytes[];
 };
 
