@@ -1752,8 +1752,6 @@ int haoProcessRawActiveLanes(
     const u32 *activeEncoded, u32 activeCount, svuint8_t vrow0,
     svuint8_t vrow1, svuint8_t vrow2, svuint8_t vrow3, svuint8_t vrow4,
     svuint8_t vrow5, svuint8_t vrow6, svuint8_t vrow7) {
-    u64a laneWordByShift[8][4];
-    u8 laneWordReadyMaskByShift[8] = {0};
     u32 i;
 
     for (i = 0; i < activeCount; i++) {
@@ -1764,16 +1762,16 @@ int haoProcessRawActiveLanes(
         const u32 group = lane >> 3;
         const u32 validMask8 =
             fullValidBlock ? 0xffU : haoComputeValidMask8(a, blockStart + lane);
+        u64a laneWord;
 
-        if (!(laneWordReadyMaskByShift[shift] & (1U << group))) {
-            laneWordByShift[shift][group] =
-                haoSelectRawLaneWord(vrow0, vrow1, vrow2, vrow3, vrow4,
-                                     vrow5, vrow6, vrow7, shift, group);
-            laneWordReadyMaskByShift[shift] |= (u8)(1U << group);
-        }
+        assert(lane < HAO_BATCH_MAX_WIDTH);
+        assert(group < 4U);
+        assert(i == 0 || activeLaneIndex[i - 1] < lane);
 
-        haoFillRawCtxFast(&ctx, blockStart + lane, validMask8,
-                          laneWordByShift[shift][group]);
+        laneWord = haoSelectRawLaneWord(vrow0, vrow1, vrow2, vrow3, vrow4,
+                                        vrow5, vrow6, vrow7, shift, group);
+
+        haoFillRawCtxFast(&ctx, blockStart + lane, validMask8, laneWord);
         if (haoProcessEncodedRangePrepared(
                 hdr, secondaryHashTable, ruleMeta, literalBlob,
                 hdr->literalBlobSize, a, control, &ctx, encoded) ==

@@ -42,7 +42,7 @@ static constexpr u8 HAO_BUILD_STATE_DONT_CARE = 2;
 // 0: baseline score plus ambiguity cap.
 // 4: baseline-seeded local search driven by HS_HAO_SELECTOR_PROFILE samples.
 #ifndef HAO_SELECTOR_SCORE_MODE
-#define HAO_SELECTOR_SCORE_MODE 4
+#define HAO_SELECTOR_SCORE_MODE 0
 #endif
 
 #ifndef HAO_SELECTOR_LOCAL_SEARCH_ROUNDS
