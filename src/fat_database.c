@@ -99,6 +99,8 @@ hs_error_t HS_CDECL fat_hs_serialize_database(const fat_hs_database_t *db,
     buf++;
     memcpy(buf, &db->platform, sizeof(u64a));
     buf += 2;
+    memcpy(buf, &db->arm_platform, sizeof(u64a));
+    buf += 2;
     *buf = db->x86_crc32;
     buf++;
     *buf = db->arm_crc32;
@@ -166,6 +168,8 @@ hs_error_t fat_db_decode_header(const char **bytes, const size_t length,
     header->arm_length = unaligned_load_u32(buf++);
     
     header->platform = unaligned_load_u64a(buf);
+    buf += 2;
+    header->arm_platform = unaligned_load_u64a(buf);
     buf += 2;
     header->x86_crc32 = unaligned_load_u32(buf++);
     header->arm_crc32 = unaligned_load_u32(buf++);

@@ -4022,7 +4022,7 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildFinalEngine(u32 minWidth) {
     DEBUG_PRINTF("rose done %p\n", engine.get());
 
     dumpRose(*this, fragments, makeLeftQueueMap(g, bc.leftfix_info),
-             bc.suffixes, engine.get());
+         bc.suffixes, engine.get(), "arm");
 
     return engine;
 }
@@ -4309,8 +4309,8 @@ bytecode_ptr<x86_RoseEngine> RoseBuildImpl::x86_buildFinalEngine(u32 minWidth) {
 
     DEBUG_PRINTF("rose done %p\n", engine.get());
 
-    // dumpRose(*this, fragments, makeLeftQueueMap(g, bc.leftfix_info),
-    //          bc.suffixes, engine.get());
+    dumpRose(*this, fragments, makeLeftQueueMap(g, bc.leftfix_info),
+         bc.suffixes, engine.get(), "x86");
 
     return engine;
 }

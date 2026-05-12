@@ -52,6 +52,7 @@ struct fat_hs_database {
     u32 x86_length;
     u32 arm_length;
     u64a platform;
+    u64a arm_platform; 
     u32 arm_crc32;
     u32 x86_crc32;
     u32 reserved0;
