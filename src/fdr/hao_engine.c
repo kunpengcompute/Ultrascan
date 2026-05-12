@@ -586,17 +586,17 @@ u32 haoBuildShuffledValidMask(const struct HAORuntimeSecondaryHashEntry *entry,
     if (!entry || !ctx) {
         return 0;
     }
-    
+
     for (i = 0; i < HAO_RUNTIME_RULE_VECTOR_BYTES; i++) {
         const u8 srcCtl = entry->tableControl[i];
         const u32 chunkBase = i & 0x10U;
         u32 srcIndex;
         u32 srcBit;
 
-        if (srcCtl & 0x80U) {
+        if (srcCtl & HAO_RUNTIME_TBLCTL_INVALID) {
             continue;
         }
-        srcIndex = chunkBase + srcCtl;
+        srcIndex = chunkBase + (srcCtl & HAO_RUNTIME_TBLCTL_SRC_MASK);
         srcBit = 1U << srcIndex;
         if (ctx->validMask32 & srcBit) {
             shuffledValidMask |= (1U << i);
@@ -651,11 +651,44 @@ u32 haoEntrySlotCountFromMask(const struct HAORuntimeSecondaryHashEntry *entry,
 }
 
 static really_inline
+int haoEntryHasNocaseControl(
+    const struct HAORuntimeSecondaryHashEntry *entry) {
+    return entry &&
+           (entry->flags & HAO_RUNTIME_SECONDARY_ENTRY_FLAG_NOCASE_CTL) != 0;
+}
+
+static really_inline
 int haoEntryHasIdentityTableControl(
     const struct HAORuntimeSecondaryHashEntry *entry) {
     return entry &&
-           (entry->flags & HAO_RUNTIME_SECONDARY_ENTRY_FLAG_IDENTITY_TBL) != 0;
+           (entry->flags & HAO_RUNTIME_SECONDARY_ENTRY_FLAG_IDENTITY_TBL) != 0 &&
+           !haoEntryHasNocaseControl(entry);
 }
+
+static really_inline
+int haoBytesMatchWithControl(u8 got, u8 expected, u8 srcCtl) {
+    const u8 care = (srcCtl & HAO_RUNTIME_TBLCTL_NOCASE) ? 0xdfU : 0xffU;
+
+    return ((got ^ expected) & care) == 0;
+}
+
+#if defined(HAVE_NEON) || defined(HAVE_SSE2)
+static really_inline
+u32 haoByteMatchMask128(m128 got, m128 expected, m128 ctrl, int nocaseCtl) {
+    if (!nocaseCtl) {
+        return movemask128(eq128(got, expected));
+    }
+
+    {
+        const m128 diff = xor128(got, expected);
+        const m128 nocaseBit =
+            and128(ctrl, set16x8(HAO_RUNTIME_TBLCTL_NOCASE));
+        const m128 care = xor128(ones128(), nocaseBit);
+
+        return movemask128(eq128(and128(diff, care), zeroes128()));
+    }
+}
+#endif
 
 #if HAO_L2_PACKED_VERIFY
 static really_inline
@@ -685,9 +718,11 @@ u32 haoBuildPackedValidMask(const struct HAORuntimeSecondaryHashEntry *entry,
     for (i = 0; i < entry->packedBytes; i++) {
         const u8 srcCtl = entry->tableControl[i];
         const u32 chunkBase = i & 0x10U;
-        const u32 srcIndex = chunkBase + (srcCtl & 0x0fU);
+        const u32 srcIndex =
+            chunkBase + (srcCtl & HAO_RUNTIME_TBLCTL_SRC_MASK);
 
-        if ((srcCtl & 0x80U) || srcIndex >= HAO_RUNTIME_RULE_VECTOR_BYTES) {
+        if ((srcCtl & HAO_RUNTIME_TBLCTL_INVALID) ||
+            srcIndex >= HAO_RUNTIME_RULE_VECTOR_BYTES) {
             continue;
         }
         if (ctx->validMask32 & (1U << srcIndex)) {
@@ -754,12 +789,15 @@ u32 haoEntryMatchMaskPackedScalar(
     for (i = 0; i < entry->packedBytes; i++) {
         const u8 srcCtl = entry->tableControl[i];
         const u32 chunkBase = i & 0x10U;
-        const u32 srcIndex = chunkBase + (srcCtl & 0x0fU);
+        const u32 srcIndex =
+            chunkBase + (srcCtl & HAO_RUNTIME_TBLCTL_SRC_MASK);
 
-        if ((srcCtl & 0x80U) || srcIndex >= HAO_RUNTIME_RULE_VECTOR_BYTES) {
+        if ((srcCtl & HAO_RUNTIME_TBLCTL_INVALID) ||
+            srcIndex >= HAO_RUNTIME_RULE_VECTOR_BYTES) {
             continue;
         }
-        if (ctx->laneWindow32[srcIndex] == entry->ruleVector[i]) {
+        if (haoBytesMatchWithControl(ctx->laneWindow32[srcIndex],
+                                     entry->ruleVector[i], srcCtl)) {
             byteMatchMask |= 1U << i;
         }
     }
@@ -781,18 +819,21 @@ u32 haoEntryMatchMaskPackedPrepared(
 
 #if defined(HAVE_NEON) || defined(HAVE_SSE2)
     {
+        const int nocaseCtl = haoEntryHasNocaseControl(entry);
         const m128 inputLo = loadu128(ctx->laneWindow32);
         const m128 ruleLo = loadu128(entry->ruleVector);
         const m128 ctrlLo = loadu128(entry->tableControl);
         const m128 shufLo = pshufb_m128(inputLo, ctrlLo);
-        u32 byteMatchMask = movemask128(eq128(shufLo, ruleLo));
+        u32 byteMatchMask =
+            haoByteMatchMask128(shufLo, ruleLo, ctrlLo, nocaseCtl);
 
         if (entry->packedBytes > 16U) {
             const m128 inputHi = loadu128(ctx->laneWindow32 + 16);
             const m128 ruleHi = loadu128(entry->ruleVector + 16);
             const m128 ctrlHi = loadu128(entry->tableControl + 16);
             const m128 shufHi = pshufb_m128(inputHi, ctrlHi);
-            byteMatchMask |= movemask128(eq128(shufHi, ruleHi)) << 16;
+            byteMatchMask |=
+                haoByteMatchMask128(shufHi, ruleHi, ctrlHi, nocaseCtl) << 16;
         }
 
         laneMask = haoEntryPackedSlotMaskFromByteMask(entry, ctx,
@@ -870,11 +911,13 @@ u32 haoEntrySingleSlotMatchMaskPrepared(
         const u32 idx = ctz32(mask);
         const u8 srcCtl = entry->tableControl[idx];
         const u32 chunkBase = idx & 0x10U;
-        const u32 srcIndex = chunkBase + srcCtl;
+        const u32 srcIndex =
+            chunkBase + (srcCtl & HAO_RUNTIME_TBLCTL_SRC_MASK);
 
         if (!(shuffledValidMask & bit) ||
-            srcCtl & 0x80U ||
-            ctx->laneWindow32[srcIndex] != entry->ruleVector[idx]) {
+            srcCtl & HAO_RUNTIME_TBLCTL_INVALID ||
+            !haoBytesMatchWithControl(ctx->laneWindow32[srcIndex],
+                                      entry->ruleVector[idx], srcCtl)) {
             return 0;
         }
         mask &= mask - 1;
@@ -931,12 +974,13 @@ u32 haoEntryMatchMaskFromPreparedContext(
             eqLo = movemask128(eq128(inputLo, ruleLo));
             eqHi = movemask128(eq128(inputHi, ruleHi));
         } else {
+            const int nocaseCtl = haoEntryHasNocaseControl(entry);
             const m128 ctrlLo = loadu128(entry->tableControl);
             const m128 ctrlHi = loadu128(entry->tableControl + 16);
             const m128 shufLo = pshufb_m128(inputLo, ctrlLo);
             const m128 shufHi = pshufb_m128(inputHi, ctrlHi);
-            eqLo = movemask128(eq128(shufLo, ruleLo));
-            eqHi = movemask128(eq128(shufHi, ruleHi));
+            eqLo = haoByteMatchMask128(shufLo, ruleLo, ctrlLo, nocaseCtl);
+            eqHi = haoByteMatchMask128(shufHi, ruleHi, ctrlHi, nocaseCtl);
         }
 
         {
@@ -970,10 +1014,14 @@ u32 haoEntryMatchMaskFromPreparedContext(
             } else {
                 const u8 srcCtl = entry->tableControl[i];
                 const u32 chunkBase = i & 0x10U;
-                const u32 srcIndex = chunkBase + srcCtl;
+                const u32 srcIndex =
+                    chunkBase + (srcCtl & HAO_RUNTIME_TBLCTL_SRC_MASK);
                 got = ctx->laneWindow32[srcIndex];
             }
-            if (got == entry->ruleVector[i]) {
+            if (haoBytesMatchWithControl(got, entry->ruleVector[i],
+                                         identityTableControl
+                                             ? 0
+                                             : entry->tableControl[i])) {
                 byteMatchMask |= bit;
             }
         }
@@ -1041,10 +1089,14 @@ static u32 haoEntryMatchMaskFromContextScalarForTest(
             } else {
                 const u8 srcCtl = entry->tableControl[i];
                 const u32 chunkBase = i & 0x10U;
-                const u32 srcIndex = chunkBase + srcCtl;
+                const u32 srcIndex =
+                    chunkBase + (srcCtl & HAO_RUNTIME_TBLCTL_SRC_MASK);
                 got = ctx->laneWindow32[srcIndex];
             }
-            if (got == entry->ruleVector[i]) {
+            if (haoBytesMatchWithControl(got, entry->ruleVector[i],
+                                         identityTableControl
+                                             ? 0
+                                             : entry->tableControl[i])) {
                 byteMatchMask |= bit;
             }
         }
@@ -1100,12 +1152,13 @@ static u32 haoEntryMatchMaskFromContextVectorForTest(
             eqLo = movemask128(eq128(inputLo, ruleLo));
             eqHi = movemask128(eq128(inputHi, ruleHi));
         } else {
+            const int nocaseCtl = haoEntryHasNocaseControl(entry);
             const m128 ctrlLo = loadu128(entry->tableControl);
             const m128 ctrlHi = loadu128(entry->tableControl + 16);
             const m128 shufLo = pshufb_m128(inputLo, ctrlLo);
             const m128 shufHi = pshufb_m128(inputHi, ctrlHi);
-            eqLo = movemask128(eq128(shufLo, ruleLo));
-            eqHi = movemask128(eq128(shufHi, ruleHi));
+            eqLo = haoByteMatchMask128(shufLo, ruleLo, ctrlLo, nocaseCtl);
+            eqHi = haoByteMatchMask128(shufHi, ruleHi, ctrlHi, nocaseCtl);
         }
 
         return haoEntryLaneMaskFromByteMatchesPrepared(
@@ -1488,21 +1541,8 @@ svuint32_t haoExtractRawKeys4(svuint8_t vrow, u64a bextMaskRaw) {
 }
 
 static really_inline
-svuint8_t haoNormalizeRawRowVec(svuint8_t vrow) {
-    const svbool_t pgb = svptrue_b8();
-    const svuint8_t vminus = svsub_n_u8_x(pgb, vrow, 32U);
-    const svbool_t ge_a = svcmpge_n_u8(pgb, vrow, (u8)'a');
-    const svbool_t le_z = svcmple_n_u8(pgb, vrow, (u8)'z');
-    const svuint8_t maybeUpper = svsel_u8(ge_a, vminus, vrow);
-
-    return svsel_u8(le_z, maybeUpper, vrow);
-}
-
-static really_inline
 u64a haoBuildRawLaneWord(svuint8_t vrow, u32 group) {
     const svbool_t pg64 = svptrue_pat_b64(SV_VL1);
-
-    vrow = haoNormalizeRawRowVec(vrow);
 
     if (group == 1U) {
         vrow = svext_u8(vrow, vrow, 8);
@@ -1934,8 +1974,7 @@ int haoRunRawTailVec(
 }
 
 static really_inline
-u64a haoBuildRawWordScalar(const struct FDR_Runtime_Args *a, size_t endPos,
-                           int normalize) {
+u64a haoBuildRawWordScalar(const struct FDR_Runtime_Args *a, size_t endPos) {
     u8 bytes[HAO_RUNTIME_BYTES_PER_RULE_SLOT];
     u32 i;
 
@@ -1948,9 +1987,6 @@ u64a haoBuildRawWordScalar(const struct FDR_Runtime_Args *a, size_t endPos,
                          (s64a)i;
 
         haoGetByteAt(a, pos, &b);
-        if (normalize && b >= (u8)'a' && b <= (u8)'z') {
-            b = (u8)(b - 32U);
-        }
         bytes[i] = b;
     }
 
@@ -1987,12 +2023,12 @@ int haoRunRawTailScalar(
     for (lane = 0; lane < blockLaneCount; lane++) {
         struct HAOPositionContext ctx;
         const size_t endPos = blockStart + lane;
-        const u64a rawWord = haoBuildRawWordScalar(a, endPos, 0);
+        const u64a rawWord = haoBuildRawWordScalar(a, endPos);
         const u32 key = (u32)pext64(rawWord, hdr->bextMaskRaw);
 
         if (haoRawBitmapHitScalar(primaryBitmap, key)) {
             const u32 encoded = primaryHashTable[key];
-            const u64a laneWord = haoBuildRawWordScalar(a, endPos, 1);
+            const u64a laneWord = haoBuildRawWordScalar(a, endPos);
             const u32 validMask8 = haoComputeValidMask8(a, endPos);
 
             if (encoded) {
@@ -2266,7 +2302,7 @@ u32 HaoRuntimeEntryMatchMaskForTest(
     memset(&ctx, 0, sizeof(ctx));
     ctx.endPos = endPos;
     ctx.window64 =
-        haoLoadWindow64Normalized(a, endPos, HAO_RUNTIME_BYTES_PER_RULE_SLOT);
+        haoLoadWindow64Raw(a, endPos, HAO_RUNTIME_BYTES_PER_RULE_SLOT);
     ctx.validMask8 = haoComputeValidMask8(a, endPos);
 
     return useVector ? haoEntryMatchMaskFromContextVectorForTest(entry, &ctx)

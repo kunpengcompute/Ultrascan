@@ -74,6 +74,10 @@ static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_EXPANSION_BUDGET = 1U << 5;
 static constexpr u32 HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT = 1U << 6;
 static constexpr u32 HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE = 1U << 7;
 static constexpr u8 HAO_SECONDARY_ENTRY_FLAG_IDENTITY_TBL = 1U << 0;
+static constexpr u8 HAO_SECONDARY_ENTRY_FLAG_NOCASE_CTL = 1U << 1;
+static constexpr u8 HAO_TBLCTL_SRC_MASK = 0x0fU;
+static constexpr u8 HAO_TBLCTL_NOCASE = 0x20U;
+static constexpr u8 HAO_TBLCTL_INVALID = 0x80U;
 
 struct Grey;
 struct target_t;
@@ -144,6 +148,7 @@ struct HAOKeyExpansionInfo {
 struct HAOVerifierFragment {
     std::array<u8, HAO_LAYOUT_BYTES_PER_RULE_SLOT> bytes = {};
     u8 validByteMask = 0;
+    u8 nocaseByteMask = 0;
     u8 anchorOffset = 0;
     u8 anchorLength = 0;
     u8 flags = 0;

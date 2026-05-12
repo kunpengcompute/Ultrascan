@@ -205,11 +205,6 @@ u32 encodePrimaryValue(u32 secondaryOffset, u32 entryCount) {
 }
 
 static
-u8 normalizedLiteralByte(u8 c) {
-    return ourisalpha(c) ? verify_u8(mytoupper(c)) : c;
-}
-
-static
 u32 haoPrimaryBitmapBytes(u32 primaryCount) {
     return (primaryCount + 7U) / 8U;
 }
@@ -275,9 +270,9 @@ HAOKeyExpansionInfo haoEnumerateExpandedKeysForLiteral(
         return info;
     }
 
-    // Enumerate all key variants induced by ambiguous selected bits. These
-    // key values are based on normalized literal bytes; final confirm resolves
-    // exact versus nocase semantics.
+    // Enumerate all key variants induced by ambiguous selected bits. Nocase
+    // alphabetic bit 5 is treated as don't-care; all other bits keep the raw
+    // literal value so the runtime can compare raw input bytes end-to-end.
     const u32 variantCount = info.selectedAmbigBits ?
                              (1U << info.selectedAmbigBits) : 1U;
     info.expandedKeys.reserve(variantCount);
@@ -386,8 +381,9 @@ bool haoStatsDumpEnabled(void) {
 }
 
 /* Build the deterministic verifier fragment that the later L2 verifier
- * consumes. Both exact and nocase rules store normalized bytes here;
- * final confirm resolves the exact versus nocase distinction. */
+ * consumes. hwlmLiteral stores nocase literals in canonical uppercase form;
+ * nocase bytes carry a compare mask bit in tableControl so runtime can keep
+ * input bytes in their original form. */
 static
 HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
                                              HAORuleCategory category) {
@@ -401,8 +397,11 @@ HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
     for (u32 j = 0; j < suffixLen; j++) {
         const u8 c = verify_u8(lit.s[len - suffixLen + j]);
         const u32 idx = laneStart + j;
-        fragment.bytes[idx] = normalizedLiteralByte(c);
+        fragment.bytes[idx] = c;
         fragment.validByteMask |= verify_u8(1U << idx);
+        if (category == HAORuleCategory::HAO_RULE_NOCASE && ourisalpha(c)) {
+            fragment.nocaseByteMask |= verify_u8(1U << idx);
+        }
     }
 
     if (category == HAORuleCategory::HAO_RULE_NOCASE) {
@@ -545,9 +544,15 @@ void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan,
         }
 
         const u32 vecIndex = entry->packedBytes++;
+        u8 ctl = verify_u8(i & HAO_TBLCTL_SRC_MASK);
         assert(vecIndex < HAO_LAYOUT_RULE_VECTOR_BYTES);
+        if (plan.verifier.nocaseByteMask & (1U << i)) {
+            ctl = verify_u8(ctl | HAO_TBLCTL_NOCASE);
+            entry->flags = verify_u8(entry->flags |
+                                     HAO_SECONDARY_ENTRY_FLAG_NOCASE_CTL);
+        }
         entry->ruleVector[vecIndex] = plan.verifier.bytes[i];
-        entry->tableControl[vecIndex] = verify_u8(i);
+        entry->tableControl[vecIndex] = ctl;
         end = vecIndex;
         count++;
     }
@@ -577,10 +582,16 @@ void haoFillSecondarySlotFromPlan(const HAOCompiledRulePlan &plan,
             continue;
         }
         const u32 vecIndex = laneBase + i;
-        const u8 srcCtl = verify_u8(vecIndex & 0x0fU);
+        u8 srcCtl = verify_u8(vecIndex & HAO_TBLCTL_SRC_MASK);
+        if (plan.verifier.nocaseByteMask & (1U << i)) {
+            srcCtl = verify_u8(srcCtl | HAO_TBLCTL_NOCASE);
+            entry->flags = verify_u8(entry->flags |
+                                     HAO_SECONDARY_ENTRY_FLAG_NOCASE_CTL);
+        }
         entry->ruleVector[vecIndex] = plan.verifier.bytes[i];
         entry->tableControl[vecIndex] = srcCtl;
-        if (srcCtl != (vecIndex & 0x0fU)) {
+        if ((srcCtl & HAO_TBLCTL_SRC_MASK) !=
+            (vecIndex & HAO_TBLCTL_SRC_MASK)) {
             entry->flags = verify_u8(entry->flags &
                                      (u8)~HAO_SECONDARY_ENTRY_FLAG_IDENTITY_TBL);
         }
@@ -688,7 +699,8 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
 
         for (u32 chunk = 0; chunk < entryCount; chunk++) {
             HAOSecondaryHashEntry entry = {};
-            memset(entry.tableControl, 0x80, sizeof(entry.tableControl));
+            memset(entry.tableControl, HAO_TBLCTL_INVALID,
+                   sizeof(entry.tableControl));
 #if HAO_L2_PACKED_VERIFY
             entry.flags = 0;
 #else

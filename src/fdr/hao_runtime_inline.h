@@ -38,11 +38,6 @@ int haoGetByteAt(const struct FDR_Runtime_Args *a, s64a pos, u8 *out) {
 }
 
 static really_inline
-u8 haoNormalizeByte(u8 c) {
-    return ourisalpha(c) ? (u8)mytoupper((char)c) : c;
-}
-
-static really_inline
 int haoRuntimeCanUseBextFastPath(void) {
     static int cached = -1;
     if (cached != -1) {
@@ -90,8 +85,8 @@ u64a haoExtractPackedBitsFallback(u64a window, u64a mask) {
 }
 
 static really_inline
-u64a haoLoadWindow64Normalized(const struct FDR_Runtime_Args *a,
-                               size_t endPos, u32 windowBytes) {
+u64a haoLoadWindow64Raw(const struct FDR_Runtime_Args *a, size_t endPos,
+                        u32 windowBytes) {
     u64a window = 0;
     u32 i;
 
@@ -153,7 +148,7 @@ void haoBuildLaneWindow32FromWindow(u64a window, u32 validMask8,
     *validMask32 = 0;
     for (j = 0; j < HAO_RUNTIME_BYTES_PER_RULE_SLOT; j++) {
         const u32 srcByte = HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U - j;
-        laneWindow[j] = haoNormalizeByte((u8)(window >> (srcByte * 8U)));
+        laneWindow[j] = (u8)(window >> (srcByte * 8U));
     }
 
     for (slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {

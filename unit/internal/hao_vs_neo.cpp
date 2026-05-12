@@ -443,7 +443,7 @@ std::string slotVectorString(const HAOSecondaryHashEntry &entry, u32 slot,
     out.reserve(HAO_LAYOUT_BYTES_PER_RULE_SLOT);
     for (u32 i = 0; i < HAO_LAYOUT_BYTES_PER_RULE_SLOT; i++) {
         const u8 ctrl = entry.tableControl[laneBase + i];
-        const bool active = ctrl != 0x80;
+        const bool active = ctrl != HAO_TBLCTL_INVALID;
         if (activeOnly && !active) {
             continue;
         }
@@ -593,10 +593,10 @@ HAOInspectStats computeHaoInspectStats(const bytecode_ptr<u8> &blob) {
 }
 
 static
-u64a loadWindow64NormalizedForTest(const std::vector<u8> &history,
-                                   const std::vector<u8> &data,
-                                   size_t historyLen, size_t endPos,
-                                   u32 windowBytes) {
+u64a loadWindow64RawForTest(const std::vector<u8> &history,
+                            const std::vector<u8> &data,
+                            size_t historyLen, size_t endPos,
+                            u32 windowBytes) {
     const size_t totalLen = historyLen + data.size();
     if (!windowBytes || windowBytes > HAO_LAYOUT_BYTES_PER_RULE_SLOT) {
         windowBytes = HAO_LAYOUT_BYTES_PER_RULE_SLOT;
@@ -720,8 +720,8 @@ std::vector<u32> extractRuntimeKeysForBlocks(
         scratch.fdr_conf = nullptr;
         const auto args = makeRuntimeArgs(data, {}, &scratch);
         for (size_t endPos = 0; endPos < data.size(); endPos++) {
-            const u64a window = haoLoadWindow64Normalized(&args, endPos,
-                                                          hdr->windowBytes);
+            const u64a window =
+                haoLoadWindow64Raw(&args, endPos, hdr->windowBytes);
             keys.push_back(haoExtractKeyFromWindow(hdr, selectors, window));
         }
     }
@@ -761,8 +761,8 @@ std::vector<u32> extractScalarReferenceKeysForBlocks(
         scratch.fdr_conf = nullptr;
         const auto args = makeRuntimeArgs(data, {}, &scratch);
         for (size_t endPos = 0; endPos < data.size(); endPos++) {
-            const u64a window = haoLoadWindow64Normalized(&args, endPos,
-                                                          artifacts.windowBytes);
+            const u64a window =
+                haoLoadWindow64Raw(&args, endPos, artifacts.windowBytes);
             keys.push_back(extractScalarKeyFromWindowForTest(artifacts, window));
         }
     }
@@ -2896,10 +2896,10 @@ TEST(HAOCompile, HaoRulePlansRespectExpansionLimit) {
     EXPECT_EQ(countedExpandedKeys, artifacts.haoSummary.totalExpandedKeys);
 }
 
-TEST(HAOCompile, HaoNocasePlanIsNormalized) {
+TEST(HAOCompile, HaoNocasePlanUsesRawVerifierBytes) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 718, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("ALPHA", true, false, 719, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("aLpHa", true, false, 719, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("beta", false, false, 720, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("gamma", false, false, 721, HWLM_ALL_GROUPS, {}, {})
     };
@@ -2912,7 +2912,70 @@ TEST(HAOCompile, HaoNocasePlanIsNormalized) {
     EXPECT_EQ(HAORuleCategory::HAO_RULE_NOCASE, plan.category);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
     EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
+    // hwlmLiteral canonicalizes nocase literals; runtime input stays raw and
+    // tableControl carries the nocase compare bit.
+    EXPECT_EQ((u8)'A', plan.verifier.bytes[3]);
+    EXPECT_EQ((u8)'L', plan.verifier.bytes[4]);
+    EXPECT_EQ((u8)'P', plan.verifier.bytes[5]);
+    EXPECT_EQ((u8)'H', plan.verifier.bytes[6]);
+    EXPECT_EQ((u8)'A', plan.verifier.bytes[7]);
+    EXPECT_EQ(0xf8U, plan.verifier.validByteMask);
+    EXPECT_EQ(0xf8U, plan.verifier.nocaseByteMask);
     EXPECT_FALSE(plan.needFullConfirm);
+}
+
+TEST(HAOCompile, HaoNocaseVerifierStoresControlMask) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 722, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("aLpHa", true, false, 723, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 724, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 725, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    const auto &plan = artifacts.haoRulePlans[1];
+    ASSERT_EQ(HAORuleCategory::HAO_RULE_NOCASE, plan.category);
+    ASSERT_EQ(0xf8U, plan.verifier.validByteMask);
+    ASSERT_EQ(0xf8U, plan.verifier.nocaseByteMask);
+
+    bool found = false;
+    for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
+        const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
+        for (u32 slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
+            if (!(entry.slotMask & (1U << slot))) {
+                continue;
+            }
+            if (entry.ruleIndex[slot] != plan.ruleIndex) {
+                continue;
+            }
+
+            found = true;
+            EXPECT_TRUE(entry.flags & HAO_SECONDARY_ENTRY_FLAG_NOCASE_CTL);
+            for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
+                if (!(plan.verifier.validByteMask & (1U << j))) {
+                    continue;
+                }
+
+                const u32 idx = verifierPackedIndexForTest(
+                    entry, slot, plan.verifier.validByteMask, j);
+#if HAO_L2_PACKED_VERIFY
+                u8 expectedCtl = verify_u8(j & HAO_TBLCTL_SRC_MASK);
+#else
+                u8 expectedCtl = verify_u8(
+                    (slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j) &
+                    HAO_TBLCTL_SRC_MASK);
+#endif
+                expectedCtl = verify_u8(expectedCtl | HAO_TBLCTL_NOCASE);
+                EXPECT_EQ(plan.verifier.bytes[j], entry.ruleVector[idx]);
+                EXPECT_EQ(expectedCtl, entry.tableControl[idx]);
+            }
+        }
+    }
+
+    EXPECT_TRUE(found);
 }
 
 TEST(HAOCompile, HaoMaskRulesBecomeAnchorConfirm) {
@@ -3176,7 +3239,7 @@ TEST(HAOCompile, HaoGlobalHashStoresVerifierFragments) {
                     EXPECT_EQ(j, entry.tableControl[idx]);
 #else
                     EXPECT_EQ(((slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j) &
-                               0x0fU), entry.tableControl[idx]);
+                               HAO_TBLCTL_SRC_MASK), entry.tableControl[idx]);
 #endif
                 }
             }
@@ -3223,7 +3286,7 @@ TEST(HAOCompile, HaoGlobalHashTableControlEncodesShuffleBytes) {
                 EXPECT_EQ(j, entry.tableControl[idx]);
 #else
                 EXPECT_EQ(((slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j) &
-                           0x0fU), entry.tableControl[idx]);
+                           HAO_TBLCTL_SRC_MASK), entry.tableControl[idx]);
 #endif
             }
         }
@@ -3251,7 +3314,7 @@ TEST(HAOExtract, BextMatchesScalar) {
     const size_t totalLen = historyLen + data.size();
 
     for (size_t endPos = 0; endPos < totalLen; endPos++) {
-        const u64a window = loadWindow64NormalizedForTest(
+        const u64a window = loadWindow64RawForTest(
             history, data, historyLen, endPos, artifacts.windowBytes);
         const u32 scalarKey = extractScalarKeyFromWindowForTest(artifacts,
                                                                 window);
@@ -3278,7 +3341,7 @@ TEST(HAOExtract, BextHistoryBoundaryConsistency) {
     const size_t historyLen = history.size();
 
     for (size_t endPos = 0; endPos < historyLen + data.size(); endPos++) {
-        const u64a window = loadWindow64NormalizedForTest(
+        const u64a window = loadWindow64RawForTest(
             history, data, historyLen, endPos, artifacts.windowBytes);
         const u32 scalarKey = extractScalarKeyFromWindowForTest(artifacts,
                                                                 window);
