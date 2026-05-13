@@ -77,6 +77,7 @@ namespace ue2 {
 
 namespace {
 
+#if defined(DUMP_SUPPORT) || defined(DEBUG)
 static
 bool haoStatsDumpEnabled(void) {
     const char *env = getenv("HS_HAO_STATS");
@@ -105,6 +106,11 @@ void dumpFdrBuildProtoInputLits(const vector<hwlmLiteral> &lits, u8 engType,
     printf("[fdrBuildProto] end\n");
     fflush(stdout);
 }
+#else
+#define HAO_STATS_DUMP_BUILD_PROTO_LITS(lits, engType, hint, make_small) \
+    do {                                                                  \
+    } while (0)
+#endif
 
 static
 bool haoV2LayoutCanPreserveCoverage(const HAOCompileArtifacts &artifacts) {
