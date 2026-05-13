@@ -1758,6 +1758,34 @@ TEST(HAOVsNeo, BlockMaskAndNoCaseConsistency) {
     EXPECT_EQ(neoMatches, haoDbMatches);
 }
 
+TEST(HAOVsNeo, NocaseMaskAnchorConsistency) {
+    const std::vector<u8> msk = {0xff};
+    const std::vector<u8> cmp = {'D'};
+
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("abcd", true, false, 44, HWLM_ALL_GROUPS, msk, cmp),
+        hwlmLiteral("mix", true, false, 45, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("hao", false, false, 46, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("neo", false, false, 47, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    bytecode_ptr<FDR> neo;
+    bytecode_ptr<FDR> haoDb;
+    if (!buildNeoAndHao(lits, &neo, &haoDb)) {
+        skipIfNoHaoSupport();
+        return;
+    }
+
+    const std::vector<u8> data = {'x','a','B','c','D',' ',
+                                  'A','b','C','D',' ',
+                                  'a','b','c','d',' ',
+                                  'm','I','x'};
+
+    const auto neoMatches = runBlock(neo.get(), data, HWLM_ALL_GROUPS);
+    const auto haoDbMatches = runBlock(haoDb.get(), data, HWLM_ALL_GROUPS);
+    EXPECT_EQ(neoMatches, haoDbMatches);
+}
+
 TEST(HAOVsNeo, MultiEntryCollisionAcceptedByHaoBuild) {
     std::vector<hwlmLiteral> lits;
     lits.reserve(HAO_RUNTIME_RULE_SLOTS_PER_ENTRY + 3);
@@ -3001,6 +3029,55 @@ TEST(HAOCompile, HaoMaskRulesBecomeAnchorConfirm) {
     EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT);
 }
 
+TEST(HAOCompile, HaoNocaseMaskAnchorStoresControlMask) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 7460, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("abcd", true, false, 7461, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff}, std::vector<u8>{'D'}),
+        hwlmLiteral("delta", false, false, 7462, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 7463, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+
+    const auto &plan = artifacts.haoRulePlans[1];
+    ASSERT_EQ(HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM, plan.category);
+    EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
+    EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK);
+    EXPECT_EQ(0xf0U, plan.verifier.validByteMask);
+    EXPECT_EQ(0xf0U, plan.verifier.nocaseByteMask);
+
+    bool found = false;
+    for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
+        const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
+        for (u32 slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
+            if (!(entry.slotMask & (1U << slot))) {
+                continue;
+            }
+            if (entry.ruleIndex[slot] != plan.ruleIndex) {
+                continue;
+            }
+
+            found = true;
+            EXPECT_TRUE(entry.flags & HAO_SECONDARY_ENTRY_FLAG_NOCASE_CTL);
+            for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
+                if (!(plan.verifier.validByteMask & (1U << j))) {
+                    continue;
+                }
+
+                const u32 idx = verifierPackedIndexForTest(
+                    entry, slot, plan.verifier.validByteMask, j);
+                EXPECT_TRUE(entry.tableControl[idx] & HAO_TBLCTL_NOCASE);
+                EXPECT_EQ(plan.verifier.bytes[j], entry.ruleVector[idx]);
+            }
+        }
+    }
+
+    EXPECT_TRUE(found);
+}
+
 TEST(HAOCompile, HaoSummaryTracksCoverageAndAnchors) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 726, HWLM_ALL_GROUPS, {}, {}),
@@ -3794,6 +3871,30 @@ TEST(HAORuntime, BitmapProbeHandlesSharedBitmapByte) {
 
     EXPECT_EQ(0x1bU, scalarMask);
     EXPECT_EQ(scalarMask, packedMask);
+}
+
+TEST(HAORuntime, RawLaneWordFromBlocksMatchesScalarReference) {
+    u8 prev[HAO_RUNTIME_BLOCK_BYTES];
+    u8 curr[HAO_RUNTIME_BLOCK_BYTES];
+
+    for (u32 i = 0; i < HAO_RUNTIME_BLOCK_BYTES; i++) {
+        prev[i] = verify_u8(0x40U + i);
+        curr[i] = verify_u8(0x80U + i);
+    }
+
+    for (u32 lane = 0; lane < HAO_RUNTIME_BLOCK_BYTES; lane++) {
+        u64a expected = 0;
+        for (u32 i = 0; i < HAO_LAYOUT_BYTES_PER_RULE_SLOT; i++) {
+            const u32 idx = lane + 25U + i;
+            const u8 b = idx < HAO_RUNTIME_BLOCK_BYTES
+                             ? prev[idx]
+                             : curr[idx - HAO_RUNTIME_BLOCK_BYTES];
+            expected |= ((u64a)b) << (i * 8U);
+        }
+
+        EXPECT_EQ(expected, HaoRuntimeRawLaneWordForTest(prev, curr, lane))
+            << "lane=" << lane;
+    }
 }
 
 TEST(HAORuntime, Batch4SparseBitmapSkipsEmptyLanes) {

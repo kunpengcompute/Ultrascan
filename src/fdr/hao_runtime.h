@@ -218,6 +218,8 @@ u32 HaoRuntimeEntryMatchMaskForTest(
 u32 HaoRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
                                      const u32 *primaryIdx, u32 laneCount,
                                      int usePacked);
+u64a HaoRuntimeRawLaneWordForTest(const u8 *prev32, const u8 *curr32,
+                                  u32 lane);
 int HaoRuntimeValidateLayoutForTest(const void *blob, u32 blobSize);
 int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
                                  struct HAORuntimeInspectSummary *summary);

@@ -399,7 +399,7 @@ HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
         const u32 idx = laneStart + j;
         fragment.bytes[idx] = c;
         fragment.validByteMask |= verify_u8(1U << idx);
-        if (category == HAORuleCategory::HAO_RULE_NOCASE && ourisalpha(c)) {
+        if (lit.nocase && ourisalpha(c)) {
             fragment.nocaseByteMask |= verify_u8(1U << idx);
         }
     }
