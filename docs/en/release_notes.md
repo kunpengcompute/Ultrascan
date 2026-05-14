@@ -2,9 +2,9 @@
 
 ## Change History<a name="EN-US_TOPIC_0000002549904611"></a>
 
-|Version|Date|Description|
+|Issue|Date|Description|
 |--|--|--|
-|01|2025-12-30|This issue is the first official release.|
+|01|2025-12-30|First official release. <br>Optimized the Hyperscan short-byte (2–4 bytes) rule matching algorithm based on the new Kunpeng 920 processor model, and added the KHSEL_BuildLilyForTeddy and KHSEL_LilyForTeddyRunExec algorithms.|
 
 
 
@@ -72,7 +72,7 @@ None
 
 |Feature|Description|
 |--|--|
-|KHSEL|Optimized the Hyperscan multi-pattern matching algorithm.Optimized the long string validation on the Rose interpreter backend.Added a configuration item for toggling the short-rule bypass algorithm.|
+|KHSEL|Optimized the Hyperscan multi-pattern matching algorithm. Optimized the long string validation on the Rose interpreter backend. Added a configuration item for toggling the short-rule bypass algorithm.|
 
 
 **Removed Features<a name="section17862111013445"></a>**
@@ -99,7 +99,7 @@ None
 
 |Feature|Description|
 |--|--|
-|KHSEL|Optimized Flink's replaceALL function in C, improving the performance by two times compared to the replaceALL function implemented in Java.Optimized the Hyperscan short-byte rule matching algorithm based on the new Kunpeng 920 processor model, improving the performance by 20%.|
+|KHSEL|Optimized Flink's replaceALL function in C, improving the performance by two times compared to the replaceALL function implemented in Java. Optimized the Hyperscan short-byte rule matching algorithm based on the new Kunpeng 920 processor model, improving the performance by 20%.|
 
 
 **Modified Features<a name="section16450949161512"></a>**
