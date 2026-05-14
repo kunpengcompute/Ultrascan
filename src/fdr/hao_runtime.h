@@ -5,7 +5,7 @@
 #include "hwlm/hwlm.h"
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 10U
+#define HAO_RUNTIME_VERSION 11U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 #define HAO_RUNTIME_KEY_BITS 22U
@@ -16,10 +16,6 @@
 #define HAO_RUNTIME_L1_COUNT_SHIFT HAO_RUNTIME_L1_OFFSET_BITS
 #define HAO_RUNTIME_RULE_SLOTS_PER_ENTRY 4U
 #define HAO_RUNTIME_BYTES_PER_RULE_SLOT 8U
-#define HAO_RUNTIME_RULE_VECTOR_BYTES \
-    (HAO_RUNTIME_RULE_SLOTS_PER_ENTRY * HAO_RUNTIME_BYTES_PER_RULE_SLOT)
-#define HAO_RUNTIME_TBL_CONTROL_BYTES \
-    (HAO_RUNTIME_RULE_SLOTS_PER_ENTRY * HAO_RUNTIME_BYTES_PER_RULE_SLOT)
 #define HAO_RUNTIME_MAX_SELECTORS 32U
 #define HAO_BATCH_FALLBACK_WIDTH 4U
 #define HAO_BATCH_MAX_WIDTH 32U
@@ -28,8 +24,8 @@
 #define HAO_RUNTIME_PRIMARY_COARSE_KEY_GROUP \
     (1U << HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT)
 
-#ifndef HAO_L2_PACKED_VERIFY
-#define HAO_L2_PACKED_VERIFY 1
+#ifndef HAO_L2_SVE_CHECK
+#define HAO_L2_SVE_CHECK 1
 #endif
 
 /* Shared HAO tuning knobs used by compile-time and runtime code paths. */
@@ -63,23 +59,20 @@
 #define HAO_RUNTIME_RULE_ANCHOR_CONFIRM 3U
 #define HAO_RUNTIME_RULE_UNSUPPORTED 4U
 #define HAO_RUNTIME_PLAN_FLAG_DIRECT_REPORT_SAFE (1U << 7)
-#define HAO_RUNTIME_SECONDARY_ENTRY_FLAG_IDENTITY_TBL (1U << 0)
-#define HAO_RUNTIME_SECONDARY_ENTRY_FLAG_NOCASE_CTL (1U << 1)
-#define HAO_RUNTIME_TBLCTL_SRC_MASK 0x0fU
-#define HAO_RUNTIME_TBLCTL_NOCASE 0x20U
-#define HAO_RUNTIME_TBLCTL_INVALID 0x80U
+#define HAO_RUNTIME_L2_META_FLAG_NOCASE (1U << 1)
 
-struct HAORuntimeSecondaryHashEntry {
-    u8 ruleVector[HAO_RUNTIME_RULE_VECTOR_BYTES];
-    u8 tableControl[HAO_RUNTIME_TBL_CONTROL_BYTES];
-    u16 ruleIndex[HAO_RUNTIME_RULE_SLOTS_PER_ENTRY];
-    /* Packed mode: headMask=end bits, tailMask=start bits. */
-    u32 headMask;
-    u32 tailMask;
+struct HAORuntimeL2Check {
+    u64a rule[HAO_RUNTIME_RULE_SLOTS_PER_ENTRY];
+    u64a mask[HAO_RUNTIME_RULE_SLOTS_PER_ENTRY];
+};
+
+struct HAORuntimeL2Meta {
+    u32 ruleIndex[HAO_RUNTIME_RULE_SLOTS_PER_ENTRY];
+    u32 careBits;
     u8 slotMask;
     u8 slotCount;
     u8 flags;
-    u8 packedBytes;
+    u8 reserved;
 };
 
 struct HAORuntimeHeader {
@@ -91,7 +84,7 @@ struct HAORuntimeHeader {
     u32 primaryCount;
     u32 primaryBitmapSize;
     u32 primaryCoarseBitmapSize;
-    u32 secondaryCount;
+    u32 l2EntryCount;
     u32 ruleMetaCount;
     u32 literalBlobSize;
     u32 extractMode;
@@ -105,7 +98,8 @@ struct HAORuntimeHeader {
     u32 primaryBitmapRawOffset;
     u32 primaryBitmapRawCoarseOffset;
     u32 primaryRawOffset;
-    u32 secondaryOffset;
+    u32 l2CheckOffset;
+    u32 l2MetaOffset;
     u32 ruleMetaOffset;
     u32 literalBlobOffset;
     u32 residualRuleCount;
@@ -143,7 +137,7 @@ struct HAORuntimeInspectSummary {
     u32 primaryCount;
     u32 primaryBitmapSize;
     u32 primaryCoarseBitmapSize;
-    u32 secondaryCount;
+    u32 l2EntryCount;
     u32 ruleMetaCount;
     u32 residualRuleCount;
     u32 nonEmptyPrimary;
@@ -212,9 +206,6 @@ hwlm_error_t HaoEngineExec(const struct FDR *fdr,
 hwlm_error_t HaoEngineExecNaiveForTest(const struct FDR *fdr,
                                        const struct FDR_Runtime_Args *a,
                                        hwlm_group_t control);
-u32 HaoRuntimeEntryMatchMaskForTest(
-    const struct HAORuntimeSecondaryHashEntry *entry,
-    const struct FDR_Runtime_Args *a, size_t endPos, int useVector);
 u32 HaoRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
                                      const u32 *primaryIdx, u32 laneCount,
                                      int usePacked);

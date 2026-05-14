@@ -276,13 +276,21 @@ const u32 *getHaoPrimaryTable(const HAORuntimeHeader *hdr) {
 }
 
 static
-const HAORuntimeSecondaryHashEntry *getHaoSecondaryTable(
-    const HAORuntimeHeader *hdr) {
+const HAORuntimeL2Check *getHaoL2CheckTable(const HAORuntimeHeader *hdr) {
     if (!hdr) {
         return nullptr;
     }
-    return reinterpret_cast<const HAORuntimeSecondaryHashEntry *>(
-        reinterpret_cast<const u8 *>(hdr) + hdr->secondaryOffset);
+    return reinterpret_cast<const HAORuntimeL2Check *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->l2CheckOffset);
+}
+
+static
+const HAORuntimeL2Meta *getHaoL2MetaTable(const HAORuntimeHeader *hdr) {
+    if (!hdr) {
+        return nullptr;
+    }
+    return reinterpret_cast<const HAORuntimeL2Meta *>(
+        reinterpret_cast<const u8 *>(hdr) + hdr->l2MetaOffset);
 }
 
 static
@@ -406,11 +414,6 @@ std::string u8ToBin(u8 v) {
 }
 
 static
-std::string maskToBin(u32 mask) {
-    return u32ToBin(mask, HAO_LAYOUT_RULE_VECTOR_BYTES);
-}
-
-static
 char printableOrDot(u8 c) {
     return std::isprint(static_cast<unsigned char>(c)) ? static_cast<char>(c)
                                                         : '.';
@@ -435,60 +438,49 @@ const char *haoCategoryName(HAORuleCategory category) {
 }
 
 static
-std::string slotVectorString(const HAOSecondaryHashEntry &entry, u32 slot,
-                             bool activeOnly) {
-    const u32 laneBase = slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT;
-    std::string out;
-
-    out.reserve(HAO_LAYOUT_BYTES_PER_RULE_SLOT);
-    for (u32 i = 0; i < HAO_LAYOUT_BYTES_PER_RULE_SLOT; i++) {
-        const u8 ctrl = entry.tableControl[laneBase + i];
-        const bool active = ctrl != HAO_TBLCTL_INVALID;
-        if (activeOnly && !active) {
-            continue;
-        }
-        out.push_back(active ? printableOrDot(entry.ruleVector[laneBase + i])
-                             : '.');
-    }
-    return out;
-}
-
-static
 u32 haoSlotCount(u8 slotMask) {
     return popcount32(slotMask & ((1U << HAO_RUNTIME_RULE_SLOTS_PER_ENTRY) - 1U));
 }
 
 static
-u32 nthSetBitForTest(u32 mask, u32 rank) {
-    while (mask) {
-        const u32 bit = ctz32(mask);
-        if (!rank) {
-            return bit;
+bool findL2SlotForRule(const HAOGlobalHashArtifacts &hash, u32 ruleIndex,
+                       u32 *entryOut, u32 *slotOut) {
+    for (u32 i = 1; i < hash.l2MetaTable.size(); i++) {
+        const auto &meta = hash.l2MetaTable[i];
+        for (u32 slot = 0; slot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY; slot++) {
+            if (!(meta.slotMask & (1U << slot))) {
+                continue;
+            }
+            if (meta.ruleIndex[slot] == ruleIndex) {
+                if (entryOut) {
+                    *entryOut = i;
+                }
+                if (slotOut) {
+                    *slotOut = slot;
+                }
+                return true;
+            }
         }
-        rank--;
-        mask &= mask - 1U;
     }
-    return 32U;
+    return false;
 }
 
 static
-u32 verifierPackedIndexForTest(const HAOSecondaryHashEntry &entry, u32 slot,
-                               u8 validMask, u32 byteIndex) {
-#if HAO_L2_PACKED_VERIFY
-    const u32 rank = popcount32(entry.slotMask & ((1U << slot) - 1U));
-    const u32 start = nthSetBitForTest(entry.tailMask, rank);
-    u32 ordinal = 0;
+u8 l2Byte(u64a word, u32 byteIndex) {
+    return verify_u8((word >> (byteIndex * 8U)) & 0xffU);
+}
 
-    for (u32 i = 0; i < byteIndex; i++) {
-        if (validMask & (1U << i)) {
-            ordinal++;
-        }
+static
+bool l2SlotSurvivesValidMaskForTest(const HAOL2Meta &meta, u32 slot,
+                                    u8 validMask8) {
+    if (slot >= HAO_LAYOUT_RULE_SLOTS_PER_ENTRY ||
+        !(meta.slotMask & (1U << slot))) {
+        return false;
     }
-    return start + ordinal;
-#else
-    (void)validMask;
-    return slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + byteIndex;
-#endif
+
+    const u32 validMask32 = validMask8 * 0x01010101U;
+    const u32 slotBits = 0xffU << (slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT);
+    return !(meta.careBits & slotBits & ~validMask32);
 }
 
 static
@@ -562,13 +554,13 @@ HAOInspectStats computeHaoInspectStats(const bytecode_ptr<u8> &blob) {
 
     const auto *bitmap = getHaoPrimaryBitmap(hdr);
     const auto *primary = getHaoPrimaryTable(hdr);
-    const auto *secondary = getHaoSecondaryTable(hdr);
+    const auto *l2Meta = getHaoL2MetaTable(hdr);
 
     stats.bitmapBytes = hdr->primaryBitmapSize;
-    stats.totalL2Entries = hdr->secondaryCount ? hdr->secondaryCount - 1 : 0;
+    stats.totalL2Entries = hdr->l2EntryCount ? hdr->l2EntryCount - 1 : 0;
 
-    for (u32 i = 0; i < hdr->secondaryCount; i++) {
-        stats.totalRulesInL2 += haoSlotCount(secondary[i].slotMask);
+    for (u32 i = 0; i < hdr->l2EntryCount; i++) {
+        stats.totalRulesInL2 += haoSlotCount(l2Meta[i].slotMask);
     }
     /* Read-only inspection of the HAO global single-table layout for runtime validation tests. */
     for (u32 i = 0; i < hdr->primaryCount; i++) {
@@ -2090,8 +2082,8 @@ TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
               hdr->primaryCount);
     EXPECT_EQ(artifacts.haoGlobalHash.primaryHashBitmapRaw.bits.size(),
               hdr->primaryBitmapSize);
-    EXPECT_EQ(artifacts.haoGlobalHash.secondaryHashTable.size(),
-              hdr->secondaryCount);
+    EXPECT_EQ(artifacts.haoGlobalHash.l2CheckTable.size(),
+              hdr->l2EntryCount);
     EXPECT_EQ(artifacts.ruleMeta.size(), hdr->ruleMetaCount);
     EXPECT_EQ(artifacts.literalBlob.size(), hdr->literalBlobSize);
     EXPECT_EQ(artifacts.extractMode, hdr->extractMode);
@@ -2175,11 +2167,11 @@ TEST(HAOCompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {
 
     const HAOInspectStats stats = computeHaoInspectStats(blob);
     EXPECT_EQ(artifacts.haoGlobalHash.stats.nonEmptyPrimary, stats.nonEmptyL1);
-    EXPECT_EQ(artifacts.haoGlobalHash.stats.totalSecondaryEntries,
+    EXPECT_EQ(artifacts.haoGlobalHash.stats.totalL2Entries,
               stats.totalL2Entries);
 }
 
-TEST(HAOCompile, BuildHaoGlobalBlobSecondaryEntriesMatchArtifacts) {
+TEST(HAOCompile, BuildHaoGlobalBlobL2EntriesMatchArtifacts) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 656, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("maskrule", false, false, 657, HWLM_ALL_GROUPS,
@@ -2198,25 +2190,29 @@ TEST(HAOCompile, BuildHaoGlobalBlobSecondaryEntriesMatchArtifacts) {
 
     const auto *hdr = getHaoRuntimeHeader(blob);
     ASSERT_NE(nullptr, hdr);
-    const auto *secondary = getHaoSecondaryTable(hdr);
+    const auto *checks = getHaoL2CheckTable(hdr);
+    const auto *metas = getHaoL2MetaTable(hdr);
 
-    ASSERT_EQ(artifacts.haoGlobalHash.secondaryHashTable.size(),
-              static_cast<size_t>(hdr->secondaryCount));
-    for (u32 i = 0; i < hdr->secondaryCount; i++) {
-        const auto &src = artifacts.haoGlobalHash.secondaryHashTable[i];
-        const auto &dst = secondary[i];
-        EXPECT_EQ(src.slotMask, dst.slotMask) << "entry=" << i;
-        EXPECT_EQ(src.headMask, dst.headMask) << "entry=" << i;
-        EXPECT_EQ(src.tailMask, dst.tailMask) << "entry=" << i;
-        EXPECT_EQ(src.packedBytes, dst.packedBytes) << "entry=" << i;
-        for (u32 j = 0; j < HAO_RUNTIME_RULE_VECTOR_BYTES; j++) {
-            EXPECT_EQ(src.ruleVector[j], dst.ruleVector[j])
-                << "entry=" << i << " byte=" << j;
-            EXPECT_EQ(src.tableControl[j], dst.tableControl[j])
-                << "entry=" << i << " tbl=" << j;
-        }
+    ASSERT_EQ(artifacts.haoGlobalHash.l2CheckTable.size(),
+              static_cast<size_t>(hdr->l2EntryCount));
+    ASSERT_EQ(artifacts.haoGlobalHash.l2MetaTable.size(),
+              static_cast<size_t>(hdr->l2EntryCount));
+    for (u32 i = 0; i < hdr->l2EntryCount; i++) {
+        const auto &srcCheck = artifacts.haoGlobalHash.l2CheckTable[i];
+        const auto &srcMeta = artifacts.haoGlobalHash.l2MetaTable[i];
+        const auto &dstCheck = checks[i];
+        const auto &dstMeta = metas[i];
+
+        EXPECT_EQ(srcMeta.careBits, dstMeta.careBits) << "entry=" << i;
+        EXPECT_EQ(srcMeta.slotMask, dstMeta.slotMask) << "entry=" << i;
+        EXPECT_EQ(srcMeta.slotCount, dstMeta.slotCount) << "entry=" << i;
+        EXPECT_EQ(srcMeta.flags, dstMeta.flags) << "entry=" << i;
         for (u32 slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
-            EXPECT_EQ(src.ruleIndex[slot], dst.ruleIndex[slot])
+            EXPECT_EQ(srcCheck.rule[slot], dstCheck.rule[slot])
+                << "entry=" << i << " slot=" << slot;
+            EXPECT_EQ(srcCheck.mask[slot], dstCheck.mask[slot])
+                << "entry=" << i << " slot=" << slot;
+            EXPECT_EQ(srcMeta.ruleIndex[slot], dstMeta.ruleIndex[slot])
                 << "entry=" << i << " slot=" << slot;
         }
     }
@@ -2247,14 +2243,14 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutAcceptsGeneratedBlob) {
                                             &summary));
     EXPECT_EQ(artifacts.haoGlobalHash.stats.nonEmptyPrimary,
               summary.nonEmptyPrimary);
-    EXPECT_EQ(artifacts.haoGlobalHash.stats.totalSecondaryEntries + 1U,
-              summary.secondaryCount);
+    EXPECT_EQ(artifacts.haoGlobalHash.stats.totalL2Entries + 1U,
+              summary.l2EntryCount);
     EXPECT_EQ(artifacts.haoGlobalHash.stats.maxEntriesPerKey,
               summary.maxEntriesPerKey);
     EXPECT_EQ(artifacts.ruleMeta.size(), summary.ruleMetaCount);
 }
 
-TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsBrokenSecondaryOffset) {
+TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsBrokenL2Offset) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 672, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("maskrule", false, false, 673, HWLM_ALL_GROUPS,
@@ -2272,11 +2268,11 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsBrokenSecondaryOffset) {
     ASSERT_NE(nullptr, blob.get());
 
     auto *hdr = reinterpret_cast<HAORuntimeHeader *>(blob.get());
-    const u32 savedSecondaryOffset = hdr->secondaryOffset;
-    hdr->secondaryOffset = verify_u32(blob.size());
+    const u32 savedL2CheckOffset = hdr->l2CheckOffset;
+    hdr->l2CheckOffset = verify_u32(blob.size());
     EXPECT_FALSE(HaoRuntimeValidateLayoutForTest(blob.get(),
                                                  verify_u32(blob.size())));
-    hdr->secondaryOffset = savedSecondaryOffset;
+    hdr->l2CheckOffset = savedL2CheckOffset;
     EXPECT_TRUE(HaoRuntimeValidateLayoutForTest(blob.get(),
                                                 verify_u32(blob.size())));
 }
@@ -2941,7 +2937,7 @@ TEST(HAOCompile, HaoNocasePlanUsesRawVerifierBytes) {
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
     EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
     // hwlmLiteral canonicalizes nocase literals; runtime input stays raw and
-    // tableControl carries the nocase compare bit.
+    // the L2 mask word carries the nocase compare mask.
     EXPECT_EQ((u8)'A', plan.verifier.bytes[3]);
     EXPECT_EQ((u8)'L', plan.verifier.bytes[4]);
     EXPECT_EQ((u8)'P', plan.verifier.bytes[5]);
@@ -2952,7 +2948,7 @@ TEST(HAOCompile, HaoNocasePlanUsesRawVerifierBytes) {
     EXPECT_FALSE(plan.needFullConfirm);
 }
 
-TEST(HAOCompile, HaoNocaseVerifierStoresControlMask) {
+TEST(HAOCompile, HaoNocaseVerifierStoresL2Mask) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 722, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("aLpHa", true, false, 723, HWLM_ALL_GROUPS, {}, {}),
@@ -2969,41 +2965,29 @@ TEST(HAOCompile, HaoNocaseVerifierStoresControlMask) {
     ASSERT_EQ(0xf8U, plan.verifier.validByteMask);
     ASSERT_EQ(0xf8U, plan.verifier.nocaseByteMask);
 
-    bool found = false;
-    for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
-        const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
-        for (u32 slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
-            if (!(entry.slotMask & (1U << slot))) {
-                continue;
-            }
-            if (entry.ruleIndex[slot] != plan.ruleIndex) {
-                continue;
-            }
+    u32 entry = 0;
+    u32 slot = 0;
+    ASSERT_TRUE(findL2SlotForRule(artifacts.haoGlobalHash, plan.ruleIndex,
+                                  &entry, &slot));
+    const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
+    const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
 
-            found = true;
-            EXPECT_TRUE(entry.flags & HAO_SECONDARY_ENTRY_FLAG_NOCASE_CTL);
-            for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
-                if (!(plan.verifier.validByteMask & (1U << j))) {
-                    continue;
-                }
-
-                const u32 idx = verifierPackedIndexForTest(
-                    entry, slot, plan.verifier.validByteMask, j);
-#if HAO_L2_PACKED_VERIFY
-                u8 expectedCtl = verify_u8(j & HAO_TBLCTL_SRC_MASK);
-#else
-                u8 expectedCtl = verify_u8(
-                    (slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j) &
-                    HAO_TBLCTL_SRC_MASK);
-#endif
-                expectedCtl = verify_u8(expectedCtl | HAO_TBLCTL_NOCASE);
-                EXPECT_EQ(plan.verifier.bytes[j], entry.ruleVector[idx]);
-                EXPECT_EQ(expectedCtl, entry.tableControl[idx]);
-            }
+    EXPECT_TRUE(meta.flags & HAO_L2_META_FLAG_NOCASE);
+    EXPECT_TRUE(meta.slotMask & (1U << slot));
+    EXPECT_EQ(plan.ruleIndex, meta.ruleIndex[slot]);
+    for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
+        const u32 careBit = 1U << (slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j);
+        if (!(plan.verifier.validByteMask & (1U << j))) {
+            EXPECT_FALSE(meta.careBits & careBit);
+            continue;
         }
+
+        EXPECT_TRUE(meta.careBits & careBit);
+        EXPECT_EQ((u8)(plan.verifier.bytes[j] & 0xdfU),
+                  l2Byte(check.rule[slot], j));
+        EXPECT_EQ((u8)0xdfU, l2Byte(check.mask[slot], j));
     }
 
-    EXPECT_TRUE(found);
 }
 
 TEST(HAOCompile, HaoMaskRulesBecomeAnchorConfirm) {
@@ -3029,7 +3013,7 @@ TEST(HAOCompile, HaoMaskRulesBecomeAnchorConfirm) {
     EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT);
 }
 
-TEST(HAOCompile, HaoNocaseMaskAnchorStoresControlMask) {
+TEST(HAOCompile, HaoNocaseMaskAnchorStoresL2Mask) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 7460, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("abcd", true, false, 7461, HWLM_ALL_GROUPS,
@@ -3049,33 +3033,25 @@ TEST(HAOCompile, HaoNocaseMaskAnchorStoresControlMask) {
     EXPECT_EQ(0xf0U, plan.verifier.validByteMask);
     EXPECT_EQ(0xf0U, plan.verifier.nocaseByteMask);
 
-    bool found = false;
-    for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
-        const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
-        for (u32 slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
-            if (!(entry.slotMask & (1U << slot))) {
-                continue;
-            }
-            if (entry.ruleIndex[slot] != plan.ruleIndex) {
-                continue;
-            }
+    u32 entry = 0;
+    u32 slot = 0;
+    ASSERT_TRUE(findL2SlotForRule(artifacts.haoGlobalHash, plan.ruleIndex,
+                                  &entry, &slot));
+    const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
+    const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
 
-            found = true;
-            EXPECT_TRUE(entry.flags & HAO_SECONDARY_ENTRY_FLAG_NOCASE_CTL);
-            for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
-                if (!(plan.verifier.validByteMask & (1U << j))) {
-                    continue;
-                }
-
-                const u32 idx = verifierPackedIndexForTest(
-                    entry, slot, plan.verifier.validByteMask, j);
-                EXPECT_TRUE(entry.tableControl[idx] & HAO_TBLCTL_NOCASE);
-                EXPECT_EQ(plan.verifier.bytes[j], entry.ruleVector[idx]);
-            }
+    EXPECT_TRUE(meta.flags & HAO_L2_META_FLAG_NOCASE);
+    EXPECT_TRUE(meta.slotMask & (1U << slot));
+    EXPECT_EQ(plan.ruleIndex, meta.ruleIndex[slot]);
+    for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
+        if (!(plan.verifier.validByteMask & (1U << j))) {
+            continue;
         }
+        EXPECT_EQ((u8)0xdfU, l2Byte(check.mask[slot], j));
+        EXPECT_EQ((u8)(plan.verifier.bytes[j] & 0xdfU),
+                  l2Byte(check.rule[slot], j));
     }
 
-    EXPECT_TRUE(found);
 }
 
 TEST(HAOCompile, HaoSummaryTracksCoverageAndAnchors) {
@@ -3254,31 +3230,22 @@ TEST(HAOCompile, HaoGlobalHashStoresAnchorConfirmFragments) {
     const auto &plan = artifacts.haoRulePlans[1];
     ASSERT_EQ(HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM, plan.category);
 
-    bool found = false;
-    for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
-        const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
-        for (u32 slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
-            if (!(entry.slotMask & (1U << slot))) {
-                continue;
-            }
-            if (entry.ruleIndex[slot] != plan.ruleIndex) {
-                continue;
-            }
+    u32 entry = 0;
+    u32 slot = 0;
+    ASSERT_TRUE(findL2SlotForRule(artifacts.haoGlobalHash, plan.ruleIndex,
+                                  &entry, &slot));
+    const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
+    const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
 
-            found = true;
-            for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
-                if (!(plan.verifier.validByteMask & (1U << j))) {
-                    continue;
-                }
-                const u32 idx = verifierPackedIndexForTest(
-                    entry, slot, plan.verifier.validByteMask, j);
-                EXPECT_EQ(plan.verifier.bytes[j],
-                          entry.ruleVector[idx]);
-            }
+    EXPECT_TRUE(meta.slotMask & (1U << slot));
+    for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
+        if (!(plan.verifier.validByteMask & (1U << j))) {
+            continue;
         }
+        EXPECT_EQ(plan.verifier.bytes[j], l2Byte(check.rule[slot], j));
+        EXPECT_EQ((u8)0xffU, l2Byte(check.mask[slot], j));
     }
 
-    EXPECT_TRUE(found);
 }
 
 TEST(HAOCompile, HaoGlobalHashStoresVerifierFragments) {
@@ -3295,81 +3262,55 @@ TEST(HAOCompile, HaoGlobalHashStoresVerifierFragments) {
 
     const auto &plan = artifacts.haoRulePlans[1];
     ASSERT_EQ(HAORuleCategory::HAO_RULE_EXACT, plan.category);
-    bool found = false;
-    for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
-        const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
-        for (u32 slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
-            if (!(entry.slotMask & (1U << slot))) {
-                continue;
-            }
-            if (entry.ruleIndex[slot] != plan.ruleIndex) {
-                continue;
-            }
-            found = true;
-            for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
-                if (plan.verifier.validByteMask & (1U << j)) {
-                    const u32 idx = verifierPackedIndexForTest(
-                        entry, slot, plan.verifier.validByteMask, j);
-                    EXPECT_EQ(plan.verifier.bytes[j],
-                              entry.ruleVector[idx]);
-#if HAO_L2_PACKED_VERIFY
-                    EXPECT_EQ(j, entry.tableControl[idx]);
-#else
-                    EXPECT_EQ(((slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j) &
-                               HAO_TBLCTL_SRC_MASK), entry.tableControl[idx]);
-#endif
-                }
-            }
+
+    u32 entry = 0;
+    u32 slot = 0;
+    ASSERT_TRUE(findL2SlotForRule(artifacts.haoGlobalHash, plan.ruleIndex,
+                                  &entry, &slot));
+    const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
+    const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
+
+    EXPECT_TRUE(meta.slotMask & (1U << slot));
+    EXPECT_EQ(plan.ruleIndex, meta.ruleIndex[slot]);
+    for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
+        const u32 careBit = 1U << (slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j);
+        if (plan.verifier.validByteMask & (1U << j)) {
+            EXPECT_TRUE(meta.careBits & careBit);
+            EXPECT_EQ(plan.verifier.bytes[j], l2Byte(check.rule[slot], j));
+            EXPECT_EQ((u8)0xffU, l2Byte(check.mask[slot], j));
+        } else {
+            EXPECT_FALSE(meta.careBits & careBit);
+            EXPECT_EQ((u8)0, l2Byte(check.mask[slot], j));
         }
     }
 
-    EXPECT_TRUE(found);
 }
 
-TEST(HAOCompile, HaoGlobalHashTableControlEncodesShuffleBytes) {
+TEST(HAOCompile, HaoL2CareBitsRejectInvalidBoundaryBytes) {
     std::vector<hwlmLiteral> lits = {
-        hwlmLiteral("alpha", false, false, 738, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("delta", false, false, 739, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("theta", false, false, 740, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("omega", false, false, 741, HWLM_ALL_GROUPS, {}, {})
+        hwlmLiteral("abcd", false, false, 760, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("delta", false, false, 761, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 762, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 763, HWLM_ALL_GROUPS, {}, {})
     };
 
     HAOCompileArtifacts artifacts;
     ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
     ASSERT_TRUE(artifacts.haoGlobalHash.valid);
 
-    const auto &plan = artifacts.haoRulePlans[1];
+    const auto &plan = artifacts.haoRulePlans[0];
     ASSERT_EQ(HAORuleCategory::HAO_RULE_EXACT, plan.category);
+    ASSERT_EQ(0xf0U, plan.verifier.validByteMask);
 
-    bool found = false;
-    for (u32 i = 1; i < artifacts.haoGlobalHash.secondaryHashTable.size(); i++) {
-        const auto &entry = artifacts.haoGlobalHash.secondaryHashTable[i];
-        for (u32 slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
-            if (!(entry.slotMask & (1U << slot))) {
-                continue;
-            }
-            if (entry.ruleIndex[slot] != plan.ruleIndex) {
-                continue;
-            }
+    u32 entry = 0;
+    u32 slot = 0;
+    ASSERT_TRUE(findL2SlotForRule(artifacts.haoGlobalHash, plan.ruleIndex,
+                                  &entry, &slot));
+    const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
 
-            found = true;
-            for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
-                if (!(plan.verifier.validByteMask & (1U << j))) {
-                    continue;
-                }
-                const u32 idx = verifierPackedIndexForTest(
-                    entry, slot, plan.verifier.validByteMask, j);
-#if HAO_L2_PACKED_VERIFY
-                EXPECT_EQ(j, entry.tableControl[idx]);
-#else
-                EXPECT_EQ(((slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j) &
-                           HAO_TBLCTL_SRC_MASK), entry.tableControl[idx]);
-#endif
-            }
-        }
-    }
-
-    EXPECT_TRUE(found);
+    EXPECT_FALSE(l2SlotSurvivesValidMaskForTest(meta, slot, 0xc0U));
+    EXPECT_TRUE(l2SlotSurvivesValidMaskForTest(meta, slot, 0xf0U));
+    EXPECT_TRUE(l2SlotSurvivesValidMaskForTest(meta, slot, 0xffU));
 }
 
 TEST(HAOExtract, BextMatchesScalar) {
@@ -3616,163 +3557,6 @@ TEST(HAOCollision, RuntimeExtractorFromRuleAndInputFiles) {
     EXPECT_GT(nonEmpty, 0U);
 }
 
-TEST(HAOPrefilter, EntryLaneMaskMatchesScalar) {
-    auto haoDb = buildFdrWithHint({
-        hwlmLiteral("alpha", false, false, 720, 0x1, {}, {}),
-        hwlmLiteral("ALPHA", true,  false, 721, 0x3, {}, {}),
-        hwlmLiteral("beta",  false, false, 722, 0x1, {}, {}),
-        hwlmLiteral("delta", false, true,  723, 0x2, {}, {}),
-        hwlmLiteral("gamma", false, false, 724, 0x4, {}, {}),
-        hwlmLiteral("theta", true,  false, 725, 0x7, {}, {})
-    }, ENGINE_ID_HAO);
-
-    if (!haoDb || haoDb->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(haoDb.get())) {
-        skipIfNoHaoSupport();
-        return;
-    }
-
-    const auto *hdr = getHaoRuntimeHeader(haoDb.get());
-    ASSERT_NE(nullptr, hdr);
-    ASSERT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
-    const auto *secondary = getHaoSecondaryTable(hdr);
-
-    const std::vector<u8> data = {'a','l','p','h','a',' ',
-                                  'B','E','T','A',' ',
-                                  'd','e','l','t','a',' ',
-                                  'T','H','E','T','A'};
-    hs_scratch scratch = {};
-    scratch.fdr_conf = nullptr;
-    const auto args = makeRuntimeArgs(data, {}, &scratch);
-
-    for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
-        for (size_t endPos = 0; endPos < data.size(); endPos++) {
-            const u32 scalarMask = HaoRuntimeEntryMatchMaskForTest(
-                &secondary[entry], &args, endPos, 0);
-            const u32 vectorMask = HaoRuntimeEntryMatchMaskForTest(
-                &secondary[entry], &args, endPos, 1);
-            EXPECT_EQ(scalarMask, vectorMask)
-                << "entry=" << entry << " endPos=" << endPos;
-        }
-    }
-}
-
-TEST(HAOPrefilter, EntryLaneMaskHistoryBoundaryConsistency) {
-    auto haoDb = buildFdrWithHint({
-        hwlmLiteral("abcz", false, false, 726, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("YY", true, false, 727, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("kappa", false, false, 728, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("theta", false, false, 729, HWLM_ALL_GROUPS, {}, {})
-    }, ENGINE_ID_HAO);
-
-    if (!haoDb || haoDb->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(haoDb.get())) {
-        skipIfNoHaoSupport();
-        return;
-    }
-
-    const auto *hdr = getHaoRuntimeHeader(haoDb.get());
-    ASSERT_NE(nullptr, hdr);
-    ASSERT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
-    const auto *secondary = getHaoSecondaryTable(hdr);
-
-    const std::vector<u8> history = {'x', 'x', 'a', 'b'};
-    const std::vector<u8> data = {'c', 'z', 'Y', 'Y', 'a', 'B', 'c', 'z'};
-    hs_scratch scratch = {};
-    scratch.fdr_conf = nullptr;
-    const auto args = makeRuntimeArgs(data, history, &scratch);
-
-    for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
-        for (size_t endPos = 0; endPos < data.size(); endPos++) {
-            const u32 scalarMask = HaoRuntimeEntryMatchMaskForTest(
-                &secondary[entry], &args, endPos, 0);
-            const u32 vectorMask = HaoRuntimeEntryMatchMaskForTest(
-                &secondary[entry], &args, endPos, 1);
-            EXPECT_EQ(scalarMask, vectorMask)
-                << "entry=" << entry << " endPos=" << endPos;
-        }
-    }
-}
-
-TEST(HAOPrefilter, HeadTailMaskRejectsSameAsScalarForPartialSlots) {
-    auto haoDb = buildFdrWithHint({
-        hwlmLiteral("ab", true, false, 760, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("abc", false, false, 761, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("beta", false, false, 762, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("z", false, false, 763, HWLM_ALL_GROUPS, {}, {})
-    }, ENGINE_ID_HAO);
-
-    if (!haoDb || haoDb->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(haoDb.get())) {
-        skipIfNoHaoSupport();
-        return;
-    }
-
-    const auto *hdr = getHaoRuntimeHeader(haoDb.get());
-    ASSERT_NE(nullptr, hdr);
-    ASSERT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
-    const auto *secondary = getHaoSecondaryTable(hdr);
-
-    const std::vector<u8> data = {'A','b',' ','a','b','c',' ',
-                                  'b','e','t','a',' ','z','z'};
-    hs_scratch scratch = {};
-    scratch.fdr_conf = nullptr;
-    const auto args = makeRuntimeArgs(data, {}, &scratch);
-
-    for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
-        for (size_t endPos = 0; endPos < data.size(); endPos++) {
-            const u32 scalarMask = HaoRuntimeEntryMatchMaskForTest(
-                &secondary[entry], &args, endPos, 0);
-            const u32 vectorMask = HaoRuntimeEntryMatchMaskForTest(
-                &secondary[entry], &args, endPos, 1);
-            EXPECT_EQ(scalarMask, vectorMask)
-                << "entry=" << entry << " endPos=" << endPos;
-        }
-    }
-}
-
-TEST(HAOPrefilter, SingleSlotFastPathMatchesScalar) {
-    auto haoDb = buildFdrWithHint({
-        hwlmLiteral("alpha", false, false, 770, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("delta", false, false, 771, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("gamma", false, false, 772, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("omega", false, false, 773, HWLM_ALL_GROUPS, {}, {})
-    }, ENGINE_ID_HAO);
-
-    if (!haoDb || haoDb->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(haoDb.get())) {
-        skipIfNoHaoSupport();
-        return;
-    }
-
-    const auto *hdr = getHaoRuntimeHeader(haoDb.get());
-    ASSERT_NE(nullptr, hdr);
-    ASSERT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
-    const auto *secondary = getHaoSecondaryTable(hdr);
-
-    const std::vector<u8> data = {'x','x','a','l','p','h','a','x',
-                                  'd','e','l','t','a','x',
-                                  'g','a','m','m','a','x',
-                                  'o','m','e','g','a'};
-    hs_scratch scratch = {};
-    scratch.fdr_conf = nullptr;
-    const auto args = makeRuntimeArgs(data, {}, &scratch);
-    bool sawSingleSlot = false;
-
-    for (u32 entry = 1; entry < hdr->secondaryCount; entry++) {
-        if (secondary[entry].slotCount != 1) {
-            continue;
-        }
-        sawSingleSlot = true;
-        for (size_t endPos = 0; endPos < data.size(); endPos++) {
-            const u32 scalarMask = HaoRuntimeEntryMatchMaskForTest(
-                &secondary[entry], &args, endPos, 0);
-            const u32 vectorMask = HaoRuntimeEntryMatchMaskForTest(
-                &secondary[entry], &args, endPos, 1);
-            EXPECT_EQ(scalarMask, vectorMask)
-                << "entry=" << entry << " endPos=" << endPos;
-        }
-    }
-
-    EXPECT_TRUE(sawSingleSlot);
-}
-
 TEST(HAORuntime, Batch4MatchesNaiveDirect) {
     auto haoDb = buildFdrWithHint({
         hwlmLiteral("alpha", false, false, 730, HWLM_ALL_GROUPS, {}, {}),
@@ -4014,22 +3798,17 @@ TEST(HAORuntime, InvalidLayoutOffsetFallsBackCleanly) {
 
     auto *hdr = reinterpret_cast<HAORuntimeHeader *>(
         reinterpret_cast<u8 *>(haoDb.get()) + fdrMatcherBlobOffset(haoDb.get()));
-    const u32 savedSecondaryOffset = hdr->secondaryOffset;
-    hdr->secondaryOffset = fdrMatcherBlobSize(haoDb.get());
+    const u32 savedL2CheckOffset = hdr->l2CheckOffset;
+    hdr->l2CheckOffset = fdrMatcherBlobSize(haoDb.get());
 
     const hwlm_error_t rv = runHaoDirect(
         haoDb.get(), {'a','l','p','h','a'}, HWLM_ALL_GROUPS);
     EXPECT_EQ(HWLM_SUCCESS, rv);
     EXPECT_TRUE(g_matches.empty());
 
-    hdr->secondaryOffset = savedSecondaryOffset;
+    hdr->l2CheckOffset = savedL2CheckOffset;
 }
 
 } // namespace
-
-
-
-
-
 
 

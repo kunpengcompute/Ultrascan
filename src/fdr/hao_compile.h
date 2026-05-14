@@ -33,14 +33,14 @@
 #define HAO_MIN_FAST_RULE_COVERAGE_PCT 80U
 #endif
 
-#ifndef HAO_L2_PACKED_VERIFY
-#define HAO_L2_PACKED_VERIFY 1
+#ifndef HAO_L2_SVE_CHECK
+#define HAO_L2_SVE_CHECK 1
 #endif
 
 namespace ue2 {
 
 static constexpr u32 HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE = 1U << 0;
-static constexpr u32 HAO_ARTIFACT_FLAG_PARTIAL_SECONDARY_CAPACITY =
+static constexpr u32 HAO_ARTIFACT_FLAG_PARTIAL_L2_CAPACITY =
     1U << 1;
 static constexpr u32 HAO_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW =
     1U << 2;
@@ -51,11 +51,6 @@ static constexpr u32 HAO_LAYOUT_L1_OFFSET_MASK =
 static constexpr u32 HAO_LAYOUT_L1_COUNT_SHIFT = HAO_LAYOUT_L1_OFFSET_BITS;
 static constexpr u32 HAO_LAYOUT_RULE_SLOTS_PER_ENTRY = 4U;
 static constexpr u32 HAO_LAYOUT_BYTES_PER_RULE_SLOT = 8U;
-static constexpr u32 HAO_LAYOUT_RULE_VECTOR_BYTES =
-    HAO_LAYOUT_RULE_SLOTS_PER_ENTRY * HAO_LAYOUT_BYTES_PER_RULE_SLOT;
-static constexpr u32 HAO_LAYOUT_TBL_CONTROL_BYTES =
-    HAO_LAYOUT_RULE_SLOTS_PER_ENTRY * HAO_LAYOUT_BYTES_PER_RULE_SLOT;
-static constexpr u32 HAO_LAYOUT_RULE_SLOT_MASK_WORDS = 1U;
 static constexpr u32 HAO_LAYOUT_MAX_SELECTORS = 32U;
 static constexpr u32 HAO_EXTRACT_MODE_SCALAR = 0U;
 static constexpr u32 HAO_EXTRACT_MODE_BEXT = 1U;
@@ -73,11 +68,7 @@ static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_AMBIG_LIMIT = 1U << 4;
 static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_EXPANSION_BUDGET = 1U << 5;
 static constexpr u32 HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT = 1U << 6;
 static constexpr u32 HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE = 1U << 7;
-static constexpr u8 HAO_SECONDARY_ENTRY_FLAG_IDENTITY_TBL = 1U << 0;
-static constexpr u8 HAO_SECONDARY_ENTRY_FLAG_NOCASE_CTL = 1U << 1;
-static constexpr u8 HAO_TBLCTL_SRC_MASK = 0x0fU;
-static constexpr u8 HAO_TBLCTL_NOCASE = 0x20U;
-static constexpr u8 HAO_TBLCTL_INVALID = 0x80U;
+static constexpr u8 HAO_L2_META_FLAG_NOCASE = 1U << 1;
 
 struct Grey;
 struct target_t;
@@ -95,17 +86,18 @@ struct HAOPrimaryHashBitmap {
     std::vector<u8> bits;
 };
 
-struct HAOSecondaryHashEntry {
-    u8 ruleVector[HAO_LAYOUT_RULE_VECTOR_BYTES];
-    u8 tableControl[HAO_LAYOUT_TBL_CONTROL_BYTES];
-    u16 ruleIndex[HAO_LAYOUT_RULE_SLOTS_PER_ENTRY];
-    /* Packed mode: headMask=end bits, tailMask=start bits. */
-    u32 headMask;
-    u32 tailMask;
+struct HAOL2Check {
+    u64a rule[HAO_LAYOUT_RULE_SLOTS_PER_ENTRY];
+    u64a mask[HAO_LAYOUT_RULE_SLOTS_PER_ENTRY];
+};
+
+struct HAOL2Meta {
+    u32 ruleIndex[HAO_LAYOUT_RULE_SLOTS_PER_ENTRY];
+    u32 careBits;
     u8 slotMask;
     u8 slotCount;
     u8 flags;
-    u8 packedBytes;
+    u8 reserved;
 };
 
 struct HAOCompileRuleMeta {
@@ -188,7 +180,7 @@ struct HAOGlobalHashStats {
     u32 collisionBuckets = 0;
     u32 totalRulesInBuckets = 0;
     u32 totalExpandedKeysInBuckets = 0;
-    u32 totalSecondaryEntries = 0;
+    u32 totalL2Entries = 0;
     u32 minRulesPerBucket = 0;
     u32 maxRulesPerBucket = 0;
     u32 minEntriesPerBucket = 0;
@@ -210,7 +202,8 @@ struct HAOGlobalHashArtifacts {
     HAOPrimaryHashTable primaryHashTable;
     HAOPrimaryHashTable primaryHashTableRaw;
     HAOPrimaryHashBitmap primaryHashBitmapRaw;
-    std::vector<HAOSecondaryHashEntry> secondaryHashTable;
+    std::vector<HAOL2Check> l2CheckTable;
+    std::vector<HAOL2Meta> l2MetaTable;
     HAOGlobalHashStats stats;
 };
 
@@ -237,7 +230,7 @@ enum class HAOFeasibilityReason : u32 {
     TOO_MANY_LITERALS,
     UNSUPPORTED_INCLUDED_LITERAL,
     NO_SELECTORS,
-    PARTIAL_SECONDARY_CAPACITY,
+    PARTIAL_L2_CAPACITY,
     PARTIAL_ENTRY_OVERFLOW,
     PARTIAL_OTHER,
     ARTIFACT_BUILD_FAILED
