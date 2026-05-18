@@ -42,6 +42,7 @@ class ParsedExpression;
 
 /** \brief True if the literal expression \a expr could be added to Rose. */
 bool shortcutLiteral(NG &ng, const ParsedExpression &expr, unsigned flags, const CompileContext & cc);
+bool x86_shortcutLiteral(NG &ng, const ParsedExpression &pe);
 size_t isShortLiteral(const ParsedExpression &expr);
 
 } // namespace ue2
