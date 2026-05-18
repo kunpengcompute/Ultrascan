@@ -39,7 +39,7 @@ Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openE
 |Boost|1.57及以上|必选：编译依赖Boost头文件。|[获取链接](https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz)|
 |PCRE|8.41及以上|可选：Hyperscan tools正确性验证工具hscollider编译依赖PCRE的8.41及以上版本。|[获取链接](https://sourceforge.net/projects/pcre/files/pcre/8.43/pcre-8.43.tar.gz)|
 |SQLite|SQLite 3|可选：Hyperscan tools测试工具hsbench编译依赖SQLite 3。|使用Yum工具安装。|
-|Hyperscan|dev|必选：待编译软件。|[获取链接](https://gitcode.com/boostkit/hyperscan/tree/dev)|
+|Hyperscan|master|必选：待编译软件。|[获取链接](https://gitcode.com/boostkit/hyperscan/tree/master)|
 
 ## 配置编译环境<a name="ZH-CN_TOPIC_0000002550305597"></a>
 
@@ -85,8 +85,6 @@ Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openE
     yum makecache
     ```
 
-正确配置Yum源，以便于后续能够正常安装所需依赖包和软件。
-
 ### 安装Ragel<a name="ZH-CN_TOPIC_0000002518785772"></a>
 
 由于Hyperscan的编译依赖于Ragel，本文中编译环境采用Ragel 6.10版本。
@@ -128,11 +126,9 @@ Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openE
 
     显示“Ragel State Machine Compiler version 6.10 March 2017”则安装成功。
 
-由于Hyperscan的编译依赖于Ragel，本文中编译环境采用Ragel 6.10版本。
-
 ### 配置Boost<a name="ZH-CN_TOPIC_0000002518785768"></a>
 
-编译Hyperscan依赖于1.57版本以上的Boost，本文编译环境采用的是Boost 1.87版本。提供两种配置Boost的方法，请根据实际情况选择。
+编译Hyperscan依赖于1.57及以上版本的Boost，本文编译环境采用的是Boost 1.87版本。提供两种配置Boost的方法，请根据实际情况选择。
 
 - 第一种：下载软件包并建立软链接，使用该方法直接创建Boost软链接即可，不需要执行安装Boost命令。
 - 第二种：下载软件包并安装，将Boost软件包安装到服务器中，不需要每次下载源码软链接Boost头文件，该安装步骤不需要建立软链接。
@@ -153,7 +149,14 @@ Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openE
     tar -zxf boost_1_87_0.tar.gz
     ```
 
-3. 建立软链接请参见[编译hyperscan第2步](#编译hyperscan)。
+3. 建立软链接。
+    
+    ```bash
+    ln -s {boost_path}/boost include/boost
+    ```
+
+    >![](public_sys-resources/icon-note.gif) **说明：** 
+    >编译依赖Boost头文件，{boost\_path}即boost\_1\_87\_0.tar.gz解压后的全路径，此处boost\_path推荐使用绝对路径。
 
 **方法二：下载软件包并安装<a name="section1857344614147"></a>**
 
@@ -203,8 +206,6 @@ Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openE
     ldconfig
     ```
 
-编译Hyperscan依赖于1.57版本以上的Boost，本文编译环境采用的是Boost 1.87版本。提供两种配置Boost的方法，请根据实际情况选择。
-
 ### 下载PCRE<a name="ZH-CN_TOPIC_0000002518625864"></a>
 
 Hyperscan tools工具hscollider的编译依赖PCRE 8.41及以上版本，本文采用PCRE 8.43版本。
@@ -215,8 +216,6 @@ Hyperscan tools工具hscollider的编译依赖PCRE 8.41及以上版本，本文�
     ```bash
     tar -zxf pcre-8.43.tar.gz
     ```
-
-Hyperscan tools工具hscollider的编译依赖PCRE 8.41及以上版本，本文采用PCRE 8.43版本。
 
 ### 安装SQLite<a name="ZH-CN_TOPIC_0000002518785774"></a>
 
@@ -270,7 +269,6 @@ Hyperscan tools工具hsbench编译依赖SQLite 3，使用Yum命令安装SQLite�
 
         3. 按“Esc“键，输入`:wq!`并按“Enter“键保存并退出编辑。
 
-Hyperscan tools工具hsbench编译依赖SQLite 3，使用Yum命令安装SQLite及SQLite开发套件，安装完成后进行版本验证。
 
 ### 安装KHSEL<a name="ZH-CN_TOPIC_0000002550345613"></a>
 
@@ -278,7 +276,7 @@ KHSEL是Hyperscan增强软件包，可以提升Hyperscan的scan性能。目前gi
 
 ## 编译Hyperscan<a name="ZH-CN_TOPIC_0000002518625866"></a>
 
-在Hyperscan源码目录下添加Boost头文件和PCRE依赖库，最后进行源码静态库、动态库或Debug模式的编译。
+在Hyperscan源码目录下添加PCRE依赖库，最后进行源码静态库、动态库或Debug模式的编译。
 
 1. 进入Hyperscan源码目录。
 
@@ -286,16 +284,7 @@ KHSEL是Hyperscan增强软件包，可以提升Hyperscan的scan性能。目前gi
     cd hyperscan
     ```
 
-2. 添加Boost头文件。
-
-    ```bash
-    ln -s {boost_path}/boost include/boost
-    ```
-
-    >![](public_sys-resources/icon-note.gif) **说明：** 
-    >编译依赖Boost头文件，{boost\_path}即boost\_1\_87\_0.tar.gz解压后的全路径，此处boost\_path推荐使用绝对路径。
-
-3. 添加PCRE依赖库。
+2. 添加PCRE依赖库。
 
     源码hscollider工具编译依赖于PCRE工具。
 
@@ -322,7 +311,7 @@ KHSEL是Hyperscan增强软件包，可以提升Hyperscan的scan性能。目前gi
 
     4. 按“Esc“键，输入`:wq!`并按“Enter“键保存并退出编辑。
 
-4. 编译源码。
+3. 编译源码。
     1. 进入Hyperscan源码目录。
 
         ```bash
@@ -379,5 +368,3 @@ KHSEL是Hyperscan增强软件包，可以提升Hyperscan的scan性能。目前gi
             ```bash
             cmake .. -DCMAKE_BUILD_TYPE=DEBUG
             ```
-
-在Hyperscan源码目录下添加Boost头文件和PCRE依赖库，最后进行源码静态库、动态库或Debug模式的编译。

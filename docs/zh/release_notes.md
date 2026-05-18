@@ -4,8 +4,7 @@
 
 |文档版本|发布日期|修改说明|
 |--|--|--|
-|02|2026-03-30|第二次正式发布，基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短字节规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
-|01|2025-12-30|第一次正式发布。|
+|01|2026-03-30|第一次正式发布，基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短字节规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
 
 ## 版本配套说明<a name="ZH-CN_TOPIC_0000002518405392"></a>
 
@@ -133,3 +132,49 @@
 ### 遗留问题<a name="ZH-CN_TOPIC_0000002518245464"></a>
 
 无
+## 版本配套文档<a name="ZH-CN_TOPIC_0000002547130797"></a>
+
+### 版本配套文档<a name="ZH-CN_TOPIC_0000002547210821"></a>
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: left;">文档名称</th>
+      <th style="text-align: left;">内容简介</th>
+      <th style="text-align: left;">交付形式</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: left;">2.6.0 版本说明书</td>
+      <td style="text-align: left;">提供Hyperscan的版本发布信息。</td>
+      <td style="text-align: left;">开源仓</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">快速入门</td>
+      <td style="text-align: left;">提供Hyperscan的快速上手教程，帮助用户快速了解和使用Hyperscan。</td>
+      <td style="text-align: left;">开源仓</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">安装指南</td>
+      <td style="text-align: left;">提供Hyperscan的安装部署指导。</td>
+      <td style="text-align: left;">开源仓</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">使用指南</td>
+      <td style="text-align: left;">提供Hyperscan的使用操作指导。</td>
+      <td style="text-align: left;">开源仓</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">开发指南</td>
+      <td style="text-align: left;">提供Hyperscan短规则旁路技术的开发与适配。</td>
+      <td style="text-align: left;">开源仓</td>
+    </tr>
+  </tbody>
+</table>
+
+
+
+### 获取文档的方法<a name="ZH-CN_TOPIC_0000002547210757"></a>
+
+您可以通过访问[开源仓](https://gitcode.com/boostkit/hyperscan/tree/master)浏览和获取相关文档。

@@ -2,13 +2,13 @@
 
 hsbench是Hyperscan官方提供的性能Benchmark工具，通过hsbench的测试结果能够对比使用KHSEL库前后的性能差异。
 
-1. 进入创建好的“build“目录。
+1. 进入创建好的`build`目录。
 
     ```bash
     cd build
     ```
 
-2. 获取[hsbench规则集](https://cdrdv2.intel.com/v1/dl/getContent/739375)并输入数据，并解压到“build/hsbench-samples“目录。
+2. 获取[hsbench规则集](https://cdrdv2.intel.com/v1/dl/getContent/739375)并输入数据，并解压到`build/hsbench-samples`目录。
 3. 运行hsbench。
 
     ```bash
