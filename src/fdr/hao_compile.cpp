@@ -518,6 +518,19 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
     }
 }
 
+static
+void haoInitEmptyL2Entry(HAOL2Check *check, HAOL2Meta *meta) {
+    assert(check);
+    assert(meta);
+
+    for (u32 slot = 0; slot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY; slot++) {
+        check->rule[slot] = 1U;
+        check->mask[slot] = 0U;
+        meta->ruleIndex[slot] = HAO_INVALID_RULE_INDEX;
+    }
+    meta->careBits = 0;
+}
+
 /* Write one HAO verifier fragment into one compact SVE L2 slot. */
 static
 void haoFillL2SlotFromPlan(const HAOCompiledRulePlan &plan, u32 localSlot,
@@ -532,8 +545,6 @@ void haoFillL2SlotFromPlan(const HAOCompiledRulePlan &plan, u32 localSlot,
     assert(validMask);
 
     meta->ruleIndex[localSlot] = plan.ruleIndex;
-    meta->slotMask |= verify_u8(1U << localSlot);
-    meta->slotCount = verify_u8(meta->slotCount + 1U);
 
     for (u32 i = 0; i < HAO_LAYOUT_BYTES_PER_RULE_SLOT; i++) {
         u8 ruleByte;
@@ -548,13 +559,12 @@ void haoFillL2SlotFromPlan(const HAOCompiledRulePlan &plan, u32 localSlot,
         if (plan.verifier.nocaseByteMask & (1U << i)) {
             maskByte = verify_u8(0xdfU);
             ruleByte = verify_u8(ruleByte & maskByte);
-            meta->flags = verify_u8(meta->flags |
-                                    HAO_L2_META_FLAG_NOCASE);
         }
 
         ruleWord |= (u64a)ruleByte << (i * 8U);
         maskWord |= (u64a)maskByte << (i * 8U);
-        meta->careBits |= 1U << (localSlot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + i);
+        meta->careBits |=
+            1U << (localSlot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + i);
     }
 
     check->rule[localSlot] = ruleWord;
@@ -589,8 +599,14 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
     out->primaryHashTable.offsets.assign(primaryCount, 0);
 
     // Keep L2[0] empty so runtime null-target handling stays unchanged.
-    out->l2CheckTable.push_back(HAOL2Check{});
-    out->l2MetaTable.push_back(HAOL2Meta{});
+    {
+        HAOL2Check check = {};
+        HAOL2Meta meta = {};
+
+        haoInitEmptyL2Entry(&check, &meta);
+        out->l2CheckTable.push_back(check);
+        out->l2MetaTable.push_back(meta);
+    }
 
     std::map<u32, std::vector<u32>> keyToRuleIndexes;
     for (const auto &plan : rulePlans) {
@@ -664,6 +680,7 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
             const size_t end = std::min(bucketRules.size(),
                                         begin + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY);
 
+            haoInitEmptyL2Entry(&l2Check, &l2Meta);
             for (size_t slot = begin; slot < end; slot++) {
                 const u32 localSlot = verify_u32(slot - begin);
                 const u32 ruleIndex = bucketRules[slot];
@@ -2163,10 +2180,6 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
             auto &dst = metaOut[i];
             memcpy(dst.ruleIndex, src.ruleIndex, sizeof(dst.ruleIndex));
             dst.careBits = src.careBits;
-            dst.slotMask = src.slotMask;
-            dst.slotCount = src.slotCount;
-            dst.flags = src.flags;
-            dst.reserved = 0;
         }
     }
 

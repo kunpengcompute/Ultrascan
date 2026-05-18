@@ -437,9 +437,14 @@ const char *haoCategoryName(HAORuleCategory category) {
     }
 }
 
+template <class L2EntryT>
 static
-u32 haoSlotCount(u8 slotMask) {
-    return popcount32(slotMask & ((1U << HAO_RUNTIME_RULE_SLOTS_PER_ENTRY) - 1U));
+u32 haoSlotCount(const L2EntryT &entry) {
+    u32 count = 0;
+    for (u32 slot = 0; slot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY; slot++) {
+        count += entry.ruleIndex[slot] != HAO_INVALID_RULE_INDEX;
+    }
+    return count;
 }
 
 static
@@ -448,9 +453,6 @@ bool findL2SlotForRule(const HAOGlobalHashArtifacts &hash, u32 ruleIndex,
     for (u32 i = 1; i < hash.l2MetaTable.size(); i++) {
         const auto &meta = hash.l2MetaTable[i];
         for (u32 slot = 0; slot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY; slot++) {
-            if (!(meta.slotMask & (1U << slot))) {
-                continue;
-            }
             if (meta.ruleIndex[slot] == ruleIndex) {
                 if (entryOut) {
                     *entryOut = i;
@@ -474,7 +476,7 @@ static
 bool l2SlotSurvivesValidMaskForTest(const HAOL2Meta &meta, u32 slot,
                                     u8 validMask8) {
     if (slot >= HAO_LAYOUT_RULE_SLOTS_PER_ENTRY ||
-        !(meta.slotMask & (1U << slot))) {
+        meta.ruleIndex[slot] == HAO_INVALID_RULE_INDEX) {
         return false;
     }
 
@@ -554,13 +556,13 @@ HAOInspectStats computeHaoInspectStats(const bytecode_ptr<u8> &blob) {
 
     const auto *bitmap = getHaoPrimaryBitmap(hdr);
     const auto *primary = getHaoPrimaryTable(hdr);
-    const auto *l2Meta = getHaoL2MetaTable(hdr);
+    const auto *l2MetaTable = getHaoL2MetaTable(hdr);
 
     stats.bitmapBytes = hdr->primaryBitmapSize;
     stats.totalL2Entries = hdr->l2EntryCount ? hdr->l2EntryCount - 1 : 0;
 
     for (u32 i = 0; i < hdr->l2EntryCount; i++) {
-        stats.totalRulesInL2 += haoSlotCount(l2Meta[i].slotMask);
+        stats.totalRulesInL2 += haoSlotCount(l2MetaTable[i]);
     }
     /* Read-only inspection of the HAO global single-table layout for runtime validation tests. */
     for (u32 i = 0; i < hdr->primaryCount; i++) {
@@ -2204,9 +2206,6 @@ TEST(HAOCompile, BuildHaoGlobalBlobL2EntriesMatchArtifacts) {
         const auto &dstMeta = metas[i];
 
         EXPECT_EQ(srcMeta.careBits, dstMeta.careBits) << "entry=" << i;
-        EXPECT_EQ(srcMeta.slotMask, dstMeta.slotMask) << "entry=" << i;
-        EXPECT_EQ(srcMeta.slotCount, dstMeta.slotCount) << "entry=" << i;
-        EXPECT_EQ(srcMeta.flags, dstMeta.flags) << "entry=" << i;
         for (u32 slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
             EXPECT_EQ(srcCheck.rule[slot], dstCheck.rule[slot])
                 << "entry=" << i << " slot=" << slot;
@@ -2972,8 +2971,6 @@ TEST(HAOCompile, HaoNocaseVerifierStoresL2Mask) {
     const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
     const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
 
-    EXPECT_TRUE(meta.flags & HAO_L2_META_FLAG_NOCASE);
-    EXPECT_TRUE(meta.slotMask & (1U << slot));
     EXPECT_EQ(plan.ruleIndex, meta.ruleIndex[slot]);
     for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
         const u32 careBit = 1U << (slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j);
@@ -3040,8 +3037,6 @@ TEST(HAOCompile, HaoNocaseMaskAnchorStoresL2Mask) {
     const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
     const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
 
-    EXPECT_TRUE(meta.flags & HAO_L2_META_FLAG_NOCASE);
-    EXPECT_TRUE(meta.slotMask & (1U << slot));
     EXPECT_EQ(plan.ruleIndex, meta.ruleIndex[slot]);
     for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
         if (!(plan.verifier.validByteMask & (1U << j))) {
@@ -3235,9 +3230,7 @@ TEST(HAOCompile, HaoGlobalHashStoresAnchorConfirmFragments) {
     ASSERT_TRUE(findL2SlotForRule(artifacts.haoGlobalHash, plan.ruleIndex,
                                   &entry, &slot));
     const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
-    const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
 
-    EXPECT_TRUE(meta.slotMask & (1U << slot));
     for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
         if (!(plan.verifier.validByteMask & (1U << j))) {
             continue;
@@ -3270,7 +3263,6 @@ TEST(HAOCompile, HaoGlobalHashStoresVerifierFragments) {
     const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
     const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
 
-    EXPECT_TRUE(meta.slotMask & (1U << slot));
     EXPECT_EQ(plan.ruleIndex, meta.ruleIndex[slot]);
     for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
         const u32 careBit = 1U << (slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + j);

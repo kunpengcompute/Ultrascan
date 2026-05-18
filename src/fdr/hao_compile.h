@@ -51,6 +51,7 @@ static constexpr u32 HAO_LAYOUT_L1_OFFSET_MASK =
 static constexpr u32 HAO_LAYOUT_L1_COUNT_SHIFT = HAO_LAYOUT_L1_OFFSET_BITS;
 static constexpr u32 HAO_LAYOUT_RULE_SLOTS_PER_ENTRY = 4U;
 static constexpr u32 HAO_LAYOUT_BYTES_PER_RULE_SLOT = 8U;
+static constexpr u32 HAO_INVALID_RULE_INDEX = ~0U;
 static constexpr u32 HAO_LAYOUT_MAX_SELECTORS = 32U;
 static constexpr u32 HAO_EXTRACT_MODE_SCALAR = 0U;
 static constexpr u32 HAO_EXTRACT_MODE_BEXT = 1U;
@@ -68,7 +69,6 @@ static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_AMBIG_LIMIT = 1U << 4;
 static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_EXPANSION_BUDGET = 1U << 5;
 static constexpr u32 HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT = 1U << 6;
 static constexpr u32 HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE = 1U << 7;
-static constexpr u8 HAO_L2_META_FLAG_NOCASE = 1U << 1;
 
 struct Grey;
 struct target_t;
@@ -94,10 +94,6 @@ struct HAOL2Check {
 struct HAOL2Meta {
     u32 ruleIndex[HAO_LAYOUT_RULE_SLOTS_PER_ENTRY];
     u32 careBits;
-    u8 slotMask;
-    u8 slotCount;
-    u8 flags;
-    u8 reserved;
 };
 
 struct HAOCompileRuleMeta {
