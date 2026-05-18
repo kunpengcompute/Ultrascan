@@ -794,6 +794,8 @@ set (hs_exec_common_SRCS
     src/util/cpuid_flags.c
     src/util/cpuid_flags.h
     src/util/multibit.c
+    src/fat_database.c
+    src/fat_database.h
     )
 
 set (hs_exec_SRCS
@@ -945,6 +947,7 @@ set (hs_exec_SRCS
     src/util/uniform_ops.h
     src/database.c
     src/database.h
+    src/database_common.h
 )
 
 set (hs_exec_avx2_SRCS
@@ -963,7 +966,9 @@ endif()
 SET (hs_compile_SRCS
     ${hs_HEADERS}
     src/crc32.h
+    src/database_common.h
     src/database.h
+    src/fat_database.h
     src/grey.cpp
     src/grey.h
     src/hs.cpp
@@ -1344,33 +1349,26 @@ SET (hs_compile_SRCS
     src/util/uniform_ops.h
     src/util/unordered.h
     src/util/verify_types.h
-    src/kunpeng-enhanced/fdr_enhanced.h
-    src/kunpeng-enhanced/khsel_core.h
-    src/kunpeng-enhanced/khsel_ops.h
-    src/kunpeng-enhanced/khsel_type.h
-    src/kunpeng-enhanced/khsel_typebase.h
-    src/kunpeng-enhanced/khsel.h
-    src/kunpeng-enhanced/lily.h
-    src/kunpeng-enhanced/shufti_enhanced.h
-    src/kunpeng-enhanced/ue2common.h
-    src/kunpeng-enhanced/fdr_enhanced.c
-    src/kunpeng-enhanced/runtime_lily.c
-    src/kunpeng-enhanced/shufti.c
-    src/kunpeng-enhanced/lily.cpp
-    src/kunpeng-enhanced/compare.h
-    src/kunpeng-enhanced/core_precomp.h
-    src/kunpeng-enhanced/fdr_confirm.h
-    src/kunpeng-enhanced/fdr_loadval.h
-    src/kunpeng-enhanced/khsel_fdr_internal.h
-    src/kunpeng-enhanced/khsel_hwlm.h
-    src/kunpeng-enhanced/khsel_runtime.h
-    src/kunpeng-enhanced/multbit.h
-    src/kunpeng-enhanced/report.h
-    src/kunpeng-enhanced/rose_internal.h
-    src/kunpeng-enhanced/scratch.h
-    src/kunpeng-enhanced/simd_arm.h
-    src/kunpeng-enhanced/simd_types.h
 )
+
+# 始终编译 lily.cpp，支持交叉编译
+list(APPEND hs_compile_SRCS
+    src/kunpeng-enhanced/lily.cpp
+)
+
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+    list(APPEND hs_compile_SRCS
+        src/kunpeng-enhanced/khsel_core.h
+        src/kunpeng-enhanced/khsel_ops.h
+        src/kunpeng-enhanced/khsel_type.h
+        src/kunpeng-enhanced/khsel_typebase.h
+        src/kunpeng-enhanced/fdr_enhanced.c
+        src/kunpeng-enhanced/runtime_lily.c
+        src/kunpeng-enhanced/shufti.c
+        src/kunpeng-enhanced/compare.h
+        src/kunpeng-enhanced/core_precomp.h
+    )
+endif()
 
 set(hs_dump_SRCS
     src/scratch_dump.cpp

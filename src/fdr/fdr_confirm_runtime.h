@@ -36,6 +36,7 @@
 #include "ue2common.h"
 #include "util/bitutils.h"
 #include "util/compare.h"
+#include "fdr_confirm.h"
 
 // this is ordinary confirmation function which runs through
 // the whole confirmation procedure

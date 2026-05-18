@@ -539,7 +539,11 @@ public:
 
     // Construct a runtime implementation.
     bytecode_ptr<RoseEngine> buildRose(u32 minWidth) override;
-    bytecode_ptr<RoseEngine> buildFinalEngine(u32 minWidth);
+    //bytecode_ptr<RoseEngine> buildFinalEngine(u32 minWidth);
+    bytecode_ptr<x86_RoseEngine> x86_buildRose(u32 minWidth) override;
+    bytecode_ptr<RoseEngine> arm_buildRose(u32 minWidth) override;
+    bytecode_ptr<RoseEngine> arm_buildFinalEngine(u32 minWidth);
+    bytecode_ptr<x86_RoseEngine> x86_buildFinalEngine(u32 minWidth);
 
     void setSom() override { hasSom = true; }
 

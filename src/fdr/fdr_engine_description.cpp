@@ -55,7 +55,6 @@ u32 FDREngineDescription::getDefaultFloodSuffixLength() const {
 
 void getFdrDescriptions(vector<FDREngineDescription> *out) {
     static const FDREngineDef def = {0, 64, 8, 0};
-    out->clear();
     out->emplace_back(def);
 }
 

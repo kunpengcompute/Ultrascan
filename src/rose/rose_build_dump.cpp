@@ -62,6 +62,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <sys/stat.h>  // for mkdir
+#include <stdexcept>   // for std::exception
 
 #ifndef DUMP_SUPPORT
 #error No dump support!
@@ -2482,41 +2484,87 @@ void roseDumpLiteralMatchers(const RoseEngine *t, const string &base) {
 void dumpRose(const RoseBuildImpl &build, const vector<LitFragment> &fragments,
               const map<left_id, u32> &leftfix_queue_map,
               const map<suffix_id, u32> &suffix_queue_map,
-              const RoseEngine *t) {
+              const RoseEngine *t, const string &platform) {
     const Grey &grey = build.cc.grey;
 
     if (!grey.dumpFlags) {
         return;
     }
 
-    StdioFile f(grey.dumpPath + "/rose.txt", "w");
+    string basePath = grey.dumpPath;
+    if (!platform.empty()) {
+        basePath += platform + "/";
+        mkdir(basePath.c_str(), 0755);
+    }
+
+    StdioFile f(basePath + "rose.txt", "w");
 
     if (!t) {
         fprintf(f, "<< no rose >>\n");
         return;
     }
 
-    // Dump Rose table info
     roseDumpText(t, f);
 
-    roseDumpComponents(t, false, grey.dumpPath);
-    roseDumpPrograms(fragments, t, grey.dumpPath);
-    roseDumpLiteralMatchers(t, grey.dumpPath);
+    roseDumpComponents(t, false, basePath);
+    roseDumpPrograms(fragments, t, basePath);
+    roseDumpLiteralMatchers(t, basePath);
 
-    // Graph.
     dumpRoseGraph(build, t, fragments, leftfix_queue_map, suffix_queue_map,
-                  "rose.dot");
+                (platform.empty() ? "rose.dot" : platform + "_rose.dot").c_str());
 
-    // Literals
     dumpRoseLiterals(build, fragments, grey);
 
-    // Lily matcher data
     if (grey.dumpFlags & Grey::DUMP_LILY) {
-        roseDumpLily(build, t, grey.dumpPath);
+        roseDumpLily(build, t, basePath);
     }
 
-    f = StdioFile(grey.dumpPath + "/rose_struct.txt", "w");
+    f = StdioFile(basePath + "rose_struct.txt", "w");
     roseDumpStructRaw(t, f);
+}
+
+void dumpRose(const RoseBuildImpl &build, const vector<LitFragment> &fragments,
+              const map<left_id, u32> &leftfix_queue_map,
+              const map<suffix_id, u32> &suffix_queue_map,
+              const x86_RoseEngine *t, const string &platform) {
+    const Grey &grey = build.cc.grey;
+
+    if (!grey.dumpFlags) {
+        return;
+    }
+
+    string basePath = grey.dumpPath;
+    if (!platform.empty()) {
+        basePath += platform + "/";
+        mkdir(basePath.c_str(), 0755);
+    }
+
+    StdioFile f(basePath + "rose.txt", "w");
+
+    if (!t) {
+        fprintf(f, "<< no rose >>\n");
+        return;
+    }
+    // 强制转换为 RoseEngine*，因为内存布局相同
+    const RoseEngine *rose = reinterpret_cast<const RoseEngine *>(t);
+
+    roseDumpText(rose, f);
+
+    roseDumpComponents(rose, false, basePath);
+    roseDumpPrograms(fragments, rose, basePath);
+    roseDumpLiteralMatchers(rose, basePath);
+
+    dumpRoseGraph(build, rose, fragments, leftfix_queue_map, suffix_queue_map,
+                  (platform.empty() ? "rose.dot" : platform + "_rose.dot").c_str());
+
+    dumpRoseLiterals(build, fragments, grey);
+
+    if (grey.dumpFlags & Grey::DUMP_LILY) {
+        roseDumpLily(build, rose, basePath);
+    }
+
+    f = StdioFile(basePath + "rose_struct.txt", "w");
+    roseDumpStructRaw(rose, f);
 }
 
 } // namespace ue2

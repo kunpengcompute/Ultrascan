@@ -32,6 +32,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "allocator.h"
 #include "hs_common.h"
@@ -362,21 +363,13 @@ hs_error_t dbIsValid(const hs_database_t *db) {
 /** Allocate a buffer and prints the database info into it. Returns an
  * appropriate error code on failure, or HS_SUCCESS on success. */
 static
-hs_error_t print_database_string(char **s, u32 version, const platform_t plat,
-                                 u32 raw_mode) {
+hs_error_t print_database_string(char **s, u32 version, u32 raw_mode) {
     assert(s);
     *s = NULL;
 
     u8 release = (version >> 8) & 0xff;
     u8 minor = (version >> 16) & 0xff;
     u8 major = (version >> 24) & 0xff;
-
-    const char *features = (plat & HS_PLATFORM_NOAVX512VBMI)
-                               ? (plat & HS_PLATFORM_NOAVX512)
-                                   ? (plat & HS_PLATFORM_NOAVX2) ? "" : "AVX2"
-                                   : "AVX512"
-                               : "AVX512VBMI";
-
     const char *mode = NULL;
 
     if (raw_mode == HS_MODE_STREAM) {
@@ -387,7 +380,11 @@ hs_error_t print_database_string(char **s, u32 version, const platform_t plat,
         assert(raw_mode == HS_MODE_BLOCK);
         mode = "BLOCK";
     }
-
+#if defined(__arm__) || defined(__aarch64__)
+    major = 1;
+    minor = 0;
+    release = 3;
+#endif
     // Initial allocation size, which should be large enough to print our info.
     // If it isn't, snprintf will tell us and we can resize appropriately.
     size_t len = 256;
@@ -402,9 +399,7 @@ hs_error_t print_database_string(char **s, u32 version, const platform_t plat,
 
         // Note: SNPRINTF_COMPAT is a macro defined above, to cope with systems
         // that don't have snprintf but have a workalike.
-        int p_len = SNPRINTF_COMPAT(
-            buf, len, "Version: %u.%u.%u Features: %s Mode: %s",
-            major, minor, release, features, mode);
+        int p_len = SNPRINTF_COMPAT(buf, len, "Version: %u.%u.%u Mode: %s", major, minor, release, mode);
         if (p_len < 0) {
             DEBUG_PRINTF("snprintf output error, returned %d\n", p_len);
             hs_misc_free(buf);
@@ -439,7 +434,7 @@ hs_error_t HS_CDECL hs_serialized_database_info(const char *bytes,
 
     u32 mode = unaligned_load_u32(bytes + offsetof(struct RoseEngine, mode));
 
-    return print_database_string(info, header.version, header.platform, mode);
+    return print_database_string(info, header.version, mode);
 }
 
 HS_PUBLIC_API
@@ -453,10 +448,7 @@ hs_error_t HS_CDECL hs_database_info(const hs_database_t *db, char **info) {
         return HS_INVALID;
     }
 
-    platform_t plat;
-    plat = db->platform;
-
     const struct RoseEngine *rose = hs_get_bytecode(db);
 
-    return print_database_string(info, db->version, plat, rose->mode);
+    return print_database_string(info, db->version, rose->mode);
 }

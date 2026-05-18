@@ -98,7 +98,11 @@ const u8 *run_accel(const union AccelAux *accel, const u8 *c, const u8 *c_end) {
         if (c + 15 >= c_end) {
             return c;
         }
+#if defined(HAVE_NEON)
         rv = KHSEL_ShuftiExec(accel->shufti.lo, accel->shufti.hi, c, c_end);
+#else
+        rv = shuftiExec(accel->shufti.lo, accel->shufti.hi, c, c_end);
+#endif
         break;
 
     case ACCEL_TRUFFLE:

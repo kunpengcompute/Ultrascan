@@ -59,6 +59,8 @@
 #include "util/multibit.h"
 #include "khsel_runtime.h"
 
+#include <stdio.h>
+
 static really_inline
 void prefetch_data(const char *data, unsigned length) {
     __builtin_prefetch(data);
@@ -318,8 +320,10 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
                             unsigned length, unsigned flags,
                             hs_scratch_t *scratch, match_event_handler onEvent,
                             void *userCtx) {
+#ifdef HAVE_NEON
     u8 lilyed = 0;
     u8 lilyTeddyed = 0;
+#endif
     if (unlikely(!scratch || !data)) {
         return HS_INVALID;
     }
@@ -400,6 +404,7 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
         goto done_scan;
     }
 
+#if defined(HAVE_NEON)
     if (unlikely(rose->lilyOffset)) {
         if (KHSEL_LilyRunExec(rose, scratch) == 1) {
             lilyed = 1;
@@ -414,7 +419,7 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
         scratch->core_info.status = STATUS_TERMINATED;
         goto done_scan;
     }
-
+#endif
     // Is this a small write case?
     if (rose->smallWriteOffset) {
         const struct SmallWriteEngine *smwr = getSmallWrite(rose);
@@ -446,7 +451,9 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
 
 done_scan:
     // 兜底上报Lily暂存项
+#if defined(HAVE_NEON)
     flushStoredLilyMatches(scratch, ALL_LILY_MATCH_ITEMS);
+#endif
     if (unlikely(internal_matching_error(scratch))) {
         unmarkScratchInUse(scratch);
         return HS_UNKNOWN_ERROR;
@@ -958,6 +965,7 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
         }
     }
 
+#if defined(HAVE_NEON)
     hs_error_t lilyResult = 0;
     if (rose->lilyOffset && !(rose->mode & HS_MODE_STREAM)) {
         lilyResult = KHSEL_LilyRunExec(rose, scratch);
@@ -996,7 +1004,27 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
     }
     // 兜底上报Lily暂存项
     flushStoredLilyMatches(scratch, ALL_LILY_MATCH_ITEMS);
-
+#else
+    switch (rose->runtimeImpl) {
+    default:
+        assert(0);
+    case ROSE_RUNTIME_FULL_ROSE:
+        rawStreamExec(id, scratch);
+        break;
+    case ROSE_RUNTIME_PURE_LITERAL:
+        pureLiteralStreamExec(id, scratch);
+        break;
+    case ROSE_RUNTIME_SINGLE_OUTFIX:
+        soleOutfixStreamExec(id, scratch);
+    }   
+    if (!told_to_stop_matching(scratch) &&
+        isAllExhausted(rose, scratch->core_info.exhaustionVector)) {
+        DEBUG_PRINTF("stream exhausted\n");
+        scratch->core_info.status |= STATUS_EXHAUSTED;
+    } else {
+        scratch->core_info.status &= (0xFF - STATUS_EXHAUSTED);
+    }
+#endif
     if (rose->hasSom && !told_to_stop_matching(scratch)) {
         int halt = flushStoredSomMatches(scratch, ~0ULL);
         if (halt) {

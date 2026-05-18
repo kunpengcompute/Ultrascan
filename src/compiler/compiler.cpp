@@ -34,6 +34,7 @@
 #include "compiler.h"
 #include "crc32.h"
 #include "database.h"
+#include "fat_database.h"
 #include "grey.h"
 #include "hs_internal.h"
 #include "hs_runtime.h"
@@ -435,10 +436,10 @@ void addLitExpression(NG &ng, unsigned index, const char *expression,
 }
 
 static
-bytecode_ptr<RoseEngine> generateRoseEngine(NG &ng) {
+bytecode_ptr<RoseEngine> arm_generateRoseEngine(NG &ng) {
     const u32 minWidth =
         ng.minWidth.is_finite() ? verify_u32(ng.minWidth) : ROSE_BOUND_INF;
-    auto rose = ng.rose->buildRose(minWidth);
+    auto rose = ng.rose->arm_buildRose(minWidth);
 
     if (!rose) {
         DEBUG_PRINTF("error building rose\n");
@@ -449,6 +450,25 @@ bytecode_ptr<RoseEngine> generateRoseEngine(NG &ng) {
     dumpReportManager(ng.rm, ng.cc.grey);
     dumpSomSlotManager(ng.ssm, ng.cc.grey);
     dumpSmallWrite(rose.get(), ng.cc.grey);
+
+    return rose;
+}
+
+static
+bytecode_ptr<x86_RoseEngine> x86_generateRoseEngine(NG &ng) {
+    const u32 minWidth =
+        ng.minWidth.is_finite() ? verify_u32(ng.minWidth) : ROSE_BOUND_INF;
+    auto rose = ng.rose->x86_buildRose(minWidth);
+
+    if (!rose) {
+        DEBUG_PRINTF("error building rose\n");
+        assert(0);
+        return nullptr;
+    }
+
+    dumpReportManager(ng.rm, ng.cc.grey);
+    dumpSomSlotManager(ng.ssm, ng.cc.grey);
+    x86_dumpSmallWrite(rose.get(), ng.cc.grey);
 
     return rose;
 }
@@ -507,11 +527,58 @@ hs_database_t *dbCreate(const char *in_bytecode, size_t len, u64a platform) {
     return db;
 }
 
+static
+fat_hs_database_t *FatdbCreate(const char *x86_bytecode, size_t x86_len,
+                           const char *arm_bytecode, size_t arm_len,
+                           u64a platform, u64a arm_platform) {
+size_t db_len = sizeof(struct fat_hs_database) + x86_len + arm_len + 128;
+    DEBUG_PRINTF("fat db size %zu\n", db_len);
+
+    struct fat_hs_database *db = (struct fat_hs_database *)hs_database_alloc(db_len);
+    if (hs_check_alloc(db) != HS_SUCCESS) {
+        hs_database_free(db);
+        return nullptr;
+    }
+
+    memset(db, 0, db_len);
+
+    db->magic = HS_DB_MAGIC;
+    db->version = HS_DB_VERSION;
+    db->x86_length = x86_len;
+    db->arm_length = arm_len;
+    db->platform = platform;
+    db->arm_platform = arm_platform;
+
+    // x86 字节码偏移（64字节对齐）
+    size_t shift = (uintptr_t)db->bytes & 0x3f;
+    db->x86_bytecode = offsetof(struct fat_hs_database, bytes) - shift;
+    char *x86_ptr = (char *)db + db->x86_bytecode;
+    assert(ISALIGNED_CL(x86_ptr));
+    memcpy(x86_ptr, x86_bytecode, x86_len);
+
+    // ARM 字节码偏移（64字节对齐）
+    // 先计算 x86 字节码结束位置
+    char *x86_end = x86_ptr + x86_len;
+    // 将结束地址向上对齐到 64 字节边界
+    char *arm_ptr = (char *)(((uintptr_t)x86_end + 63) & ~63);
+    // 计算相对于 db 起始的偏移量
+    db->arm_bytecode = arm_ptr - (char *)db;
+    assert(ISALIGNED_CL(arm_ptr));
+    memcpy(arm_ptr, arm_bytecode, arm_len);
+
+    // 先算X86的CRC32
+    db->x86_crc32 = Crc32c_ComputeBuf(0, x86_ptr, x86_len);
+    // 再算ARM的CRC32
+    db->arm_crc32 = Crc32c_ComputeBuf(0, arm_ptr, arm_len);
+
+    return (fat_hs_database_t *)db;
+}
+
 
 struct hs_database *build(NG &ng, unsigned int *length, u8 pureFlag) {
     assert(length);
 
-    auto rose = generateRoseEngine(ng);
+    auto rose = arm_generateRoseEngine(ng);
     struct RoseEngine *roseHead = rose.get();
     roseHead->pureLiteral = pureFlag;
 
@@ -534,6 +601,56 @@ struct hs_database *build(NG &ng, unsigned int *length, u8 pureFlag) {
 
     return db;
 }
+
+
+struct fat_hs_database *fat_build(NG &x86_ng, NG &arm_ng, unsigned int *length, u8 pureFlag) {
+    assert(length);
+    // 生成 x86 字节码
+    auto x86_rose = x86_generateRoseEngine(x86_ng);
+    struct x86_RoseEngine *x86_roseHead = x86_rose.get();
+    x86_roseHead->pureLiteral = pureFlag;
+
+    if (!x86_rose) {
+        throw CompileError("Unable to generate x86 bytecode.");
+    }
+    size_t x86_len = x86_rose.size();
+    if (!x86_len) {
+        DEBUG_PRINTF("x86 RoseEngine has zero length\n");
+        assert(0);
+        throw CompileError("Internal error.");
+    }
+
+    // 生成 ARM 字节码
+    auto arm_rose = arm_generateRoseEngine(arm_ng);
+    struct RoseEngine *arm_roseHead = arm_rose.get();
+    arm_roseHead->pureLiteral = pureFlag;
+
+    if (!arm_rose) {
+        throw CompileError("Unable to generate ARM bytecode.");
+    }
+    size_t arm_len = arm_rose.size();
+    if (!arm_len) {
+        DEBUG_PRINTF("ARM RoseEngine has zero length\n");
+        assert(0);
+        throw CompileError("Internal error.");
+    }
+
+    // 构建 FAT Database
+    const char *x86_bytecode = (const char *)(x86_rose.get());
+    const char *arm_bytecode = (const char *)(arm_rose.get());
+    const platform_t p = target_to_platform(x86_ng.cc.target_info);
+    const platform_t arm_p = target_to_platform(arm_ng.cc.target_info);
+    
+    struct fat_hs_database *db = FatdbCreate(x86_bytecode, x86_len, 
+                                         arm_bytecode, arm_len, p, arm_p);
+    if (!db) {
+        throw CompileError("Could not allocate memory for bytecode.");
+    }
+
+    *length = x86_len + arm_len;
+    return db;
+}
+
 
 static
 void stripFromPositions(vector<PositionInfo> &v, Position pos) {

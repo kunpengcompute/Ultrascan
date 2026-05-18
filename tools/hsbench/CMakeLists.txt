@@ -65,14 +65,18 @@ if (BUILD_CHIMERA)
     add_executable(hsbench ${hsbench_SOURCES} ${hsbench_INTERNAL_OBJECTS})
     include_directories(${PCRE_INCLUDE_DIRS})
     if(NOT WIN32)
-        target_link_libraries(hsbench hs chimera ${PCRE_LDFLAGS} databaseutil
-            expressionutil ${SQLITE3_LDFLAGS} ${CMAKE_THREAD_LIBS_INIT})
+        target_link_libraries(hsbench chimera ${PCRE_LDFLAGS} databaseutil
+            expressionutil hs ${SQLITE3_LDFLAGS} ${CMAKE_THREAD_LIBS_INIT})
     else()
-        target_link_libraries(hsbench hs chimera pcre databaseutil
-            expressionutil ${SQLITE3_LDFLAGS} ${CMAKE_THREAD_LIBS_INIT})
+        target_link_libraries(hsbench chimera pcre databaseutil
+            expressionutil hs ${SQLITE3_LDFLAGS} ${CMAKE_THREAD_LIBS_INIT})
     endif()
 else()
-    add_executable(hsbench ${hsbench_SOURCES} ${hsbench_INTERNAL_OBJECTS})
-    target_link_libraries(hsbench hs databaseutil expressionutil
+    if(WIN32 AND (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS))
+        add_executable(hsbench ${hsbench_SOURCES} $<TARGET_OBJECTS:hs_compile_shared> $<TARGET_OBJECTS:hs_exec_shared>)
+    else()
+        add_executable(hsbench ${hsbench_SOURCES})
+    endif()
+    target_link_libraries(hsbench databaseutil expressionutil hs
         ${SQLITE3_LDFLAGS} ${CMAKE_THREAD_LIBS_INIT})
 endif()

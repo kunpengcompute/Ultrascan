@@ -41,6 +41,7 @@
 
 // Group constants
 typedef u64a rose_group;
+#define KHSEL_ROSE_CONTINUE_MATCHING_NO_EXHAUST 2
 
 // Delayed literal stuff
 #define DELAY_BITS                  5
@@ -330,6 +331,109 @@ struct RoseBoundaryReports {
  *  state (normal case) or into the tstate region of scratch (for transient rose
  *  nfas). Rose nfa info table can distinguish the cases.
  */
+
+struct x86_RoseEngine {
+    u8  pureLiteral; /* Indicator of pure literal API */
+    u8  noFloatingRoots; /* only need to run the anchored table if something
+                          * matched in the anchored table */
+    u8  requiresEodCheck; /* stuff happens at eod time */
+    u8  hasOutfixesInSmallBlock; /**< has at least one outfix that must run even
+                                    in small block scans. */
+    u8  runtimeImpl; /**< can we just run the floating table or a single outfix?
+                      * or do we need a full rose? */
+    u8  mpvTriggeredByLeaf; /**< need to check (suf|out)fixes for mpv trigger */
+    u8  canExhaust; /**< every pattern has an exhaustion key */
+    u8  hasSom; /**< has at least one pattern which tracks SOM. */
+    u8  somHorizon; /**< width in bytes of SOM offset storage (governed by
+                        SOM precision) */
+    u32 mode; /**< scanning mode, one of HS_MODE_{BLOCK,STREAM,VECTORED} */
+    u32 historyRequired; /**< max amount of history required for streaming */
+    u32 ekeyCount; /**< number of exhaustion keys */
+    u32 lkeyCount; /**< number of logical keys */
+    u32 lopCount; /**< number of logical ops */
+    u32 ckeyCount; /**< number of combination keys */
+    u32 logicalTreeOffset; /**< offset to mapping from lkey to LogicalOp */
+    u32 combInfoMapOffset; /**< offset to mapping from ckey to combInfo */
+    u32 dkeyCount; /**< number of dedupe keys */
+    u32 dkeyLogSize; /**< size of fatbit for storing dkey log (bytes) */
+    u32 invDkeyOffset; /**< offset to table mapping from dkeys to the external
+                         *  report ids */
+    u32 somLocationCount; /**< number of som locations required */
+    u32 somLocationFatbitSize; /**< size of SOM location fatbit (bytes) */
+    u32 rolesWithStateCount; // number of roles with entries in state bitset
+    u32 stateSize; /* size of the state bitset
+                    * WARNING: not the size of the rose state */
+    u32 anchorStateSize; /* size of the state for the anchor dfas */
+    u32 tStateSize; /* total size of the state for transient rose nfas */
+    u32 scratchStateSize; /**< uncompressed state req'd for NFAs in scratch;
+                           * used for sizing scratch only. */
+    u32 smallWriteOffset; /**< offset of small-write matcher */
+    u32 lilyOffset;           // 防止报错
+    u32 lilyForTeddyOffset;   // 防止报错
+    u32 amatcherOffset; // offset of the anchored literal matcher (bytes)
+    u32 ematcherOffset; // offset of the eod-anchored literal matcher (bytes)
+    u32 fmatcherOffset; // offset of the floating literal matcher (bytes)
+    u32 drmatcherOffset; // offset of the delayed rebuild table (bytes)
+    u32 sbmatcherOffset; // offset of the small-block literal matcher (bytes)
+    u32 longLitTableOffset; // offset of the long literal table
+    u32 amatcherMinWidth; 
+    u32 fmatcherMinWidth; 
+    u32 eodmatcherMinWidth; 
+    u32 amatcherMaxBiAnchoredWidth;
+    u32 fmatcherMaxBiAnchoredWidth;
+    u32 reportProgramOffset;
+    u32 reportProgramCount;
+    u32 delayProgramOffset;
+    u32 anchoredProgramOffset;
+    u32 activeArrayCount; //number of nfas tracked in the active array
+    u32 activeLeftCount; //number of nfas tracked in the active rose array
+    u32 queueCount;      /**< number of nfa queues */
+    u32 activeQueueArraySize; //!< size of fatbit for active queues (bytes)
+    u32 eagerIterOffset;
+    u32 handledKeyCount;
+    u32 handledKeyFatbitSize;
+    u32 leftOffset;
+    u32 roseCount;
+    u32 eodProgramOffset; //!< EOD program, otherwise 0.
+    u32 flushCombProgramOffset; /**< FlushCombination program, otherwise 0 */
+    u32 lastFlushCombProgramOffset;
+    u32 lastByteHistoryIterOffset; 
+    u32 minWidth;
+    u32 minWidthExcludingBoundaries;
+    u32 maxBiAnchoredWidth;
+    u32 anchoredDistance; // region to run the anchored table over
+    u32 anchoredMinDistance; /* start of region to run anchored table over */
+    u32 floatingDistance;
+    u32 floatingMinDistance; /* start of region to run floating table over */
+    u32 smallBlockDistance;
+    u32 floatingMinLiteralMatchOffset;
+    u32 nfaInfoOffset; /* offset to the nfa info offset array */
+    rose_group initialGroups;
+    rose_group floating_group_mask; /* groups that are used by the ftable */
+    u32 size; // (bytes)
+    u32 delay_count; /* number of delayed literal ids. */
+    u32 delay_fatbit_size; //!< size of each delay fatbit in scratch (bytes)
+    u32 anchored_count; /* number of anchored literal ids */
+    u32 anchored_fatbit_size; //!< size of each anch fatbit in scratch (bytes)
+    u32 maxFloatingDelayedMatch;
+    u32 delayRebuildLength;
+    struct RoseStateOffsets stateOffsets;
+    struct RoseBoundaryReports boundary;
+    u32 totalNumLiterals; /* total number of literals including dr */
+    u32 asize; /* size of the atable */
+    u32 outfixBeginQueue; /* first outfix queue */
+    u32 outfixEndQueue; /* one past the last outfix queue */
+    u32 leftfixBeginQueue; /* first prefix/infix queue */
+    u32 initMpvNfa; /* (allegedly chained) mpv to force on at init */
+    u32 rosePrefixCount; /* number of rose prefixes */
+    u32 activeLeftIterOffset; /* mmbit_sparse_iter over non-transient roses */
+    u32 ematcherRegionSize; /* max region size to pass to ematcher */
+    u32 somRevCount; /**< number of som reverse nfas */
+    u32 somRevOffsetOffset; /**< offset to array of offsets to som rev nfas */
+    u32 longLitStreamState; // size in bytes
+    struct scatter_full_plan state_init;
+};
+
 struct RoseEngine {
     u8  pureLiteral; /* Indicator of pure literal API */
     u8  noFloatingRoots; /* only need to run the anchored table if something
@@ -603,6 +707,14 @@ const struct LeftNfaInfo *getLeftTable(const struct RoseEngine *t) {
     return r;
 }
 
+static really_inline
+const struct LeftNfaInfo *x86_getLeftTable(const struct x86_RoseEngine *t) {
+    const struct LeftNfaInfo *r
+        = (const struct LeftNfaInfo *)((const char *)t + t->leftOffset);
+    assert(ISALIGNED_N(r, 4));
+    return r;
+}
+
 struct mmbit_sparse_iter; // forward decl
 
 static really_inline
@@ -652,6 +764,17 @@ struct SmallWriteEngine;
 
 static really_inline
 const struct SmallWriteEngine *getSmallWrite(const struct RoseEngine *t) {
+    if (!t->smallWriteOffset) {
+        return NULL;
+    }
+
+    const struct SmallWriteEngine *smwr =
+        (const struct SmallWriteEngine *)((const char *)t + t->smallWriteOffset);
+    return smwr;
+}
+
+static really_inline
+const struct SmallWriteEngine *x86_getSmallWrite(const struct x86_RoseEngine *t) {
     if (!t->smallWriteOffset) {
         return NULL;
     }

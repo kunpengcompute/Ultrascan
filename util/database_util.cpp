@@ -72,6 +72,34 @@ bool saveDatabase(const hs_database_t *db, const char *filename, bool verbose) {
     return true;
 }
 
+
+bool fat_saveDatabase(const fat_hs_database *db, const char *filename, bool verbose) {
+    assert(db);
+    assert(filename);
+
+    if (verbose) {
+        cout << "Saving FAT database to: " << filename << endl;
+    }
+
+    char *bytes = nullptr;
+    size_t length = 0;
+    hs_error_t err = fat_hs_serialize_database(db, &bytes, &length);
+    if (err != HS_SUCCESS) {
+        return false;
+    }
+
+    assert(bytes);
+    assert(length > 0);
+
+    ofstream out(filename, ios::binary);
+    out.write(bytes, length);
+    out.close();
+
+    ::free(bytes);
+
+    return true;
+}
+
 hs_database_t * loadDatabase(const char *filename, bool verbose) {
     assert(filename);
 
@@ -113,8 +141,19 @@ hs_database_t * loadDatabase(const char *filename, bool verbose) {
         cout << "Reading " << len << " bytes" << endl;
     }
     is.seekg(0, ios::beg);
-    bytes = new char[len];
+    try {
+        bytes = new char[len];
+    } catch (const std::bad_alloc &e) {
+        cout << "Memory allocation failed: " << e.what() << endl;
+        return nullptr;
+    }
     is.read(bytes, len);
+    if (!is) {  // 读取失败
+        delete[] bytes;
+        bytes = nullptr;
+        is.close();
+        return nullptr;
+    }
     is.close();
 #endif
 
@@ -146,6 +185,72 @@ hs_database_t * loadDatabase(const char *filename, bool verbose) {
 
     if (err != HS_SUCCESS) {
         cout << "hs_deserialize_database call failed: " << err << endl;
+        return nullptr;
+    }
+
+    assert(db);
+
+    return db;
+}
+
+fat_hs_database *fat_loadDatabase(const char *filename, bool verbose) {
+    assert(filename);
+
+    if (verbose) {
+        cout << "Loading FAT database from: " << filename << endl;
+    }
+
+    char *bytes = nullptr;
+
+#if defined(HAVE_MMAP)
+    int fd = open(filename, O_RDONLY);
+    if (fd < 0) {
+        return nullptr;
+    }
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        close(fd);
+        return nullptr;
+    }
+    size_t len = st.st_size;
+
+    bytes = (char *)mmap(nullptr, len, PROT_READ, MAP_SHARED, fd, 0);
+    if (bytes == MAP_FAILED) {
+        cout << "mmap failed" << endl;
+        close(fd);
+        return nullptr;
+    }
+#else
+    ifstream is;
+    is.open(filename, ios::in | ios::binary);
+    if (!is.is_open()) {
+        return nullptr;
+    }
+    is.seekg(0, ios::end);
+    size_t len = is.tellg();
+    if (verbose) {
+        cout << "Reading " << len << " bytes" << endl;
+    }
+    is.seekg(0, ios::beg);
+    bytes = new char[len];
+    is.read(bytes, len);
+    is.close();
+#endif
+
+    assert(bytes);
+
+    fat_hs_database *db = nullptr;
+    hs_error_t err = fat_hs_deserialize_database(bytes, len, &db);
+
+#if defined(HAVE_MMAP)
+    munmap(bytes, len);
+    close(fd);
+#else
+    delete [] bytes;
+#endif
+
+    if (err != HS_SUCCESS) {
+        cout << "fat_hs_deserialize_database call failed: " << err << endl;
         return nullptr;
     }
 

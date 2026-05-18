@@ -35,6 +35,7 @@
 #include "hs_compile.h"
 #include "hs_internal.h"
 #include "database.h"
+#include "fat_database.h"
 #include "compiler/compiler.h"
 #include "compiler/error.h"
 #include "nfagraph/ng.h"
@@ -179,6 +180,346 @@ unsigned getSomPrecision(unsigned mode) {
 }
 
 namespace ue2 {
+static
+hs_error_t validate_fat_compile_args(fat_hs_database_t **db,
+                                     hs_compile_error_t **comp_error,
+                                     const char *const *expressions,
+                                     unsigned elements,
+                                     const Grey &g) {
+    if (!comp_error) {
+        if (db) {
+            *db = nullptr;
+        }
+        return HS_COMPILER_ERROR;
+    }
+    if (!db) {
+        *comp_error = generateCompileError("Invalid parameter: db is NULL", -1);
+        return HS_COMPILER_ERROR;
+    }
+    if (!expressions) {
+        *db = nullptr;
+        *comp_error = generateCompileError("Invalid parameter: expressions is NULL", -1);
+        return HS_COMPILER_ERROR;
+    }
+    if (elements == 0) {
+        *db = nullptr;
+        *comp_error = generateCompileError("Invalid parameter: elements is zero", -1);
+        return HS_COMPILER_ERROR;
+    }
+
+#if defined(FAT_RUNTIME)
+    if (!check_ssse3()) {
+        *db = nullptr;
+        *comp_error = generateCompileError("Unsupported architecture", -1);
+        return HS_ARCH_ERROR;
+    }
+#endif
+
+    if (elements > g.limitPatternCount) {
+        *db = nullptr;
+        *comp_error = generateCompileError("Number of patterns too large", -1);
+        return HS_COMPILER_ERROR;
+    }
+
+    return HS_SUCCESS;
+}
+
+
+hs_error_t
+fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
+                     const unsigned *ids, const hs_expr_ext *const *ext,
+                     unsigned elements, unsigned mode,
+                     const hs_platform_info_t *platform, fat_hs_database_t **db,
+                     hs_compile_error_t **comp_error, const Grey &g) {
+    // Check the args: note that it's OK for flags, ids or ext to be null.
+    hs_error_t err = validate_fat_compile_args(db, comp_error, expressions, elements, g);
+    if (err != HS_SUCCESS) {
+        return err;
+    }
+
+    if (!checkMode(mode, comp_error)) {
+        *db = nullptr;
+        assert(*comp_error); // set by checkMode.
+        return HS_COMPILER_ERROR;
+    }
+
+    if (!checkPlatform(platform, comp_error)) {
+        *db = nullptr;
+        assert(*comp_error); // set by checkPlatform.
+        return HS_COMPILER_ERROR;
+    }
+
+    if (elements > g.limitPatternCount) {
+        *db = nullptr;
+        *comp_error = generateCompileError("Number of patterns too large", -1);
+        return HS_COMPILER_ERROR;
+    }
+
+    // This function is simply a wrapper around both the parser and compiler
+    bool isStreaming = mode & (HS_MODE_STREAM | HS_MODE_VECTORED);
+    bool isVectored = mode & HS_MODE_VECTORED;
+    unsigned somPrecision = getSomPrecision(mode);
+
+    target_t target_info = platform ? target_t(*platform)
+                                    : get_current_target();
+    u32 count_2_4_byte_literals = 0;
+    for (unsigned int i = 0; i < elements; i++) {
+        try {
+                // Use ParsedExpression constructor directly
+                ParsedExpression pe(i, expressions[i], flags ? flags[i] : 0, 0, ext ? ext[i] : nullptr);
+                // Check if it's a literal using the same logic as shortcut_literal
+                if (isShortLiteral(pe) > 0) {
+                    count_2_4_byte_literals++;
+                }
+            }
+        catch (const ParseError &) {
+            continue; // Skip invalid expressions, they'll be caught later
+        } catch (const CompileError &) {
+            continue; // Skip compilation errors, they'll be caught later
+        }
+    }
+
+    try {
+        // =======1. 编译 x86 字节码===============
+        Grey x86_grey = g;
+        x86_grey.allowLily = false;
+        x86_grey.allowNeoFdr = false;
+        
+        CompileContext x86_cc(isStreaming, isVectored, target_info, x86_grey);
+        NG x86_ng(x86_cc, elements, somPrecision);
+        x86_ng.allowLilyForTeddy = false;
+
+        // First pass: process all HS_FLAG_COMBINATION rules to populate toLogicalKeyMap
+        for (unsigned int i = 0; i < elements; i++) {
+            if (flags && (flags[i] & HS_FLAG_COMBINATION)) {
+                try {
+                    addExpression(x86_ng, i, expressions[i], flags[i],
+                                  ext ? ext[i] : nullptr, ids ? ids[i] : 0);
+                } catch (CompileError &e) {
+                    /* Caught a parse error:
+                     * throw it upstream as a CompileError with a specific index */
+                    e.setExpressionIndex(i);
+                    throw; /* do not slice */
+                }
+            }
+        }
+
+        // Second pass: process all non-HS_FLAG_COMBINATION rules
+        for (unsigned int i = 0; i < elements; i++) {
+            if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
+                try {
+                    addExpression(x86_ng, i, expressions[i], flags ? flags[i] : 0,
+                                  ext ? ext[i] : nullptr, ids ? ids[i] : 0);
+                } catch (CompileError &e) {
+                    /* Caught a parse error:
+                     * throw it upstream as a CompileError with a specific index */
+                    e.setExpressionIndex(i);
+                    throw; /* do not slice */
+                }
+            }
+        }
+
+        // Check sub-expression ids
+        x86_ng.rm.pl.validateSubIDs(ids, expressions, flags, elements);
+        // Renumber and assign lkey to reports
+        x86_ng.rm.logicalKeyRenumber();
+
+        //===== 编译arm字节码 根据config.txt获取===================
+        Grey arm_grey = g;
+        // 为ARM创建单独的target_info，不包含AVX2/AVX512特性
+        hs_platform_info arm_platform;
+        arm_platform.tune = HS_TUNE_FAMILY_GENERIC;
+        arm_platform.cpu_features = 0;  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
+        target_t arm_target_info(arm_platform);
+
+        CompileContext arm_cc(isStreaming, isVectored, arm_target_info, arm_grey);
+        NG arm_ng(arm_cc, elements, somPrecision);
+
+        if (count_2_4_byte_literals > 8) {
+            DEBUG_PRINTF("More than 8 2-4 rules exist, will not start lilyForTeddy\n");
+            arm_ng.allowLilyForTeddy = false;
+        }
+
+        // First pass: process all HS_FLAG_COMBINATION rules to populate toLogicalKeyMap
+        for (unsigned int i = 0; i < elements; i++) {
+            if (flags && (flags[i] & HS_FLAG_COMBINATION)) {
+                try {
+                    addExpression(arm_ng, i, expressions[i], flags[i],
+                                  ext ? ext[i] : nullptr, ids ? ids[i] : 0);
+                } catch (CompileError &e) {
+                    /* Caught a parse error:
+                     * throw it upstream as a CompileError with a specific index */
+                    e.setExpressionIndex(i);
+                    throw; /* do not slice */
+                }
+            }
+        }
+
+        // Second pass: process all non-HS_FLAG_COMBINATION rules
+        for (unsigned int i = 0; i < elements; i++) {
+            if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
+                try {
+                    addExpression(arm_ng, i, expressions[i], flags ? flags[i] : 0,
+                                  ext ? ext[i] : nullptr, ids ? ids[i] : 0);
+                } catch (CompileError &e) {
+                    /* Caught a parse error:
+                     * throw it upstream as a CompileError with a specific index */
+                    e.setExpressionIndex(i);
+                    throw; /* do not slice */
+                }
+            }
+        }
+        // Check sub-expression ids
+        arm_ng.rm.pl.validateSubIDs(ids, expressions, flags, elements);
+        // Renumber and assign lkey to reports
+        arm_ng.rm.logicalKeyRenumber();
+
+        // ===== 构建 FAT Database========
+        unsigned length = 0;
+        struct fat_hs_database *out = fat_build(x86_ng, arm_ng, &length, 0);
+        assert(out);
+        assert(length);
+        *db = out;
+        *comp_error = nullptr;
+
+        return HS_SUCCESS;
+    }
+    catch (const CompileError &e) {
+        // Compiler error occurred
+        *db = nullptr;
+        *comp_error = generateCompileError(e.reason,
+                                           e.hasIndex ? (int)e.index : -1);
+        return HS_COMPILER_ERROR;
+    }
+    catch (const std::bad_alloc &) {
+        *db = nullptr;
+        *comp_error = const_cast<hs_compile_error_t *>(&hs_enomem);
+        return HS_COMPILER_ERROR;
+    }
+    catch (...) {
+        assert(!"Internal error, unexpected exception");
+        *db = nullptr;
+        *comp_error = const_cast<hs_compile_error_t *>(&hs_einternal);
+        return HS_COMPILER_ERROR;
+    }
+}
+
+hs_error_t
+fat_hs_compile_lit_multi_int(const char *const *expressions,
+                     const unsigned *flags, const unsigned *ids,
+                     const hs_expr_ext *const *ext, const size_t *lens,
+                     unsigned elements, unsigned mode,
+                     const hs_platform_info_t *platform, fat_hs_database_t **db,
+                     hs_compile_error_t **comp_error, const Grey &g) {
+    // Check the args: note that it's OK for flags, ids or ext to be null.
+    hs_error_t err = validate_fat_compile_args(db, comp_error, expressions, elements, g);
+    if (err != HS_SUCCESS) {
+        return err;
+    }
+
+    if (!checkMode(mode, comp_error)) {
+        *db = nullptr;
+        assert(*comp_error);
+        return HS_COMPILER_ERROR;
+    }
+
+    if (!checkPlatform(platform, comp_error)) {
+        *db = nullptr;
+        assert(*comp_error);
+        return HS_COMPILER_ERROR;
+    }
+
+    if (elements > g.limitPatternCount) {
+        *db = nullptr;
+        *comp_error = generateCompileError("Number of patterns too large", -1);
+        return HS_COMPILER_ERROR;
+    }
+
+    bool isStreaming = mode & (HS_MODE_STREAM | HS_MODE_VECTORED);
+    bool isVectored = mode & HS_MODE_VECTORED;
+    unsigned somPrecision = getSomPrecision(mode);
+
+    target_t target_info = platform ? target_t(*platform)
+                                    : get_current_target();
+
+    try {
+        // =======1. 编译 x86 字节码===============
+        Grey x86_grey = g;
+        x86_grey.allowLily = false;
+        x86_grey.allowNeoFdr = false;
+        
+        CompileContext x86_cc(isStreaming, isVectored, target_info, x86_grey);
+        NG x86_ng(x86_cc, elements, somPrecision);
+        x86_ng.allowLilyForTeddy = false;
+
+        for (unsigned int i = 0; i < elements; i++) {
+            try {
+                addLitExpression(x86_ng, i, expressions[i], flags ? flags[i] : 0,
+                                 ext ? ext[i] : nullptr, ids ? ids[i] : 0,
+                                 lens[i]);
+            } catch (CompileError &e) {
+                e.setExpressionIndex(i);
+                throw;
+            }
+        }
+
+        x86_ng.rm.pl.validateSubIDs(ids, expressions, flags, elements);
+        x86_ng.rm.logicalKeyRenumber();
+
+        // =======2. 编译 arm 字节码===============
+        Grey arm_grey = g;
+        // 为ARM创建单独的target_info，不包含AVX2/AVX512特性
+        hs_platform_info arm_platform;
+        arm_platform.tune = HS_TUNE_FAMILY_GENERIC;
+        arm_platform.cpu_features = 0;  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
+        target_t arm_target_info(arm_platform);
+
+        CompileContext arm_cc(isStreaming, isVectored, arm_target_info, arm_grey);
+        NG arm_ng(arm_cc, elements, somPrecision);
+
+        for (unsigned int i = 0; i < elements; i++) {
+            try {
+                addLitExpression(arm_ng, i, expressions[i], flags ? flags[i] : 0,
+                                 ext ? ext[i] : nullptr, ids ? ids[i] : 0,
+                                 lens[i]);
+            } catch (CompileError &e) {
+                e.setExpressionIndex(i);
+                throw;
+            }
+        }
+
+        arm_ng.rm.pl.validateSubIDs(ids, expressions, flags, elements);
+        arm_ng.rm.logicalKeyRenumber();
+
+        // =======3. 构建 FAT Database========
+        unsigned length = 0;
+        struct fat_hs_database *out = fat_build(x86_ng, arm_ng, &length, 0);
+        assert(out);
+        assert(length);
+        *db = out;
+        *comp_error = nullptr;
+
+        return HS_SUCCESS;
+    }
+    catch (const CompileError &e) {
+        *db = nullptr;
+        *comp_error = generateCompileError(e.reason,
+                                           e.hasIndex ? (int)e.index : -1);
+        return HS_COMPILER_ERROR;
+    }
+    catch (const std::bad_alloc &) {
+        *db = nullptr;
+        *comp_error = const_cast<hs_compile_error_t *>(&hs_enomem);
+        return HS_COMPILER_ERROR;
+    }
+    catch (...) {
+        assert(!"Internal error, unexpected exception");
+        *db = nullptr;
+        *comp_error = const_cast<hs_compile_error_t *>(&hs_einternal);
+        return HS_COMPILER_ERROR;
+    }
+}
+
 
 hs_error_t
 hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
@@ -482,6 +823,26 @@ hs_error_t HS_CDECL hs_compile(const char *expression, unsigned flags,
 }
 
 extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL fat_hs_compile(const char *expression, unsigned flags,
+                               unsigned mode,
+                               const hs_platform_info_t *platform,
+                               fat_hs_database_t **db, hs_compile_error_t **error) {
+    if (expression == nullptr) {
+        *db = nullptr;
+        *error = generateCompileError("Invalid parameter: expression is NULL",
+                                      -1);
+        return HS_COMPILER_ERROR;
+    }
+
+    unsigned id = 0; // single expressions get zero as an ID
+    const hs_expr_ext * const *ext = nullptr; // unused for this call.
+
+    return fat_hs_compile_multi_int(&expression, &flags, &id, ext, 1, mode,
+                                platform, db, error, Grey());
+}
+
+
+extern "C" HS_PUBLIC_API
 hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
                                      const unsigned *flags, const unsigned *ids,
                                      unsigned elements, unsigned mode,
@@ -490,6 +851,17 @@ hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
                                      hs_compile_error_t **error) {
     const hs_expr_ext * const *ext = nullptr; // unused for this call.
     return hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
+                                platform, db, error, Grey());
+}
+
+hs_error_t HS_CDECL fat_hs_compile_multi(const char *const *expressions,
+                                     const unsigned *flags, const unsigned *ids,
+                                     unsigned elements, unsigned mode,
+                                     const hs_platform_info_t *platform,
+                                     fat_hs_database_t **db,
+                                     hs_compile_error_t **error) {
+    const hs_expr_ext * const *ext = nullptr; // unused for this call.
+    return fat_hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
                                 platform, db, error, Grey());
 }
 
@@ -504,6 +876,19 @@ hs_error_t HS_CDECL hs_compile_ext_multi(const char * const *expressions,
     return hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
                                 platform, db, error, Grey());
 }
+
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL fat_hs_compile_ext_multi(const char * const *expressions,
+                                     const unsigned *flags, const unsigned *ids,
+                                     const hs_expr_ext * const *ext,
+                                     unsigned elements, unsigned mode,
+                                     const hs_platform_info_t *platform,
+                                     fat_hs_database_t **db,
+                                     hs_compile_error_t **error) {
+    return fat_hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
+                                platform, db, error, Grey());
+}
+
 
 extern "C" HS_PUBLIC_API
 hs_error_t HS_CDECL hs_compile_lit(const char *expression, unsigned flags,
@@ -525,6 +910,29 @@ hs_error_t HS_CDECL hs_compile_lit(const char *expression, unsigned flags,
                                     mode, platform, db, error, Grey());
 }
 
+
+
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL fat_hs_compile_lit(const char *expression, unsigned flags,
+                                   const size_t len, unsigned mode,
+                                   const hs_platform_info_t *platform,
+                                   fat_hs_database_t **db,
+                                   hs_compile_error_t **error) {
+    if (expression == nullptr) {
+        *db = nullptr;
+        *error = generateCompileError("Invalid parameter: expression is NULL",
+                                      -1);
+        return HS_COMPILER_ERROR;
+    }
+
+    unsigned id = 0; // single expressions get zero as an ID
+    const hs_expr_ext * const *ext = nullptr; // unused for this call.
+
+    return fat_hs_compile_lit_multi_int(&expression, &flags, &id, ext, &len, 1,
+                                    mode, platform, db, error, Grey());
+}
+
+
 extern "C" HS_PUBLIC_API
 hs_error_t HS_CDECL hs_compile_lit_multi(const char * const *expressions,
                                          const unsigned *flags,
@@ -538,6 +946,21 @@ hs_error_t HS_CDECL hs_compile_lit_multi(const char * const *expressions,
     return hs_compile_lit_multi_int(expressions, flags, ids, ext, lens,
                                     elements, mode, platform, db, error,
                                     Grey());
+}
+
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL fat_hs_compile_lit_multi(const char * const *expressions,
+                                         const unsigned *flags,
+                                         const unsigned *ids,
+                                         const size_t *lens,
+                                         unsigned elements, unsigned mode,
+                                         const hs_platform_info_t *platform,
+                                         fat_hs_database_t **db,
+                                         hs_compile_error_t **error) {
+    const hs_expr_ext * const *ext = nullptr;
+    return fat_hs_compile_lit_multi_int(expressions, flags, ids, ext, lens,
+                                        elements, mode, platform, db, error,
+                                        Grey());
 }
 
 static

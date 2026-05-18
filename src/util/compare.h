@@ -200,6 +200,7 @@ int cmpForward_small(const u8 *p1, const u8 *p2, size_t len, char nocase) {
 }
 
 // 大字符串（≥96字节）：混合策略（标量前缀 + NEON主体）
+#ifdef HAVE_NEON
 static really_inline
 int cmpForward_large(const u8 *p1, const u8 *p2, size_t len, char nocase) {
     // 前32字节用标量（快速退出）
@@ -270,15 +271,19 @@ int cmpForward_large(const u8 *p1, const u8 *p2, size_t len, char nocase) {
     size_t processed = p1_cur - p1;
     return cmpForward_small(p1 + processed, p2 + processed, len - processed, nocase);
 }
-
+#endif
 static really_inline
-int cmpForward_PRO(const u8 *p1, const u8 *p2, size_t len, char nocase) {
-    if (len < 96) {
-        return cmpForward_small(p1, p2, len, nocase);
-    } else {
-        return cmpForward_large(p1, p2, len, nocase);
+    int cmpForward_PRO(const u8 *p1, const u8 *p2, size_t len, char nocase) {
+        if (len < 96) {
+            return cmpForward_small(p1, p2, len, nocase);
+        } else {
+    #ifdef HAVE_NEON
+            return cmpForward_large(p1, p2, len, nocase);
+    #else
+            return cmpForward_small(p1, p2, len, nocase);
+    #endif
+        }
     }
-}
 
 
 #undef CMP_T
