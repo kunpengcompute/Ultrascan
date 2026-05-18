@@ -363,8 +363,13 @@ KHSEL是Hyperscan增强软件包，可以提升Hyperscan的scan性能。目前gi
 
             ![](figures/3.png)
 
-        - 编译源码debug模式。在执行编译命令中增加生成动态库编译选项：-DCMAKE\_BUILD\_TYPE=DEBUG。
+        - 在鲲鹏计算平台编译源码debug模式。在执行编译命令中增加生成动态库编译选项：-DCMAKE\_BUILD\_TYPE=DEBUG。
 
             ```bash
             cmake .. -DCMAKE_BUILD_TYPE=DEBUG
+            ```
+        - 在x86计算平台编译源码debug模式。在执行编译命令中增加生成动态库编译选项：-DCMAKE\_BUILD\_TYPE=DEBUG。
+
+            ```bash
+            cmake .. -DCMAKE_BUILD_TYPE=DEBUG -DCMAKE_C_FLAGS="-D__X86_64__" -DCMAKE_CXX_FLAGS="-D__X86_64__"
             ```
