@@ -1,4 +1,4 @@
-# 使用指南<a name="ZH-CN_TOPIC_0000002518413720"></a>
+# 用户指南<a name="ZH-CN_TOPIC_0000002518413720"></a>
 
 ## 特性使能<a name="ZH-CN_TOPIC_0000002518253766"></a>
 
@@ -15,5 +15,3 @@ config.txt文件示例内容如下：
 ```bash
 allowLily:1;allowNeoFdr:1;
 ```
-
-在Hyperscan根目录下配置config.txt文件，用于控制短字节优化和假阳性阻断特性开关。短字节优化和假阳性阻断特性默认开启。
