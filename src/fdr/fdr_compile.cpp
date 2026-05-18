@@ -77,6 +77,20 @@ namespace ue2 {
 
 namespace {
 
+static
+bool haoProtoTraceEnabled(void) {
+    const char *env = getenv("HS_HAO_STATS");
+    return env && *env && *env != '0';
+}
+
+#define HAO_PROTO_TRACE(...)                                                \
+    do {                                                                    \
+        if (haoProtoTraceEnabled()) {                                       \
+            fprintf(stderr, __VA_ARGS__);                                   \
+            fflush(stderr);                                                 \
+        }                                                                   \
+    } while (0)
+
 #if defined(DUMP_SUPPORT) || defined(DEBUG)
 static
 bool haoStatsDumpEnabled(void) {
@@ -149,6 +163,8 @@ bool tryBuildHaoV2ProtoArtifacts(const target_t &target,
 
     if (!grey.allowHaoV2) {
         DEBUG_PRINTF("HAO v2 feasibility: disabled by grey flag\n");
+        HAO_PROTO_TRACE("[HAO][Proto] HAO disabled by grey lits=%zu\n",
+                        lits.size());
         return false;
     }
 
@@ -161,12 +177,29 @@ bool tryBuildHaoV2ProtoArtifacts(const target_t &target,
                  haoFeasible ? 1 : 0,
                  haoFeasibilityReasonName(haoResult.reason),
                  haoResult.flags);
+    HAO_PROTO_TRACE("[HAO][Proto] feasibility lits=%zu maxLits=%u canBuild=%u "
+                    "reason=%s flags=0x%x total=%u fast=%u residual=%u "
+                    "unsupported=%u expanded=%u maxAmbig=%u\n",
+                    lits.size(), (unsigned)HAO_MAX_LITERALS,
+                    haoFeasible ? 1U : 0U,
+                    haoFeasibilityReasonName(haoResult.reason),
+                    haoResult.flags, builtArtifacts.haoSummary.totalRules,
+                    builtArtifacts.haoSummary.fastPathRules,
+                    builtArtifacts.haoSummary.residualRules,
+                    builtArtifacts.haoSummary.unsupportedRules,
+                    builtArtifacts.haoSummary.totalExpandedKeys,
+                    builtArtifacts.haoSummary.maxSelectedAmbigBits);
     if (!haoFeasible) {
         return false;
     }
 
     if (!haoV2LayoutCanPreserveCoverage(builtArtifacts)) {
         DEBUG_PRINTF("HAO v2 feasibility: rejected by coverage gate\n");
+        HAO_PROTO_TRACE("[HAO][Proto] rejected by coverage gate lits=%zu "
+                        "valid=%u hashFlags=0x%x\n",
+                        lits.size(),
+                        builtArtifacts.haoGlobalHash.valid ? 1U : 0U,
+                        builtArtifacts.haoGlobalHash.flags);
         return false;
     }
 
@@ -962,6 +995,13 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                                             const target_t &target,
                                             const Grey &grey, u32 hint) {
     // HAO_STATS_DUMP_BUILD_PROTO_LITS(lits, engType, hint, make_small);
+    HAO_PROTO_TRACE("[HAO][Proto] begin engType=%u hint=%u make_small=%u "
+                    "lits=%zu teddy=%u neo=%u hao=%u\n",
+                    (unsigned)engType, (unsigned)hint,
+                    make_small ? 1U : 0U, lits.size(),
+                    grey.fdrAllowTeddy ? 1U : 0U,
+                    grey.allowNeoFdr ? 1U : 0U,
+                    grey.allowHaoV2 ? 1U : 0U);
     DEBUG_PRINTF("cpu has %s\n", target.has_avx2() ? "avx2" : "no-avx2");
 
     if (grey.fdrAllowTeddy) {
@@ -969,9 +1009,13 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                                            target);
         if (proto) {
             DEBUG_PRINTF("build with teddy succeeded\n");
+            HAO_PROTO_TRACE("[HAO][Proto] selected=Teddy lits=%zu\n",
+                            lits.size());
             return proto;
         } else {
             DEBUG_PRINTF("build with teddy failed, will try with FDR\n");
+            HAO_PROTO_TRACE("[HAO][Proto] teddy rejected lits=%zu\n",
+                            lits.size());
         }
     }
 
@@ -981,6 +1025,10 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                   ? chooseHaoEngine(target, lits, make_small)
                   : getFdrDescription(hint);
     if (haoDes && haoDes->getID() == HAO_ENGINE_ID) {
+        HAO_PROTO_TRACE("[HAO][Proto] try HAO lits=%zu bits=%u stride=%u "
+                        "tableEntries=%u\n",
+                        lits.size(), haoDes->bits, haoDes->stride,
+                        haoDes->getNumTableEntries());
         // temporary hack for unit testing
         if (hint != HINT_INVALID) {
             haoDes->bits = 9;
@@ -996,21 +1044,33 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                 engType, move(haoDes), lits, haoBucketToLits,
                 make_small);
             proto->haoArtifacts = std::move(haoArtifacts);
+            HAO_PROTO_TRACE("[HAO][Proto] selected=HAO lits=%zu\n",
+                            proto->lits.size());
             return proto;
         }
 
+        HAO_PROTO_TRACE("[HAO][Proto] HAO rejected lits=%zu hint=%u\n",
+                        lits.size(), (unsigned)hint);
         if (haoHint) {
             // Explicit HAO hint, but HAO v2 could not accept the rule set.
             return nullptr;
         }
     } else if (haoHint) {
+        HAO_PROTO_TRACE("[HAO][Proto] HAO hint has no HAO description "
+                        "lits=%zu hint=%u\n",
+                        lits.size(), (unsigned)hint);
         return nullptr;
+    } else {
+        HAO_PROTO_TRACE("[HAO][Proto] HAO not selected by chooser lits=%zu\n",
+                        lits.size());
     }
 
     if (grey.allowNeoFdr) {
         auto des = (hint == HINT_INVALID) ? chooseNeoFdrEngine(target, lits, make_small)
                                         : getFdrDescription(hint);
         if (!des) {
+            HAO_PROTO_TRACE("[HAO][Proto] NeoFdr chooser failed lits=%zu\n",
+                            lits.size());
             return nullptr;
         }
 
@@ -1025,12 +1085,18 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         auto proto =
             ue2::make_unique<HWLMProto>(engType, move(des), lits, bucketToLits,
                                         make_small);
+        HAO_PROTO_TRACE("[HAO][Proto] selected=NeoFdr lits=%zu engine=%u "
+                        "bits=%u stride=%u\n",
+                        proto->lits.size(), proto->fdrEng->getID(),
+                        proto->fdrEng->bits, proto->fdrEng->stride);
         return proto;        
     }
 
     auto des = (hint == HINT_INVALID) ? chooseEngine(target, lits, make_small)
                                       : getFdrDescription(hint);
     if (!des) {
+        HAO_PROTO_TRACE("[HAO][Proto] default FDR chooser failed lits=%zu\n",
+                        lits.size());
         return nullptr;
     }
 
@@ -1045,6 +1111,10 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
     auto proto =
         ue2::make_unique<HWLMProto>(engType, move(des), lits, bucketToLits,
                                     make_small);
+    HAO_PROTO_TRACE("[HAO][Proto] selected=FDR lits=%zu engine=%u bits=%u "
+                    "stride=%u\n",
+                    proto->lits.size(), proto->fdrEng->getID(),
+                    proto->fdrEng->bits, proto->fdrEng->stride);
     return proto;
 }
 

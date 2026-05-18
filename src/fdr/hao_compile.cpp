@@ -33,7 +33,7 @@ namespace {
 
 static constexpr u32 HAO_BUILD_MAX_SUFFIX_BYTES = 8;
 static constexpr u32 HAO_BUILD_MAX_CANDIDATE_BITS = HAO_BUILD_MAX_SUFFIX_BYTES * 8;
-static constexpr u32 HAO_BUILD_L2_KEY_BITS = 18;
+static constexpr u32 HAO_BUILD_L2_KEY_BITS = 21;
 static constexpr u32 HAO_BUILD_MAX_L2_ENTRIES = 1U << HAO_BUILD_L2_KEY_BITS;
 static constexpr u64a HAO_BUILD_MAX_TOTAL_PRIMARY_FOOTPRINT =
     128ULL * 1024ULL * 1024ULL;
@@ -1945,7 +1945,7 @@ bool analyzeHAOFeasibility(const target_t &target,
         return false;
     }
 
-    if (lits.size() > std::numeric_limits<u16>::max()) {
+    if (lits.size() > HAO_MAX_LITERALS) {
         local.reason = HAOFeasibilityReason::TOO_MANY_LITERALS;
         if (result) {
             *result = local;
