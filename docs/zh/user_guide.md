@@ -1,6 +1,9 @@
-# 用户指南<a name="ZH-CN_TOPIC_0000002518413720"></a>
+# 用户指南
 
-## 特性使能<a name="ZH-CN_TOPIC_0000002518253766"></a>
+## 前提条件
+请参考[安装指南](./installation_guide.md)完成Hyperscan的安装和编译指导。
+
+## 特性使能
 
 在Hyperscan根目录下配置config.txt文件，用于控制短字节优化和假阳性阻断特性开关。短字节优化和假阳性阻断特性默认开启。
 
