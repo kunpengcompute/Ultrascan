@@ -85,7 +85,7 @@ struct HWLMProto {
     bool make_small = false;
 
     /**
-     * \brief Optional cached HAO v2 compile artifacts, used when proto build
+     * \brief Optional cached HAO compile artifacts, used when proto build
      * has already selected the HAO global layout for table generation.
      */
     std::unique_ptr<HAOCompileArtifacts> haoArtifacts;

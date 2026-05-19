@@ -14,7 +14,7 @@
 #endif
 
 #ifndef HAO_MAX_KEY_AMBIG_BITS
-#define HAO_MAX_KEY_AMBIG_BITS 15U
+#define HAO_MAX_KEY_AMBIG_BITS HAO_KEY_BITS
 #endif
 
 #ifndef HAO_MAX_KEY_EXPANSION
@@ -25,16 +25,8 @@
 #define HAO_MAX_SMALL_CLASS_EXPANSION 16U
 #endif
 
-#ifndef HAO_MAX_TOTAL_EXPANDED_KEYS
-#define HAO_MAX_TOTAL_EXPANDED_KEYS (1U << 27)
-#endif
-
 #ifndef HAO_MAX_LITERALS
 #define HAO_MAX_LITERALS (1U << 18)
-#endif
-
-#ifndef HAO_MIN_FAST_RULE_COVERAGE_PCT
-#define HAO_MIN_FAST_RULE_COVERAGE_PCT 80U
 #endif
 
 namespace ue2 {
@@ -66,7 +58,6 @@ static constexpr u32 HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM = 1U << 1;
 static constexpr u32 HAO_RULE_PLAN_FLAG_NORMALIZED = 1U << 2;
 static constexpr u32 HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK = 1U << 3;
 static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_AMBIG_LIMIT = 1U << 4;
-static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_EXPANSION_BUDGET = 1U << 5;
 static constexpr u32 HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT = 1U << 6;
 static constexpr u32 HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE = 1U << 7;
 
@@ -160,8 +151,6 @@ struct HAOCompileSummary {
     u32 anchorConfirmRules = 0;
     u32 exactRules = 0;
     u32 nocaseRules = 0;
-    u32 residualRules = 0;
-    u32 residualUnsupportedRules = 0;
     u32 fastPathConfirmRules = 0;
     u32 directReportRules = 0;
     u32 keyExpandedRules = 0;
@@ -169,7 +158,7 @@ struct HAOCompileSummary {
     u32 maxSelectedAmbigBits = 0;
 };
 
-/* Build-time statistics for the HAO v2 global single-table layout. */
+/* Build-time statistics for the HAO global single-table layout. */
 
 struct HAOGlobalHashStats {
     u32 nonEmptyPrimary = 0;
@@ -189,7 +178,7 @@ struct HAOGlobalHashStats {
     u32 entryBucketsGt4 = 0;
 };
 
-/* Artifacts for the HAO v2 global single-table build. */
+/* Artifacts for the HAO global single-table build. */
 struct HAOGlobalHashArtifacts {
     bool valid = false;
     u32 flags = 0;

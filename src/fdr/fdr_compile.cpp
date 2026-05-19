@@ -127,15 +127,8 @@ void dumpFdrBuildProtoInputLits(const vector<hwlmLiteral> &lits, u8 engType,
 #endif
 
 static
-bool haoV2LayoutCanPreserveCoverage(const HAOCompileArtifacts &artifacts) {
+bool haoLayoutOk(const HAOCompileArtifacts &artifacts) {
     const HAOCompileSummary &summary = artifacts.haoSummary;
-    /* HAO v2 currently preserves correctness via two paths:
-     * 1) global single-table fast path
-     * 2) residual sidecar full-confirm path
-     * So coverage should be judged on whether the build produced a valid
-     * HAO blob without partial-capacity loss, rather than only on fast-path
-     * rule count. */
-    const u32 coveredPct = summary.totalRules ? 100U : 0U;
 
     if (!artifacts.haoGlobalHash.valid) {
         return false;
@@ -145,7 +138,8 @@ bool haoV2LayoutCanPreserveCoverage(const HAOCompileArtifacts &artifacts) {
         return false;
     }
 
-    if (coveredPct < HAO_MIN_FAST_RULE_COVERAGE_PCT) {
+    if (summary.fastPathRules != summary.totalRules ||
+        summary.unsupportedRules) {
         return false;
     }
 
@@ -153,7 +147,7 @@ bool haoV2LayoutCanPreserveCoverage(const HAOCompileArtifacts &artifacts) {
 }
 
 static
-bool tryBuildHaoV2ProtoArtifacts(const target_t &target,
+bool tryBuildHaoProto(const target_t &target,
                                  const std::vector<hwlmLiteral> &lits,
                                  const Grey &grey,
                                  std::unique_ptr<HAOCompileArtifacts> *out) {
@@ -161,8 +155,8 @@ bool tryBuildHaoV2ProtoArtifacts(const target_t &target,
         out->reset();
     }
 
-    if (!grey.allowHaoV2) {
-        DEBUG_PRINTF("HAO v2 feasibility: disabled by grey flag\n");
+    if (!grey.allowHao) {
+        DEBUG_PRINTF("HAO feasibility: disabled by grey flag\n");
         HAO_PROTO_TRACE("[HAO][Proto] HAO disabled by grey lits=%zu\n",
                         lits.size());
         return false;
@@ -173,19 +167,18 @@ bool tryBuildHaoV2ProtoArtifacts(const target_t &target,
     const bool haoFeasible = analyzeHAOFeasibility(target, lits, grey,
                                                    &haoResult,
                                                    &builtArtifacts);
-    DEBUG_PRINTF("HAO v2 feasibility: canBuild=%u reason=%s flags=0x%x\n",
+    DEBUG_PRINTF("HAO feasibility: canBuild=%u reason=%s flags=0x%x\n",
                  haoFeasible ? 1 : 0,
                  haoFeasibilityReasonName(haoResult.reason),
                  haoResult.flags);
     HAO_PROTO_TRACE("[HAO][Proto] feasibility lits=%zu maxLits=%u canBuild=%u "
-                    "reason=%s flags=0x%x total=%u fast=%u residual=%u "
-                    "unsupported=%u expanded=%u maxAmbig=%u\n",
+                    "reason=%s flags=0x%x total=%u fast=%u unsupported=%u "
+                    "expanded=%u maxAmbig=%u\n",
                     lits.size(), (unsigned)HAO_MAX_LITERALS,
                     haoFeasible ? 1U : 0U,
                     haoFeasibilityReasonName(haoResult.reason),
                     haoResult.flags, builtArtifacts.haoSummary.totalRules,
                     builtArtifacts.haoSummary.fastPathRules,
-                    builtArtifacts.haoSummary.residualRules,
                     builtArtifacts.haoSummary.unsupportedRules,
                     builtArtifacts.haoSummary.totalExpandedKeys,
                     builtArtifacts.haoSummary.maxSelectedAmbigBits);
@@ -193,8 +186,8 @@ bool tryBuildHaoV2ProtoArtifacts(const target_t &target,
         return false;
     }
 
-    if (!haoV2LayoutCanPreserveCoverage(builtArtifacts)) {
-        DEBUG_PRINTF("HAO v2 feasibility: rejected by coverage gate\n");
+    if (!haoLayoutOk(builtArtifacts)) {
+        DEBUG_PRINTF("HAO feasibility: rejected by coverage gate\n");
         HAO_PROTO_TRACE("[HAO][Proto] rejected by coverage gate lits=%zu "
                         "valid=%u hashFlags=0x%x\n",
                         lits.size(),
@@ -1001,7 +994,7 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
                     make_small ? 1U : 0U, lits.size(),
                     grey.fdrAllowTeddy ? 1U : 0U,
                     grey.allowNeoFdr ? 1U : 0U,
-                    grey.allowHaoV2 ? 1U : 0U);
+                    grey.allowHao ? 1U : 0U);
     DEBUG_PRINTF("cpu has %s\n", target.has_avx2() ? "avx2" : "no-avx2");
 
     if (grey.fdrAllowTeddy) {
@@ -1019,7 +1012,7 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         }
     }
 
-    /* Engine id 2 is now reserved for HAO v2 only. */
+    /* Engine id 2 is now reserved for HAO only. */
     const bool haoHint = (hint == HAO_ENGINE_ID);
     auto haoDes = (hint == HINT_INVALID)
                   ? chooseHaoEngine(target, lits, make_small)
@@ -1039,7 +1032,7 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         addIncludedInfo(lits, haoDes->getNumBuckets(), haoBucketToLits);
 
         std::unique_ptr<HAOCompileArtifacts> haoArtifacts;
-        if (tryBuildHaoV2ProtoArtifacts(target, lits, grey, &haoArtifacts)) {
+        if (tryBuildHaoProto(target, lits, grey, &haoArtifacts)) {
             auto proto = ue2::make_unique<HWLMProto>(
                 engType, move(haoDes), lits, haoBucketToLits,
                 make_small);
@@ -1052,7 +1045,7 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         HAO_PROTO_TRACE("[HAO][Proto] HAO rejected lits=%zu hint=%u\n",
                         lits.size(), (unsigned)hint);
         if (haoHint) {
-            // Explicit HAO hint, but HAO v2 could not accept the rule set.
+            // Explicit HAO hint, but HAO could not accept the rule set.
             return nullptr;
         }
     } else if (haoHint) {
@@ -1139,8 +1132,8 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
         if (!buildHAOArtifacts(proto.lits, &rebuiltHaoArtifacts, false)) {
             return nullptr;
         }
-        if (!haoV2LayoutCanPreserveCoverage(rebuiltHaoArtifacts)) {
-            assert(0 && "HAO feasibility mismatch: invalid v2 coverage in table build");
+        if (!haoLayoutOk(rebuiltHaoArtifacts)) {
+            assert(0 && "HAO feasibility mismatch: invalid coverage in table build");
             return nullptr;
         }
         matcherBlob = buildHAOBlob(rebuiltHaoArtifacts);

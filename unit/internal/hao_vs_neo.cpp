@@ -96,7 +96,7 @@ bytecode_ptr<FDR> buildFdrWithHint(std::vector<hwlmLiteral> lits, u32 hint) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowHaoV2 = true;
+    grey.allowHao = true;
 
     auto proto = fdrBuildProtoHinted(HWLM_ENGINE_FDR, std::move(lits), false,
                                      hint, get_current_target(), grey);
@@ -239,7 +239,7 @@ const HAORuntimeHeader *getHaoRuntimeHeader(const FDR *fdr) {
         reinterpret_cast<const u8 *>(fdr) + fdrMatcherBlobOffset(fdr));
 }
 
-/* Test-only read-only entry for inspecting HAO v2 blobs before runtime switch-over. */
+/* Test-only read-only entry for inspecting HAO blobs before runtime switch-over. */
 static
 const HAORuntimeHeader *getHaoRuntimeHeader(const bytecode_ptr<u8> &blob) {
     if (!blob.get()) {
@@ -339,7 +339,7 @@ std::vector<Match> runHaoDirectInOrder(const FDR *fdr,
     return g_matches;
 }
 
-/* Blob-level direct execution helper for HAO v2 before it is wired into generic FDR execution. */
+/* Blob-level direct execution helper for HAO before it is wired into generic FDR execution. */
 static
 std::vector<Match> runHaoBlobDirectInOrder(const bytecode_ptr<u8> &blob,
                                            const std::vector<u8> &data,
@@ -396,7 +396,7 @@ std::vector<Match> runHaoBlobDirectStreamingInOrder(
 static
 void skipIfNoHaoSupport() {
     // HAO path is currently gated on Arm64 in the HAO feasibility path.
-    SUCCEED() << "Skip HAO regression on this target (HAO v2 unavailable).";
+    SUCCEED() << "Skip HAO regression on this target (HAO unavailable).";
 }
 
 static
@@ -538,11 +538,11 @@ std::vector<hwlmLiteral> makeDuplicateLiterals(const std::string &s, bool nocase
 }
 
 static
-Grey makeHaoGrey(bool allowHaoV2 = true) {
+Grey makeHaoGrey(bool allowHao = true) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowHaoV2 = allowHaoV2;
+    grey.allowHao = allowHao;
     return grey;
 }
 
@@ -2016,11 +2016,11 @@ TEST(HAOCompile, CanBuildHaoRejectsTooFewLiterals) {
     EXPECT_FALSE(canBuildHAO(get_current_target(), lits, grey));
 }
 
-TEST(HAOCompile, HAOProtoBuildPrefersHaoV2Artifacts) {
+TEST(HAOCompile, HAOProtoBuildPrefersHaoArtifacts) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowHaoV2 = true;
+    grey.allowHao = true;
 
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 6233, HWLM_ALL_GROUPS, {}, {}),
@@ -2039,11 +2039,11 @@ TEST(HAOCompile, HAOProtoBuildPrefersHaoV2Artifacts) {
     EXPECT_NE(nullptr, proto->haoArtifacts.get());
 }
 
-TEST(HAOCompile, HAOProtoBuildRejectsHaoWhenV2Disabled) {
+TEST(HAOCompile, HAOProtoBuildRejectsHaoWhenDisabled) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowHaoV2 = false;
+    grey.allowHao = false;
 
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 6237, HWLM_ALL_GROUPS, {}, {}),
@@ -2424,8 +2424,6 @@ TEST(HAORuntime, HaoRuntimeStatsTrackDirectReportPath) {
     EXPECT_EQ(matches.size(), stats.callbackReports);
     EXPECT_EQ(0U, stats.encodedConfirmCalls);
     EXPECT_EQ(0U, stats.encodedConfirmRejects);
-    EXPECT_EQ(0U, stats.residualRuleChecks);
-    EXPECT_EQ(0U, stats.residualPosCalls);
 }
 
 TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveAcrossBlockBoundaries) {
@@ -2506,11 +2504,11 @@ TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveAcrossHistoryAndMultipleBlocks) {
     EXPECT_EQ(naiveMatches, batchMatches);
 }
 
-TEST(HAORuntime, BuildFdrWithHaoV2LayoutEmbedsHaoBlob) {
+TEST(HAORuntime, BuildFdrWithHaoLayoutEmbedsHaoBlob) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowHaoV2 = true;
+    grey.allowHao = true;
 
     auto fdr = buildFdrWithHintAndGrey({
         hwlmLiteral("alpha", false, false, 696, HWLM_ALL_GROUPS, {}, {}),
@@ -2530,11 +2528,11 @@ TEST(HAORuntime, BuildFdrWithHaoV2LayoutEmbedsHaoBlob) {
     EXPECT_EQ(HAO_RUNTIME_MAGIC, magic);
 }
 
-TEST(HAORuntime, AutoHaoBuildWithHaoV2LayoutEmbedsHaoBlob) {
+TEST(HAORuntime, AutoHaoBuildWithHaoLayoutEmbedsBlob) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowHaoV2 = true;
+    grey.allowHao = true;
 
     auto fdr = buildFdrAutoWithGrey({
         hwlmLiteral("alpha", false, false, 6996, HWLM_ALL_GROUPS, {}, {}),
@@ -2554,11 +2552,11 @@ TEST(HAORuntime, AutoHaoBuildWithHaoV2LayoutEmbedsHaoBlob) {
     EXPECT_EQ(HAO_RUNTIME_MAGIC, magic);
 }
 
-TEST(HAORuntime, AutoHaoBuildWithHaoV2LayoutEmbedsHaoBlobForAnchorConfirmRules) {
+TEST(HAORuntime, AutoHaoBuildWithHaoLayoutEmbedsBlobForAnchorConfirmRules) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowHaoV2 = true;
+    grey.allowHao = true;
 
     auto fdr = buildFdrAutoWithGrey({
         hwlmLiteral("alpha", false, false, 7996, HWLM_ALL_GROUPS, {}, {}),
@@ -2567,36 +2565,6 @@ TEST(HAORuntime, AutoHaoBuildWithHaoV2LayoutEmbedsHaoBlobForAnchorConfirmRules) 
                     std::vector<u8>{'l', 0x60}),
         hwlmLiteral("theta", false, false, 7998, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("omega", false, false, 7999, HWLM_ALL_GROUPS, {}, {})
-    }, grey);
-
-    if (!fdr || fdr->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(fdr.get())) {
-        skipIfNoHaoSupport();
-        return;
-    }
-
-    const u8 *blob = reinterpret_cast<const u8 *>(fdr.get()) + fdrMatcherBlobOffset(fdr.get());
-    u32 magic = 0;
-    memcpy(&magic, blob, sizeof(magic));
-    EXPECT_EQ(HAO_RUNTIME_MAGIC, magic);
-}
-
-TEST(HAORuntime, AutoHaoBuildWithHaoV2LayoutEmbedsHaoBlobForResidualUnsupportedRules) {
-    Grey grey;
-    grey.fdrAllowTeddy = false;
-    grey.allowNeoFdr = true;
-    grey.allowHaoV2 = true;
-
-    auto fdr = buildFdrAutoWithGrey({
-        hwlmLiteral("alpha", false, false, 8096, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("z", false, false, 8097, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("theta", false, false, 8098, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("omega", false, false, 8099, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("delta", false, false, 8100, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("sigma", false, false, 8101, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("kappa", false, false, 8102, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("mask", false, false, 8103, HWLM_ALL_GROUPS,
-                    std::vector<u8>{0xff, 0xf0},
-                    std::vector<u8>{'s', 0x60})
     }, grey);
 
     if (!fdr || fdr->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(fdr.get())) {
@@ -2644,91 +2612,11 @@ TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectForAnchorConfirmRules) {
     EXPECT_EQ(haoDbMatches, haoMatches);
 }
 
-TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectWithResidualUnsupportedRules) {
-    std::vector<hwlmLiteral> lits = {
-        hwlmLiteral("alpha", false, false, 8301, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("ALPHA", true, false, 8302, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("z", false, false, 8303, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("theta", false, false, 8304, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("mask", false, false, 8305, HWLM_ALL_GROUPS,
-                    std::vector<u8>{0xff, 0xf0},
-                    std::vector<u8>{'s', 0x60})
-    };
-    HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    auto haoBlob = buildHAOBlob(artifacts);
-    ASSERT_NE(nullptr, haoBlob.get());
-
-    auto haoDb = buildFdrWithHint(lits, ENGINE_ID_HAO);
-    if (!haoDb || haoDb->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(haoDb.get())) {
-        skipIfNoHaoSupport();
-        return;
-    }
-
-    const std::vector<u8> data = {
-        'x','a','l','p','h','a','-',
-        'm','a','s','k','-',
-        'A','l','P','h','A','-',
-        'z','-',
-        't','h','e','t','a'
-    };
-
-    auto haoDbMatches = runHaoDirectInOrder(haoDb.get(), data, HWLM_ALL_GROUPS, true);
-    auto haoMatches = runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, true);
-    std::sort(haoDbMatches.begin(), haoDbMatches.end());
-    std::sort(haoMatches.begin(), haoMatches.end());
-    EXPECT_EQ(haoDbMatches, haoMatches);
-}
-
-TEST(HAORuntime, HaoRuntimeStatsTrackResidualPath) {
-    if (!HaoRuntimeStatsEnabledForTest()) {
-        return;
-    }
-
-    std::vector<hwlmLiteral> lits = {
-        hwlmLiteral("alpha", false, false, 8791, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("ALPHA", true, false, 8792, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("z", false, false, 8793, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("theta", false, false, 8794, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("mask", false, false, 8795, HWLM_ALL_GROUPS,
-                    std::vector<u8>{0xff, 0xf0},
-                    std::vector<u8>{'s', 0x60})
-    };
-
-    HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    auto haoBlob = buildHAOBlob(artifacts);
-    ASSERT_NE(nullptr, haoBlob.get());
-
-    const std::vector<u8> data = {
-        'x','a','l','p','h','a','-',
-        'm','a','s','k','-',
-        'A','l','P','h','A','-',
-        'z','-',
-        't','h','e','t','a'
-    };
-
-    HaoRuntimeResetStatsForTest();
-    const auto matches =
-        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, true);
-    HAORuntimeStats stats = {};
-    HaoRuntimeGetStatsForTest(&stats);
-
-    EXPECT_FALSE(matches.empty());
-    EXPECT_GT(stats.scanCalls, 0U);
-    EXPECT_EQ(data.size(), stats.scanInputBytes);
-    EXPECT_GT(stats.residualPosCalls, 0U);
-    EXPECT_GT(stats.residualRuleChecks, 0U);
-    EXPECT_GT(stats.residualConfirmCalls, 0U);
-    EXPECT_GT(stats.residualConfirmMatches, 0U);
-    EXPECT_EQ(matches.size(), stats.callbackReports);
-}
-
-TEST(HAORuntime, EmbeddedHaoV2FdrBatchMatchesNaive) {
+TEST(HAORuntime, EmbeddedHaoFdrBatchMatchesNaive) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
-    grey.allowHaoV2 = true;
+    grey.allowHao = true;
 
     auto fdr = buildFdrWithHintAndGrey({
         hwlmLiteral("alpha", false, false, 700, HWLM_ALL_GROUPS, {}, {}),
@@ -2902,13 +2790,7 @@ TEST(HAOCompile, HaoRulePlansRespectExpansionLimit) {
 
     u32 countedExpandedKeys = 0;
     for (const auto &plan : artifacts.haoRulePlans) {
-        if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
-            EXPECT_GT(plan.keyExpansion.selectedAmbigBits,
-                      HAO_MAX_KEY_AMBIG_BITS);
-            EXPECT_EQ(0U, plan.keyExpansion.expandedKeyCount);
-            continue;
-        }
-
+        EXPECT_NE(HAORuleCategory::HAO_RULE_UNSUPPORTED, plan.category);
         EXPECT_LE(plan.keyExpansion.selectedAmbigBits,
                   HAO_MAX_KEY_AMBIG_BITS);
         EXPECT_EQ(1U << plan.keyExpansion.selectedAmbigBits,
@@ -3063,9 +2945,9 @@ TEST(HAOCompile, HaoSummaryTracksCoverageAndAnchors) {
     ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
 
     EXPECT_EQ(lits.size(), artifacts.haoSummary.totalRules);
-    EXPECT_EQ(artifacts.haoSummary.fastPathRules +
-              artifacts.haoSummary.unsupportedRules,
-              artifacts.haoSummary.totalRules);
+    EXPECT_EQ(0U, artifacts.haoSummary.unsupportedRules);
+    EXPECT_EQ(artifacts.haoSummary.totalRules,
+              artifacts.haoSummary.fastPathRules);
 
     u32 anchorCount = 0;
     for (const auto &plan : artifacts.haoRulePlans) {
@@ -3090,7 +2972,6 @@ TEST(HAOCompile, HaoSummaryTracksDirectReportRules) {
     EXPECT_EQ(3U, artifacts.haoSummary.exactRules);
     EXPECT_EQ(1U, artifacts.haoSummary.nocaseRules);
     EXPECT_EQ(lits.size(), artifacts.haoSummary.directReportRules);
-    EXPECT_EQ(0U, artifacts.haoSummary.residualRules);
     EXPECT_EQ(0U, artifacts.haoSummary.fastPathConfirmRules);
 }
 
@@ -3148,7 +3029,7 @@ TEST(HAOCompile, HaoDirectReportSafetyFollowsSelectorCoverage) {
     }
 }
 
-TEST(HAOCompile, HaoBudgetedSelectorsAvoidResidualUnsupportedRules) {
+TEST(HAOCompile, HaoBudgetedSelectorsKeepAllRulesFastPath) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 7396, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 7397, HWLM_ALL_GROUPS, {}, {}),
@@ -3162,9 +3043,9 @@ TEST(HAOCompile, HaoBudgetedSelectorsAvoidResidualUnsupportedRules) {
     HAOCompileArtifacts artifacts;
     ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
 
-    EXPECT_EQ(0U, artifacts.haoSummary.residualRules);
-    EXPECT_EQ(0U, artifacts.haoSummary.residualUnsupportedRules);
     EXPECT_EQ(0U, artifacts.haoSummary.unsupportedRules);
+    EXPECT_EQ(artifacts.haoSummary.totalRules,
+              artifacts.haoSummary.fastPathRules);
     EXPECT_LE(artifacts.haoSummary.maxSelectedAmbigBits,
               HAO_MAX_KEY_AMBIG_BITS);
 
@@ -3189,12 +3070,9 @@ TEST(HAOCompile, HaoGlobalHashBuildsSinglePrimarySpace) {
     ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
     ASSERT_TRUE(artifacts.haoGlobalHash.valid);
 
-    u32 nonResidualExpandedKeys = 0;
+    u32 fastPathExpandedKeys = 0;
     for (const auto &plan : artifacts.haoRulePlans) {
-        if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
-            continue;
-        }
-        nonResidualExpandedKeys += plan.keyExpansion.expandedKeyCount;
+        fastPathExpandedKeys += plan.keyExpansion.expandedKeyCount;
     }
 
     const u32 primaryCount = 1U << artifacts.keyBits;
@@ -3203,7 +3081,7 @@ TEST(HAOCompile, HaoGlobalHashBuildsSinglePrimarySpace) {
               artifacts.haoGlobalHash.primaryHashTableRaw.offsets.size());
     EXPECT_EQ((primaryCount + 7U) / 8U,
               artifacts.haoGlobalHash.primaryHashBitmapRaw.bits.size());
-    EXPECT_EQ(nonResidualExpandedKeys,
+    EXPECT_EQ(fastPathExpandedKeys,
               artifacts.haoGlobalHash.stats.totalExpandedKeysInBuckets);
     EXPECT_GT(artifacts.haoGlobalHash.stats.nonEmptyPrimary, 0U);
 }
@@ -3802,5 +3680,4 @@ TEST(HAORuntime, InvalidLayoutOffsetFallsBackCleanly) {
 }
 
 } // namespace
-
 

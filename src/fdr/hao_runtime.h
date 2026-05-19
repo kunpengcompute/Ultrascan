@@ -5,7 +5,7 @@
 #include "hwlm/hwlm.h"
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 15U
+#define HAO_RUNTIME_VERSION 16U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 #define HAO_RUNTIME_KEY_BITS 22U
@@ -26,12 +26,12 @@
     (1U << HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT)
 
 /* Shared HAO tuning knobs used by compile-time and runtime code paths. */
-/* These remain part of the public HAO contract for the HAO v2-only path. */
+/* These remain part of the public HAO contract for the HAO-only path. */
 #ifndef HAO_KEY_BITS
 #define HAO_KEY_BITS 22U
 #endif
 #ifndef HAO_MAX_KEY_AMBIG_BITS
-#define HAO_MAX_KEY_AMBIG_BITS 15U
+#define HAO_MAX_KEY_AMBIG_BITS HAO_KEY_BITS
 #endif
 #ifndef HAO_MAX_KEY_EXPANSION
 #define HAO_MAX_KEY_EXPANSION (1U << HAO_MAX_KEY_AMBIG_BITS)
@@ -39,16 +39,9 @@
 #ifndef HAO_MAX_SMALL_CLASS_EXPANSION
 #define HAO_MAX_SMALL_CLASS_EXPANSION 16U
 #endif
-#ifndef HAO_MAX_TOTAL_EXPANDED_KEYS
-#define HAO_MAX_TOTAL_EXPANDED_KEYS (1U << 27)
-#endif
 #ifndef HAO_MAX_LITERALS
 #define HAO_MAX_LITERALS (1U << 18)
 #endif
-#ifndef HAO_MIN_FAST_RULE_COVERAGE_PCT
-#define HAO_MIN_FAST_RULE_COVERAGE_PCT 80U
-#endif
-
 #define HAO_RULE_FLAG_NOCASE (1U << 0)
 #define HAO_RULE_FLAG_NORUNS (1U << 1)
 #define HAO_RULE_FLAG_HAS_MASK (1U << 2)
@@ -96,8 +89,8 @@ struct HAORuntimeHeader {
     u32 l2MetaOffset;
     u32 ruleMetaOffset;
     u32 literalBlobOffset;
-    u32 residualRuleCount;
-    u32 residualRuleIndexOffset;
+    u32 reserved1;
+    u32 reserved2;
 };
 
 struct HAORuntimeBitSelector {
@@ -133,7 +126,6 @@ struct HAORuntimeInspectSummary {
     u32 primaryCoarseBitmapSize;
     u32 l2EntryCount;
     u32 ruleMetaCount;
-    u32 residualRuleCount;
     u32 nonEmptyPrimary;
     u32 multiEntryBucketCount;
     u32 maxEntriesPerKey;
@@ -158,12 +150,6 @@ struct HAORuntimeStats {
     u64a encodedConfirmCalls;
     u64a encodedConfirmMatches;
     u64a encodedConfirmRejects;
-    u64a residualPosCalls;
-    u64a residualRuleChecks;
-    u64a residualGroupRejects;
-    u64a residualConfirmCalls;
-    u64a residualConfirmMatches;
-    u64a residualConfirmRejects;
     u64a callbackReports;
     u64a l2RangeEntryBucketsEq1;
     u64a l2RangeEntryBuckets2To4;

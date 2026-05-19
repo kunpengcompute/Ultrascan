@@ -21,9 +21,7 @@
 #include <limits>
 #include <map>
 #include <memory>
-#include <fstream>
 #include <string>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -39,64 +37,6 @@ static constexpr u64a HAO_BUILD_MAX_TOTAL_PRIMARY_FOOTPRINT =
     128ULL * 1024ULL * 1024ULL;
 static constexpr u8 HAO_BUILD_STATE_DONT_CARE = 2;
 
-// 0: baseline score plus ambiguity cap.
-// 4: baseline-seeded local search driven by HS_HAO_SELECTOR_PROFILE samples.
-#ifndef HAO_SELECTOR_SCORE_MODE
-#define HAO_SELECTOR_SCORE_MODE 0
-#endif
-
-#ifndef HAO_SELECTOR_LOCAL_SEARCH_ROUNDS
-#define HAO_SELECTOR_LOCAL_SEARCH_ROUNDS 2U
-#endif
-
-#ifndef HAO_SELECTOR_LOCAL_SEARCH_TOPK
-#define HAO_SELECTOR_LOCAL_SEARCH_TOPK 0U
-#endif
-
-#ifndef HAO_SELECTOR_LOCAL_MIN_NONEMPTY_PCT
-#define HAO_SELECTOR_LOCAL_MIN_NONEMPTY_PCT 98U
-#endif
-
-#ifndef HAO_SELECTOR_LOCAL_MIN_GAIN_PCT
-#define HAO_SELECTOR_LOCAL_MIN_GAIN_PCT 5.0
-#endif
-
-#ifndef HAO_SELECTOR_REL_ACTIVE_WEIGHT
-#define HAO_SELECTOR_REL_ACTIVE_WEIGHT 100.0
-#endif
-
-#ifndef HAO_SELECTOR_REL_ENTRY_WEIGHT
-#define HAO_SELECTOR_REL_ENTRY_WEIGHT 90.0
-#endif
-
-#ifndef HAO_SELECTOR_REL_GT4_WEIGHT
-#define HAO_SELECTOR_REL_GT4_WEIGHT 35.0
-#endif
-
-#ifndef HAO_SELECTOR_REL_EXPANDED_KEY_WEIGHT
-#define HAO_SELECTOR_REL_EXPANDED_KEY_WEIGHT 8.0
-#endif
-
-#ifndef HAO_SELECTOR_REL_COLLISION_WEIGHT
-#define HAO_SELECTOR_REL_COLLISION_WEIGHT 8.0
-#endif
-
-#ifndef HAO_SELECTOR_REL_DEEP_BUCKET_WEIGHT
-#define HAO_SELECTOR_REL_DEEP_BUCKET_WEIGHT 12.0
-#endif
-
-#ifndef HAO_SELECTOR_REL_MAX_RULE_WEIGHT
-#define HAO_SELECTOR_REL_MAX_RULE_WEIGHT 4.0
-#endif
-
-#ifndef HAO_SELECTOR_PROFILE_MAX_BYTES
-#define HAO_SELECTOR_PROFILE_MAX_BYTES (16U * 1024U * 1024U)
-#endif
-
-#ifndef HAO_SELECTOR_PROFILE_MAX_WINDOWS
-#define HAO_SELECTOR_PROFILE_MAX_WINDOWS 65536U
-#endif
-
 struct HAOBitCandidate {
     u32 bitIndex = 0;
     double score = 0.0;
@@ -109,32 +49,11 @@ struct HAOBitCandidate {
     std::vector<u8> states; // 0, 1, or HAO_BUILD_STATE_DONT_CARE
 };
 
-struct HAOSelectorCostEval {
-    bool valid = false;
-    u32 totalExpandedKeys = 0;
-    u32 nonEmptyPrimary = 0;
-    u32 collisionBuckets = 0;
-    u32 totalL2Entries = 0;
-    u32 ruleBucketsGt4 = 0;
-    u32 entryBucketsGt4 = 0;
-    u32 maxRulesPerBucket = 0;
-    double expectedActive = 0.0;
-    double expectedEntries = 0.0;
-    double expectedGt4 = 0.0;
-    double cost = std::numeric_limits<double>::infinity();
-};
-
-struct HAOSelectorInputProfile {
-    bool initialized = false;
-    bool loaded = false;
-    std::vector<u64a> windows;
-};
-
 static
 bool getBitState(const hwlmLiteral &lit, u32 bitIndex, u8 *state);
 
 static
-void haoComputeKeyValueMaskForLiteral(const hwlmLiteral &lit,
+void haoLitKeyMask(const hwlmLiteral &lit,
                                    const std::vector<HAOBitSelector> &selectors,
                                    u32 *keyValue, u32 *keyMask) {
     u32 v = 0;
@@ -234,16 +153,16 @@ u32 haoFullKeyMask(u32 keyBits) {
 }
 
 /* Returns true when a literal carries supplementary mask/cmp semantics.
- * In the current HAO v2 plan this maps to anchor-confirm. */
+ * In the current HAO plan this maps to anchor-confirm. */
 static
-bool haoLiteralHasSupplementaryMask(const hwlmLiteral &lit) {
+bool haoHasMask(const hwlmLiteral &lit) {
     return !lit.msk.empty() || !lit.cmp.empty();
 }
 
-/* Enumerate the selected-bit key variants for one rule. Callers exclude
- * rules from the fast path when ambiguity exceeds HAO_MAX_KEY_AMBIG_BITS. */
+/* Enumerate the selected-bit key variants for one rule. HAO is fast-path
+ * only, so rules that exceed HAO_MAX_KEY_AMBIG_BITS reject the whole build. */
 static
-HAOKeyExpansionInfo haoEnumerateExpandedKeysForLiteral(
+HAOKeyExpansionInfo haoExpandKeys(
     const hwlmLiteral &lit, const std::vector<HAOBitSelector> &selectors) {
     HAOKeyExpansionInfo info;
     u32 baseKeyValue = 0;
@@ -306,7 +225,7 @@ HAORuleCategory haoClassifyLiteral(const hwlmLiteral &lit,
         return HAORuleCategory::HAO_RULE_UNSUPPORTED;
     }
 
-    if (haoLiteralHasSupplementaryMask(lit)) {
+    if (haoHasMask(lit)) {
         return HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM;
     }
 
@@ -318,21 +237,7 @@ HAORuleCategory haoClassifyLiteral(const hwlmLiteral &lit,
 }
 
 static
-bool haoPlanRequiresResidualEval(const HAOCompiledRulePlan &plan) {
-    if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
-        return true;
-    }
-    if (plan.category == HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM) {
-        return false;
-    }
-    if (plan.flags & HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM) {
-        return true;
-    }
-    return false;
-}
-
-static
-bool haoSelectorsCoverExactCaseBits(
+bool haoCoverCaseBits(
     const hwlmLiteral &lit, const std::vector<HAOBitSelector> &selectors) {
     for (u32 byteFromEnd = 0; byteFromEnd < lit.s.size(); byteFromEnd++) {
         const u8 c = verify_u8(lit.s[lit.s.size() - byteFromEnd - 1]);
@@ -355,18 +260,18 @@ bool haoSelectorsCoverExactCaseBits(
 }
 
 static
-bool haoPlanCanDirectReport(const hwlmLiteral &lit,
+bool haoCanDirectReport(const hwlmLiteral &lit,
                             const HAOCompiledRulePlan &plan,
                             const std::vector<HAOBitSelector> &selectors) {
     if (plan.category != HAORuleCategory::HAO_RULE_EXACT &&
         plan.category != HAORuleCategory::HAO_RULE_NOCASE) {
         return false;
     }
-    if (haoLiteralHasSupplementaryMask(lit) || lit.noruns) {
+    if (haoHasMask(lit) || lit.noruns) {
         return false;
     }
     if (plan.category == HAORuleCategory::HAO_RULE_EXACT) {
-        if (!haoSelectorsCoverExactCaseBits(lit, selectors)) {
+        if (!haoCoverCaseBits(lit, selectors)) {
             return false;
         }
     }
@@ -385,7 +290,7 @@ bool haoStatsDumpEnabled(void) {
  * nocase bytes are encoded through an L2 mask byte of 0xdf so runtime can
  * compare input bytes without normalizing them first. */
 static
-HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
+HAOVerifierFragment haoBuildFrag(const hwlmLiteral &lit,
                                              HAORuleCategory category) {
     HAOVerifierFragment fragment = {};
     const u32 len = verify_u32(lit.s.size());
@@ -416,7 +321,7 @@ HAOVerifierFragment haoBuildVerifierFragment(const hwlmLiteral &lit,
 /* Build the compile-time HAO rule-plan layer that later table construction
  * consumes directly. */
 static
-void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
+void haoBuildPlans(const std::vector<hwlmLiteral> &lits,
                        const std::vector<HAOBitSelector> &selectors,
                        std::vector<HAOCompiledRulePlan> *rulePlans,
                        HAOCompileSummary *summary) {
@@ -432,9 +337,9 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
     for (u32 i = 0; i < lits.size(); i++) {
         HAOCompiledRulePlan plan = {};
         plan.ruleIndex = i;
-        plan.keyExpansion = haoEnumerateExpandedKeysForLiteral(lits[i], selectors);
+        plan.keyExpansion = haoExpandKeys(lits[i], selectors);
         plan.category = haoClassifyLiteral(lits[i], plan.keyExpansion);
-        plan.verifier = haoBuildVerifierFragment(lits[i], plan.category);
+        plan.verifier = haoBuildFrag(lits[i], plan.category);
 
         if (plan.keyExpansion.selectedAmbigBits) {
             plan.flags |= HAO_RULE_PLAN_FLAG_KEY_EXPANDED;
@@ -442,7 +347,7 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
         if (lits[i].nocase) {
             plan.flags |= HAO_RULE_PLAN_FLAG_NORMALIZED;
         }
-        if (haoLiteralHasSupplementaryMask(lits[i])) {
+        if (haoHasMask(lits[i])) {
             plan.flags |= HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK;
         }
         if (plan.keyExpansion.selectedAmbigBits > HAO_MAX_KEY_AMBIG_BITS) {
@@ -462,14 +367,6 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
             summary->unsupportedRules++;
             plan.keyExpansion.expandedKeys.clear();
             plan.keyExpansion.expandedKeyCount = 0;
-        } else if ((u64a)summary->totalExpandedKeys +
-                    plan.keyExpansion.expandedKeyCount >
-            HAO_MAX_TOTAL_EXPANDED_KEYS) {
-            plan.category = HAORuleCategory::HAO_RULE_UNSUPPORTED;
-            plan.flags |= HAO_RULE_PLAN_FLAG_OVER_EXPANSION_BUDGET;
-            plan.keyExpansion.expandedKeys.clear();
-            plan.keyExpansion.expandedKeyCount = 0;
-            summary->unsupportedRules++;
         }
 
         switch (plan.category) {
@@ -488,9 +385,8 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
             break;
         }
 
-        const bool requiresResidual = haoPlanRequiresResidualEval(plan);
         const bool canDirectReport =
-            haoPlanCanDirectReport(lits[i], plan, selectors);
+            haoCanDirectReport(lits[i], plan, selectors);
 
         if (canDirectReport) {
             plan.flags |= HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE;
@@ -499,12 +395,8 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
         if (plan.flags & HAO_RULE_PLAN_FLAG_KEY_EXPANDED) {
             summary->keyExpandedRules++;
         }
-        if (requiresResidual) {
-            summary->residualRules++;
-            if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
-                summary->residualUnsupportedRules++;
-            }
-        } else if (!canDirectReport) {
+        if (!canDirectReport &&
+            plan.category != HAORuleCategory::HAO_RULE_UNSUPPORTED) {
             summary->fastPathConfirmRules++;
         }
         if (canDirectReport) {
@@ -519,7 +411,7 @@ void buildHAORulePlans(const std::vector<hwlmLiteral> &lits,
 }
 
 static
-void haoInitEmptyL2Entry(HAOL2Check *check, HAOL2Meta *meta) {
+void haoInitL2(HAOL2Check *check, HAOL2Meta *meta) {
     assert(check);
     assert(meta);
 
@@ -533,7 +425,7 @@ void haoInitEmptyL2Entry(HAOL2Check *check, HAOL2Meta *meta) {
 
 /* Write one HAO verifier fragment into one compact SVE L2 slot. */
 static
-void haoFillL2SlotFromPlan(const HAOCompiledRulePlan &plan, u32 localSlot,
+void haoFillL2(const HAOCompiledRulePlan &plan, u32 localSlot,
                            HAOL2Check *check, HAOL2Meta *meta) {
     const u8 validMask = plan.verifier.validByteMask;
     u64a ruleWord = 0;
@@ -574,7 +466,7 @@ void haoFillL2SlotFromPlan(const HAOCompiledRulePlan &plan, u32 localSlot,
 /* Build the HAO global single-table hash. Expanded keys go straight into the
  * global key space instead of being grouped by mask class. */
 static
-void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
+void haoBuildHash(const std::vector<HAOCompiledRulePlan> &rulePlans,
                               u32 keyBits, HAOGlobalHashArtifacts *out) {
     if (!out) {
         return;
@@ -603,15 +495,16 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
         HAOL2Check check = {};
         HAOL2Meta meta = {};
 
-        haoInitEmptyL2Entry(&check, &meta);
+        haoInitL2(&check, &meta);
         out->l2CheckTable.push_back(check);
         out->l2MetaTable.push_back(meta);
     }
 
     std::map<u32, std::vector<u32>> keyToRuleIndexes;
     for (const auto &plan : rulePlans) {
-        if (haoPlanRequiresResidualEval(plan)) {
-            continue;
+        if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
+            out->flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+            return;
         }
         for (const auto &expanded : plan.keyExpansion.expandedKeys) {
             keyToRuleIndexes[expanded.keyValue].push_back(plan.ruleIndex);
@@ -680,12 +573,12 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
             const size_t end = std::min(bucketRules.size(),
                                         begin + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY);
 
-            haoInitEmptyL2Entry(&l2Check, &l2Meta);
+            haoInitL2(&l2Check, &l2Meta);
             for (size_t slot = begin; slot < end; slot++) {
                 const u32 localSlot = verify_u32(slot - begin);
                 const u32 ruleIndex = bucketRules[slot];
                 assert(ruleIndex < rulePlans.size());
-                haoFillL2SlotFromPlan(rulePlans[ruleIndex], localSlot,
+                haoFillL2(rulePlans[ruleIndex], localSlot,
                                       &l2Check, &l2Meta);
             }
 
@@ -700,7 +593,7 @@ void buildHAOGlobalHashTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
 // chooses between scalar extraction and the BEXT-based path.
 template <class ArtifactsT>
 static
-void buildExtractDescriptor(const std::vector<HAOBitSelector> &selectors,
+void haoBuildExtract(const std::vector<HAOBitSelector> &selectors,
                             ArtifactsT *artifacts) {
     if (!artifacts) {
         return;
@@ -883,7 +776,7 @@ void dumpRuleKeys(const std::vector<hwlmLiteral> &lits,
     for (size_t i = 0; i < lits.size(); i++) {
         u32 keyValue = 0;
         u32 keyMask = 0;
-        haoComputeKeyValueMaskForLiteral(lits[i], selectors, &keyValue, &keyMask);
+        haoLitKeyMask(lits[i], selectors, &keyValue, &keyMask);
         printf("  r%zu id=%u keyValue={dec=%u hex=0x%x bin=%s} keyMask={dec=%u hex=0x%x bin=%s}\n",
                i, lits[i].id, keyValue, keyValue,
                keyToBits(keyValue, keyBits).c_str(), keyMask, keyMask,
@@ -930,53 +823,51 @@ void dumpHAOSummary(const ArtifactsT &artifacts) {
                                              (double)h.nonEmptyPrimary
                                        : 0.0;
 
-    printf("[HAO][Summary/编译汇总]\n");
-    HAO_SUMMARY_FMT("total(规则总数)",                           "%u", s.totalRules);
-    HAO_SUMMARY_FMT("fastPath(快速路径规则数)",                  "%u", s.fastPathRules);
-    HAO_SUMMARY_FMT("residual(兜底规则数)",                      "%u", s.residualRules);
-    HAO_SUMMARY_FMT("residualUnsupported(兜底且不支持规则数)",   "%u", s.residualUnsupportedRules);
-    HAO_SUMMARY_FMT("unsupported(不支持规则数)",                 "%u", s.unsupportedRules);
-    HAO_SUMMARY_FMT("exact(精确规则数)",                         "%u", s.exactRules);
-    HAO_SUMMARY_FMT("nocase(忽略大小写规则数)",                  "%u", s.nocaseRules);
-    HAO_SUMMARY_FMT("anchorConfirm(anchor确认规则数)",           "%u", s.anchorConfirmRules);
-    HAO_SUMMARY_FMT("directReport(可直接上报规则数)",            "%u", s.directReportRules);
-    HAO_SUMMARY_FMT("fastPathConfirm(快速路径需确认规则数)",     "%u", s.fastPathConfirmRules);
-    HAO_SUMMARY_FMT("keyExpanded(发生key展开规则数)",            "%u", s.keyExpandedRules);
-    HAO_SUMMARY_FMT("expandedKeys(展开后的key总数)",             "%u", s.totalExpandedKeys);
-    HAO_SUMMARY_FMT("maxSelectedAmbigBits(最大选位歧义bit数)",   "%u", s.maxSelectedAmbigBits);
+    printf("[HAO][Summary]\n");
+    HAO_SUMMARY_FMT("total", "%u", s.totalRules);
+    HAO_SUMMARY_FMT("fastPath", "%u", s.fastPathRules);
+    HAO_SUMMARY_FMT("unsupported", "%u", s.unsupportedRules);
+    HAO_SUMMARY_FMT("exact", "%u", s.exactRules);
+    HAO_SUMMARY_FMT("nocase", "%u", s.nocaseRules);
+    HAO_SUMMARY_FMT("anchorConfirm", "%u", s.anchorConfirmRules);
+    HAO_SUMMARY_FMT("directReport", "%u", s.directReportRules);
+    HAO_SUMMARY_FMT("fastPathConfirm", "%u", s.fastPathConfirmRules);
+    HAO_SUMMARY_FMT("keyExpanded", "%u", s.keyExpandedRules);
+    HAO_SUMMARY_FMT("expandedKeys", "%u", s.totalExpandedKeys);
+    HAO_SUMMARY_FMT("maxSelectedAmbigBits", "%u", s.maxSelectedAmbigBits);
 
     if (!artifacts.haoGlobalHash.valid || !h.nonEmptyPrimary) {
         return;
     }
 
-    printf("[HAO][Hash/哈希分布]\n");
-    HAO_SUMMARY_FMT("nonEmptyPrimary(非空一级桶数)",             "%u", h.nonEmptyPrimary);
-    HAO_SUMMARY_FMT("collisionBuckets(冲突桶数)",                "%u", h.collisionBuckets);
-    HAO_SUMMARY_FMT("collisionBucketPct(冲突桶占比)",            "%.5f",
+    printf("[HAO][Hash]\n");
+    HAO_SUMMARY_FMT("nonEmptyPrimary", "%u", h.nonEmptyPrimary);
+    HAO_SUMMARY_FMT("collisionBuckets", "%u", h.collisionBuckets);
+    HAO_SUMMARY_FMT("collisionBucketPct", "%.5f",
                     haoCompilePct(h.collisionBuckets, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("avgRulesPerBucket(每桶平均规则数)",         "%.5f", avgRulesPerBucket);
-    HAO_SUMMARY_FMT("minRulesPerBucket(每桶最少规则数)",         "%u", h.minRulesPerBucket);
-    HAO_SUMMARY_FMT("maxRulesPerBucket(每桶最多规则数)",         "%u", h.maxRulesPerBucket);
-    HAO_SUMMARY_FMT("ruleBucketsEq1(规则数=1的桶数)",            "%u", h.ruleBucketsEq1);
-    HAO_SUMMARY_FMT("ruleBucketsEq1Pct(规则数=1桶占比)",         "%.5f",
+    HAO_SUMMARY_FMT("avgRulesPerBucket", "%.5f", avgRulesPerBucket);
+    HAO_SUMMARY_FMT("minRulesPerBucket", "%u", h.minRulesPerBucket);
+    HAO_SUMMARY_FMT("maxRulesPerBucket", "%u", h.maxRulesPerBucket);
+    HAO_SUMMARY_FMT("ruleBucketsEq1", "%u", h.ruleBucketsEq1);
+    HAO_SUMMARY_FMT("ruleBucketsEq1Pct", "%.5f",
                     haoCompilePct(h.ruleBucketsEq1, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("ruleBuckets2To4(规则数2~4的桶数)",          "%u", h.ruleBuckets2To4);
-    HAO_SUMMARY_FMT("ruleBuckets2To4Pct(规则数2~4桶占比)",       "%.5f",
+    HAO_SUMMARY_FMT("ruleBuckets2To4", "%u", h.ruleBuckets2To4);
+    HAO_SUMMARY_FMT("ruleBuckets2To4Pct", "%.5f",
                     haoCompilePct(h.ruleBuckets2To4, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("ruleBucketsGt4(规则数>4的桶数)",            "%u", h.ruleBucketsGt4);
-    HAO_SUMMARY_FMT("ruleBucketsGt4Pct(规则数>4桶占比)",         "%.5f",
+    HAO_SUMMARY_FMT("ruleBucketsGt4", "%u", h.ruleBucketsGt4);
+    HAO_SUMMARY_FMT("ruleBucketsGt4Pct", "%.5f",
                     haoCompilePct(h.ruleBucketsGt4, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("avgEntriesPerBucket(每桶平均entry数)",      "%.5f", avgEntriesPerBucket);
-    HAO_SUMMARY_FMT("minEntriesPerBucket(每桶最少entry数)",      "%u", h.minEntriesPerBucket);
-    HAO_SUMMARY_FMT("maxEntriesPerBucket(每桶最多entry数)",      "%u", h.maxEntriesPerKey);
-    HAO_SUMMARY_FMT("entryBucketsEq1(entry数=1的桶数)",          "%u", h.entryBucketsEq1);
-    HAO_SUMMARY_FMT("entryBucketsEq1Pct(entry数=1桶占比)",       "%.5f",
+    HAO_SUMMARY_FMT("avgEntriesPerBucket", "%.5f", avgEntriesPerBucket);
+    HAO_SUMMARY_FMT("minEntriesPerBucket", "%u", h.minEntriesPerBucket);
+    HAO_SUMMARY_FMT("maxEntriesPerBucket", "%u", h.maxEntriesPerKey);
+    HAO_SUMMARY_FMT("entryBucketsEq1", "%u", h.entryBucketsEq1);
+    HAO_SUMMARY_FMT("entryBucketsEq1Pct", "%.5f",
                     haoCompilePct(h.entryBucketsEq1, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("entryBuckets2To4(entry数2~4的桶数)",        "%u", h.entryBuckets2To4);
-    HAO_SUMMARY_FMT("entryBuckets2To4Pct(entry数2~4桶占比)",     "%.5f",
+    HAO_SUMMARY_FMT("entryBuckets2To4", "%u", h.entryBuckets2To4);
+    HAO_SUMMARY_FMT("entryBuckets2To4Pct", "%.5f",
                     haoCompilePct(h.entryBuckets2To4, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("entryBucketsGt4(entry数>4的桶数)",          "%u", h.entryBucketsGt4);
-    HAO_SUMMARY_FMT("entryBucketsGt4Pct(entry数>4桶占比)",       "%.5f",
+    HAO_SUMMARY_FMT("entryBucketsGt4", "%u", h.entryBucketsGt4);
+    HAO_SUMMARY_FMT("entryBucketsGt4Pct", "%.5f",
                     haoCompilePct(h.entryBucketsGt4, h.nonEmptyPrimary));
 }
 
@@ -1080,7 +971,7 @@ u64a signatureOfStates(const std::vector<u8> &states) {
 }
 
 static
-bool haoCandidateFitsAmbigBudget(const HAOBitCandidate &cand,
+bool haoCandFits(const HAOBitCandidate &cand,
                                  const std::vector<u8> &selectedAmbigs) {
     assert(cand.states.size() == selectedAmbigs.size());
     for (u32 i = 0; i < cand.states.size(); i++) {
@@ -1095,7 +986,7 @@ bool haoCandidateFitsAmbigBudget(const HAOBitCandidate &cand,
 }
 
 static
-void haoApplyCandidateAmbigBudget(const HAOBitCandidate &cand,
+void haoCandApply(const HAOBitCandidate &cand,
                                   std::vector<u8> *selectedAmbigs) {
     assert(selectedAmbigs);
     assert(cand.states.size() == selectedAmbigs->size());
@@ -1105,249 +996,6 @@ void haoApplyCandidateAmbigBudget(const HAOBitCandidate &cand,
         }
     }
 }
-
-#if HAO_SELECTOR_SCORE_MODE == 4
-static
-u64a haoParseU64Env(const char *name, u64a fallback) {
-    const char *value = getenv(name);
-    if (!value || !*value) {
-        return fallback;
-    }
-
-    char *end = nullptr;
-    const unsigned long long parsed = strtoull(value, &end, 0);
-    if (end == value) {
-        return fallback;
-    }
-    return (u64a)parsed;
-}
-
-static
-u64a haoBuildProfileWindow(const std::vector<u8> &data, size_t endPos) {
-    u64a window = 0;
-    for (u32 byteFromEnd = 0; byteFromEnd < HAO_BUILD_MAX_SUFFIX_BYTES;
-         byteFromEnd++) {
-        const u8 c = data[endPos - byteFromEnd];
-        window |= (u64a)c << (byteFromEnd * 8U);
-    }
-    return window;
-}
-
-static
-void haoLoadSelectorInputProfile(HAOSelectorInputProfile *profile) {
-    assert(profile);
-    profile->initialized = true;
-
-    const char *path = getenv("HS_HAO_SELECTOR_PROFILE");
-    if (!path || !*path) {
-        path = getenv("HAO_SELECTOR_PROFILE");
-    }
-    if (!path || !*path) {
-        return;
-    }
-
-    const u64a maxBytes = haoParseU64Env("HS_HAO_SELECTOR_PROFILE_MAX_BYTES",
-                                         HAO_SELECTOR_PROFILE_MAX_BYTES);
-    const u64a maxWindows =
-        haoParseU64Env("HS_HAO_SELECTOR_PROFILE_MAX_WINDOWS",
-                       HAO_SELECTOR_PROFILE_MAX_WINDOWS);
-    if (!maxBytes || !maxWindows) {
-        return;
-    }
-
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        return;
-    }
-
-    std::vector<u8> data;
-    data.reserve((size_t)std::min<u64a>(maxBytes, 1U << 20));
-    char ch = 0;
-    while ((u64a)data.size() < maxBytes && in.get(ch)) {
-        data.push_back((u8)(unsigned char)ch);
-    }
-    if (data.size() < HAO_BUILD_MAX_SUFFIX_BYTES) {
-        return;
-    }
-
-    const size_t windowCount = data.size() - HAO_BUILD_MAX_SUFFIX_BYTES + 1;
-    const size_t maxSampleWindows = (size_t)maxWindows;
-    const size_t stride =
-        std::max<size_t>(1, (windowCount + maxSampleWindows - 1) /
-                                maxSampleWindows);
-    u64a total = 0;
-
-    profile->windows.reserve((size_t)std::min<u64a>(maxWindows, windowCount));
-    for (size_t start = 0;
-         start + HAO_BUILD_MAX_SUFFIX_BYTES <= data.size() &&
-         profile->windows.size() < maxWindows;
-         start += stride) {
-        const size_t endPos = start + HAO_BUILD_MAX_SUFFIX_BYTES - 1;
-        const u64a window = haoBuildProfileWindow(data, endPos);
-        profile->windows.push_back(window);
-        total++;
-    }
-
-    if (!total || profile->windows.empty()) {
-        profile->windows.clear();
-        return;
-    }
-
-    profile->loaded = true;
-}
-
-static
-const HAOSelectorInputProfile &haoGetSelectorInputProfile(void) {
-    static HAOSelectorInputProfile profile;
-    if (!profile.initialized) {
-        haoLoadSelectorInputProfile(&profile);
-    }
-    return profile;
-}
-
-static
-bool haoSelectorInputProfileLoaded(void) {
-    const HAOSelectorInputProfile &profile = haoGetSelectorInputProfile();
-    return profile.loaded && !profile.windows.empty();
-}
-
-static
-u32 haoProfileWindowKey(const std::vector<const HAOBitCandidate *> &selected,
-                        u64a window) {
-    u32 key = 0;
-    for (u32 i = 0; i < selected.size(); i++) {
-        if (window & (1ULL << selected[i]->bitIndex)) {
-            key |= (1U << i);
-        }
-    }
-    return key;
-}
-
-static
-std::vector<const HAOBitCandidate *> haoSortedSelectedCandidates(
-    const std::vector<const HAOBitCandidate *> &selected) {
-    std::vector<const HAOBitCandidate *> ordered = selected;
-    std::sort(ordered.begin(), ordered.end(),
-              [](const HAOBitCandidate *a, const HAOBitCandidate *b) {
-                  return a->bitIndex < b->bitIndex;
-              });
-    return ordered;
-}
-#endif
-
-#if HAO_SELECTOR_SCORE_MODE == 4
-static
-HAOSelectorCostEval haoEvaluateSelectorRuntimeCost(
-    const std::vector<const HAOBitCandidate *> &selected,
-    size_t literalCount) {
-    HAOSelectorCostEval eval;
-    if (selected.empty() || selected.size() > HAO_LAYOUT_KEY_BITS ||
-        selected.size() > 31U) {
-        return eval;
-    }
-
-    const std::vector<const HAOBitCandidate *> ordered =
-        haoSortedSelectedCandidates(selected);
-    std::unordered_map<u32, u32> bucketCounts;
-    bucketCounts.reserve(literalCount * 4);
-
-    for (u32 litIndex = 0; litIndex < literalCount; litIndex++) {
-        u32 baseKey = 0;
-        u32 ambiguousBits[HAO_LAYOUT_MAX_SELECTORS] = {};
-        u32 ambiguousCount = 0;
-
-        for (u32 selectorPos = 0; selectorPos < ordered.size(); selectorPos++) {
-            const u8 state = ordered[selectorPos]->states[litIndex];
-            if (state == HAO_BUILD_STATE_DONT_CARE) {
-                if (ambiguousCount >= HAO_MAX_KEY_AMBIG_BITS ||
-                    ambiguousCount >= HAO_LAYOUT_MAX_SELECTORS) {
-                    return eval;
-                }
-                ambiguousBits[ambiguousCount++] = selectorPos;
-            } else if (state) {
-                baseKey |= (1U << selectorPos);
-            }
-        }
-
-        const u32 variantCount = 1U << ambiguousCount;
-        if ((u64a)eval.totalExpandedKeys + variantCount >
-            HAO_MAX_TOTAL_EXPANDED_KEYS) {
-            return eval;
-        }
-        eval.totalExpandedKeys += variantCount;
-
-        for (u32 variant = 0; variant < variantCount; variant++) {
-            u32 key = baseKey;
-            for (u32 j = 0; j < ambiguousCount; j++) {
-                const u32 bit = ambiguousBits[j];
-                if (variant & (1U << j)) {
-                    key |= (1U << bit);
-                } else {
-                    key &= ~(1U << bit);
-                }
-            }
-            bucketCounts[key]++;
-        }
-    }
-
-    eval.nonEmptyPrimary = verify_u32(bucketCounts.size());
-    const HAOSelectorInputProfile &profile = haoGetSelectorInputProfile();
-    for (const auto &it : bucketCounts) {
-        const u32 ruleCount = it.second;
-        const u32 entryCount =
-            (ruleCount + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY - 1) /
-            HAO_LAYOUT_RULE_SLOTS_PER_ENTRY;
-
-        eval.totalL2Entries += entryCount;
-        eval.maxRulesPerBucket = std::max(eval.maxRulesPerBucket, ruleCount);
-        if (ruleCount > 1) {
-            eval.collisionBuckets++;
-        }
-        if (ruleCount > HAO_LAYOUT_RULE_SLOTS_PER_ENTRY) {
-            eval.ruleBucketsGt4++;
-        }
-        if (entryCount > HAO_LAYOUT_RULE_SLOTS_PER_ENTRY) {
-            eval.entryBucketsGt4++;
-        }
-    }
-
-    if (!profile.loaded || profile.windows.empty()) {
-        return eval;
-    }
-
-    u64a active = 0;
-    u64a gt4 = 0;
-    long double entries = 0.0;
-    for (u64a window : profile.windows) {
-        const u32 key = haoProfileWindowKey(ordered, window);
-        const auto it = bucketCounts.find(key);
-        if (it == bucketCounts.end()) {
-            continue;
-        }
-        const u32 ruleCount = it->second;
-        const u32 entryCount =
-            (ruleCount + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY - 1) /
-            HAO_LAYOUT_RULE_SLOTS_PER_ENTRY;
-        active++;
-        entries += entryCount;
-        if (ruleCount > HAO_LAYOUT_RULE_SLOTS_PER_ENTRY ||
-            entryCount > HAO_LAYOUT_RULE_SLOTS_PER_ENTRY) {
-            gt4++;
-        }
-    }
-
-    const double denom = (double)profile.windows.size();
-    eval.expectedActive = (double)active / denom;
-    eval.expectedEntries = (double)entries / denom;
-    eval.expectedGt4 = (double)gt4 / denom;
-
-    // The final search cost is normalized against the baseline selector, so
-    // keep this field as a simple absolute fallback/debug summary.
-    eval.cost = eval.expectedActive + eval.expectedEntries + eval.expectedGt4;
-    eval.valid = true;
-    return eval;
-}
-#endif
 
 static
 std::vector<HAOBitCandidate> buildBitCandidates(
@@ -1395,8 +1043,7 @@ std::vector<HAOBitCandidate> buildBitCandidates(
             std::max<size_t>(1, lits.size());
         c.entropy = entropyScore(zeros, ones);
 
-        // Baseline selector quality: broad fixed coverage plus distribution
-        // balance. Profile mode uses this only to seed the local search.
+        // Selector quality: broad fixed coverage plus distribution balance.
         c.score = (c.fixedRatio * 0.8) + (c.entropy * 0.2);
 
         out.push_back(std::move(c));
@@ -1405,208 +1052,14 @@ std::vector<HAOBitCandidate> buildBitCandidates(
     return out;
 }
 
-#if HAO_SELECTOR_SCORE_MODE == 4
 static
-bool haoSelectedContainsBit(
-    const std::vector<const HAOBitCandidate *> &selected, u32 bitIndex) {
-    for (const HAOBitCandidate *cand : selected) {
-        if (cand->bitIndex == bitIndex) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static
-bool haoSelectedHasDuplicateSignature(
-    const std::vector<const HAOBitCandidate *> &selected) {
-    std::unordered_set<u64a> signatures;
-    for (const HAOBitCandidate *cand : selected) {
-        if (!signatures.insert(signatureOfStates(cand->states)).second) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static
-bool haoSelectedFitsAmbigBudget(
-    const std::vector<const HAOBitCandidate *> &selected,
-    size_t literalCount) {
-    std::vector<u8> ambigs(literalCount, 0);
-    for (const HAOBitCandidate *cand : selected) {
-        if (!haoCandidateFitsAmbigBudget(*cand, ambigs)) {
-            return false;
-        }
-        haoApplyCandidateAmbigBudget(*cand, &ambigs);
-    }
-    return true;
-}
-
-static
-bool haoSelectorLocalTrialAllowed(const HAOSelectorCostEval &eval,
-                                  const HAOSelectorCostEval &baseline) {
-    if (!eval.valid || !baseline.valid || !baseline.nonEmptyPrimary) {
-        return false;
-    }
-
-    const u64a minNonEmpty =
-        (u64a)baseline.nonEmptyPrimary * HAO_SELECTOR_LOCAL_MIN_NONEMPTY_PCT;
-    if ((u64a)eval.nonEmptyPrimary * 100U < minNonEmpty) {
-        return false;
-    }
-
-    // Keep the rule-side structure at least as healthy as the baseline. The
-    // profile tells us which buckets are hot, but it must not be allowed to
-    // collapse the key space or create deeper worst-case buckets.
-    if (eval.ruleBucketsGt4 > baseline.ruleBucketsGt4 ||
-        eval.entryBucketsGt4 > baseline.entryBucketsGt4 ||
-        eval.maxRulesPerBucket > baseline.maxRulesPerBucket) {
-        return false;
-    }
-    if ((u64a)eval.collisionBuckets * baseline.nonEmptyPrimary >
-        (u64a)baseline.collisionBuckets * eval.nonEmptyPrimary) {
-        return false;
-    }
-
-    return true;
-}
-
-static
-double haoRatioToBaseline(double value, double baseline) {
-    static constexpr double eps = 0.000000001;
-    if (baseline > eps) {
-        return value / baseline;
-    }
-    return value <= eps ? 1.0 : 8.0;
-}
-
-static
-double haoRatioToBaselineU32(u32 value, u32 baseline) {
-    if (baseline) {
-        return (double)value / (double)baseline;
-    }
-    return value ? 8.0 : 1.0;
-}
-
-static
-double haoSelectorRelativeCost(const HAOSelectorCostEval &eval,
-                               const HAOSelectorCostEval &baseline) {
-    const u32 evalDeepBuckets = eval.ruleBucketsGt4 + eval.entryBucketsGt4;
-    const u32 baselineDeepBuckets =
-        baseline.ruleBucketsGt4 + baseline.entryBucketsGt4;
-
-    double cost = 0.0;
-    cost += HAO_SELECTOR_REL_ACTIVE_WEIGHT *
-            haoRatioToBaseline(eval.expectedActive, baseline.expectedActive);
-    cost += HAO_SELECTOR_REL_ENTRY_WEIGHT *
-            haoRatioToBaseline(eval.expectedEntries, baseline.expectedEntries);
-    cost += HAO_SELECTOR_REL_GT4_WEIGHT *
-            haoRatioToBaseline(eval.expectedGt4, baseline.expectedGt4);
-    cost += HAO_SELECTOR_REL_EXPANDED_KEY_WEIGHT *
-            haoRatioToBaselineU32(eval.totalExpandedKeys,
-                                  baseline.totalExpandedKeys);
-    cost += HAO_SELECTOR_REL_COLLISION_WEIGHT *
-            haoRatioToBaselineU32(eval.collisionBuckets,
-                                  baseline.collisionBuckets);
-    cost += HAO_SELECTOR_REL_DEEP_BUCKET_WEIGHT *
-            haoRatioToBaselineU32(evalDeepBuckets, baselineDeepBuckets);
-    cost += HAO_SELECTOR_REL_MAX_RULE_WEIGHT *
-            haoRatioToBaselineU32(eval.maxRulesPerBucket,
-                                  baseline.maxRulesPerBucket);
-    return cost;
-}
-#endif
-
-static
-void haoAppendSelectorFromCandidate(const HAOBitCandidate &cand,
+void haoAddSelector(const HAOBitCandidate &cand,
                                     std::vector<HAOBitSelector> *selectors) {
     HAOBitSelector s;
     s.byteOffset = verify_u8(cand.bitIndex / 8);
     s.bitOffset = verify_u8(cand.bitIndex % 8);
     selectors->push_back(s);
 }
-
-#if HAO_SELECTOR_SCORE_MODE == 4
-static
-void haoRunSelectorLocalSearch(
-    const std::vector<HAOBitCandidate> &candidates, size_t literalCount,
-    std::vector<const HAOBitCandidate *> *selected) {
-    if (!selected || selected->empty()) {
-        return;
-    }
-    if (!haoSelectorInputProfileLoaded()) {
-        return;
-    }
-
-    const std::vector<const HAOBitCandidate *> baselineSelected = *selected;
-    HAOSelectorCostEval current =
-        haoEvaluateSelectorRuntimeCost(*selected, literalCount);
-    if (!current.valid) {
-        return;
-    }
-    const HAOSelectorCostEval baseline = current;
-    current.cost = haoSelectorRelativeCost(current, baseline);
-    const double baselineCost = current.cost;
-
-    for (u32 round = 0; round < HAO_SELECTOR_LOCAL_SEARCH_ROUNDS; round++) {
-        bool improved = false;
-        HAOSelectorCostEval bestEval = current;
-        std::vector<const HAOBitCandidate *> bestSelected;
-
-        for (u32 pos = 0; pos < selected->size(); pos++) {
-            u32 considered = 0;
-            for (const auto &cand : candidates) {
-                if (cand.bitIndex == (*selected)[pos]->bitIndex) {
-                    continue;
-                }
-                if (haoSelectedContainsBit(*selected, cand.bitIndex)) {
-                    continue;
-                }
-                if (HAO_SELECTOR_LOCAL_SEARCH_TOPK &&
-                    considered >= HAO_SELECTOR_LOCAL_SEARCH_TOPK) {
-                    break;
-                }
-                considered++;
-
-                std::vector<const HAOBitCandidate *> trial = *selected;
-                trial[pos] = &cand;
-                if (haoSelectedHasDuplicateSignature(trial) ||
-                    !haoSelectedFitsAmbigBudget(trial, literalCount)) {
-                    continue;
-                }
-
-                HAOSelectorCostEval eval =
-                    haoEvaluateSelectorRuntimeCost(trial, literalCount);
-                if (!eval.valid) {
-                    continue;
-                }
-                if (!haoSelectorLocalTrialAllowed(eval, baseline)) {
-                    continue;
-                }
-                eval.cost = haoSelectorRelativeCost(eval, baseline);
-                if (eval.cost + 0.000001 < bestEval.cost) {
-                    bestEval = eval;
-                    bestSelected = std::move(trial);
-                    improved = true;
-                }
-            }
-        }
-
-        if (!improved) {
-            break;
-        }
-        *selected = std::move(bestSelected);
-        current = bestEval;
-    }
-
-    const double minGainCost =
-        baselineCost * (100.0 - HAO_SELECTOR_LOCAL_MIN_GAIN_PCT) / 100.0;
-    if (current.cost > minGainCost) {
-        *selected = baselineSelected;
-    }
-}
-#endif
 
 static
 void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
@@ -1646,55 +1099,11 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
     std::unordered_set<u64a> signatures;
     std::unordered_set<u32> chosenBits;
     std::vector<u8> selectedAmbigs(lits.size(), 0);
-#if HAO_SELECTOR_SCORE_MODE == 4
-    std::vector<const HAOBitCandidate *> selectedCands;
-    selectedCands.reserve(targetBits);
-
-    for (const auto &cand : candidates) {
-        if (selectedCands.size() >= targetBits) {
-            break;
-        }
-        if (!haoCandidateFitsAmbigBudget(cand, selectedAmbigs)) {
-            continue;
-        }
-
-        const u64a sig = signatureOfStates(cand.states);
-        if (!signatures.insert(sig).second) {
-            continue;
-        }
-
-        selectedCands.push_back(&cand);
-        chosenBits.insert(cand.bitIndex);
-        haoApplyCandidateAmbigBudget(cand, &selectedAmbigs);
-    }
-
-    if (selectedCands.size() < targetBits) {
-        for (const auto &cand : candidates) {
-            if (selectedCands.size() >= targetBits) {
-                break;
-            }
-            if (chosenBits.find(cand.bitIndex) != chosenBits.end()) {
-                continue;
-            }
-            if (!haoCandidateFitsAmbigBudget(cand, selectedAmbigs)) {
-                continue;
-            }
-            selectedCands.push_back(&cand);
-            chosenBits.insert(cand.bitIndex);
-            haoApplyCandidateAmbigBudget(cand, &selectedAmbigs);
-        }
-    }
-
-    haoRunSelectorLocalSearch(candidates, lits.size(), &selectedCands);
-    for (const HAOBitCandidate *cand : selectedCands) {
-        haoAppendSelectorFromCandidate(*cand, selectors);
-    }
-#else
     for (const auto &cand : candidates) {
         if (selectors->size() >= targetBits) {
             break;
         }
-        if (!haoCandidateFitsAmbigBudget(cand, selectedAmbigs)) {
+        if (!haoCandFits(cand, selectedAmbigs)) {
             continue;
         }
 
@@ -1704,9 +1113,9 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
             continue;
         }
 
-        haoAppendSelectorFromCandidate(cand, selectors);
+        haoAddSelector(cand, selectors);
         chosenBits.insert(cand.bitIndex);
-        haoApplyCandidateAmbigBudget(cand, &selectedAmbigs);
+        haoCandApply(cand, &selectedAmbigs);
     }
     // If heuristic selection did not fill the target bit budget,
     // take additional candidates in bit-order until the budget is met.
@@ -1718,15 +1127,14 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
             if (chosenBits.find(cand.bitIndex) != chosenBits.end()) {
                 continue;
             }
-            if (!haoCandidateFitsAmbigBudget(cand, selectedAmbigs)) {
+            if (!haoCandFits(cand, selectedAmbigs)) {
                 continue;
             }
-            haoAppendSelectorFromCandidate(cand, selectors);
+            haoAddSelector(cand, selectors);
             chosenBits.insert(cand.bitIndex);
-            haoApplyCandidateAmbigBudget(cand, &selectedAmbigs);
+            haoCandApply(cand, &selectedAmbigs);
         }
     }
-#endif
 
     std::sort(selectors->begin(), selectors->end(),
               [](const HAOBitSelector &a, const HAOBitSelector &b) {
@@ -1739,7 +1147,7 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
 }
 
 static
-void buildRuleMeta(const std::vector<hwlmLiteral> &lits,
+void haoBuildMeta(const std::vector<hwlmLiteral> &lits,
                    std::vector<HAOCompileRuleMeta> *ruleMeta,
                    std::vector<u8> *literalBlob) {
     ruleMeta->clear();
@@ -1805,7 +1213,7 @@ void resetHAOCompileArtifactsCommon(ArtifactsT *artifacts) {
 
 template <class ArtifactsT>
 static
-bool buildSharedHAOArtifacts(const std::vector<hwlmLiteral> &lits,
+bool haoBuildShared(const std::vector<hwlmLiteral> &lits,
                              ArtifactsT *artifacts) {
     if (!artifacts || lits.empty()) {
         return false;
@@ -1816,21 +1224,26 @@ bool buildSharedHAOArtifacts(const std::vector<hwlmLiteral> &lits,
         return false;
     }
 
-    buildExtractDescriptor(artifacts->bitSelectors, artifacts);
-    buildHAORulePlans(lits, artifacts->bitSelectors, &artifacts->haoRulePlans,
+    haoBuildExtract(artifacts->bitSelectors, artifacts);
+    haoBuildPlans(lits, artifacts->bitSelectors, &artifacts->haoRulePlans,
                       &artifacts->haoSummary);
-    buildHAOGlobalHashTables(artifacts->haoRulePlans, artifacts->keyBits,
+    if (artifacts->haoSummary.unsupportedRules ||
+        artifacts->haoSummary.fastPathRules != artifacts->haoSummary.totalRules) {
+        artifacts->flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+        return false;
+    }
+    haoBuildHash(artifacts->haoRulePlans, artifacts->keyBits,
                              &artifacts->haoGlobalHash);
     buildHAORawPrimaryTables(artifacts->bitSelectors, artifacts->haoGlobalHash,
                              &artifacts->haoGlobalHash.primaryHashTableRaw,
                              &artifacts->haoGlobalHash.primaryHashBitmapRaw);
-    buildRuleMeta(lits, &artifacts->ruleMeta, &artifacts->literalBlob);
+    haoBuildMeta(lits, &artifacts->ruleMeta, &artifacts->literalBlob);
     artifacts->flags = artifacts->haoGlobalHash.flags;
     return true;
 }
 
 static
-void dumpHAOArtifactsVerbose(const std::vector<hwlmLiteral> &lits,
+void haoDumpArtifacts(const std::vector<hwlmLiteral> &lits,
                              const HAOCompileArtifacts &artifacts) {
     printf("\n========== [HAO][Build-Artifacts] Begin ==========\n");
     printf("[HAO][Params] key_bits(fixed=%u, selector_count=%zu) l2_key_bits=%u l2_capacity=%u l2_entry_capacity=%u\n",
@@ -1850,7 +1263,7 @@ void dumpHAOArtifactsVerbose(const std::vector<hwlmLiteral> &lits,
 
 template <class ReasonT>
 static
-const char *buildFeasibilityReasonName(ReasonT reason) {
+const char *haoReasonName(ReasonT reason) {
     switch (reason) {
     case ReasonT::OK:
         return "OK";
@@ -1880,11 +1293,11 @@ const char *buildFeasibilityReasonName(ReasonT reason) {
 }
 
 const char *haoFeasibilityReasonName(HAOFeasibilityReason reason) {
-    return buildFeasibilityReasonName(reason);
+    return haoReasonName(reason);
 }
 
 bool haoGreyEnabled(const Grey &grey) {
-    return grey.allowHaoV2;
+    return grey.allowHao;
 }
 
 bool haoCanUseBextFastPath(const target_t &target) {
@@ -1913,12 +1326,12 @@ bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
     }
 
     resetHAOCompileArtifactsCommon(artifacts);
-    if (!buildSharedHAOArtifacts(lits, artifacts)) {
+    if (!haoBuildShared(lits, artifacts)) {
         return false;
     }
 
     if (enableDump) {
-        dumpHAOArtifactsVerbose(lits, *artifacts);
+        haoDumpArtifacts(lits, *artifacts);
     } else if (haoStatsDumpEnabled()) {
         dumpHAOSummary(*artifacts);
     }
@@ -1978,7 +1391,9 @@ bool analyzeHAOFeasibility(const target_t &target,
     }
 
     if (!buildHAOArtifacts(lits, out, false)) {
-        local.reason = HAOFeasibilityReason::ARTIFACT_BUILD_FAILED;
+        local.reason = out->haoSummary.unsupportedRules ?
+                       HAOFeasibilityReason::UNSUPPORTED_INCLUDED_LITERAL :
+                       HAOFeasibilityReason::ARTIFACT_BUILD_FAILED;
         if (result) {
             *result = local;
         }
@@ -2025,21 +1440,12 @@ bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
 
 template <class ArtifactsT>
 static
-bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
-    std::vector<u32> residualRuleIndexes;
-
+bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
     if (!artifacts.haoGlobalHash.valid) {
         return nullptr;
     }
     if (artifacts.haoRulePlans.size() != artifacts.ruleMeta.size()) {
         return nullptr;
-    }
-
-    residualRuleIndexes.reserve(artifacts.haoRulePlans.size());
-    for (u32 i = 0; i < artifacts.haoRulePlans.size(); i++) {
-        if (haoPlanRequiresResidualEval(artifacts.haoRulePlans[i])) {
-            residualRuleIndexes.push_back(i);
-        }
     }
 
     const u32 selectorCount = verify_u32(artifacts.bitSelectors.size());
@@ -2059,7 +1465,6 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
     }
     const u32 ruleMetaCount = verify_u32(artifacts.ruleMeta.size());
     const u32 literalBlobSize = verify_u32(artifacts.literalBlob.size());
-    const u32 residualRuleCount = verify_u32(residualRuleIndexes.size());
 
     const size_t selectorBytes =
         sizeof(HAORuntimeBitSelector) * artifacts.bitSelectors.size();
@@ -2077,7 +1482,6 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
     const size_t ruleMetaBytes =
         sizeof(HAORuntimeRuleMeta) * artifacts.ruleMeta.size();
     const size_t literalBlobBytes = artifacts.literalBlob.size();
-    const size_t residualRuleBytes = sizeof(u32) * residualRuleIndexes.size();
 
     if (primaryRawCount != primaryCount ||
         primaryBitmapRawSize != primaryBitmapSize) {
@@ -2105,8 +1509,6 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
     totalSize += ROUNDUP_N(ruleMetaBytes, alignof(u32));
     const u32 literalBlobOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(literalBlobBytes, alignof(u32));
-    const u32 residualRuleIndexOffset = verify_u32(totalSize);
-    totalSize += ROUNDUP_N(residualRuleBytes, alignof(u32));
 
     auto blob = make_zeroed_bytecode_ptr<u8>(totalSize, 64);
     if (!blob) {
@@ -2140,8 +1542,8 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
     hdr->l2MetaOffset = l2MetaOffset;
     hdr->ruleMetaOffset = ruleMetaOffset;
     hdr->literalBlobOffset = literalBlobOffset;
-    hdr->residualRuleCount = residualRuleCount;
-    hdr->residualRuleIndexOffset = residualRuleIndexOffset;
+    hdr->reserved1 = 0;
+    hdr->reserved2 = 0;
 
     u8 *base = blob.get();
     auto *selectorsOut =
@@ -2211,16 +1613,11 @@ bytecode_ptr<u8> buildHAOGlobalBlobImpl(const ArtifactsT &artifacts) {
         memcpy(base + literalBlobOffset, artifacts.literalBlob.data(),
                literalBlobBytes);
     }
-    if (residualRuleBytes) {
-        memcpy(base + residualRuleIndexOffset, residualRuleIndexes.data(),
-               residualRuleBytes);
-    }
-
     return blob;
 }
 
 bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts) {
-    return buildHAOGlobalBlobImpl(artifacts);
+    return haoBuildBlobImpl(artifacts);
 }
 
 } // namespace ue2

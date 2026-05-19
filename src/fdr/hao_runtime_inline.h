@@ -252,14 +252,4 @@ u32 haoExtractKeyFromWindow(const struct HAORuntimeHeader *hdr,
     return haoExtractKeyScalarFromWindow(selectors, hdr->selectorCount, window);
 }
 
-static really_inline
-void haoDecodePrimaryValue(u32 encoded, u32 *offset, u32 *count) {
-    if (offset) {
-        *offset = encoded & HAO_RUNTIME_L1_OFFSET_MASK;
-    }
-    if (count) {
-        *count = encoded >> HAO_RUNTIME_L1_COUNT_SHIFT;
-    }
-}
-
 #endif // HAO_RUNTIME_INLINE_H
