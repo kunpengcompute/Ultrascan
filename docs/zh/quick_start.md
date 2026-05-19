@@ -33,8 +33,7 @@ hsbench是Hyperscan官方提供的性能Benchmark工具，通过hsbench的测试
     - Max throughput \(per core\)：所有CPU核中的最大吞吐量（Mbit每秒）。
 
 ## hsdump通用字节码生成工具
-
-hsdump是Hyperscan提供的调试工具，用于转储模式编译过程中的内部信息。通用字节码功能支持同时生成可在x86和鲲鹏计算平台部署的双架构规则集编译后字节码，
+对于需要编译一套规则集字节码，将该字节码部同时署到鲲鹏计算平台和x86计算平台上的场景，使用hsdump进行字节码的编译并生成编译后文件（下文称通用字节码）。hsdump是Hyperscan提供的调试工具，用于转储模式编译过程中的内部信息。通过hsdump可以编译出支持跨平台部署的字节码。
 1. 进入创建好的`build_debug`目录。
 
     ```bash
@@ -65,9 +64,3 @@ hsdump是Hyperscan提供的调试工具，用于转储模式编译过程中的�
 
 4. 查看输出结果。
     hsdump会在指定输出目录中生成通用字节码文件：`db.raw`。
-
-5. 使用场景。
-    将db.raw跨平台部署。
-
-6. 注意事项。
-    - hsdump需要在Debug模式下编译Hyperscan才能使用。
