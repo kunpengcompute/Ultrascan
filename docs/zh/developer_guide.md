@@ -17,9 +17,10 @@ KHSEL库已优化函数如[**表 1** KHSEL库已优化函数](#KHSEL库已优化
 |KHSEL_LilyForTeddyRunExec|Hyperscan新增2~4字节短规则匹配的运行函数。|
 
 
-通用字节码功能接口[**表 2** 通用字节码功能接口](#通用字节码功能接口)所示。
+通用字节码功能接口[**表 2** 通用字节码功能接口](#通用字节码功能接口)所示。  
 **表 2** 通用字节码功能接口<a id="通用字节码功能接口"></a>
-
+|名称|说明|
+|--|--|
 |fat_hs_compile|Hyperscan新增通用字节码编译函数，编译单个正则表达式。|
 |fat_hs_compile_multi|Hyperscan新增通用字节码批量编译函数，编译多个正则表达式。|
 |fat_hs_compile_ext_multi|Hyperscan新增通用字节码扩展批量编译函数，编译多个正则表达式。|
@@ -131,13 +132,13 @@ hs_error_t KHSEL_LilyForTeddyRunExec(const struct RoseEngine *rose, hs_scratch_t
 
 匹配结果的错误码。
 
-### fat\_hs\_compile<a name="ZH-CN_TOPIC_fat_hs_compile"></a>
+### fat\_hs\_compile
 
-**函数功能<a name="section_fat_hs_compile_func"></a>**
+**函数功能**
 
 编译单个正则表达式，生成包含x86和ARM双架构字节码的通用数据库。
 
-**函数定义<a name="section_fat_hs_compile_def"></a>**
+**函数定义**
 
 ```c
 hs_error_t fat_hs_compile(const char *expression, unsigned int flags,
@@ -307,5 +308,5 @@ hs_error_t fat_hs_compile_lit_multi(const char *const *expressions,
 
 |文档版本|发布日期|修改说明|
 |--|--|--|
+|02|2026-06-30|第二次正式发布，基于鲲鹏920新型号处理器新增通用字节码功能。|
 |01|2026-03-30|第一次正式发布，基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短字节规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
-|01|2026-06-30|第二次正式发布，基于鲲鹏920新型号处理器新增通用字节码功能。|
