@@ -1,6 +1,10 @@
-# 快速入门<a name="ZH-CN_TOPIC_0000002550013877"></a>
+# 快速入门
+
+## 前提条件
+请参考[安装指南](./installation_guide.md)完成Hyperscan的安装和编译指导。
 
 ## hsbench通用字节码性能测试
+
 hsbench是Hyperscan官方提供的性能Benchmark工具，通过hsbench的测试结果能够对比使用KHSEL库前后的性能差异。
 
 1. 进入创建好的`build`目录。
@@ -12,11 +16,14 @@ hsbench是Hyperscan官方提供的性能Benchmark工具，通过hsbench的测试
 2. 获取[hsbench规则集](https://cdrdv2.intel.com/v1/dl/getContent/739375)并输入数据，并解压到`build/hsbench-samples`目录。
 3. 运行hsbench。
 
-不使用通用字节码：
+    不使用通用字节码：
+
     ```bash
     ./bin/hsbench -e ./hsbench-samples/pcre/snort_literals -c ./hsbench-samples/corpora/gutenberg.db -N -n1
     ```
-使用通用字节码：
+
+    使用通用字节码：
+
     ```bash
     ./bin/hsbench -U ./dump/db.raw -c ./hsbench-samples/corpora/gutenberg.db -N -n1
     ```
@@ -42,7 +49,7 @@ hsbench是Hyperscan官方提供的性能Benchmark工具，通过hsbench的测试
 
 2. 准备规则文件。创建一个包含正则表达式的文件，例如`patterns.txt`，格式如下：
 
-    ```
+    ```text
     1:/hatstand.*teakettle/s
     2:/(hatstand|teakettle)/iH
     ```

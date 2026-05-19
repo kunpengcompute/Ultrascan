@@ -269,7 +269,6 @@ Hyperscan tools工具hsbench编译依赖SQLite 3，使用Yum命令安装SQLite�
 
         3. 按“Esc“键，输入`:wq!`并按“Enter“键保存并退出编辑。
 
-
 ### 安装KHSEL<a name="ZH-CN_TOPIC_0000002550345613"></a>
 
 KHSEL是Hyperscan增强软件包，可以提升Hyperscan的scan性能。目前gitcode平台dev分支已集成KHSEL源码，位于`src\kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。
