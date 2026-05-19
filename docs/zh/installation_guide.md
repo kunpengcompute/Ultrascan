@@ -269,7 +269,6 @@ Hyperscan tools工具hsbench编译依赖SQLite 3，使用Yum命令安装SQLite�
 
         3. 按“Esc“键，输入`:wq!`并按“Enter“键保存并退出编辑。
 
-
 ### 安装KHSEL<a name="ZH-CN_TOPIC_0000002550345613"></a>
 
 KHSEL是Hyperscan增强软件包，可以提升Hyperscan的scan性能。目前gitcode平台dev分支已集成KHSEL源码，位于`src\kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。
@@ -340,6 +339,19 @@ KHSEL是Hyperscan增强软件包，可以提升Hyperscan的scan性能。目前gi
             cmake ..
             make -j
             ```
+        - （可选）亦可使用如下指令编译debug模式，如果使用该指令，会覆盖release模式编译选项。
+
+            ```bash
+            #在鲲鹏计算平台编译debug模式
+            cmake .. -DCMAKE_BUILD_TYPE=DEBUG
+            make -j
+            ```
+            ```bash
+            #在x86平台编译debug模式
+            cmake .. -DCMAKE_BUILD_TYPE=DEBUG -DCMAKE_C_FLAGS="-D__X86_64__" -DCMAKE_CXX_FLAGS="-D__X86_64__"
+            make -j
+            ```
+
 
             编译完成后，默认生成Hyperscan的静态库和测试程序：
 
@@ -362,9 +374,3 @@ KHSEL是Hyperscan增强软件包，可以提升Hyperscan的scan性能。目前gi
             生成的动态库：
 
             ![](figures/3.png)
-
-        - 编译源码debug模式。在执行编译命令中增加生成动态库编译选项：-DCMAKE\_BUILD\_TYPE=DEBUG。
-
-            ```bash
-            cmake .. -DCMAKE_BUILD_TYPE=DEBUG
-            ```
