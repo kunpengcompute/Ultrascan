@@ -23,6 +23,13 @@
 #define HAO_L2_COUNT1_FAST 1
 #endif
 
+#ifndef HAO_PREFETCH_INPUT_DISTANCE
+#define HAO_PREFETCH_INPUT_DISTANCE 32U
+#endif
+
+#define HAO_PREFETCH_R(addr) __builtin_prefetch((addr), 0, 2)
+
+
 static struct HAORuntimeStats g_haoStats;
 static int g_haoStatsForceEnabled;
 #if HAO_ENABLE_RUNTIME_STATS
@@ -1606,6 +1613,8 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
         const u32 blockLaneCount = remaining > HAO_RUNTIME_BLOCK_BYTES
                                        ? HAO_RUNTIME_BLOCK_BYTES
                                        : (u32)remaining;
+        HAO_PREFETCH_R(a->buf + i + HAO_PREFETCH_INPUT_DISTANCE);
+
         if (likely(haoCanRunRaw32V2(hdr, a, i, blockLaneCount))) {
             svuint8_t rawCurr;
 
