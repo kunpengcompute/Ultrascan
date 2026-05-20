@@ -250,7 +250,7 @@ static really_inline m128 zeroes128(void) {
 
 /** \brief Return 1 if a and b are different otherwise 0 */
 static really_inline int diff128(m128 a, m128 b) {
-    return !!vaddlvq_s16(veorq_s16(a.vect_s16, b.vect_s16));
+    return !!vaddlvq_u16(veorq_u16(a.vect_u16, b.vect_u16));
 }
 
 static really_inline int isnonzero128(m128 a) {
