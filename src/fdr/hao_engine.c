@@ -27,7 +27,7 @@
 #define HAO_PREFETCH_INPUT_DISTANCE 32U
 #endif
 
-#define HAO_PREFETCH_R(addr) __builtin_prefetch((addr), 0, 2)
+#define HAO_PREFETCH_R(addr) __builtin_prefetch((addr), 0, 3)
 
 
 static struct HAORuntimeStats g_haoStats;
@@ -751,7 +751,7 @@ int haoRunL2Range(
     }
 #endif
 
-    for (n = 0; n < count; n++) {
+    for (u32 n = 0; n < count; n++) {
         const u32 off = offset + n;
         int rv;
 
@@ -986,9 +986,6 @@ void haoPrepRawKeysPred(const u8 *primaryBitmap, svbool_t pg,
                               svuint32_t *vbitmapBytes) {
     const u32 *primaryBitmapWords = (const u32 *)primaryBitmap;
     const svuint32_t vwordIdx = svlsr_n_u32_x(pg, vkeys, 5);
-
-    assert(vbitPos);
-    assert(vbitmapBytes);
 
     *vbitPos = svand_n_u32_x(pg, vkeys, 31U);
     *vbitmapBytes = svld1_gather_u32index_u32(pg, primaryBitmapWords,

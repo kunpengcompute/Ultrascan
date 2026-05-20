@@ -31,7 +31,7 @@ namespace {
 
 static constexpr u32 HAO_BUILD_MAX_SUFFIX_BYTES = 8;
 static constexpr u32 HAO_BUILD_MAX_CANDIDATE_BITS = HAO_BUILD_MAX_SUFFIX_BYTES * 8;
-static constexpr u32 HAO_BUILD_L2_KEY_BITS = 21;
+static constexpr u32 HAO_BUILD_L2_KEY_BITS = 22;
 static constexpr u32 HAO_BUILD_MAX_L2_ENTRIES = 1U << HAO_BUILD_L2_KEY_BITS;
 static constexpr u64a HAO_BUILD_MAX_TOTAL_PRIMARY_FOOTPRINT =
     128ULL * 1024ULL * 1024ULL;
@@ -822,52 +822,51 @@ void dumpHAOSummary(const ArtifactsT &artifacts) {
                                        ? (double)h.totalL2Entries /
                                              (double)h.nonEmptyPrimary
                                        : 0.0;
-
-    printf("[HAO][Summary]\n");
-    HAO_SUMMARY_FMT("total", "%u", s.totalRules);
-    HAO_SUMMARY_FMT("fastPath", "%u", s.fastPathRules);
-    HAO_SUMMARY_FMT("unsupported", "%u", s.unsupportedRules);
-    HAO_SUMMARY_FMT("exact", "%u", s.exactRules);
-    HAO_SUMMARY_FMT("nocase", "%u", s.nocaseRules);
-    HAO_SUMMARY_FMT("anchorConfirm", "%u", s.anchorConfirmRules);
-    HAO_SUMMARY_FMT("directReport", "%u", s.directReportRules);
-    HAO_SUMMARY_FMT("fastPathConfirm", "%u", s.fastPathConfirmRules);
-    HAO_SUMMARY_FMT("keyExpanded", "%u", s.keyExpandedRules);
-    HAO_SUMMARY_FMT("expandedKeys", "%u", s.totalExpandedKeys);
-    HAO_SUMMARY_FMT("maxSelectedAmbigBits", "%u", s.maxSelectedAmbigBits);
+    printf("[HAO][Summary/编译汇总]\n");
+    HAO_SUMMARY_FMT("total(规则总数)",                           "%u", s.totalRules);
+    HAO_SUMMARY_FMT("fastPath(快速路径规则数)",                  "%u", s.fastPathRules);
+    HAO_SUMMARY_FMT("unsupported(不支持规则数)",                 "%u", s.unsupportedRules);
+    HAO_SUMMARY_FMT("exact(精确规则数)",                         "%u", s.exactRules);
+    HAO_SUMMARY_FMT("nocase(忽略大小写规则数)",                  "%u", s.nocaseRules);
+    HAO_SUMMARY_FMT("anchorConfirm(anchor确认规则数)",           "%u", s.anchorConfirmRules);
+    HAO_SUMMARY_FMT("directReport(可直接上报规则数)",            "%u", s.directReportRules);
+    HAO_SUMMARY_FMT("fastPathConfirm(快速路径需确认规则数)",     "%u", s.fastPathConfirmRules);
+    HAO_SUMMARY_FMT("keyExpanded(发生key展开规则数)",            "%u", s.keyExpandedRules);
+    HAO_SUMMARY_FMT("expandedKeys(展开后的key总数)",             "%u", s.totalExpandedKeys);
+    HAO_SUMMARY_FMT("maxSelectedAmbigBits(最大选位歧义bit数)",   "%u", s.maxSelectedAmbigBits);
 
     if (!artifacts.haoGlobalHash.valid || !h.nonEmptyPrimary) {
         return;
     }
 
-    printf("[HAO][Hash]\n");
-    HAO_SUMMARY_FMT("nonEmptyPrimary", "%u", h.nonEmptyPrimary);
-    HAO_SUMMARY_FMT("collisionBuckets", "%u", h.collisionBuckets);
-    HAO_SUMMARY_FMT("collisionBucketPct", "%.5f",
+    printf("[HAO][Hash/哈希分布]\n");
+    HAO_SUMMARY_FMT("nonEmptyPrimary(非空一级桶数)",             "%u", h.nonEmptyPrimary);
+    HAO_SUMMARY_FMT("collisionBuckets(冲突桶数)",                "%u", h.collisionBuckets);
+    HAO_SUMMARY_FMT("collisionBucketPct(冲突桶占比)",            "%.5f",
                     haoCompilePct(h.collisionBuckets, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("avgRulesPerBucket", "%.5f", avgRulesPerBucket);
-    HAO_SUMMARY_FMT("minRulesPerBucket", "%u", h.minRulesPerBucket);
-    HAO_SUMMARY_FMT("maxRulesPerBucket", "%u", h.maxRulesPerBucket);
-    HAO_SUMMARY_FMT("ruleBucketsEq1", "%u", h.ruleBucketsEq1);
-    HAO_SUMMARY_FMT("ruleBucketsEq1Pct", "%.5f",
+    HAO_SUMMARY_FMT("avgRulesPerBucket(每桶平均规则数)",         "%.5f", avgRulesPerBucket);
+    HAO_SUMMARY_FMT("minRulesPerBucket(每桶最少规则数)",         "%u", h.minRulesPerBucket);
+    HAO_SUMMARY_FMT("maxRulesPerBucket(每桶最多规则数)",         "%u", h.maxRulesPerBucket);
+    HAO_SUMMARY_FMT("ruleBucketsEq1(规则数=1的桶数)",            "%u", h.ruleBucketsEq1);
+    HAO_SUMMARY_FMT("ruleBucketsEq1Pct(规则数=1桶占比)",         "%.5f",
                     haoCompilePct(h.ruleBucketsEq1, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("ruleBuckets2To4", "%u", h.ruleBuckets2To4);
-    HAO_SUMMARY_FMT("ruleBuckets2To4Pct", "%.5f",
+    HAO_SUMMARY_FMT("ruleBuckets2To4(规则数2~4的桶数)",          "%u", h.ruleBuckets2To4);
+    HAO_SUMMARY_FMT("ruleBuckets2To4Pct(规则数2~4桶占比)",       "%.5f",
                     haoCompilePct(h.ruleBuckets2To4, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("ruleBucketsGt4", "%u", h.ruleBucketsGt4);
-    HAO_SUMMARY_FMT("ruleBucketsGt4Pct", "%.5f",
+    HAO_SUMMARY_FMT("ruleBucketsGt4(规则数>4的桶数)",            "%u", h.ruleBucketsGt4);
+    HAO_SUMMARY_FMT("ruleBucketsGt4Pct(规则数>4桶占比)",         "%.5f",
                     haoCompilePct(h.ruleBucketsGt4, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("avgEntriesPerBucket", "%.5f", avgEntriesPerBucket);
-    HAO_SUMMARY_FMT("minEntriesPerBucket", "%u", h.minEntriesPerBucket);
-    HAO_SUMMARY_FMT("maxEntriesPerBucket", "%u", h.maxEntriesPerKey);
-    HAO_SUMMARY_FMT("entryBucketsEq1", "%u", h.entryBucketsEq1);
-    HAO_SUMMARY_FMT("entryBucketsEq1Pct", "%.5f",
+    HAO_SUMMARY_FMT("avgEntriesPerBucket(每桶平均entry数)",      "%.5f", avgEntriesPerBucket);
+    HAO_SUMMARY_FMT("minEntriesPerBucket(每桶最少entry数)",      "%u", h.minEntriesPerBucket);
+    HAO_SUMMARY_FMT("maxEntriesPerBucket(每桶最多entry数)",      "%u", h.maxEntriesPerKey);
+    HAO_SUMMARY_FMT("entryBucketsEq1(entry数=1的桶数)",          "%u", h.entryBucketsEq1);
+    HAO_SUMMARY_FMT("entryBucketsEq1Pct(entry数=1桶占比)",       "%.5f",
                     haoCompilePct(h.entryBucketsEq1, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("entryBuckets2To4", "%u", h.entryBuckets2To4);
-    HAO_SUMMARY_FMT("entryBuckets2To4Pct", "%.5f",
+    HAO_SUMMARY_FMT("entryBuckets2To4(entry数2~4的桶数)",        "%u", h.entryBuckets2To4);
+    HAO_SUMMARY_FMT("entryBuckets2To4Pct(entry数2~4桶占比)",     "%.5f",
                     haoCompilePct(h.entryBuckets2To4, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("entryBucketsGt4", "%u", h.entryBucketsGt4);
-    HAO_SUMMARY_FMT("entryBucketsGt4Pct", "%.5f",
+    HAO_SUMMARY_FMT("entryBucketsGt4(entry数>4的桶数)",          "%u", h.entryBucketsGt4);
+    HAO_SUMMARY_FMT("entryBucketsGt4Pct(entry数>4桶占比)",       "%.5f",
                     haoCompilePct(h.entryBucketsGt4, h.nonEmptyPrimary));
 }
 
