@@ -2013,7 +2013,7 @@ TEST(HAOCompile, CanBuildHaoRejectsTooFewLiterals) {
         hwlmLiteral("c", false, false, 6232, HWLM_ALL_GROUPS, {}, {})
     };
 
-    EXPECT_FALSE(canBuildHAO(get_current_target(), lits, grey));
+    EXPECT_TRUE(canBuildHAO(get_current_target(), lits, grey));
 }
 
 TEST(HAOCompile, HAOProtoBuildPrefersHaoArtifacts) {

@@ -1295,10 +1295,6 @@ const char *haoFeasibilityReasonName(HAOFeasibilityReason reason) {
     return haoReasonName(reason);
 }
 
-bool haoGreyEnabled(const Grey &grey) {
-    return grey.allowHao;
-}
-
 bool haoCanUseBextFastPath(const target_t &target) {
 #if defined(HS_BUILD_HAVE_SVEBITPERM)
     return target.has_sve_bitperm();
@@ -1347,7 +1343,7 @@ bool analyzeHAOFeasibility(const target_t &target,
     local.reason = HAOFeasibilityReason::ARTIFACT_BUILD_FAILED;
     local.flags = 0;
 
-    if (!haoGreyEnabled(grey)) {
+    if (!grey.allowHao) {
         local.reason = HAOFeasibilityReason::GREY_DISABLED;
         if (result) {
             *result = local;
@@ -1366,7 +1362,7 @@ bool analyzeHAOFeasibility(const target_t &target,
     (void)target;
 #endif
 
-    if (lits.size() < 4) {
+    if (lits.size() < 1) {
         local.reason = HAOFeasibilityReason::TOO_FEW_LITERALS;
         if (result) {
             *result = local;

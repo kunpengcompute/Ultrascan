@@ -26,7 +26,7 @@
 #endif
 
 #ifndef HAO_MAX_LITERALS
-#define HAO_MAX_LITERALS (1U << 18)
+#define HAO_MAX_LITERALS (1U << HAO_KEY_BITS)
 #endif
 
 namespace ue2 {
@@ -233,8 +233,6 @@ bool analyzeHAOFeasibility(const target_t &target,
                            HAOCompileArtifacts *artifacts);
 
 const char *haoFeasibilityReasonName(HAOFeasibilityReason reason);
-
-bool haoGreyEnabled(const Grey &grey);
 
 bool haoHasSveBitPermPrereq(const target_t &target);
 
