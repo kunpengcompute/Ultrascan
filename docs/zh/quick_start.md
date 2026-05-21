@@ -1,5 +1,11 @@
 # 快速入门<a name="ZH-CN_TOPIC_0000002550013877"></a>
 
+## 前提条件
+
+请参考[安装指南](./installation_guide.md)完成Hyperscan的安装和编译指导。
+
+## hsbench性能测试
+
 hsbench是Hyperscan官方提供的性能Benchmark工具，通过hsbench的测试结果能够对比使用KHSEL库前后的性能差异。
 
 1. 进入创建好的`build`目录。

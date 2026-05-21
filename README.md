@@ -1,4 +1,4 @@
-# Hyperscan介绍<a name="ZH-CN_TOPIC_0000002518252292"></a>
+# Hyperscan介绍
 
 ## 最新消息
 
@@ -6,19 +6,20 @@
 
 \[2025-12-30\]: 发布Hyperscan KHSEL 2.5.3。优化Hyperscan多模匹配算法。优化Rose解释器后端长字符串校验。增加短规则旁路算法开关。
 
-## 项目介绍<a name="ZH-CN_TOPIC_0000002549772085"></a>
+## 项目介绍
 
 Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的大部分语法的前提下，增加了特定的语法和工作模式来保证其在真实网络场景下的实用性。Hyperscan针对不同使用场景设计了短规则旁路、假阳性阻断等高效匹配算法，以及结合SIMD指令，实现了正则表达式的高性能匹配。Hyperscan适用于部署在诸如DPI/IPS/IDS/FW等场景中。在鲲鹏平台上，华为基于NEON指令集对Hyperscan进行了改造，以适配AAarch64架构，同时针对算法进行了优化。
 
 ## 特性介绍
+
 |特性名称|特性介绍
 |--|--|
 | 短规则旁路技术 | 短规则旁路技术特性包括单字节短规则算法和2~4字节短规则算法，通过将导致性能瓶颈的短规则从常规规则中分离，用旁路规则算法消除冗余操作，从而大幅提升整体匹配性能。 |
 | 假阳性阻断技术 | 假阳性阻断技术特性能够减少解释器大量无用的调用，进而大幅提高Hyperscan匹配性能。  |
 
-## 目录结构<a name="ZH-CN_TOPIC_0000002549772081"></a>
+## 目录结构
 
-```
+```text
 ├── chimera                                                    # Chimera接口目录，提供PCRE兼容的正则表达式功能
 │   ├── ch.h                                                  # Chimera公共API头文件
 │   ├── ch_compile.cpp                                        # Chimera编译时功能实现
@@ -82,53 +83,46 @@ Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 └── ...                                                        # 其他根级文件
 ```
 
-
-## 版本说明<a name="ZH-CN_TOPIC_0000002518252296"></a>
+## 版本说明
 
 每个版本的特性变更详细信息，具体请参见《[版本说明书](docs/zh/release_notes.md)》。
 
 ## 约束与限制
+
 Arm平台上，Hyperscan使用lily引擎对单字节规则、2-4字节短规则匹配场景进行性能增强，该优化特性存在如下约束：
 
 lily单字节、2-4字节短规则匹配引擎各自仅能处理至多8条单字节规则，超出部分将采用原有引擎处理。
 在单条语料中，lily引擎所负责匹配的单字节规则命中次数合计应不大于4096，否则将停止匹配，并返回HS_SCAN_TERMINATED错误码。
 在单条语料中，lily引擎所负责匹配的2-4字节短规则命中次数合计应不大于4096，否则将停止匹配，并返回HS_SCAN_TERMINATED错误码。
 
-## 环境部署<a name="ZH-CN_TOPIC_0000002549772083"></a>
+## 环境部署
 
 介绍Hyperscan的环境依赖及安装方式和编译方法，具体请参见《[安装指南](./docs/zh/installation_guide.md)》。
 
-
-## 快速入门<a name="ZH-CN_TOPIC_0000002549892057"></a>
+## 快速入门
 
 Hyperscan的快速入门通过使用Hyperscan官方提供的性能Benchmark工具hsbench，具体请参见《[快速入门](./docs/zh/quick_start.md)》。
 
-
-## 学习文档<a name="ZH-CN_TOPIC_0000002518252300"></a>
+## 学习文档
 
 |名称|简介|
 |--|--|
-|[快速入门](./docs/zh/quick_start.md)|提供快速上手验证指导。|
 |[版本说明书](docs/zh/release_notes.md)|提供Hyperscan每个发布版本的基础信息和特性更新信息。|
 |[安装指南](./docs/zh/installation_guide.md)|指导用户如何安装部署及编译软件。|
-|[开发指南](./docs/zh/developer_guide.md)|提供Hyperscan特性相关接口说明及定义等。|
+|[快速入门](./docs/zh/quick_start.md)|提供快速上手验证指导。|
 |[用户指南](./docs/zh/user_guide.md)|提供Hyperscan特性使用指导。|
+|[开发指南](./docs/zh/developer_guide.md)|提供Hyperscan特性相关接口说明及定义等。|
 
-
-## 贡献声明<a name="ZH-CN_TOPIC_0000002518412216"></a>
+## 贡献声明
 
 欢迎大家为社区做贡献，如果使用过程中有任何问题/建议，或者需要反馈特性需求和bug报告，可以提交[Issues](https://gitcode.com/boostkit/hyperscan)联系我们，具体贡献方法可参考[这里](https://gitcode.com/boostkit/community/blob/master/docs/contributor/contributing.md)。同时也欢迎大家在[讨论专区](https://gitcode.com/boostkit/community/discussions)展开讨论交流。感谢您的支持。
 
-
-## 免责声明<a name="ZH-CN_TOPIC_0000002518412214"></a>
+## 免责声明
 
 此代码仓计划参与Hyperscan软件开源，仅作Hyperscan性能提升，编码风格遵照原生开源软件，继承原生开源软件安全设计，不破坏原生开源软件设计及编码风格和方式，软件的任何漏洞与安全问题，均由相应的上游社区根据其漏洞和安全响应机制解决。请密切关注上游社区发布的通知和版本更新。鲲鹏计算社区对软件的漏洞及安全问题不承担任何责任。
 
-
-## License<a name="ZH-CN_TOPIC_0000002549892075"></a>
+## License
 
 本项目采用BSD License许可证。详见[LICENSE](LICENSE)文件。
 
 本项目的文档适用CC-BY 4.0许可证，具体请参见[LICENSE](docs/LICENSE)文件。
-
-
