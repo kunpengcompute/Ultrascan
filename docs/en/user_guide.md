@@ -12,13 +12,6 @@ You can configure the  **config.txt**  file in the  **root**  directory of Hyper
 
 The following is an example of the  **config.txt**  file:
 
-```
+```text
 allowLily:1;allowNeoFdr:1;
 ```
-
-You can configure the  **config.txt**  file in the  **root**  directory of Hyperscan to enable or disable the short byte optimization and false-positive blocking features. The features are enabled by default.
-## Use Cases<a name="EN-US_TOPIC_0000002549907329"></a>
-
-To be added.
-
-
