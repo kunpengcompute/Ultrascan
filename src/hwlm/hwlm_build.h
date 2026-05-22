@@ -80,6 +80,11 @@ struct HWLMProto {
     std::map<u32, std::vector<u32>> bucketToLits;
 
     /**
+     * \brief Optional compile-time label used only for diagnostics.
+     */
+    const char *debugName = nullptr;
+
+    /**
      * \brief Flag to optimise matcher for small size from Rose.
      */
     bool make_small = false;

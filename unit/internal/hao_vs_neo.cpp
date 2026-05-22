@@ -399,44 +399,6 @@ void skipIfNoHaoSupport() {
     SUCCEED() << "Skip HAO regression on this target (HAO unavailable).";
 }
 
-static
-std::string u32ToBin(u32 v, u32 width) {
-    const std::string full = std::bitset<32>(v).to_string();
-    if (width >= 32) {
-        return full;
-    }
-    return full.substr(32 - width);
-}
-
-static
-std::string u8ToBin(u8 v) {
-    return std::bitset<8>(v).to_string();
-}
-
-static
-char printableOrDot(u8 c) {
-    return std::isprint(static_cast<unsigned char>(c)) ? static_cast<char>(c)
-                                                        : '.';
-}
-
-static
-const char *haoCategoryName(HAORuleCategory category) {
-    switch (category) {
-    case HAORuleCategory::HAO_RULE_EXACT:
-        return "exact";
-    case HAORuleCategory::HAO_RULE_NOCASE:
-        return "nocase";
-    case HAORuleCategory::HAO_RULE_SMALL_CLASS_EXPAND:
-        return "small-expand";
-    case HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM:
-        return "anchor-confirm";
-    case HAORuleCategory::HAO_RULE_UNSUPPORTED:
-        return "unsupported";
-    default:
-        return "unknown";
-    }
-}
-
 template <class L2EntryT>
 static
 u32 haoSlotCount(const L2EntryT &entry) {
@@ -483,44 +445,6 @@ bool l2SlotSurvivesValidMaskForTest(const HAOL2Meta &meta, u32 slot,
     const u32 validMask32 = validMask8 * 0x01010101U;
     const u32 slotBits = 0xffU << (slot * HAO_LAYOUT_BYTES_PER_RULE_SLOT);
     return !(meta.careBits & slotBits & ~validMask32);
-}
-
-static
-void dumpBitmapBytes(std::ostream &os, const std::vector<u8> &bytes,
-                     const std::string &indent) {
-    bool sawNonZero = false;
-
-    os << indent << "bitmapBytes=" << bytes.size() << "\n";
-    for (size_t i = 0; i < bytes.size(); i++) {
-        if (!bytes[i]) {
-            continue;
-        }
-        sawNonZero = true;
-        os << indent << "  [" << i << "] dec=" << static_cast<u32>(bytes[i])
-           << " hex=0x" << std::hex << static_cast<u32>(bytes[i]) << std::dec
-           << " bits=" << u8ToBin(bytes[i]) << "\n";
-    }
-    if (!sawNonZero) {
-        os << indent << "  <all_zero>\n";
-    }
-}
-
-static
-u8 ruleBitStateNoMask(const hwlmLiteral &lit, const HAOBitSelector &sel) {
-    // 0 -> bit 0, 1 -> bit 1, 2 -> don't-care(X)
-    const u32 bitIndex = static_cast<u32>(sel.byteOffset) * 8U +
-                         static_cast<u32>(sel.bitOffset);
-    const u32 byteFromEnd = bitIndex / 8;
-    const u32 bitInByte = bitIndex % 8;
-    const u32 len = static_cast<u32>(lit.s.size());
-    if (byteFromEnd >= len) {
-        return 2;
-    }
-    const u8 c = verify_u8(lit.s[len - byteFromEnd - 1]);
-    if (lit.nocase && ourisalpha(c) && bitInByte == 5) {
-        return 2;
-    }
-    return (c & (1U << bitInByte)) ? 1 : 0;
 }
 
 static

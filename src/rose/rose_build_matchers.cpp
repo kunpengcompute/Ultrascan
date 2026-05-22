@@ -887,10 +887,12 @@ void buildAccel(const RoseBuildImpl &build,
 }
 
 bytecode_ptr<HWLM>
-buildHWLMMatcher(const RoseBuildImpl &build, LitProto *litProto) {
+buildHWLMMatcher(const RoseBuildImpl &build, LitProto *litProto,
+                 const char *matcherName) {
     if (!litProto) {
         return nullptr;
     }
+    litProto->hwlmProto->debugName = matcherName;
     auto hwlm = hwlmBuild(*litProto->hwlmProto, build.cc,
                           build.getInitialGroups());
     if (!hwlm) {

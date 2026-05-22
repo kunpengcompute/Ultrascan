@@ -243,7 +243,8 @@ bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
 
 bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
                        HAOCompileArtifacts *artifacts,
-                       bool enableDump = true);
+                       bool enableDump = true,
+                       bool allowStatsDump = true);
 
 bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts);
 

@@ -1106,7 +1106,7 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
             continue;
         }
 
-        // Principle 3: keep only one from identical-feature columns. 
+        // Principle 3: keep only one from identical-feature columns.
         const u64a sig = signatureOfStates(cand.states);
         if (!signatures.insert(sig).second) {
             continue;
@@ -1315,7 +1315,7 @@ bool haoHasSveBitPermPrereq(const target_t &target) {
 
 bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
                        HAOCompileArtifacts *artifacts,
-                       bool enableDump) {
+                       bool enableDump, bool allowStatsDump) {
     if (!artifacts) {
         return false;
     }
@@ -1327,7 +1327,7 @@ bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
 
     if (enableDump) {
         haoDumpArtifacts(lits, *artifacts);
-    } else if (haoStatsDumpEnabled()) {
+    } else if (allowStatsDump && haoStatsDumpEnabled()) {
         dumpHAOSummary(*artifacts);
     }
 
@@ -1385,7 +1385,7 @@ bool analyzeHAOFeasibility(const target_t &target,
         out = tempStorage.get();
     }
 
-    if (!buildHAOArtifacts(lits, out, false)) {
+    if (!buildHAOArtifacts(lits, out, false, false)) {
         local.reason = out->haoSummary.unsupportedRules ?
                        HAOFeasibilityReason::UNSUPPORTED_INCLUDED_LITERAL :
                        HAOFeasibilityReason::ARTIFACT_BUILD_FAILED;
