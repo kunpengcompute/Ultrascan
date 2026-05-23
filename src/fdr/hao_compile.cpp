@@ -49,6 +49,11 @@ struct HAOBitCandidate {
     std::vector<u8> states; // 0, 1, or HAO_BUILD_STATE_DONT_CARE
 };
 
+enum class HAOSelectorMode : u8 {
+    DEFAULT,
+    DYNAMIC_EXPANSION
+};
+
 static
 bool getBitState(const hwlmLiteral &lit, u32 bitIndex, u8 *state);
 
@@ -997,6 +1002,36 @@ void haoCandApply(const HAOBitCandidate &cand,
 }
 
 static
+double haoCandExpansionCost(const HAOBitCandidate &cand,
+                            const std::vector<u8> &selectedAmbigs) {
+    assert(cand.states.size() == selectedAmbigs.size());
+
+    double cost = 0.0;
+    for (u32 i = 0; i < cand.states.size(); i++) {
+        if (cand.states[i] != HAO_BUILD_STATE_DONT_CARE) {
+            continue;
+        }
+        cost += std::ldexp(1.0, selectedAmbigs[i]);
+    }
+
+    return cost / std::max<size_t>(1, cand.states.size());
+}
+
+static
+double haoCandDynamicScore(const HAOBitCandidate &cand,
+                           const std::vector<u8> &selectedAmbigs) {
+    const double expansionCost =
+        std::log2(1.0 + haoCandExpansionCost(cand, selectedAmbigs));
+
+    // Start from the original fixed/entropy preference, but penalize bits
+    // that would amplify the current key expansion frontier.
+    return cand.fixedRatio * 0.70 +
+           cand.entropy * 0.25 -
+           expansionCost * 0.18 -
+           cand.ambiguousRatio * 0.10;
+}
+
+static
 std::vector<HAOBitCandidate> buildBitCandidates(
     const std::vector<hwlmLiteral> &lits) {
     std::vector<HAOBitCandidate> out;
@@ -1061,9 +1096,22 @@ void haoAddSelector(const HAOBitCandidate &cand,
 }
 
 static
-void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
-                        std::vector<HAOBitSelector> *selectors,
-                        u32 *keyBitsOut) {
+void finalizeBitSelectors(std::vector<HAOBitSelector> *selectors,
+                          u32 *keyBitsOut) {
+    std::sort(selectors->begin(), selectors->end(),
+              [](const HAOBitSelector &a, const HAOBitSelector &b) {
+                  return haoSelectorBitIndex(a) < haoSelectorBitIndex(b);
+              });
+
+    if (keyBitsOut) {
+        *keyBitsOut = verify_u32(selectors->size());
+    }
+}
+
+static
+void selectBitSelectorsDefault(const std::vector<hwlmLiteral> &lits,
+                               std::vector<HAOBitSelector> *selectors,
+                               u32 *keyBitsOut) {
     selectors->clear();
     if (keyBitsOut) {
         *keyBitsOut = 0;
@@ -1098,6 +1146,7 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
     std::unordered_set<u64a> signatures;
     std::unordered_set<u32> chosenBits;
     std::vector<u8> selectedAmbigs(lits.size(), 0);
+
     for (const auto &cand : candidates) {
         if (selectors->size() >= targetBits) {
             break;
@@ -1105,19 +1154,16 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
         if (!haoCandFits(cand, selectedAmbigs)) {
             continue;
         }
-
-        // Principle 3: keep only one from identical-feature columns.
         const u64a sig = signatureOfStates(cand.states);
-        if (!signatures.insert(sig).second) {
+        if (signatures.find(sig) != signatures.end()) {
             continue;
         }
-
+        signatures.insert(sig);
         haoAddSelector(cand, selectors);
         chosenBits.insert(cand.bitIndex);
         haoCandApply(cand, &selectedAmbigs);
     }
-    // If heuristic selection did not fill the target bit budget,
-    // take additional candidates in bit-order until the budget is met.
+
     if (selectors->size() < targetBits) {
         for (const auto &cand : candidates) {
             if (selectors->size() >= targetBits) {
@@ -1135,13 +1181,124 @@ void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
         }
     }
 
-    std::sort(selectors->begin(), selectors->end(),
-              [](const HAOBitSelector &a, const HAOBitSelector &b) {
-                  return haoSelectorBitIndex(a) < haoSelectorBitIndex(b);
+    finalizeBitSelectors(selectors, keyBitsOut);
+}
+
+static
+void selectBitSelectorsDynamic(const std::vector<hwlmLiteral> &lits,
+                               std::vector<HAOBitSelector> *selectors,
+                               u32 *keyBitsOut) {
+    selectors->clear();
+    if (keyBitsOut) {
+        *keyBitsOut = 0;
+    }
+    if (lits.empty()) {
+        return;
+    }
+
+    auto candidates = buildBitCandidates(lits);
+    if (candidates.empty()) {
+        return;
+    }
+    std::sort(candidates.begin(), candidates.end(),
+              [](const HAOBitCandidate &a, const HAOBitCandidate &b) {
+                  if (a.score != b.score) {
+                      return a.score > b.score;
+                  }
+                  if (a.fixedCount != b.fixedCount) {
+                      return a.fixedCount > b.fixedCount;
+                  }
+                  if (a.ambiguousCount != b.ambiguousCount) {
+                      return a.ambiguousCount < b.ambiguousCount;
+                  }
+                  return a.bitIndex < b.bitIndex;
               });
 
-    if (keyBitsOut) {
-        *keyBitsOut = verify_u32(selectors->size());
+    const u32 targetBits = std::min<u32>(HAO_LAYOUT_KEY_BITS,
+                                         verify_u32(candidates.size()));
+
+    std::unordered_set<u64a> signatures;
+    std::unordered_set<u32> chosenBits;
+    std::vector<u8> selectedAmbigs(lits.size(), 0);
+
+    while (selectors->size() < targetBits) {
+        const HAOBitCandidate *best = nullptr;
+        double bestScore = -std::numeric_limits<double>::infinity();
+
+        for (u32 pass = 0; pass < 2 && !best; pass++) {
+            const bool allowDuplicateSignature = pass != 0;
+
+            for (const auto &cand : candidates) {
+                if (chosenBits.find(cand.bitIndex) != chosenBits.end()) {
+                    continue;
+                }
+                if (!haoCandFits(cand, selectedAmbigs)) {
+                    continue;
+                }
+
+                const u64a sig = signatureOfStates(cand.states);
+                if (!allowDuplicateSignature &&
+                    signatures.find(sig) != signatures.end()) {
+                    continue;
+                }
+
+                const double score =
+                    haoCandDynamicScore(cand, selectedAmbigs);
+                if (!best || score > bestScore ||
+                    (score == bestScore &&
+                     cand.fixedCount > best->fixedCount) ||
+                    (score == bestScore &&
+                     cand.fixedCount == best->fixedCount &&
+                     cand.ambiguousCount < best->ambiguousCount) ||
+                    (score == bestScore &&
+                     cand.fixedCount == best->fixedCount &&
+                     cand.ambiguousCount == best->ambiguousCount &&
+                     cand.bitIndex < best->bitIndex)) {
+                    best = &cand;
+                    bestScore = score;
+                }
+            }
+        }
+
+        if (!best) {
+            break;
+        }
+
+        const u64a sig = signatureOfStates(best->states);
+        signatures.insert(sig);
+        haoAddSelector(*best, selectors);
+        chosenBits.insert(best->bitIndex);
+        haoCandApply(*best, &selectedAmbigs);
+    }
+
+    if (selectors->size() < targetBits) {
+        for (const auto &cand : candidates) {
+            if (selectors->size() >= targetBits) {
+                break;
+            }
+            if (chosenBits.find(cand.bitIndex) != chosenBits.end()) {
+                continue;
+            }
+            if (!haoCandFits(cand, selectedAmbigs)) {
+                continue;
+            }
+            haoAddSelector(cand, selectors);
+            chosenBits.insert(cand.bitIndex);
+            haoCandApply(cand, &selectedAmbigs);
+        }
+    }
+
+    finalizeBitSelectors(selectors, keyBitsOut);
+}
+
+static
+void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
+                        std::vector<HAOBitSelector> *selectors,
+                        u32 *keyBitsOut, HAOSelectorMode mode) {
+    if (mode == HAOSelectorMode::DYNAMIC_EXPANSION) {
+        selectBitSelectorsDynamic(lits, selectors, keyBitsOut);
+    } else {
+        selectBitSelectorsDefault(lits, selectors, keyBitsOut);
     }
 }
 
@@ -1213,12 +1370,13 @@ void resetHAOCompileArtifactsCommon(ArtifactsT *artifacts) {
 template <class ArtifactsT>
 static
 bool haoBuildShared(const std::vector<hwlmLiteral> &lits,
-                             ArtifactsT *artifacts) {
+                    ArtifactsT *artifacts, HAOSelectorMode selectorMode) {
     if (!artifacts || lits.empty()) {
         return false;
     }
 
-    selectBitSelectors(lits, &artifacts->bitSelectors, &artifacts->keyBits);
+    selectBitSelectors(lits, &artifacts->bitSelectors, &artifacts->keyBits,
+                       selectorMode);
     if (artifacts->bitSelectors.empty()) {
         return false;
     }
@@ -1238,6 +1396,59 @@ bool haoBuildShared(const std::vector<hwlmLiteral> &lits,
                              &artifacts->haoGlobalHash.primaryHashBitmapRaw);
     haoBuildMeta(lits, &artifacts->ruleMeta, &artifacts->literalBlob);
     artifacts->flags = artifacts->haoGlobalHash.flags;
+    return true;
+}
+
+static
+double haoPct(u32 value, u32 total) {
+    if (!total) {
+        return 0.0;
+    }
+    return (static_cast<double>(value) * 100.0) / static_cast<double>(total);
+}
+
+static
+double haoAvgRulesPerBucket(const HAOGlobalHashStats &stats) {
+    if (!stats.nonEmptyPrimary) {
+        return 0.0;
+    }
+    return static_cast<double>(stats.totalRulesInBuckets) /
+           static_cast<double>(stats.nonEmptyPrimary);
+}
+
+static
+bool haoAcceptDynamicSelector(const HAOCompileArtifacts &base,
+                              const HAOCompileArtifacts &candidate) {
+    const auto &baseStats = base.haoGlobalHash.stats;
+    const auto &candStats = candidate.haoGlobalHash.stats;
+    if (!candidate.haoGlobalHash.valid ||
+        (candidate.flags & HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE)) {
+        return false;
+    }
+
+    if (candidate.haoSummary.totalExpandedKeys >=
+        base.haoSummary.totalExpandedKeys) {
+        return false;
+    }
+
+    const double baseAvgRules = haoAvgRulesPerBucket(baseStats);
+    const double candAvgRules = haoAvgRulesPerBucket(candStats);
+    if (baseAvgRules > 0.0 && candAvgRules > baseAvgRules * 1.25) {
+        return false;
+    }
+
+    const double collisionPct =
+        haoPct(candStats.collisionBuckets, candStats.nonEmptyPrimary);
+    if (collisionPct > 10.0) {
+        return false;
+    }
+
+    const double ruleGt4Pct =
+        haoPct(candStats.ruleBucketsGt4, candStats.nonEmptyPrimary);
+    if (ruleGt4Pct > 2.0) {
+        return false;
+    }
+
     return true;
 }
 
@@ -1320,14 +1531,30 @@ bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
         return false;
     }
 
-    resetHAOCompileArtifactsCommon(artifacts);
-    if (!haoBuildShared(lits, artifacts)) {
+    HAOCompileArtifacts base;
+    resetHAOCompileArtifactsCommon(&base);
+    if (!haoBuildShared(lits, &base, HAOSelectorMode::DEFAULT)) {
         return false;
     }
 
+    HAOCompileArtifacts dynamic;
+    resetHAOCompileArtifactsCommon(&dynamic);
+    const bool haveDynamic =
+        haoBuildShared(lits, &dynamic, HAOSelectorMode::DYNAMIC_EXPANSION);
+
+    const char *selectorMode = "default";
+    if (haveDynamic && haoAcceptDynamicSelector(base, dynamic)) {
+        *artifacts = std::move(dynamic);
+        selectorMode = "dynamic";
+    } else {
+        *artifacts = std::move(base);
+    }
+
     if (enableDump) {
+        printf("[HAO][Selector] mode=%s\n", selectorMode);
         haoDumpArtifacts(lits, *artifacts);
     } else if (allowStatsDump && haoStatsDumpEnabled()) {
+        printf("[HAO][Selector] mode=%s\n", selectorMode);
         dumpHAOSummary(*artifacts);
     }
 
