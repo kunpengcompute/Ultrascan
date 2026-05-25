@@ -94,6 +94,36 @@ bool haoShouldPrintCompileStats(const HWLMProto &proto) {
     return strncmp(proto.debugName, "x86/", 4) != 0;
 }
 
+static
+void dumpFdrBuildProtoLits(const vector<hwlmLiteral> &lits) {
+    auto hexVec = [](const vector<u8> &v) {
+        static const char hex[] = "0123456789abcdef";
+        string out;
+
+        out.reserve(v.size() * 2);
+        for (u8 b : v) {
+            out.push_back(hex[b >> 4]);
+            out.push_back(hex[b & 0xf]);
+        }
+        return out;
+    };
+
+    printf("[FDR][BuildProtoLits] count=%zu\n", lits.size());
+    for (size_t i = 0; i < lits.size(); i++) {
+        const auto &lit = lits[i];
+        const string msk = hexVec(lit.msk);
+        const string cmp = hexVec(lit.cmp);
+
+        printf("[FDR][Lit] idx=%zu id=%u len=%zu nocase=%u noruns=%u "
+               "groups=0x%llx s=\"%s\" msk=%s cmp=%s\n",
+               i, lit.id, lit.s.size(), lit.nocase ? 1U : 0U,
+               lit.noruns ? 1U : 0U, (unsigned long long)lit.groups,
+               escapeString(lit.s).c_str(), msk.c_str(), cmp.c_str());
+        // printf("%s\n", escapeString(lit.s).c_str());
+    }
+    fflush(stdout);
+}
+
 #define HAO_PROTO_TRACE(...)                                                \
     do {                                                                    \
         if (haoProtoTraceEnabled()) {                                       \
@@ -1047,6 +1077,7 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
 unique_ptr<HWLMProto> fdrBuildProto(u8 engType, vector<hwlmLiteral> lits,
                                     bool make_small, const target_t &target,
                                     const Grey &grey) {
+    // dumpFdrBuildProtoLits(lits);
     return fdrBuildProtoInternal(engType, lits, make_small, target, grey,
                                  HINT_INVALID);
 }

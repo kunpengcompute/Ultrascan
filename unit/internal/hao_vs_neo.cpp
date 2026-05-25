@@ -2011,7 +2011,7 @@ TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
     EXPECT_EQ(artifacts.haoGlobalHash.l2CheckTable.size(),
               hdr->l2EntryCount);
     EXPECT_EQ(artifacts.ruleMeta.size(), hdr->ruleMetaCount);
-    EXPECT_EQ(artifacts.literalBlob.size(), hdr->literalBlobSize);
+    EXPECT_EQ(0U, hdr->reservedLiteralBlobSize);
     EXPECT_EQ(artifacts.extractMode, hdr->extractMode);
     EXPECT_EQ(artifacts.windowBytes, hdr->windowBytes);
     EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
@@ -2044,12 +2044,13 @@ TEST(HAOCompile, BuildHaoGlobalBlobStoresRulePlanMeta) {
     EXPECT_EQ(static_cast<u8>(plan.category), meta[1].category);
     EXPECT_EQ(plan.flags, meta[1].planFlags);
     EXPECT_EQ(plan.verifier.validByteMask, meta[1].verifierValidByteMask);
-    EXPECT_EQ(plan.verifier.anchorOffset, meta[1].anchorOffset);
-    EXPECT_EQ(plan.verifier.anchorLength, meta[1].anchorLength);
+    EXPECT_EQ(0U, meta[1].reserved1);
+    EXPECT_EQ(0U, meta[1].reserved2);
     EXPECT_EQ(plan.verifier.flags, meta[1].verifierFlags);
-    EXPECT_EQ(srcMeta.litOffset, meta[1].litOffset);
+    EXPECT_EQ(0U, meta[1].reserved3);
+    EXPECT_EQ(srcMeta.maskWord, meta[1].maskWord);
+    EXPECT_EQ(srcMeta.cmpWord, meta[1].cmpWord);
     for (u32 i = 0; i < 8; i++) {
-        EXPECT_EQ(srcMeta.lit[i], meta[1].lit[i]);
         EXPECT_EQ(srcMeta.msk[i], meta[1].msk[i]);
         EXPECT_EQ(srcMeta.cmp[i], meta[1].cmp[i]);
     }
@@ -2476,7 +2477,7 @@ TEST(HAORuntime, AutoHaoBuildWithHaoLayoutEmbedsBlob) {
     EXPECT_EQ(HAO_RUNTIME_MAGIC, magic);
 }
 
-TEST(HAORuntime, AutoHaoBuildWithHaoLayoutEmbedsBlobForAnchorConfirmRules) {
+TEST(HAORuntime, AutoHaoBuildWithHaoLayoutEmbedsBlobForMaskConfirmRules) {
     Grey grey;
     grey.fdrAllowTeddy = false;
     grey.allowNeoFdr = true;
@@ -2502,7 +2503,7 @@ TEST(HAORuntime, AutoHaoBuildWithHaoLayoutEmbedsBlobForAnchorConfirmRules) {
     EXPECT_EQ(HAO_RUNTIME_MAGIC, magic);
 }
 
-TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectForAnchorConfirmRules) {
+TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectForMaskConfirmRules) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 8201, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("maskrule", false, false, 8202, HWLM_ALL_GROUPS,
@@ -2809,11 +2810,11 @@ TEST(HAOCompile, HaoMaskRulesBecomeAnchorConfirm) {
     ASSERT_EQ(lits.size(), artifacts.haoRulePlans.size());
 
     const auto &plan = artifacts.haoRulePlans[1];
-    EXPECT_EQ(HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM, plan.category);
+    EXPECT_EQ(HAORuleCategory::HAO_RULE_MASK_CONFIRM, plan.category);
     EXPECT_TRUE(plan.needFullConfirm);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK);
-    EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT);
+    EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_MASK_CONFIRM);
 }
 
 TEST(HAOCompile, HaoNocaseMaskAnchorStoresL2Mask) {
@@ -2830,7 +2831,7 @@ TEST(HAOCompile, HaoNocaseMaskAnchorStoresL2Mask) {
     ASSERT_TRUE(artifacts.haoGlobalHash.valid);
 
     const auto &plan = artifacts.haoRulePlans[1];
-    ASSERT_EQ(HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM, plan.category);
+    ASSERT_EQ(HAORuleCategory::HAO_RULE_MASK_CONFIRM, plan.category);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK);
     EXPECT_EQ(0xf0U, plan.verifier.validByteMask);
@@ -2873,13 +2874,13 @@ TEST(HAOCompile, HaoSummaryTracksCoverageAndAnchors) {
     EXPECT_EQ(artifacts.haoSummary.totalRules,
               artifacts.haoSummary.fastPathRules);
 
-    u32 anchorCount = 0;
+    u32 maskCount = 0;
     for (const auto &plan : artifacts.haoRulePlans) {
-        if (plan.category == HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM) {
-            anchorCount++;
+        if (plan.category == HAORuleCategory::HAO_RULE_MASK_CONFIRM) {
+            maskCount++;
         }
     }
-    EXPECT_EQ(anchorCount, artifacts.haoSummary.anchorConfirmRules);
+    EXPECT_EQ(maskCount, artifacts.haoSummary.maskConfirmRules);
 }
 
 TEST(HAOCompile, HaoSummaryTracksDirectReportRules) {
@@ -2916,9 +2917,7 @@ TEST(HAOCompile, HaoDirectReportSafetyFollowsSelectorCoverage) {
         const auto &plan = artifacts.haoRulePlans[i];
         bool expectedSafe = false;
 
-        if (!lit.noruns && lit.msk.empty() && lit.cmp.empty() &&
-            plan.verifier.anchorOffset == 0 &&
-            plan.verifier.anchorLength == lit.s.size()) {
+        if (!lit.noruns && lit.msk.empty() && lit.cmp.empty()) {
             if (plan.category == HAORuleCategory::HAO_RULE_NOCASE) {
                 expectedSafe = true;
             } else if (plan.category == HAORuleCategory::HAO_RULE_EXACT) {
@@ -3025,7 +3024,7 @@ TEST(HAOCompile, HaoGlobalHashStoresAnchorConfirmFragments) {
     ASSERT_TRUE(artifacts.haoGlobalHash.valid);
 
     const auto &plan = artifacts.haoRulePlans[1];
-    ASSERT_EQ(HAORuleCategory::HAO_RULE_ANCHOR_CONFIRM, plan.category);
+    ASSERT_EQ(HAORuleCategory::HAO_RULE_MASK_CONFIRM, plan.category);
 
     u32 entry = 0;
     u32 slot = 0;

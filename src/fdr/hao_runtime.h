@@ -5,7 +5,7 @@
 #include "hwlm/hwlm.h"
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 16U
+#define HAO_RUNTIME_VERSION 18U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 #define HAO_RUNTIME_KEY_BITS 22U
@@ -49,7 +49,7 @@
 #define HAO_RUNTIME_RULE_EXACT 0U
 #define HAO_RUNTIME_RULE_NOCASE 1U
 #define HAO_RUNTIME_RULE_SMALL_CLASS_EXPAND 2U
-#define HAO_RUNTIME_RULE_ANCHOR_CONFIRM 3U
+#define HAO_RUNTIME_RULE_MASK_CONFIRM 3U
 #define HAO_RUNTIME_RULE_UNSUPPORTED 4U
 #define HAO_RUNTIME_PLAN_FLAG_DIRECT_REPORT_SAFE (1U << 7)
 struct HAORuntimeL2Check {
@@ -73,7 +73,7 @@ struct HAORuntimeHeader {
     u32 primaryCoarseBitmapSize;
     u32 l2EntryCount;
     u32 ruleMetaCount;
-    u32 literalBlobSize;
+    u32 reservedLiteralBlobSize;
     u32 extractMode;
     u32 windowBytes;
     u64a bextMask;
@@ -88,7 +88,7 @@ struct HAORuntimeHeader {
     u32 l2CheckOffset;
     u32 l2MetaOffset;
     u32 ruleMetaOffset;
-    u32 literalBlobOffset;
+    u32 reservedLiteralBlobOffset;
     u32 reserved1;
     u32 reserved2;
 };
@@ -106,14 +106,15 @@ struct HAORuntimeRuleMeta {
     u16 flags;
     u8 category;
     u8 verifierValidByteMask;
-    u8 anchorOffset;
-    u8 anchorLength;
+    u8 reserved1;
+    u8 reserved2;
     u8 verifierFlags;
     u8 maskLen;
     u16 reserved0;
     u32 planFlags;
-    u32 litOffset;
-    u8 lit[8];
+    u32 reserved3;
+    u64a maskWord;
+    u64a cmpWord;
     u8 msk[8];
     u8 cmp[8];
 };

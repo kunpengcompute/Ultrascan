@@ -58,7 +58,7 @@ static constexpr u32 HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM = 1U << 1;
 static constexpr u32 HAO_RULE_PLAN_FLAG_NORMALIZED = 1U << 2;
 static constexpr u32 HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK = 1U << 3;
 static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_AMBIG_LIMIT = 1U << 4;
-static constexpr u32 HAO_RULE_PLAN_FLAG_ANCHOR_FRAGMENT = 1U << 6;
+static constexpr u32 HAO_RULE_PLAN_FLAG_MASK_CONFIRM = 1U << 6;
 static constexpr u32 HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE = 1U << 7;
 
 struct Grey;
@@ -93,8 +93,9 @@ struct HAOCompileRuleMeta {
     u16 len;
     u16 flags;
     u8 maskLen;
-    u32 litOffset;
-    u8 lit[8];
+    u32 reserved0;
+    u64a maskWord;
+    u64a cmpWord;
     u8 msk[8];
     u8 cmp[8];
 };
@@ -104,7 +105,7 @@ enum class HAORuleCategory : u8 {
     HAO_RULE_EXACT = 0,
     HAO_RULE_NOCASE = 1,
     HAO_RULE_SMALL_CLASS_EXPAND = 2,
-    HAO_RULE_ANCHOR_CONFIRM = 3,
+    HAO_RULE_MASK_CONFIRM = 3,
     HAO_RULE_UNSUPPORTED = 4
 };
 
@@ -128,8 +129,8 @@ struct HAOVerifierFragment {
     std::array<u8, HAO_LAYOUT_BYTES_PER_RULE_SLOT> bytes = {};
     u8 validByteMask = 0;
     u8 nocaseByteMask = 0;
-    u8 anchorOffset = 0;
-    u8 anchorLength = 0;
+    u8 reserved0 = 0;
+    u8 reserved1 = 0;
     u8 flags = 0;
 };
 
@@ -148,7 +149,7 @@ struct HAOCompileSummary {
     u32 totalRules = 0;
     u32 fastPathRules = 0;
     u32 unsupportedRules = 0;
-    u32 anchorConfirmRules = 0;
+    u32 maskConfirmRules = 0;
     u32 exactRules = 0;
     u32 nocaseRules = 0;
     u32 fastPathConfirmRules = 0;
@@ -156,6 +157,11 @@ struct HAOCompileSummary {
     u32 keyExpandedRules = 0;
     u32 totalExpandedKeys = 0;
     u32 maxSelectedAmbigBits = 0;
+    u64a totalLiteralBytes = 0;
+    u32 minLiteralLen = 0;
+    u32 maxLiteralLen = 0;
+    u32 literalLenLe4 = 0;
+    u32 literalLen5To8 = 0;
 };
 
 /* Build-time statistics for the HAO global single-table layout. */
@@ -204,7 +210,6 @@ struct HAOCompileArtifacts {
     HAOCompileSummary haoSummary;
     HAOGlobalHashArtifacts haoGlobalHash;
     std::vector<HAOCompileRuleMeta> ruleMeta;
-    std::vector<u8> literalBlob;
 };
 
 enum class HAOFeasibilityReason : u32 {
@@ -251,5 +256,3 @@ bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts);
 } // namespace ue2
 
 #endif // HAO_COMPILE_H
-
-
