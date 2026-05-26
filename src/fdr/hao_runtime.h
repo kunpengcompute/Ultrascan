@@ -5,7 +5,7 @@
 #include "hwlm/hwlm.h"
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 18U
+#define HAO_RUNTIME_VERSION 19U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
 #define HAO_RUNTIME_KEY_BITS 22U
@@ -51,7 +51,6 @@
 #define HAO_RUNTIME_RULE_SMALL_CLASS_EXPAND 2U
 #define HAO_RUNTIME_RULE_MASK_CONFIRM 3U
 #define HAO_RUNTIME_RULE_UNSUPPORTED 4U
-#define HAO_RUNTIME_PLAN_FLAG_DIRECT_REPORT_SAFE (1U << 7)
 struct HAORuntimeL2Check {
     u64a rule[HAO_RUNTIME_RULE_SLOTS_PER_ENTRY];
     u64a mask[HAO_RUNTIME_RULE_SLOTS_PER_ENTRY];
@@ -101,22 +100,12 @@ struct HAORuntimeBitSelector {
 
 struct HAORuntimeRuleMeta {
     u32 id;
-    hwlm_group_t groups;
-    u16 len;
     u16 flags;
-    u8 category;
-    u8 verifierValidByteMask;
-    u8 reserved1;
-    u8 reserved2;
-    u8 verifierFlags;
     u8 maskLen;
-    u16 reserved0;
-    u32 planFlags;
-    u32 reserved3;
+    u8 reserved;
+    hwlm_group_t groups;
     u64a maskWord;
     u64a cmpWord;
-    u8 msk[8];
-    u8 cmp[8];
 };
 
 /* Read-only summary returned by HAO runtime blob inspection helpers. */
@@ -174,13 +163,6 @@ struct FDR_Runtime_Args;
 extern "C" {
 #endif
 
-u64a haoExtractPackedBitsSveBitPerm(u64a window, u64a mask);
-void haoExtractPackedBitsSveBitPermBatch(const u64a *windows, u32 count,
-                                         u64a mask, u64a *packedOut);
-void haoExtractPackedBitsSveBitPermBatchToKeys(const u64a *windows, u32 count,
-                                               u64a mask, u32 keyMask,
-                                               u32 *keysOut);
-u32 haoExtractPackedBitsSveBitPermLaneCount(void);
 hwlm_error_t HaoEngineExec(const struct FDR *fdr,
                            const struct FDR_Runtime_Args *a,
                            hwlm_group_t control);

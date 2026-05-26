@@ -6,7 +6,6 @@
 #include "hs_compile.h"
 #include "util/bitutils.h"
 #include "util/compare.h"
-#include "util/cpuid_flags.h"
 #include "util/simd_utils.h"
 #include "util/unaligned.h"
 
@@ -35,20 +34,6 @@ int haoGetByteAt(const struct FDR_Runtime_Args *a, s64a pos, u8 *out) {
     }
     *out = a->buf_history[idx];
     return 1;
-}
-
-static really_inline
-int haoRuntimeCanUseBextFastPath(void) {
-    static int cached = -1;
-    if (cached != -1) {
-        return cached;
-    }
-#if defined(HS_BUILD_HAVE_SVEBITPERM)
-    cached = !!(cpuid_flags() & HS_CPU_FEATURES_SVEBITPERM);
-#else
-    cached = 0;
-#endif
-    return cached;
 }
 
 static really_inline
@@ -188,11 +173,7 @@ u32 haoPackedKeyMask(u32 selectorCount) {
 
 static really_inline
 u32 haoExtractKeyBext(const struct HAORuntimeHeader *hdr, u64a window) {
-    const u64a packed = haoRuntimeCanUseBextFastPath()
-                            ? haoExtractPackedBitsSveBitPerm(window,
-                                                             hdr->bextMask)
-                            : haoExtractPackedBitsFallback(window,
-                                                           hdr->bextMask);
+    const u64a packed = haoExtractPackedBitsFallback(window, hdr->bextMask);
     return (u32)(packed & haoPackedKeyMask(hdr->selectorCount));
 }
 
@@ -206,17 +187,10 @@ void haoExtractKeysFromBextWindows(const struct HAORuntimeHeader *hdr,
         return;
     }
 
-    assert(count <= HAO_BATCH_MAX_WIDTH);
-    if (haoRuntimeCanUseBextFastPath()) {
-        haoExtractPackedBitsSveBitPermBatchToKeys(windows, count,
-                                                  hdr->bextMask, keyMask,
-                                                  keys);
-    } else {
-        for (i = 0; i < count; i++) {
-            keys[i] = (u32)(haoExtractPackedBitsFallback(windows[i],
-                                                         hdr->bextMask) &
-                            keyMask);
-        }
+    for (i = 0; i < count; i++) {
+        keys[i] = (u32)(haoExtractPackedBitsFallback(windows[i],
+                                                     hdr->bextMask) &
+                        keyMask);
     }
 }
 

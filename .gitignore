@@ -106,4 +106,5 @@ build
 reference/
 documents/
 hash_test/
+hash_opt/
 data/

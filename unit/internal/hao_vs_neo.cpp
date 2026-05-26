@@ -2038,22 +2038,15 @@ TEST(HAOCompile, BuildHaoGlobalBlobStoresRulePlanMeta) {
     const auto *meta = reinterpret_cast<const HAORuntimeRuleMeta *>(
         reinterpret_cast<const u8 *>(hdr) + hdr->ruleMetaOffset);
 
-    const auto &plan = artifacts.haoRulePlans[1];
     const auto &srcMeta = artifacts.ruleMeta[1];
 
-    EXPECT_EQ(static_cast<u8>(plan.category), meta[1].category);
-    EXPECT_EQ(plan.flags, meta[1].planFlags);
-    EXPECT_EQ(plan.verifier.validByteMask, meta[1].verifierValidByteMask);
-    EXPECT_EQ(0U, meta[1].reserved1);
-    EXPECT_EQ(0U, meta[1].reserved2);
-    EXPECT_EQ(plan.verifier.flags, meta[1].verifierFlags);
-    EXPECT_EQ(0U, meta[1].reserved3);
+    EXPECT_EQ(srcMeta.id, meta[1].id);
+    EXPECT_EQ(srcMeta.flags, meta[1].flags);
+    EXPECT_EQ(srcMeta.maskLen, meta[1].maskLen);
+    EXPECT_EQ(0U, meta[1].reserved);
+    EXPECT_EQ(srcMeta.groups, meta[1].groups);
     EXPECT_EQ(srcMeta.maskWord, meta[1].maskWord);
     EXPECT_EQ(srcMeta.cmpWord, meta[1].cmpWord);
-    for (u32 i = 0; i < 8; i++) {
-        EXPECT_EQ(srcMeta.msk[i], meta[1].msk[i]);
-        EXPECT_EQ(srcMeta.cmp[i], meta[1].cmp[i]);
-    }
 }
 
 TEST(HAOCompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {

@@ -820,7 +820,6 @@ set (hs_exec_SRCS
     src/fdr/flood_runtime.h
     src/fdr/fdr_loadval.h
     src/fdr/hao_engine.c
-    src/fdr/hao_extract_sve2_bitperm.c
     src/fdr/hao_runtime.h
     src/fdr/teddy.c
     src/fdr/teddy.h
@@ -954,14 +953,6 @@ set (hs_exec_avx2_SRCS
     src/fdr/teddy_avx2.c
     src/util/masked_move.c
 )
-
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64" AND HS_BUILD_HAVE_SVEBITPERM)
-    set_source_files_properties(
-        src/fdr/hao_extract_sve2_bitperm.c
-        PROPERTIES
-            COMPILE_FLAGS "${HS_SVEBITPERM_C_FLAGS}")
-endif()
-
 
 SET (hs_compile_SRCS
     ${hs_HEADERS}

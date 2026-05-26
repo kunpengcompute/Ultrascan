@@ -22,6 +22,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -33,6 +34,13 @@ static constexpr u32 HAO_BUILD_MAX_SUFFIX_BYTES = 8;
 static constexpr u32 HAO_BUILD_MAX_CANDIDATE_BITS = HAO_BUILD_MAX_SUFFIX_BYTES * 8;
 static constexpr u32 HAO_BUILD_L2_KEY_BITS = 22;
 static constexpr u32 HAO_BUILD_MAX_L2_ENTRIES = 1U << HAO_BUILD_L2_KEY_BITS;
+static constexpr size_t HAO_BUILD_CLUSTER_AUTO_MAX_LITS = 10000;
+#ifndef HAO_BRUTEFORCE_CANDIDATE_LIMIT
+#define HAO_BRUTEFORCE_CANDIDATE_LIMIT 30U
+#endif
+#ifndef HAO_BRUTEFORCE_BEAM_WIDTH
+#define HAO_BRUTEFORCE_BEAM_WIDTH 96U
+#endif
 static constexpr u64a HAO_BUILD_MAX_TOTAL_PRIMARY_FOOTPRINT =
     128ULL * 1024ULL * 1024ULL;
 static constexpr u8 HAO_BUILD_STATE_DONT_CARE = 2;
@@ -51,13 +59,17 @@ struct HAOBitCandidate {
 
 enum class HAOSelectorMode : u8 {
     DEFAULT,
-    DYNAMIC_EXPANSION
+    DYNAMIC_EXPANSION,
+    CLUSTERED,
+    BRUTEFORCE
 };
 
 enum class HAOSelectorPolicy : u8 {
     AUTO,
     DEFAULT_ONLY,
-    DYNAMIC_ONLY
+    DYNAMIC_ONLY,
+    CLUSTER_ONLY,
+    BRUTEFORCE_ONLY
 };
 
 static
@@ -312,6 +324,17 @@ HAOSelectorPolicy haoSelectorPolicy(void) {
     } else if (strcmp(env, "dynamic") == 0 || strcmp(env, "DYNAMIC") == 0 ||
                strcmp(env, "1") == 0) {
         policy = static_cast<int>(HAOSelectorPolicy::DYNAMIC_ONLY);
+    } else if (strcmp(env, "cluster") == 0 || strcmp(env, "CLUSTER") == 0 ||
+               strcmp(env, "clustered") == 0 ||
+               strcmp(env, "CLUSTERED") == 0 ||
+               strcmp(env, "2") == 0) {
+        policy = static_cast<int>(HAOSelectorPolicy::CLUSTER_ONLY);
+    } else if (strcmp(env, "bruteforce") == 0 ||
+               strcmp(env, "BRUTEFORCE") == 0 ||
+               strcmp(env, "brute") == 0 ||
+               strcmp(env, "BRUTE") == 0 ||
+               strcmp(env, "3") == 0) {
+        policy = static_cast<int>(HAOSelectorPolicy::BRUTEFORCE_ONLY);
     } else {
         policy = static_cast<int>(HAOSelectorPolicy::AUTO);
     }
@@ -1362,11 +1385,464 @@ void selectBitSelectorsDynamic(const std::vector<hwlmLiteral> &lits,
     finalizeBitSelectors(selectors, keyBitsOut);
 }
 
+struct HAOClusterBucketEval {
+    u32 count = 0;
+    std::array<u32, 4> categoryCount = {};
+    std::array<u32, HAO_LAYOUT_BYTES_PER_RULE_SLOT + 1> lenCount = {};
+    u32 hasMaskCount = 0;
+    u32 norunsCount = 0;
+};
+
+struct HAOClusterEvalCost {
+    double cost = std::numeric_limits<double>::infinity();
+    u64a totalExpandedKeys = 0;
+    u32 maxExpandedKeysPerRule = 0;
+    u32 nonEmptyPrimary = 0;
+    u32 collisionBuckets = 0;
+    u32 totalL2Entries = 0;
+    u32 maxRulesPerBucket = 0;
+    double heavyBucketCost = 0.0;
+    double heterogeneityCost = 0.0;
+};
+
+static
+u8 haoClusterCategory(const hwlmLiteral &lit) {
+    if (haoHasMask(lit)) {
+        return 2;
+    }
+    if (lit.nocase) {
+        return 1;
+    }
+    return 0;
+}
+
+static
+void haoClusterBucketAdd(const hwlmLiteral &lit, HAOClusterBucketEval *bucket,
+                         double *heterogeneityCost) {
+    assert(bucket);
+    assert(heterogeneityCost);
+
+    const u8 category = haoClusterCategory(lit);
+    const u32 len = std::min<u32>(verify_u32(lit.s.size()),
+                                  HAO_LAYOUT_BYTES_PER_RULE_SLOT);
+    const bool hasMask = haoHasMask(lit);
+    const bool noruns = lit.noruns;
+    const u32 prior = bucket->count;
+
+    *heterogeneityCost +=
+        (double)(prior - bucket->categoryCount[category]) * 8.0;
+    *heterogeneityCost +=
+        (double)(hasMask ? prior - bucket->hasMaskCount
+                         : bucket->hasMaskCount) *
+        6.0;
+    *heterogeneityCost +=
+        (double)(noruns ? prior - bucket->norunsCount
+                        : bucket->norunsCount) *
+        3.0;
+    *heterogeneityCost +=
+        (double)(prior - bucket->lenCount[len]) * 1.5;
+
+    bucket->count++;
+    bucket->categoryCount[category]++;
+    bucket->lenCount[len]++;
+    if (hasMask) {
+        bucket->hasMaskCount++;
+    }
+    if (noruns) {
+        bucket->norunsCount++;
+    }
+}
+
+static
+HAOClusterEvalCost haoEvalClusterCandidate(
+    const std::vector<hwlmLiteral> &lits, const HAOBitCandidate &cand,
+    const std::vector<u32> &currentKey,
+    const std::vector<u32> &currentAmbigMask,
+    const std::vector<u8> &currentAmbigCount, u32 selectedBits) {
+    static constexpr u32 HAO_CLUSTER_EVAL_MAX_RULE_EXPANSION = 2048U;
+    static constexpr u64a HAO_CLUSTER_EVAL_MAX_TOTAL_EXPANSION =
+        4ULL * 1024ULL * 1024ULL;
+
+    HAOClusterEvalCost out;
+    std::unordered_map<u32, HAOClusterBucketEval> buckets;
+    buckets.reserve(std::min<size_t>(lits.size() * 2U, 1U << 20));
+
+    assert(lits.size() == cand.states.size());
+    assert(lits.size() == currentKey.size());
+    assert(lits.size() == currentAmbigMask.size());
+    assert(lits.size() == currentAmbigCount.size());
+    assert(selectedBits < 32U);
+
+    const u32 newBit = 1U << selectedBits;
+    for (u32 ruleIndex = 0; ruleIndex < lits.size(); ruleIndex++) {
+        u32 key = currentKey[ruleIndex];
+        u32 ambigMask = currentAmbigMask[ruleIndex];
+        u32 ambigCount = currentAmbigCount[ruleIndex];
+        const u8 state = cand.states[ruleIndex];
+
+        if (state == HAO_BUILD_STATE_DONT_CARE) {
+            ambigMask |= newBit;
+            ambigCount++;
+        } else if (state) {
+            key |= newBit;
+        }
+
+        if (ambigCount >= 31U) {
+            return out;
+        }
+        const u32 expansion = 1U << ambigCount;
+        if (expansion > HAO_CLUSTER_EVAL_MAX_RULE_EXPANSION) {
+            return out;
+        }
+
+        out.totalExpandedKeys += expansion;
+        if (out.totalExpandedKeys > HAO_CLUSTER_EVAL_MAX_TOTAL_EXPANSION) {
+            return out;
+        }
+        out.maxExpandedKeysPerRule =
+            std::max(out.maxExpandedKeysPerRule, expansion);
+
+        u32 ambigBits[HAO_LAYOUT_KEY_BITS] = {};
+        u32 ambigBitCount = 0;
+        for (u32 bit = 0; bit <= selectedBits; bit++) {
+            if (ambigMask & (1U << bit)) {
+                ambigBits[ambigBitCount++] = bit;
+            }
+        }
+
+        for (u32 variant = 0; variant < expansion; variant++) {
+            u32 expandedKey = key;
+            for (u32 j = 0; j < ambigBitCount; j++) {
+                const u32 bit = ambigBits[j];
+                if (variant & (1U << j)) {
+                    expandedKey |= 1U << bit;
+                } else {
+                    expandedKey &= ~(1U << bit);
+                }
+            }
+
+            auto &bucket = buckets[expandedKey];
+            haoClusterBucketAdd(lits[ruleIndex], &bucket,
+                                &out.heterogeneityCost);
+        }
+    }
+
+    out.nonEmptyPrimary = verify_u32(buckets.size());
+    for (const auto &it : buckets) {
+        const u32 count = it.second.count;
+        if (count > 1U) {
+            out.collisionBuckets++;
+        }
+        out.maxRulesPerBucket = std::max(out.maxRulesPerBucket, count);
+        out.totalL2Entries +=
+            (count + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY - 1U) /
+            HAO_LAYOUT_RULE_SLOTS_PER_ENTRY;
+        out.heavyBucketCost += (double)count * (double)count;
+    }
+
+    out.cost =
+        (double)out.totalExpandedKeys * 10.0 +
+        (double)out.maxExpandedKeysPerRule * 50.0 +
+        (double)out.collisionBuckets * 120.0 +
+        out.heavyBucketCost * 8.0 +
+        (double)out.totalL2Entries * 25.0 +
+        out.heterogeneityCost * 1.5 +
+        (double)out.nonEmptyPrimary * 0.05 +
+        (double)out.maxRulesPerBucket * 250.0;
+
+    return out;
+}
+
+static
+void haoClusterApplyCandidate(const HAOBitCandidate &cand, u32 selectedBits,
+                              std::vector<u32> *currentKey,
+                              std::vector<u32> *currentAmbigMask,
+                              std::vector<u8> *currentAmbigCount) {
+    assert(currentKey);
+    assert(currentAmbigMask);
+    assert(currentAmbigCount);
+    assert(cand.states.size() == currentKey->size());
+
+    const u32 newBit = 1U << selectedBits;
+    for (u32 i = 0; i < cand.states.size(); i++) {
+        const u8 state = cand.states[i];
+        if (state == HAO_BUILD_STATE_DONT_CARE) {
+            (*currentAmbigMask)[i] |= newBit;
+            (*currentAmbigCount)[i]++;
+        } else if (state) {
+            (*currentKey)[i] |= newBit;
+        }
+    }
+}
+
+static
+void selectBitSelectorsClustered(const std::vector<hwlmLiteral> &lits,
+                                 std::vector<HAOBitSelector> *selectors,
+                                 u32 *keyBitsOut) {
+    selectors->clear();
+    if (keyBitsOut) {
+        *keyBitsOut = 0;
+    }
+    if (lits.empty()) {
+        return;
+    }
+
+    auto candidates = buildBitCandidates(lits);
+    if (candidates.empty()) {
+        return;
+    }
+    std::sort(candidates.begin(), candidates.end(),
+              [](const HAOBitCandidate &a, const HAOBitCandidate &b) {
+                  if (a.fixedCount != b.fixedCount) {
+                      return a.fixedCount > b.fixedCount;
+                  }
+                  if (a.ambiguousCount != b.ambiguousCount) {
+                      return a.ambiguousCount < b.ambiguousCount;
+                  }
+                  if (a.entropy != b.entropy) {
+                      return a.entropy > b.entropy;
+                  }
+                  return a.bitIndex < b.bitIndex;
+              });
+
+    const u32 targetBits = std::min<u32>(HAO_LAYOUT_KEY_BITS,
+                                         verify_u32(candidates.size()));
+    std::vector<u32> currentKey(lits.size(), 0);
+    std::vector<u32> currentAmbigMask(lits.size(), 0);
+    std::vector<u8> currentAmbigCount(lits.size(), 0);
+    std::unordered_set<u32> chosenBits;
+
+    while (selectors->size() < targetBits) {
+        const HAOBitCandidate *best = nullptr;
+        HAOClusterEvalCost bestCost;
+        const u32 selectedBits = verify_u32(selectors->size());
+
+        for (const auto &cand : candidates) {
+            if (chosenBits.find(cand.bitIndex) != chosenBits.end()) {
+                continue;
+            }
+            if (!haoCandFits(cand, currentAmbigCount)) {
+                continue;
+            }
+
+            const auto cost = haoEvalClusterCandidate(
+                lits, cand, currentKey, currentAmbigMask, currentAmbigCount,
+                selectedBits);
+            if (!std::isfinite(cost.cost)) {
+                continue;
+            }
+
+            if (!best || cost.cost < bestCost.cost ||
+                (cost.cost == bestCost.cost &&
+                 cand.ambiguousCount < best->ambiguousCount) ||
+                (cost.cost == bestCost.cost &&
+                 cand.ambiguousCount == best->ambiguousCount &&
+                 cand.fixedCount > best->fixedCount) ||
+                (cost.cost == bestCost.cost &&
+                 cand.ambiguousCount == best->ambiguousCount &&
+                 cand.fixedCount == best->fixedCount &&
+                 cand.bitIndex < best->bitIndex)) {
+                best = &cand;
+                bestCost = cost;
+            }
+        }
+
+        if (!best) {
+            break;
+        }
+
+        haoAddSelector(*best, selectors);
+        chosenBits.insert(best->bitIndex);
+        haoClusterApplyCandidate(*best, selectedBits, &currentKey,
+                                 &currentAmbigMask, &currentAmbigCount);
+    }
+
+    if (selectors->size() < targetBits) {
+        for (const auto &cand : candidates) {
+            if (selectors->size() >= targetBits) {
+                break;
+            }
+            if (chosenBits.find(cand.bitIndex) != chosenBits.end()) {
+                continue;
+            }
+            if (!haoCandFits(cand, currentAmbigCount)) {
+                continue;
+            }
+            const u32 selectedBits = verify_u32(selectors->size());
+            haoAddSelector(cand, selectors);
+            chosenBits.insert(cand.bitIndex);
+            haoClusterApplyCandidate(cand, selectedBits, &currentKey,
+                                     &currentAmbigMask, &currentAmbigCount);
+        }
+    }
+
+    finalizeBitSelectors(selectors, keyBitsOut);
+}
+
+struct HAOBruteState {
+    u64a chosenCandidateMask = 0;
+    std::vector<u32> currentKey;
+    std::vector<u32> currentAmbigMask;
+    std::vector<u8> currentAmbigCount;
+    std::vector<u32> selectedCandidateIndexes;
+    HAOClusterEvalCost eval;
+};
+
+static
+bool haoBruteStateLess(const HAOBruteState &a, const HAOBruteState &b) {
+    if (a.eval.cost != b.eval.cost) {
+        return a.eval.cost < b.eval.cost;
+    }
+    if (a.eval.totalExpandedKeys != b.eval.totalExpandedKeys) {
+        return a.eval.totalExpandedKeys < b.eval.totalExpandedKeys;
+    }
+    if (a.eval.collisionBuckets != b.eval.collisionBuckets) {
+        return a.eval.collisionBuckets < b.eval.collisionBuckets;
+    }
+    if (a.eval.maxRulesPerBucket != b.eval.maxRulesPerBucket) {
+        return a.eval.maxRulesPerBucket < b.eval.maxRulesPerBucket;
+    }
+    return a.chosenCandidateMask < b.chosenCandidateMask;
+}
+
+static
+void haoBruteTrimBeam(std::vector<HAOBruteState> *beam) {
+    assert(beam);
+    if (beam->empty()) {
+        return;
+    }
+
+    std::sort(beam->begin(), beam->end(), haoBruteStateLess);
+    auto last = std::unique(
+        beam->begin(), beam->end(),
+        [](const HAOBruteState &a, const HAOBruteState &b) {
+            return a.chosenCandidateMask == b.chosenCandidateMask;
+        });
+    beam->erase(last, beam->end());
+    if (beam->size() > HAO_BRUTEFORCE_BEAM_WIDTH) {
+        beam->resize(HAO_BRUTEFORCE_BEAM_WIDTH);
+    }
+}
+
+static
+void selectBitSelectorsBruteforce(const std::vector<hwlmLiteral> &lits,
+                                  std::vector<HAOBitSelector> *selectors,
+                                  u32 *keyBitsOut) {
+    selectors->clear();
+    if (keyBitsOut) {
+        *keyBitsOut = 0;
+    }
+    if (lits.empty()) {
+        return;
+    }
+
+    auto candidates = buildBitCandidates(lits);
+    if (candidates.empty()) {
+        return;
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const HAOBitCandidate &a, const HAOBitCandidate &b) {
+                  const double scoreA =
+                      a.fixedRatio * 0.55 + a.entropy * 0.30 -
+                      a.ambiguousRatio * 0.45;
+                  const double scoreB =
+                      b.fixedRatio * 0.55 + b.entropy * 0.30 -
+                      b.ambiguousRatio * 0.45;
+                  if (scoreA != scoreB) {
+                      return scoreA > scoreB;
+                  }
+                  if (a.fixedCount != b.fixedCount) {
+                      return a.fixedCount > b.fixedCount;
+                  }
+                  if (a.ambiguousCount != b.ambiguousCount) {
+                      return a.ambiguousCount < b.ambiguousCount;
+                  }
+                  return a.bitIndex < b.bitIndex;
+              });
+
+    const u32 candidateLimit =
+        std::min<u32>(HAO_BRUTEFORCE_CANDIDATE_LIMIT,
+                      verify_u32(candidates.size()));
+    candidates.resize(candidateLimit);
+
+    const u32 targetBits =
+        std::min<u32>(HAO_LAYOUT_KEY_BITS, candidateLimit);
+
+    HAOBruteState initial;
+    initial.currentKey.assign(lits.size(), 0);
+    initial.currentAmbigMask.assign(lits.size(), 0);
+    initial.currentAmbigCount.assign(lits.size(), 0);
+
+    std::vector<HAOBruteState> beam;
+    beam.push_back(std::move(initial));
+
+    for (u32 depth = 0; depth < targetBits; depth++) {
+        std::vector<HAOBruteState> nextBeam;
+        nextBeam.reserve(beam.size() * candidateLimit);
+
+        for (const auto &state : beam) {
+            for (u32 candIdx = 0; candIdx < candidateLimit; candIdx++) {
+                const u64a candMask = 1ULL << candIdx;
+                if (state.chosenCandidateMask & candMask) {
+                    continue;
+                }
+
+                const auto &cand = candidates[candIdx];
+                if (!haoCandFits(cand, state.currentAmbigCount)) {
+                    continue;
+                }
+
+                HAOBruteState next = state;
+                next.chosenCandidateMask |= candMask;
+                next.selectedCandidateIndexes.push_back(candIdx);
+
+                const auto eval = haoEvalClusterCandidate(
+                    lits, cand, state.currentKey, state.currentAmbigMask,
+                    state.currentAmbigCount, depth);
+                if (!std::isfinite(eval.cost)) {
+                    continue;
+                }
+
+                haoClusterApplyCandidate(cand, depth, &next.currentKey,
+                                         &next.currentAmbigMask,
+                                         &next.currentAmbigCount);
+                next.eval = eval;
+                nextBeam.push_back(std::move(next));
+            }
+        }
+
+        haoBruteTrimBeam(&nextBeam);
+        if (nextBeam.empty()) {
+            break;
+        }
+        beam = std::move(nextBeam);
+    }
+
+    if (beam.empty()) {
+        selectBitSelectorsClustered(lits, selectors, keyBitsOut);
+        return;
+    }
+
+    haoBruteTrimBeam(&beam);
+    const HAOBruteState &best = beam.front();
+    for (u32 candIdx : best.selectedCandidateIndexes) {
+        assert(candIdx < candidates.size());
+        haoAddSelector(candidates[candIdx], selectors);
+    }
+
+    finalizeBitSelectors(selectors, keyBitsOut);
+}
+
 static
 void selectBitSelectors(const std::vector<hwlmLiteral> &lits,
                         std::vector<HAOBitSelector> *selectors,
                         u32 *keyBitsOut, HAOSelectorMode mode) {
-    if (mode == HAOSelectorMode::DYNAMIC_EXPANSION) {
+    if (mode == HAOSelectorMode::BRUTEFORCE) {
+        selectBitSelectorsBruteforce(lits, selectors, keyBitsOut);
+    } else if (mode == HAOSelectorMode::CLUSTERED) {
+        selectBitSelectorsClustered(lits, selectors, keyBitsOut);
+    } else if (mode == HAOSelectorMode::DYNAMIC_EXPANSION) {
         selectBitSelectorsDynamic(lits, selectors, keyBitsOut);
     } else {
         selectBitSelectorsDefault(lits, selectors, keyBitsOut);
@@ -1384,8 +1860,6 @@ void haoBuildMeta(const std::vector<hwlmLiteral> &lits,
         HAOCompileRuleMeta m = {};
         m.id = lit.id;
         m.groups = lit.groups;
-        m.len = verify_u16(std::min<size_t>(lit.s.size(),
-                                            std::numeric_limits<u16>::max()));
         if (lit.nocase) {
             m.flags |= HAO_RULE_META_FLAG_NOCASE;
         }
@@ -1400,10 +1874,6 @@ void haoBuildMeta(const std::vector<hwlmLiteral> &lits,
             m.maskLen = normLen;
             packMaskCmpTail(normMsk, normCmp, normLen,
                             &m.maskWord, &m.cmpWord);
-            for (size_t j = 0; j < m.maskLen; j++) {
-                m.msk[j] = normMsk[j];
-                m.cmp[j] = normCmp[j];
-            }
         }
         ruleMeta->push_back(m);
     }
@@ -1514,6 +1984,52 @@ bool haoAcceptDynamicSelector(const HAOCompileArtifacts &base,
 }
 
 static
+double haoArtifactSelectorCost(const HAOCompileArtifacts &artifacts) {
+    if (!artifacts.haoGlobalHash.valid ||
+        (artifacts.flags & HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE)) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    const auto &s = artifacts.haoSummary;
+    const auto &h = artifacts.haoGlobalHash.stats;
+    const double avgRules = haoAvgRulesPerBucket(h);
+    const double collisionPct =
+        haoPct(h.collisionBuckets, h.nonEmptyPrimary);
+    const double heavyPct =
+        haoPct(h.ruleBucketsGt4, h.nonEmptyPrimary);
+
+    return (double)s.totalExpandedKeys * 10.0 +
+           (double)s.maxSelectedAmbigBits * 500.0 +
+           (double)h.collisionBuckets * 120.0 +
+           (double)h.ruleBucketsGt4 * 900.0 +
+           (double)h.maxRulesPerBucket * 300.0 +
+           (double)h.totalL2Entries * 25.0 +
+           avgRules * 1000.0 +
+           collisionPct * 200.0 +
+           heavyPct * 600.0;
+}
+
+static
+bool haoAcceptClusterSelector(const HAOCompileArtifacts &base,
+                              const HAOCompileArtifacts &candidate) {
+    const double baseCost = haoArtifactSelectorCost(base);
+    const double candCost = haoArtifactSelectorCost(candidate);
+
+    if (!std::isfinite(candCost)) {
+        return false;
+    }
+
+    // Avoid trading a slightly better bucket shape for a much larger expansion
+    // frontier; expansion directly increases primary/L2 pressure.
+    if ((u64a)candidate.haoSummary.totalExpandedKeys >
+        (u64a)base.haoSummary.totalExpandedKeys * 2ULL) {
+        return false;
+    }
+
+    return candCost < baseCost * 0.98;
+}
+
+static
 void haoDumpArtifacts(const std::vector<hwlmLiteral> &lits,
                              const HAOCompileArtifacts &artifacts) {
     printf("\n========== [HAO][Build-Artifacts] Begin ==========\n");
@@ -1602,24 +2118,56 @@ bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
     const char *selectorMode = "default";
     if (policy == HAOSelectorPolicy::DEFAULT_ONLY) {
         *artifacts = std::move(base);
+    } else if (policy == HAOSelectorPolicy::BRUTEFORCE_ONLY) {
+        HAOCompileArtifacts brute;
+        resetHAOCompileArtifactsCommon(&brute);
+        if (!haoBuildShared(lits, &brute, HAOSelectorMode::BRUTEFORCE)) {
+            return false;
+        }
+        *artifacts = std::move(brute);
+        selectorMode = "bruteforce-forced";
     } else {
+        HAOCompileArtifacts selected;
+        resetHAOCompileArtifactsCommon(&selected);
+        selected = std::move(base);
+
         HAOCompileArtifacts dynamic;
         resetHAOCompileArtifactsCommon(&dynamic);
         const bool haveDynamic =
+            policy != HAOSelectorPolicy::CLUSTER_ONLY &&
             haoBuildShared(lits, &dynamic, HAOSelectorMode::DYNAMIC_EXPANSION);
         const bool useDynamic =
             haveDynamic &&
             (policy == HAOSelectorPolicy::DYNAMIC_ONLY ||
-             haoAcceptDynamicSelector(base, dynamic));
+             haoAcceptDynamicSelector(selected, dynamic));
 
         if (useDynamic) {
-            *artifacts = std::move(dynamic);
+            selected = std::move(dynamic);
             selectorMode = policy == HAOSelectorPolicy::DYNAMIC_ONLY
                                ? "dynamic-forced"
                                : "dynamic";
-        } else {
-            *artifacts = std::move(base);
         }
+
+        HAOCompileArtifacts clustered;
+        resetHAOCompileArtifactsCommon(&clustered);
+        const bool haveCluster =
+            policy != HAOSelectorPolicy::DYNAMIC_ONLY &&
+            (policy == HAOSelectorPolicy::CLUSTER_ONLY ||
+             lits.size() <= HAO_BUILD_CLUSTER_AUTO_MAX_LITS) &&
+            haoBuildShared(lits, &clustered, HAOSelectorMode::CLUSTERED);
+        const bool useCluster =
+            haveCluster &&
+            (policy == HAOSelectorPolicy::CLUSTER_ONLY ||
+             haoAcceptClusterSelector(selected, clustered));
+
+        if (useCluster) {
+            selected = std::move(clustered);
+            selectorMode = policy == HAOSelectorPolicy::CLUSTER_ONLY
+                               ? "cluster-forced"
+                               : "cluster";
+        }
+
+        *artifacts = std::move(selected);
     }
 
     if (enableDump) {
@@ -1878,25 +2426,14 @@ bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
         reinterpret_cast<HAORuntimeRuleMeta *>(base + ruleMetaOffset);
     for (u32 i = 0; i < ruleMetaCount; i++) {
         const auto &srcMeta = artifacts.ruleMeta[i];
-        const auto &plan = artifacts.haoRulePlans[i];
         auto &dst = ruleMetaOut[i];
         dst.id = srcMeta.id;
-        dst.groups = srcMeta.groups;
-        dst.len = srcMeta.len;
         dst.flags = srcMeta.flags;
-        dst.category = static_cast<u8>(plan.category);
-        dst.verifierValidByteMask = plan.verifier.validByteMask;
-        dst.reserved1 = 0;
-        dst.reserved2 = 0;
-        dst.verifierFlags = plan.verifier.flags;
         dst.maskLen = srcMeta.maskLen;
-        dst.reserved0 = 0;
-        dst.planFlags = plan.flags;
-        dst.reserved3 = 0;
+        dst.reserved = 0;
+        dst.groups = srcMeta.groups;
         dst.maskWord = srcMeta.maskWord;
         dst.cmpWord = srcMeta.cmpWord;
-        memcpy(dst.msk, srcMeta.msk, sizeof(dst.msk));
-        memcpy(dst.cmp, srcMeta.cmp, sizeof(dst.cmp));
     }
     return blob;
 }

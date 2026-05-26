@@ -89,15 +89,12 @@ struct HAOL2Meta {
 
 struct HAOCompileRuleMeta {
     u32 id;
-    hwlm_group_t groups;
-    u16 len;
     u16 flags;
     u8 maskLen;
-    u32 reserved0;
+    u8 reserved;
+    hwlm_group_t groups;
     u64a maskWord;
     u64a cmpWord;
-    u8 msk[8];
-    u8 cmp[8];
 };
 
 /* Each HAO rule is classified into one explicit compile-time category. */
