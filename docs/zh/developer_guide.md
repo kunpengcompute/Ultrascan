@@ -1,6 +1,6 @@
-# 开发指南<a name="ZH-CN_TOPIC_0000002549765393"></a>
+# 开发指南
 
-## 函数说明<a name="ZH-CN_TOPIC_0000002549885353"></a>
+## 函数说明
 
 >![](public_sys-resources/icon-notice.gif) **须知：** 
 >KHSEL中的函数（KHSEL\_xxx）无需被显式调用，它们作为Hyperscan的内部接口使用。
@@ -16,25 +16,25 @@ KHSEL库已优化函数如[**表 1** KHSEL库已优化函数](#KHSEL库已优化
 |KHSEL_BuildLilyForTeddy|Hyperscan新增2~4字节短规则匹配的编译函数。|
 |KHSEL_LilyForTeddyRunExec|Hyperscan新增2~4字节短规则匹配的运行函数。|
 
-## 使用说明<a name="ZH-CN_TOPIC_0000002518405558"></a>
+## 使用说明
 
 KHSEL函数源码已集成到Hyperscan仓库dev分支中，位于`src\kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。
 
-## 函数定义<a name="ZH-CN_TOPIC_0000002549885351"></a>
+## 函数定义
 
-### KHSEL\_BuildLily<a name="ZH-CN_TOPIC_0000002518245592"></a>
+### KHSEL\_BuildLily
 
-**函数功能<a name="section95941732195012"></a>**
+**函数功能**
 
 基于规则集内的单字节短规则进行规则编译，输出编译后的mask。
 
-**函数定义<a name="section1183110404506"></a>**
+**函数定义**
 
 ```c
 std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily, std::vector<u32> &reportVec, std::vector<u32> &ekeyVec); 
 ```
 
-**参数说明<a name="section1192224915509"></a>**
+**参数说明**
 
 |参数名|描述|取值范围|输入/输出|
 |--|--|--|--|
@@ -42,30 +42,30 @@ std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily, std::vector<u3
 |reportVec|短字节规则对应的reportID。|C++ vector对象，无非空限制|输入|
 |ekeyVec|短字节规则对应的ekey。|C++ vector对象，无非空限制|输入|
 
-**返回值<a name="section13615359181110"></a>**
+**返回值**
 
 规则编译后的输出。
 
 ### KHSEL\_LilyRunExec<a name="ZH-CN_TOPIC_0000002518245632"></a>
 
-**函数功能<a name="section95941732195012"></a>**
+**函数功能**
 
 基于编译输出的mask，进行运行期输入数据的匹配。
 
-**函数定义<a name="section1183110404506"></a>**
+**函数定义**
 
 ```c
 hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch); 
 ```
 
-**参数说明<a name="section1192224915509"></a>**
+**参数说明**
 
 |参数名|描述|取值范围|输入/输出|
 |--|--|--|--|
 |rose|RoseEngine对象，保存编译期输出结果，作为运行期输入。|非空|输入|
 |scratch|输入数据所需的临时内存空间。|非空|输入|
 
-**返回值<a name="section13615359181110"></a>**
+**返回值**
 
 匹配结果的错误码。
 
