@@ -848,9 +848,9 @@ void haoLoadRawCurr32(const struct FDR_Runtime_Args *a, size_t blockStart,
 }
 
 static really_inline
-svuint32_t haoRawKeys4(svuint8_t vrow, u64a bextMaskRaw) {
+svuint32_t haoRawKeys4(svuint8_t vrow, u64a bextMask) {
     const svuint64_t packed =
-        svbext_n_u64(svreinterpret_u64_u8(vrow), (uint64_t)bextMaskRaw);
+        svbext_n_u64(svreinterpret_u64_u8(vrow), (uint64_t)bextMask);
     const svuint32_t as32 = svreinterpret_u32_u64(packed);
 
     return svuzp1_u32(as32, as32);
@@ -1058,7 +1058,7 @@ int haoRunRaw32(
     size_t blockStart, svuint8_t vlo, svuint8_t vhi) {
     u32 encodedByPair[4][8];
     const u32 laneMask = haoCollectRawEncoded(
-        primaryBitmap, primaryHashTable, hdr->bextMaskRaw, vlo, vhi,
+        primaryBitmap, primaryHashTable, hdr->bextMask, vlo, vhi,
         encodedByPair);
     const u32 fullValidBlock =
         blockStart + a->len_history >= HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U;
@@ -1175,7 +1175,7 @@ int haoRunRawTailVec(
     size_t blockStart, u32 blockLaneCount, svuint8_t vlo, svuint8_t vhi) {
     u32 encodedByPair[4][8];
     const u32 laneMask = haoCollectRawTailEncoded(
-        primaryBitmap, primaryHashTable, hdr->bextMaskRaw, blockLaneCount,
+        primaryBitmap, primaryHashTable, hdr->bextMask, blockLaneCount,
         vlo, vhi, encodedByPair);
     const u32 fullValidBlock =
         blockStart + a->len_history >= HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U;
@@ -1234,7 +1234,7 @@ int haoRunRawTailScalar(
         struct HAOPositionContext ctx;
         const size_t endPos = blockStart + lane;
         const u64a rawWord = haoBuildRawWordScalar(a, endPos);
-        const u32 key = (u32)pext64(rawWord, hdr->bextMaskRaw);
+        const u32 key = (u32)pext64(rawWord, hdr->bextMask);
 
         if (haoRawBitmapHitScalar(primaryBitmap, key)) {
             const u32 encoded = primaryHashTable[key];

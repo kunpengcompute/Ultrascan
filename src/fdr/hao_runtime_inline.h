@@ -37,15 +37,6 @@ int haoGetByteAt(const struct FDR_Runtime_Args *a, s64a pos, u8 *out) {
 }
 
 static really_inline
-u64a haoByteReverse64(u64a v) {
-    v = ((v & 0x00ff00ff00ff00ffULL) << 8)
-        | ((v >> 8) & 0x00ff00ff00ff00ffULL);
-    v = ((v & 0x0000ffff0000ffffULL) << 16)
-        | ((v >> 16) & 0x0000ffff0000ffffULL);
-    return (v << 32) | (v >> 32);
-}
-
-static really_inline
 int haoCanDirectLoadCurrentWindow64(const struct FDR_Runtime_Args *a,
                                     size_t endPos, u32 windowBytes) {
     return a && a->buf && windowBytes == HAO_RUNTIME_BYTES_PER_RULE_SLOT &&
@@ -85,12 +76,14 @@ u64a haoLoadWindow64Raw(const struct FDR_Runtime_Args *a, size_t endPos,
 
     if (haoCanDirectLoadCurrentWindow64(a, endPos, windowBytes)) {
         const u8 *start = a->buf + endPos + 1 - windowBytes;
-        return haoByteReverse64(unaligned_load_u64a(start));
+        return unaligned_load_u64a(start);
     }
 
     for (i = 0; i < windowBytes; i++) {
         u8 b = 0;
-        if (!haoGetByteAt(a, (s64a)endPos - (s64a)i, &b)) {
+        const s64a pos = (s64a)endPos - (s64a)(windowBytes - 1U) +
+                         (s64a)i;
+        if (!haoGetByteAt(a, pos, &b)) {
             continue;
         }
         window |= ((u64a)b) << (i * 8U);

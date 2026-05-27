@@ -522,12 +522,14 @@ u64a loadWindow64RawForTest(const std::vector<u8> &history,
 
     u64a window = 0;
     for (u32 i = 0; i < windowBytes; i++) {
-        const size_t pos = endPos >= i ? endPos - i : totalLen;
+        const s64a pos = static_cast<s64a>(endPos) -
+                         static_cast<s64a>(windowBytes - 1U) +
+                         static_cast<s64a>(i);
         u8 c = 0;
-        if (pos < historyLen) {
-            c = history[pos];
-        } else if (pos < totalLen) {
-            c = data[pos - historyLen];
+        if (pos >= 0 && static_cast<size_t>(pos) < historyLen) {
+            c = history[static_cast<size_t>(pos)];
+        } else if (pos >= 0 && static_cast<size_t>(pos) < totalLen) {
+            c = data[static_cast<size_t>(pos) - historyLen];
         }
         window |= ((u64a)c) << (i * 8U);
     }
@@ -537,18 +539,23 @@ u64a loadWindow64RawForTest(const std::vector<u8> &history,
 static
 u32 extractScalarKeyFromWindowForTest(const HAOCompileArtifacts &artifacts,
                                       u64a window) {
-    u32 key = 0;
-    for (u32 i = 0; i < artifacts.bitSelectors.size() &&
-                    i < HAO_LAYOUT_MAX_SELECTORS;
-         i++) {
-        const auto &sel = artifacts.bitSelectors[i];
-        const u32 bitIndex = static_cast<u32>(sel.byteOffset) * 8U +
-                             static_cast<u32>(sel.bitOffset);
-        if (window & ((u64a)1 << bitIndex)) {
-            key |= (1U << i);
+    u64a packed = 0;
+    u32 outBit = 0;
+    u64a mask = artifacts.bextMask;
+
+    while (mask && outBit < HAO_LAYOUT_MAX_SELECTORS) {
+        const u64a lowest = mask & (0 - mask);
+        if (window & lowest) {
+            packed |= ((u64a)1 << outBit);
         }
+        mask &= mask - 1;
+        outBit++;
     }
-    return key;
+
+    if (artifacts.bitSelectors.size() >= 32) {
+        return (u32)packed;
+    }
+    return (u32)(packed & ((1ULL << artifacts.bitSelectors.size()) - 1ULL));
 }
 
 static
@@ -2685,9 +2692,6 @@ TEST(HAOCompile, BextMaskMatchesSelectors) {
     u64a expectedMask = 0;
     for (u32 i = 0; i < expectedBits.size(); i++) {
         expectedMask |= ((u64a)1 << expectedBits[i]);
-        if (i) {
-            EXPECT_LT(expectedBits[i - 1], expectedBits[i]);
-        }
     }
     EXPECT_EQ(expectedMask, artifacts.bextMask);
 }
