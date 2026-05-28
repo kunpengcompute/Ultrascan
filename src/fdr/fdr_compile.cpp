@@ -64,7 +64,6 @@
 #include <memory>
 #include <numeric>
 #include <set>
-#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -78,14 +77,14 @@ namespace ue2 {
 namespace {
 
 static
-bool haoProtoTraceEnabled(void) {
+bool haoStatsEnabled(void) {
     const char *env = getenv("HS_HAO_STATS");
     return env && *env && *env != '0';
 }
 
 static
 bool haoShouldPrintCompileStats(const HWLMProto &proto) {
-    if (!haoProtoTraceEnabled()) {
+    if (!haoStatsEnabled()) {
         return false;
     }
     if (!proto.debugName) {
@@ -95,79 +94,12 @@ bool haoShouldPrintCompileStats(const HWLMProto &proto) {
 }
 
 static
-void dumpFdrBuildProtoLits(const char *tag, const char *matcher,
-                           const vector<hwlmLiteral> &lits) {
-    auto hexVec = [](const vector<u8> &v) {
-        static const char hex[] = "0123456789abcdef";
-        string out;
-
-        out.reserve(v.size() * 2);
-        for (u8 b : v) {
-            out.push_back(hex[b >> 4]);
-            out.push_back(hex[b & 0xf]);
-        }
-        return out;
-    };
-
-    printf("[HAO][%s] matcher=%s count=%zu\n", tag ? tag : "InputLits",
-           matcher ? matcher : "unknown", lits.size());
-    for (size_t i = 0; i < lits.size(); i++) {
-        const auto &lit = lits[i];
-        const string msk = hexVec(lit.msk);
-        const string cmp = hexVec(lit.cmp);
-
-        // printf("[HAO][InputLit] idx=%zu id=%u len=%zu nocase=%u noruns=%u "
-        //        "groups=0x%llx s=\"%s\" msk=%s cmp=%s\n",
-        //        i, lit.id, lit.s.size(), lit.nocase ? 1U : 0U,
-        //        lit.noruns ? 1U : 0U, (unsigned long long)lit.groups,
-        //        escapeString(lit.s).c_str(), msk.c_str(), cmp.c_str());
-        printf("%s\n", escapeString(lit.s).c_str());
-    }
-    fflush(stdout);
-}
-
-#define HAO_PROTO_TRACE(...)                                                \
-    do {                                                                    \
-        if (haoProtoTraceEnabled()) {                                       \
-            fprintf(stderr, __VA_ARGS__);                                   \
-            fflush(stderr);                                                 \
-        }                                                                   \
-    } while (0)
-
-static
-bool haoLayoutOk(const HAOCompileArtifacts &artifacts) {
-    const HAOCompileSummary &summary = artifacts.haoSummary;
-
-    if (!artifacts.haoGlobalHash.valid) {
-        return false;
-    }
-    if (artifacts.haoGlobalHash.flags &
-        HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE) {
-        return false;
-    }
-
-    if (summary.fastPathRules != summary.totalRules ||
-        summary.unsupportedRules) {
-        return false;
-    }
-
-    return true;
-}
-
-static
 bool tryBuildHaoProto(const target_t &target,
-                                 const std::vector<hwlmLiteral> &lits,
-                                 const Grey &grey,
-                                 std::unique_ptr<HAOCompileArtifacts> *out) {
+                      const std::vector<hwlmLiteral> &lits,
+                      const Grey &grey,
+                      std::unique_ptr<HAOCompileArtifacts> *out) {
     if (out) {
         out->reset();
-    }
-
-    if (!grey.allowHao) {
-        DEBUG_PRINTF("HAO feasibility: disabled by grey flag\n");
-        // HAO_PROTO_TRACE("[HAO][Proto] HAO disabled by grey lits=%zu\n",
-        //                 lits.size());
-        return false;
     }
 
     HAOCompileArtifacts builtArtifacts;
@@ -179,28 +111,7 @@ bool tryBuildHaoProto(const target_t &target,
                  haoFeasible ? 1 : 0,
                  haoFeasibilityReasonName(haoResult.reason),
                  haoResult.flags);
-    // HAO_PROTO_TRACE("[HAO][Proto] feasibility lits=%zu maxLits=%u canBuild=%u "
-    //                 "reason=%s flags=0x%x total=%u fast=%u unsupported=%u "
-    //                 "expanded=%u maxAmbig=%u\n",
-    //                 lits.size(), (unsigned)HAO_MAX_LITERALS,
-    //                 haoFeasible ? 1U : 0U,
-    //                 haoFeasibilityReasonName(haoResult.reason),
-    //                 haoResult.flags, builtArtifacts.haoSummary.totalRules,
-    //                 builtArtifacts.haoSummary.fastPathRules,
-    //                 builtArtifacts.haoSummary.unsupportedRules,
-    //                 builtArtifacts.haoSummary.totalExpandedKeys,
-    //                 builtArtifacts.haoSummary.maxSelectedAmbigBits);
     if (!haoFeasible) {
-        return false;
-    }
-
-    if (!haoLayoutOk(builtArtifacts)) {
-        DEBUG_PRINTF("HAO feasibility: rejected by coverage gate\n");
-        // HAO_PROTO_TRACE("[HAO][Proto] rejected by coverage gate lits=%zu "
-        //                 "valid=%u hashFlags=0x%x\n",
-        //                 lits.size(),
-        //                 builtArtifacts.haoGlobalHash.valid ? 1U : 0U,
-        //                 builtArtifacts.haoGlobalHash.flags);
         return false;
     }
 
@@ -1008,12 +919,16 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         }
     }
     /* Engine id 2 is now reserved for HAO only. */
-    const bool haoHint = (hint == HAO_ENGINE_ID);
-    auto haoDes = (hint == HINT_INVALID)
-                  ? chooseHaoEngine(target, lits, make_small)
-                  : getFdrDescription(hint);
+    const bool forcedHao = hint == HAO_ENGINE_ID;
+    std::unique_ptr<FDREngineDescription> haoDes;
+    if (forcedHao) {
+        haoDes = getFdrDescription(hint);
+    } else if (hint == HINT_INVALID) {
+        haoDes = chooseHaoEngine(target, lits, make_small);
+    }
+
     if (haoDes && haoDes->getID() == HAO_ENGINE_ID) {
-        if (hint != HINT_INVALID) {
+        if (forcedHao) {
             haoDes->bits = 9;
             haoDes->stride = 1;
         }
@@ -1029,12 +944,12 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
             proto->haoArtifacts = std::move(haoArtifacts);
             return proto;
         }
-        if (haoHint) {
-            return nullptr;
-        }
-    } else if (haoHint) {
+    }
+
+    if (forcedHao) {
         return nullptr;
     }
+
     if (grey.allowNeoFdr) {
         auto des = (hint == HINT_INVALID) ? chooseNeoFdrEngine(target, lits, make_small)
                                         : getFdrDescription(hint);
@@ -1098,23 +1013,28 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
                    proto.debugName ? proto.debugName : "unknown",
                    (const void *)&proto, proto.lits.size(),
                    proto.fdrEng->bits, proto.fdrEng->stride);
-            // dumpFdrBuildProtoLits("HAOInputLits",
-            //                       proto.debugName ? proto.debugName
-            //                                       : "unknown",
-            //                       proto.lits);
             fflush(stdout);
         }
 
-        HAOCompileArtifacts rebuiltHaoArtifacts;
-        if (!buildHAOArtifacts(proto.lits, &rebuiltHaoArtifacts, false,
-                               printStats)) {
+        HAOCompileArtifacts *haoArtifacts = proto.haoArtifacts.get();
+        if (!haoArtifacts) {
+            assert(0 && "HAO table build missing cached artifacts");
             return nullptr;
         }
-        if (!haoLayoutOk(rebuiltHaoArtifacts)) {
+        if (!refreshHAOReports(haoArtifacts, proto.lits)) {
+            assert(0 && "HAO report metadata mismatch");
+            return nullptr;
+        }
+
+        if (printStats) {
+            dumpHAOCompileStats(*haoArtifacts);
+        }
+
+        if (!haoArtifactsOk(*haoArtifacts)) {
             assert(0 && "HAO feasibility mismatch: invalid coverage in table build");
             return nullptr;
         }
-        matcherBlob = buildHAOBlob(rebuiltHaoArtifacts);
+        matcherBlob = buildHAOBlob(*haoArtifacts);
         if (!matcherBlob) {
             return nullptr;
         }
@@ -1148,5 +1068,3 @@ size_t fdrSize(const FDR *fdr) {
 }
 
 } // namespace ue2
-
-

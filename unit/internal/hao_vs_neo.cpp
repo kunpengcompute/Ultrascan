@@ -410,10 +410,10 @@ u32 haoSlotCount(const L2EntryT &entry) {
 }
 
 static
-bool findL2SlotForRule(const HAOGlobalHashArtifacts &hash, u32 ruleIndex,
+bool findL2SlotForRule(const HAOHashBuild &hash, u32 ruleIndex,
                        u32 *entryOut, u32 *slotOut) {
-    for (u32 i = 1; i < hash.l2MetaTable.size(); i++) {
-        const auto &meta = hash.l2MetaTable[i];
+    for (u32 i = 1; i < hash.l2Meta.size(); i++) {
+        const auto &meta = hash.l2Meta[i];
         for (u32 slot = 0; slot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY; slot++) {
             if (meta.ruleIndex[slot] == ruleIndex) {
                 if (entryOut) {
@@ -480,13 +480,13 @@ HAOInspectStats computeHaoInspectStats(const bytecode_ptr<u8> &blob) {
 
     const auto *bitmap = getHaoPrimaryBitmap(hdr);
     const auto *primary = getHaoPrimaryTable(hdr);
-    const auto *l2MetaTable = getHaoL2MetaTable(hdr);
+    const auto *l2Meta = getHaoL2MetaTable(hdr);
 
     stats.bitmapBytes = hdr->primaryBitmapSize;
     stats.totalL2Entries = hdr->l2EntryCount ? hdr->l2EntryCount - 1 : 0;
 
     for (u32 i = 0; i < hdr->l2EntryCount; i++) {
-        stats.totalRulesInL2 += haoSlotCount(l2MetaTable[i]);
+        stats.totalRulesInL2 += haoSlotCount(l2Meta[i]);
     }
     /* Read-only inspection of the HAO global single-table layout for runtime validation tests. */
     for (u32 i = 0; i < hdr->primaryCount; i++) {
@@ -552,10 +552,10 @@ u32 extractScalarKeyFromWindowForTest(const HAOCompileArtifacts &artifacts,
         outBit++;
     }
 
-    if (artifacts.bitSelectors.size() >= 32) {
+    if (artifacts.selectors.size() >= 32) {
         return (u32)packed;
     }
-    return (u32)(packed & ((1ULL << artifacts.bitSelectors.size()) - 1ULL));
+    return (u32)(packed & ((1ULL << artifacts.selectors.size()) - 1ULL));
 }
 
 static
@@ -577,13 +577,13 @@ u64a extractPackedBitsFallbackForTest(u64a window, u64a mask) {
 
 static
 u32 packedBitsToKeyForTest(const HAOCompileArtifacts &artifacts, u64a packed) {
-    if (artifacts.bitSelectors.empty()) {
+    if (artifacts.selectors.empty()) {
         return 0;
     }
-    if (artifacts.bitSelectors.size() >= 32) {
+    if (artifacts.selectors.size() >= 32) {
         return (u32)packed;
     }
-    return (u32)(packed & ((1ULL << artifacts.bitSelectors.size()) - 1ULL));
+    return (u32)(packed & ((1ULL << artifacts.selectors.size()) - 1ULL));
 }
 
 static
@@ -1999,8 +1999,8 @@ TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
     auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
@@ -2008,16 +2008,16 @@ TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
     const auto *hdr = reinterpret_cast<const HAORuntimeHeader *>(blob.get());
     EXPECT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
     EXPECT_EQ(HAO_RUNTIME_VERSION, hdr->version);
-    EXPECT_EQ(artifacts.haoGlobalHash.flags, hdr->flags);
-    EXPECT_EQ(artifacts.haoGlobalHash.keyBits, hdr->keyBits);
-    EXPECT_EQ(artifacts.bitSelectors.size(), hdr->selectorCount);
-    EXPECT_EQ(artifacts.haoGlobalHash.primaryHashTableRaw.offsets.size(),
+    EXPECT_EQ(artifacts.hash.flags, hdr->flags);
+    EXPECT_EQ(artifacts.hash.keyBits, hdr->keyBits);
+    EXPECT_EQ(artifacts.selectors.size(), hdr->selectorCount);
+    EXPECT_EQ(artifacts.hash.primary.offsets.size(),
               hdr->primaryCount);
-    EXPECT_EQ(artifacts.haoGlobalHash.primaryHashBitmapRaw.bits.size(),
+    EXPECT_EQ(artifacts.hash.bitmap.bits.size(),
               hdr->primaryBitmapSize);
-    EXPECT_EQ(artifacts.haoGlobalHash.l2CheckTable.size(),
+    EXPECT_EQ(artifacts.hash.l2Check.size(),
               hdr->l2EntryCount);
-    EXPECT_EQ(artifacts.ruleMeta.size(), hdr->ruleMetaCount);
+    EXPECT_EQ(artifacts.meta.size(), hdr->ruleMetaCount);
     EXPECT_EQ(0U, hdr->reservedLiteralBlobSize);
     EXPECT_EQ(artifacts.extractMode, hdr->extractMode);
     EXPECT_EQ(artifacts.windowBytes, hdr->windowBytes);
@@ -2035,8 +2035,8 @@ TEST(HAOCompile, BuildHaoGlobalBlobStoresRulePlanMeta) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
     auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
@@ -2045,7 +2045,7 @@ TEST(HAOCompile, BuildHaoGlobalBlobStoresRulePlanMeta) {
     const auto *meta = reinterpret_cast<const HAORuntimeRuleMeta *>(
         reinterpret_cast<const u8 *>(hdr) + hdr->ruleMetaOffset);
 
-    const auto &srcMeta = artifacts.ruleMeta[1];
+    const auto &srcMeta = artifacts.meta[1];
 
     EXPECT_EQ(srcMeta.id, meta[1].id);
     EXPECT_EQ(srcMeta.flags, meta[1].flags);
@@ -2067,8 +2067,8 @@ TEST(HAOCompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
     auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
@@ -2080,21 +2080,21 @@ TEST(HAOCompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {
     const auto *bitmap = getHaoPrimaryBitmap(hdr);
 
     for (u32 i = 0; i < hdr->selectorCount; i++) {
-        EXPECT_EQ(artifacts.bitSelectors[i].byteOffset, selectors[i].byteOffset);
-        EXPECT_EQ(artifacts.bitSelectors[i].bitOffset, selectors[i].bitOffset);
+        EXPECT_EQ(artifacts.selectors[i].byteOffset, selectors[i].byteOffset);
+        EXPECT_EQ(artifacts.selectors[i].bitOffset, selectors[i].bitOffset);
     }
     for (u32 i = 0; i < hdr->primaryCount; i++) {
-        EXPECT_EQ(artifacts.haoGlobalHash.primaryHashTableRaw.offsets[i],
+        EXPECT_EQ(artifacts.hash.primary.offsets[i],
                   primary[i]);
     }
     for (u32 i = 0; i < hdr->primaryBitmapSize; i++) {
-        EXPECT_EQ(artifacts.haoGlobalHash.primaryHashBitmapRaw.bits[i],
+        EXPECT_EQ(artifacts.hash.bitmap.bits[i],
                   bitmap[i]);
     }
 
     const HAOInspectStats stats = computeHaoInspectStats(blob);
-    EXPECT_EQ(artifacts.haoGlobalHash.stats.nonEmptyPrimary, stats.nonEmptyL1);
-    EXPECT_EQ(artifacts.haoGlobalHash.stats.totalL2Entries,
+    EXPECT_EQ(artifacts.hash.stats.nonEmptyPrimary, stats.nonEmptyL1);
+    EXPECT_EQ(artifacts.hash.stats.totalL2Entries,
               stats.totalL2Entries);
 }
 
@@ -2109,8 +2109,8 @@ TEST(HAOCompile, BuildHaoGlobalBlobL2EntriesMatchArtifacts) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
     auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
@@ -2120,13 +2120,13 @@ TEST(HAOCompile, BuildHaoGlobalBlobL2EntriesMatchArtifacts) {
     const auto *checks = getHaoL2CheckTable(hdr);
     const auto *metas = getHaoL2MetaTable(hdr);
 
-    ASSERT_EQ(artifacts.haoGlobalHash.l2CheckTable.size(),
+    ASSERT_EQ(artifacts.hash.l2Check.size(),
               static_cast<size_t>(hdr->l2EntryCount));
-    ASSERT_EQ(artifacts.haoGlobalHash.l2MetaTable.size(),
+    ASSERT_EQ(artifacts.hash.l2Meta.size(),
               static_cast<size_t>(hdr->l2EntryCount));
     for (u32 i = 0; i < hdr->l2EntryCount; i++) {
-        const auto &srcCheck = artifacts.haoGlobalHash.l2CheckTable[i];
-        const auto &srcMeta = artifacts.haoGlobalHash.l2MetaTable[i];
+        const auto &srcCheck = artifacts.hash.l2Check[i];
+        const auto &srcMeta = artifacts.hash.l2Meta[i];
         const auto &dstCheck = checks[i];
         const auto &dstMeta = metas[i];
 
@@ -2153,8 +2153,8 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutAcceptsGeneratedBlob) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
     auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
@@ -2165,13 +2165,13 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutAcceptsGeneratedBlob) {
     ASSERT_TRUE(HaoRuntimeInspectBlobForTest(blob.get(),
                                             verify_u32(blob.size()),
                                             &summary));
-    EXPECT_EQ(artifacts.haoGlobalHash.stats.nonEmptyPrimary,
+    EXPECT_EQ(artifacts.hash.stats.nonEmptyPrimary,
               summary.nonEmptyPrimary);
-    EXPECT_EQ(artifacts.haoGlobalHash.stats.totalL2Entries + 1U,
+    EXPECT_EQ(artifacts.hash.stats.totalL2Entries + 1U,
               summary.l2EntryCount);
-    EXPECT_EQ(artifacts.haoGlobalHash.stats.maxEntriesPerKey,
+    EXPECT_EQ(artifacts.hash.stats.maxEntriesPerKey,
               summary.maxEntriesPerKey);
-    EXPECT_EQ(artifacts.ruleMeta.size(), summary.ruleMetaCount);
+    EXPECT_EQ(artifacts.meta.size(), summary.ruleMetaCount);
 }
 
 TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsBrokenL2Offset) {
@@ -2185,8 +2185,8 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsBrokenL2Offset) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
     auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
@@ -2323,7 +2323,7 @@ TEST(HAORuntime, HaoRuntimeStatsTrackDirectReportPath) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
     auto haoBlob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, haoBlob.get());
 
@@ -2513,7 +2513,7 @@ TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectForMaskConfirmRules) {
         hwlmLiteral("theta", false, false, 8204, HWLM_ALL_GROUPS, {}, {})
     };
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
     auto haoBlob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, haoBlob.get());
 
@@ -2679,12 +2679,12 @@ TEST(HAOCompile, BextMaskMatchesSelectors) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
     ASSERT_EQ(HAO_EXTRACT_MODE_BEXT, artifacts.extractMode);
 
     std::vector<u32> expectedBits;
-    for (u32 i = 0; i < artifacts.bitSelectors.size(); i++) {
-        const auto &sel = artifacts.bitSelectors[i];
+    for (u32 i = 0; i < artifacts.selectors.size(); i++) {
+        const auto &sel = artifacts.selectors[i];
         expectedBits.push_back(static_cast<u32>(sel.byteOffset) * 8U +
                                static_cast<u32>(sel.bitOffset));
     }
@@ -2707,11 +2707,11 @@ TEST(HAOCompile, HaoRulePlansRespectExpansionLimit) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_EQ(lits.size(), artifacts.haoRulePlans.size());
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_EQ(lits.size(), artifacts.plans.size());
 
     u32 countedExpandedKeys = 0;
-    for (const auto &plan : artifacts.haoRulePlans) {
+    for (const auto &plan : artifacts.plans) {
         EXPECT_NE(HAORuleCategory::HAO_RULE_UNSUPPORTED, plan.category);
         EXPECT_LE(plan.keyExpansion.selectedAmbigBits,
                   HAO_MAX_KEY_AMBIG_BITS);
@@ -2720,7 +2720,7 @@ TEST(HAOCompile, HaoRulePlansRespectExpansionLimit) {
         countedExpandedKeys += plan.keyExpansion.expandedKeyCount;
     }
 
-    EXPECT_EQ(countedExpandedKeys, artifacts.haoSummary.totalExpandedKeys);
+    EXPECT_EQ(countedExpandedKeys, artifacts.summary.totalExpandedKeys);
 }
 
 TEST(HAOCompile, HaoNocasePlanUsesRawVerifierBytes) {
@@ -2732,10 +2732,10 @@ TEST(HAOCompile, HaoNocasePlanUsesRawVerifierBytes) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_EQ(lits.size(), artifacts.haoRulePlans.size());
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_EQ(lits.size(), artifacts.plans.size());
 
-    const auto &plan = artifacts.haoRulePlans[1];
+    const auto &plan = artifacts.plans[1];
     EXPECT_EQ(HAORuleCategory::HAO_RULE_NOCASE, plan.category);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
     EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
@@ -2748,7 +2748,7 @@ TEST(HAOCompile, HaoNocasePlanUsesRawVerifierBytes) {
     EXPECT_EQ((u8)'A', plan.verifier.bytes[7]);
     EXPECT_EQ(0xf8U, plan.verifier.validByteMask);
     EXPECT_EQ(0xf8U, plan.verifier.nocaseByteMask);
-    EXPECT_FALSE(plan.needFullConfirm);
+    EXPECT_FALSE(plan.flags & HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM);
 }
 
 TEST(HAOCompile, HaoNocaseVerifierStoresL2Mask) {
@@ -2760,20 +2760,20 @@ TEST(HAOCompile, HaoNocaseVerifierStoresL2Mask) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
-    const auto &plan = artifacts.haoRulePlans[1];
+    const auto &plan = artifacts.plans[1];
     ASSERT_EQ(HAORuleCategory::HAO_RULE_NOCASE, plan.category);
     ASSERT_EQ(0xf8U, plan.verifier.validByteMask);
     ASSERT_EQ(0xf8U, plan.verifier.nocaseByteMask);
 
     u32 entry = 0;
     u32 slot = 0;
-    ASSERT_TRUE(findL2SlotForRule(artifacts.haoGlobalHash, plan.ruleIndex,
+    ASSERT_TRUE(findL2SlotForRule(artifacts.hash, plan.ruleIndex,
                                   &entry, &slot));
-    const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
-    const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
+    const auto &check = artifacts.hash.l2Check[entry];
+    const auto &meta = artifacts.hash.l2Meta[entry];
 
     EXPECT_EQ(plan.ruleIndex, meta.ruleIndex[slot]);
     for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
@@ -2803,12 +2803,11 @@ TEST(HAOCompile, HaoMaskRulesBecomeAnchorConfirm) {
         hwlmLiteral("theta", false, false, 725, HWLM_ALL_GROUPS, {}, {}),
     };
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_EQ(lits.size(), artifacts.haoRulePlans.size());
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_EQ(lits.size(), artifacts.plans.size());
 
-    const auto &plan = artifacts.haoRulePlans[1];
+    const auto &plan = artifacts.plans[1];
     EXPECT_EQ(HAORuleCategory::HAO_RULE_MASK_CONFIRM, plan.category);
-    EXPECT_TRUE(plan.needFullConfirm);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK);
     EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_MASK_CONFIRM);
@@ -2824,10 +2823,10 @@ TEST(HAOCompile, HaoNocaseMaskAnchorStoresL2Mask) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
-    const auto &plan = artifacts.haoRulePlans[1];
+    const auto &plan = artifacts.plans[1];
     ASSERT_EQ(HAORuleCategory::HAO_RULE_MASK_CONFIRM, plan.category);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK);
@@ -2836,10 +2835,10 @@ TEST(HAOCompile, HaoNocaseMaskAnchorStoresL2Mask) {
 
     u32 entry = 0;
     u32 slot = 0;
-    ASSERT_TRUE(findL2SlotForRule(artifacts.haoGlobalHash, plan.ruleIndex,
+    ASSERT_TRUE(findL2SlotForRule(artifacts.hash, plan.ruleIndex,
                                   &entry, &slot));
-    const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
-    const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
+    const auto &check = artifacts.hash.l2Check[entry];
+    const auto &meta = artifacts.hash.l2Meta[entry];
 
     EXPECT_EQ(plan.ruleIndex, meta.ruleIndex[slot]);
     for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
@@ -2864,20 +2863,20 @@ TEST(HAOCompile, HaoSummaryTracksCoverageAndAnchors) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
 
-    EXPECT_EQ(lits.size(), artifacts.haoSummary.totalRules);
-    EXPECT_EQ(0U, artifacts.haoSummary.unsupportedRules);
-    EXPECT_EQ(artifacts.haoSummary.totalRules,
-              artifacts.haoSummary.fastPathRules);
+    EXPECT_EQ(lits.size(), artifacts.summary.totalRules);
+    EXPECT_EQ(0U, artifacts.summary.unsupportedRules);
+    EXPECT_EQ(artifacts.summary.totalRules,
+              artifacts.summary.fastPathRules);
 
     u32 maskCount = 0;
-    for (const auto &plan : artifacts.haoRulePlans) {
+    for (const auto &plan : artifacts.plans) {
         if (plan.category == HAORuleCategory::HAO_RULE_MASK_CONFIRM) {
             maskCount++;
         }
     }
-    EXPECT_EQ(maskCount, artifacts.haoSummary.maskConfirmRules);
+    EXPECT_EQ(maskCount, artifacts.summary.maskConfirmRules);
 }
 
 TEST(HAOCompile, HaoSummaryTracksDirectReportRules) {
@@ -2889,12 +2888,12 @@ TEST(HAOCompile, HaoSummaryTracksDirectReportRules) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
 
-    EXPECT_EQ(3U, artifacts.haoSummary.exactRules);
-    EXPECT_EQ(1U, artifacts.haoSummary.nocaseRules);
-    EXPECT_EQ(lits.size(), artifacts.haoSummary.directReportRules);
-    EXPECT_EQ(0U, artifacts.haoSummary.fastPathConfirmRules);
+    EXPECT_EQ(3U, artifacts.summary.exactRules);
+    EXPECT_EQ(1U, artifacts.summary.nocaseRules);
+    EXPECT_EQ(lits.size(), artifacts.summary.directReportRules);
+    EXPECT_EQ(0U, artifacts.summary.fastPathConfirmRules);
 }
 
 TEST(HAOCompile, HaoDirectReportSafetyFollowsSelectorCoverage) {
@@ -2906,12 +2905,12 @@ TEST(HAOCompile, HaoDirectReportSafetyFollowsSelectorCoverage) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_EQ(lits.size(), artifacts.haoRulePlans.size());
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_EQ(lits.size(), artifacts.plans.size());
 
     for (u32 i = 0; i < lits.size(); i++) {
         const auto &lit = lits[i];
-        const auto &plan = artifacts.haoRulePlans[i];
+        const auto &plan = artifacts.plans[i];
         bool expectedSafe = false;
 
         if (!lit.noruns && lit.msk.empty() && lit.cmp.empty()) {
@@ -2928,7 +2927,7 @@ TEST(HAOCompile, HaoDirectReportSafetyFollowsSelectorCoverage) {
                     if (!ourisalpha(c)) {
                         continue;
                     }
-                    for (const auto &sel : artifacts.bitSelectors) {
+                    for (const auto &sel : artifacts.selectors) {
                         if (sel.byteOffset == byteFromEnd &&
                             sel.bitOffset == 5U) {
                             foundCaseBit = true;
@@ -2961,15 +2960,15 @@ TEST(HAOCompile, HaoBudgetedSelectorsKeepAllRulesFastPath) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
 
-    EXPECT_EQ(0U, artifacts.haoSummary.unsupportedRules);
-    EXPECT_EQ(artifacts.haoSummary.totalRules,
-              artifacts.haoSummary.fastPathRules);
-    EXPECT_LE(artifacts.haoSummary.maxSelectedAmbigBits,
+    EXPECT_EQ(0U, artifacts.summary.unsupportedRules);
+    EXPECT_EQ(artifacts.summary.totalRules,
+              artifacts.summary.fastPathRules);
+    EXPECT_LE(artifacts.summary.maxSelectedAmbigBits,
               HAO_MAX_KEY_AMBIG_BITS);
 
-    for (const auto &plan : artifacts.haoRulePlans) {
+    for (const auto &plan : artifacts.plans) {
         EXPECT_NE(HAORuleCategory::HAO_RULE_UNSUPPORTED, plan.category);
         EXPECT_LE(plan.keyExpansion.selectedAmbigBits,
                   HAO_MAX_KEY_AMBIG_BITS);
@@ -2987,23 +2986,23 @@ TEST(HAOCompile, HaoGlobalHashBuildsSinglePrimarySpace) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
     u32 fastPathExpandedKeys = 0;
-    for (const auto &plan : artifacts.haoRulePlans) {
+    for (const auto &plan : artifacts.plans) {
         fastPathExpandedKeys += plan.keyExpansion.expandedKeyCount;
     }
 
-    const u32 primaryCount = 1U << artifacts.keyBits;
-    EXPECT_EQ(artifacts.keyBits, artifacts.haoGlobalHash.keyBits);
+    const u32 primaryCount = 1U << artifacts.hash.keyBits;
+    EXPECT_EQ(artifacts.selectors.size(), artifacts.hash.keyBits);
     EXPECT_EQ(primaryCount,
-              artifacts.haoGlobalHash.primaryHashTableRaw.offsets.size());
+              artifacts.hash.primary.offsets.size());
     EXPECT_EQ((primaryCount + 7U) / 8U,
-              artifacts.haoGlobalHash.primaryHashBitmapRaw.bits.size());
+              artifacts.hash.bitmap.bits.size());
     EXPECT_EQ(fastPathExpandedKeys,
-              artifacts.haoGlobalHash.stats.totalExpandedKeysInBuckets);
-    EXPECT_GT(artifacts.haoGlobalHash.stats.nonEmptyPrimary, 0U);
+              artifacts.hash.stats.totalExpandedKeysInBuckets);
+    EXPECT_GT(artifacts.hash.stats.nonEmptyPrimary, 0U);
 }
 
 TEST(HAOCompile, HaoGlobalHashStoresAnchorConfirmFragments) {
@@ -3017,17 +3016,17 @@ TEST(HAOCompile, HaoGlobalHashStoresAnchorConfirmFragments) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
-    const auto &plan = artifacts.haoRulePlans[1];
+    const auto &plan = artifacts.plans[1];
     ASSERT_EQ(HAORuleCategory::HAO_RULE_MASK_CONFIRM, plan.category);
 
     u32 entry = 0;
     u32 slot = 0;
-    ASSERT_TRUE(findL2SlotForRule(artifacts.haoGlobalHash, plan.ruleIndex,
+    ASSERT_TRUE(findL2SlotForRule(artifacts.hash, plan.ruleIndex,
                                   &entry, &slot));
-    const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
+    const auto &check = artifacts.hash.l2Check[entry];
 
     for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
         if (!(plan.verifier.validByteMask & (1U << j))) {
@@ -3048,18 +3047,18 @@ TEST(HAOCompile, HaoGlobalHashStoresVerifierFragments) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
-    const auto &plan = artifacts.haoRulePlans[1];
+    const auto &plan = artifacts.plans[1];
     ASSERT_EQ(HAORuleCategory::HAO_RULE_EXACT, plan.category);
 
     u32 entry = 0;
     u32 slot = 0;
-    ASSERT_TRUE(findL2SlotForRule(artifacts.haoGlobalHash, plan.ruleIndex,
+    ASSERT_TRUE(findL2SlotForRule(artifacts.hash, plan.ruleIndex,
                                   &entry, &slot));
-    const auto &check = artifacts.haoGlobalHash.l2CheckTable[entry];
-    const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
+    const auto &check = artifacts.hash.l2Check[entry];
+    const auto &meta = artifacts.hash.l2Meta[entry];
 
     EXPECT_EQ(plan.ruleIndex, meta.ruleIndex[slot]);
     for (u32 j = 0; j < HAO_LAYOUT_BYTES_PER_RULE_SLOT; j++) {
@@ -3085,18 +3084,18 @@ TEST(HAOCompile, HaoL2CareBitsRejectInvalidBoundaryBytes) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
-    const auto &plan = artifacts.haoRulePlans[0];
+    const auto &plan = artifacts.plans[0];
     ASSERT_EQ(HAORuleCategory::HAO_RULE_EXACT, plan.category);
     ASSERT_EQ(0xf0U, plan.verifier.validByteMask);
 
     u32 entry = 0;
     u32 slot = 0;
-    ASSERT_TRUE(findL2SlotForRule(artifacts.haoGlobalHash, plan.ruleIndex,
+    ASSERT_TRUE(findL2SlotForRule(artifacts.hash, plan.ruleIndex,
                                   &entry, &slot));
-    const auto &meta = artifacts.haoGlobalHash.l2MetaTable[entry];
+    const auto &meta = artifacts.hash.l2Meta[entry];
 
     EXPECT_FALSE(l2SlotSurvivesValidMaskForTest(meta, slot, 0xc0U));
     EXPECT_TRUE(l2SlotSurvivesValidMaskForTest(meta, slot, 0xf0U));
@@ -3112,7 +3111,7 @@ TEST(HAOExtract, BextMatchesScalar) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
 
     const std::vector<u8> history = {'x', 'y', 'z'};
     const std::vector<u8> data = {'a','l','p','h','a',' ',
@@ -3142,7 +3141,7 @@ TEST(HAOExtract, BextHistoryBoundaryConsistency) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
 
     const std::vector<u8> history = {'x', 'x', 'a', 'b'};
     const std::vector<u8> data = {'c', 'z', 'Y', 'Y', 'a', 'B', 'c', 'z'};
@@ -3173,8 +3172,8 @@ TEST(HAOCollision, RuntimeExtractorReportsCollisionRateOnDeterministicCorpus) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
     auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
@@ -3183,7 +3182,7 @@ TEST(HAOCollision, RuntimeExtractorReportsCollisionRateOnDeterministicCorpus) {
     const auto *selectors = getHaoSelectors(hdr);
     ASSERT_NE(nullptr, selectors);
     ASSERT_GT(hdr->selectorCount, 0U);
-    ASSERT_EQ(artifacts.bitSelectors.size(), hdr->selectorCount);
+    ASSERT_EQ(artifacts.selectors.size(), hdr->selectorCount);
 
     const auto data = makeDeterministicCollisionCorpus(HAO_COLLISION_SAMPLE_COUNT);
     const auto runtimeHashes = extractRuntimeKeysForData(hdr, selectors, data);
@@ -3228,8 +3227,8 @@ TEST(HAOCollision, RuntimeCollisionRateMatchesScalarReference) {
     };
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
     auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
@@ -3294,8 +3293,8 @@ TEST(HAOCollision, RuntimeExtractorFromRuleAndInputFiles) {
     ASSERT_GT(sampleCount, 0U);
 
     HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, false));
-    ASSERT_TRUE(artifacts.haoGlobalHash.valid);
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
 
     auto blob = buildHAOBlob(artifacts);
     ASSERT_NE(nullptr, blob.get());
@@ -3600,4 +3599,3 @@ TEST(HAORuntime, InvalidLayoutOffsetFallsBackCleanly) {
 }
 
 } // namespace
-

@@ -136,7 +136,6 @@ struct HAOCompiledRulePlan {
     u32 ruleIndex = 0;
     HAORuleCategory category = HAORuleCategory::HAO_RULE_UNSUPPORTED;
     u32 flags = 0;
-    bool needFullConfirm = false;
     HAOKeyExpansionInfo keyExpansion;
     HAOVerifierFragment verifier;
 };
@@ -163,7 +162,7 @@ struct HAOCompileSummary {
 
 /* Build-time statistics for the HAO global single-table layout. */
 
-struct HAOGlobalHashStats {
+struct HAOHashStats {
     u32 nonEmptyPrimary = 0;
     u32 collisionBuckets = 0;
     u32 totalRulesInBuckets = 0;
@@ -182,29 +181,33 @@ struct HAOGlobalHashStats {
 };
 
 /* Artifacts for the HAO global single-table build. */
-struct HAOGlobalHashArtifacts {
+struct HAOHashBuild {
     bool valid = false;
     u32 flags = 0;
     u32 keyBits = 0;
-    u32 fullKeyMask = 0;
-    HAOPrimaryHashTable primaryHashTableRaw;
-    HAOPrimaryHashBitmap primaryHashBitmapRaw;
-    std::vector<HAOL2Check> l2CheckTable;
-    std::vector<HAOL2Meta> l2MetaTable;
-    HAOGlobalHashStats stats;
+    HAOPrimaryHashTable primary;
+    HAOPrimaryHashBitmap bitmap;
+    std::vector<HAOL2Check> l2Check;
+    std::vector<HAOL2Meta> l2Meta;
+    HAOHashStats stats;
 };
 
 struct HAOCompileArtifacts {
-    u32 keyBits = 0;
-    u32 flags = 0;
+    const char *selectorName = "unknown";
     u32 extractMode = HAO_EXTRACT_MODE_SCALAR;
     u32 windowBytes = HAO_LAYOUT_BYTES_PER_RULE_SLOT;
     u64a bextMask = 0;
-    std::vector<HAOBitSelector> bitSelectors;
-    std::vector<HAOCompiledRulePlan> haoRulePlans;
-    HAOCompileSummary haoSummary;
-    HAOGlobalHashArtifacts haoGlobalHash;
-    std::vector<HAOCompileRuleMeta> ruleMeta;
+    std::vector<HAOBitSelector> selectors;
+    std::vector<HAOCompiledRulePlan> plans;
+    HAOCompileSummary summary;
+    HAOHashBuild hash;
+    std::vector<HAOCompileRuleMeta> meta;
+};
+
+enum class HAODumpMode : u8 {
+    None = 0,
+    SummaryIfEnabled,
+    Full
 };
 
 enum class HAOFeasibilityReason : u32 {
@@ -213,7 +216,7 @@ enum class HAOFeasibilityReason : u32 {
     ARCH_UNSUPPORTED,
     TOO_FEW_LITERALS,
     TOO_MANY_LITERALS,
-    UNSUPPORTED_INCLUDED_LITERAL,
+    UNSUPPORTED_LITERAL,
     NO_SELECTORS,
     PARTIAL_L2_CAPACITY,
     PARTIAL_ENTRY_OVERFLOW,
@@ -243,8 +246,14 @@ bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
 
 bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
                        HAOCompileArtifacts *artifacts,
-                       bool enableDump = true,
-                       bool allowStatsDump = true);
+                       HAODumpMode dumpMode = HAODumpMode::Full);
+
+void dumpHAOCompileStats(const HAOCompileArtifacts &artifacts);
+
+bool haoArtifactsOk(const HAOCompileArtifacts &artifacts);
+
+bool refreshHAOReports(HAOCompileArtifacts *artifacts,
+                       const std::vector<hwlmLiteral> &lits);
 
 bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts);
 
