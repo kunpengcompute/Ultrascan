@@ -5,6 +5,7 @@
 #include "fdr_enhanced.h"
 #include "fdr_internal.h"
 #include "hao_runtime.h"
+#include "hao_runtime_test.h"
 #include "hao_runtime_inline.h"
 #include "util/bitutils.h"
 #include "util/simd_utils.h"

@@ -14,6 +14,7 @@
 #include "fdr/fdr_enhanced.h"
 #include "fdr/hao_compile.h"
 #include "fdr/hao_runtime.h"
+#include "fdr/hao_runtime_test.h"
 #include "fdr/hao_runtime_inline.h"
 #include "hwlm/hwlm_internal.h"
 #include "scratch.h"
