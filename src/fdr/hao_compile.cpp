@@ -2034,23 +2034,29 @@ bool haoBuildAuto(const std::vector<hwlmLiteral> &lits,
 
     bool haveBest = false;
     double bestCost = std::numeric_limits<double>::infinity();
-    HAOCompileArtifacts best;
+    HAOSelectorMode bestMode = HAOSelectorMode::DEFAULT;
+    const char *bestName = nullptr;
 
     for (const auto &candidate : candidates) {
-        HAOCompileArtifacts current;
-        if (!haoBuildWithMode(lits, candidate.mode, candidate.name,
-                              &current)) {
-            continue;
+        double cost = std::numeric_limits<double>::infinity();
+        {
+            HAOCompileArtifacts current;
+            if (!haoBuildWithMode(lits, candidate.mode, candidate.name,
+                                  &current)) {
+                continue;
+            }
+
+            cost = haoAutoSelectorCost(current);
         }
 
-        const double cost = haoAutoSelectorCost(current);
         if (!std::isfinite(cost)) {
             continue;
         }
         if (!haveBest || cost < bestCost) {
             haveBest = true;
             bestCost = cost;
-            best = std::move(current);
+            bestMode = candidate.mode;
+            bestName = candidate.name;
         }
     }
 
@@ -2058,8 +2064,8 @@ bool haoBuildAuto(const std::vector<hwlmLiteral> &lits,
         return false;
     }
 
-    *artifacts = std::move(best);
-    return true;
+    assert(bestName);
+    return haoBuildWithMode(lits, bestMode, bestName, artifacts);
 }
 
 void haoDumpArtifacts(const std::vector<hwlmLiteral> &lits,
