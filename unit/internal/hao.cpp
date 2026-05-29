@@ -250,15 +250,6 @@ const HAORuntimeHeader *getHaoRuntimeHeader(const bytecode_ptr<u8> &blob) {
 }
 
 static
-const HAORuntimeBitSelector *getHaoSelectors(const HAORuntimeHeader *hdr) {
-    if (!hdr) {
-        return nullptr;
-    }
-    return reinterpret_cast<const HAORuntimeBitSelector *>(
-        reinterpret_cast<const u8 *>(hdr) + hdr->selectorsOffset);
-}
-
-static
 const u8 *getHaoPrimaryBitmap(const HAORuntimeHeader *hdr) {
     if (!hdr) {
         return nullptr;
@@ -604,7 +595,7 @@ std::vector<u8> makeDeterministicCollisionCorpus(size_t count) {
 
 static
 std::vector<u32> extractRuntimeKeysForBlocks(
-    const HAORuntimeHeader *hdr, const HAORuntimeBitSelector *selectors,
+    const HAORuntimeHeader *hdr,
     const std::vector<std::vector<u8>> &blocks);
 
 static
@@ -614,21 +605,20 @@ std::vector<u32> extractScalarReferenceKeysForBlocks(
 
 static
 std::vector<u32> extractRuntimeKeysForData(const HAORuntimeHeader *hdr,
-                                           const HAORuntimeBitSelector *selectors,
                                            const std::vector<u8> &data) {
     std::vector<std::vector<u8>> blocks;
     if (!data.empty()) {
         blocks.push_back(data);
     }
-    return extractRuntimeKeysForBlocks(hdr, selectors, blocks);
+    return extractRuntimeKeysForBlocks(hdr, blocks);
 }
 
 static
 std::vector<u32> extractRuntimeKeysForBlocks(
-    const HAORuntimeHeader *hdr, const HAORuntimeBitSelector *selectors,
+    const HAORuntimeHeader *hdr,
     const std::vector<std::vector<u8>> &blocks) {
     std::vector<u32> keys;
-    if (!hdr || !selectors || blocks.empty()) {
+    if (!hdr || blocks.empty()) {
         return keys;
     }
 
@@ -647,8 +637,9 @@ std::vector<u32> extractRuntimeKeysForBlocks(
         const auto args = makeRuntimeArgs(data, {}, &scratch);
         for (size_t endPos = 0; endPos < data.size(); endPos++) {
             const u64a window =
-                haoLoadWindow64Raw(&args, endPos, hdr->windowBytes);
-            keys.push_back(haoExtractKeyFromWindow(hdr, selectors, window));
+                haoLoadWindow64Raw(&args, endPos,
+                                   HAO_RUNTIME_BYTES_PER_RULE_SLOT);
+            keys.push_back(haoExtractKeyBext(hdr, window));
         }
     }
     return keys;
@@ -688,7 +679,8 @@ std::vector<u32> extractScalarReferenceKeysForBlocks(
         const auto args = makeRuntimeArgs(data, {}, &scratch);
         for (size_t endPos = 0; endPos < data.size(); endPos++) {
             const u64a window =
-                haoLoadWindow64Raw(&args, endPos, artifacts.windowBytes);
+                haoLoadWindow64Raw(&args, endPos,
+                                   HAO_LAYOUT_BYTES_PER_RULE_SLOT);
             keys.push_back(extractScalarKeyFromWindowForTest(artifacts, window));
         }
     }
@@ -2009,9 +2001,7 @@ TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
     const auto *hdr = reinterpret_cast<const HAORuntimeHeader *>(blob.get());
     EXPECT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
     EXPECT_EQ(HAO_RUNTIME_VERSION, hdr->version);
-    EXPECT_EQ(artifacts.hash.flags, hdr->flags);
-    EXPECT_EQ(artifacts.hash.keyBits, hdr->keyBits);
-    EXPECT_EQ(artifacts.selectors.size(), hdr->selectorCount);
+    EXPECT_EQ(artifacts.selectors.size(), hdr->keyBits);
     EXPECT_EQ(artifacts.hash.primary.offsets.size(),
               hdr->primaryCount);
     EXPECT_EQ(artifacts.hash.bitmap.bits.size(),
@@ -2019,9 +2009,6 @@ TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
     EXPECT_EQ(artifacts.hash.l2Check.size(),
               hdr->l2EntryCount);
     EXPECT_EQ(artifacts.meta.size(), hdr->ruleMetaCount);
-    EXPECT_EQ(0U, hdr->reservedLiteralBlobSize);
-    EXPECT_EQ(artifacts.extractMode, hdr->extractMode);
-    EXPECT_EQ(artifacts.windowBytes, hdr->windowBytes);
     EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
 }
 
@@ -2076,14 +2063,11 @@ TEST(HAOCompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {
 
     const auto *hdr = getHaoRuntimeHeader(blob);
     ASSERT_NE(nullptr, hdr);
-    const auto *selectors = getHaoSelectors(hdr);
     const auto *primary = getHaoPrimaryTable(hdr);
     const auto *bitmap = getHaoPrimaryBitmap(hdr);
 
-    for (u32 i = 0; i < hdr->selectorCount; i++) {
-        EXPECT_EQ(artifacts.selectors[i].byteOffset, selectors[i].byteOffset);
-        EXPECT_EQ(artifacts.selectors[i].bitOffset, selectors[i].bitOffset);
-    }
+    EXPECT_EQ(artifacts.selectors.size(), hdr->keyBits);
+    EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
     for (u32 i = 0; i < hdr->primaryCount; i++) {
         EXPECT_EQ(artifacts.hash.primary.offsets[i],
                   primary[i]);
@@ -2681,7 +2665,6 @@ TEST(HAOCompile, BextMaskMatchesSelectors) {
 
     HAOCompileArtifacts artifacts;
     ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
-    ASSERT_EQ(HAO_EXTRACT_MODE_BEXT, artifacts.extractMode);
 
     std::vector<u32> expectedBits;
     for (u32 i = 0; i < artifacts.selectors.size(); i++) {
@@ -3123,7 +3106,7 @@ TEST(HAOExtract, BextMatchesScalar) {
 
     for (size_t endPos = 0; endPos < totalLen; endPos++) {
         const u64a window = loadWindow64RawForTest(
-            history, data, historyLen, endPos, artifacts.windowBytes);
+            history, data, historyLen, endPos, HAO_LAYOUT_BYTES_PER_RULE_SLOT);
         const u32 scalarKey = extractScalarKeyFromWindowForTest(artifacts,
                                                                 window);
         const u64a packed = extractPackedBitsFallbackForTest(window,
@@ -3150,7 +3133,7 @@ TEST(HAOExtract, BextHistoryBoundaryConsistency) {
 
     for (size_t endPos = 0; endPos < historyLen + data.size(); endPos++) {
         const u64a window = loadWindow64RawForTest(
-            history, data, historyLen, endPos, artifacts.windowBytes);
+            history, data, historyLen, endPos, HAO_LAYOUT_BYTES_PER_RULE_SLOT);
         const u32 scalarKey = extractScalarKeyFromWindowForTest(artifacts,
                                                                 window);
         const u64a packed = extractPackedBitsFallbackForTest(window,
@@ -3180,13 +3163,11 @@ TEST(HAOCollision, RuntimeExtractorReportsCollisionRateOnDeterministicCorpus) {
     ASSERT_NE(nullptr, blob.get());
     const auto *hdr = getHaoRuntimeHeader(blob);
     ASSERT_NE(nullptr, hdr);
-    const auto *selectors = getHaoSelectors(hdr);
-    ASSERT_NE(nullptr, selectors);
-    ASSERT_GT(hdr->selectorCount, 0U);
-    ASSERT_EQ(artifacts.selectors.size(), hdr->selectorCount);
+    ASSERT_GT(hdr->keyBits, 0U);
+    ASSERT_EQ(artifacts.selectors.size(), hdr->keyBits);
 
     const auto data = makeDeterministicCollisionCorpus(HAO_COLLISION_SAMPLE_COUNT);
-    const auto runtimeHashes = extractRuntimeKeysForData(hdr, selectors, data);
+    const auto runtimeHashes = extractRuntimeKeysForData(hdr, data);
     ASSERT_EQ(data.size(), runtimeHashes.size());
     for (u32 h : runtimeHashes) {
         ASSERT_LT(h, hdr->primaryCount);
@@ -3204,10 +3185,7 @@ TEST(HAOCollision, RuntimeExtractorReportsCollisionRateOnDeterministicCorpus) {
               << " collisionRate=" << collisionRate
               << " usageRate=" << usageRate
               << " keyBits=" << hdr->keyBits
-              << " selectorCount=" << hdr->selectorCount
-              << " extractMode="
-              << (hdr->extractMode == HAO_RUNTIME_EXTRACT_MODE_BEXT ? "bext"
-                                                                     : "scalar")
+              << " extractMode=bext"
               << "\n";
 
     EXPECT_GE(collisionRate, 0.0);
@@ -3235,11 +3213,9 @@ TEST(HAOCollision, RuntimeCollisionRateMatchesScalarReference) {
     ASSERT_NE(nullptr, blob.get());
     const auto *hdr = getHaoRuntimeHeader(blob);
     ASSERT_NE(nullptr, hdr);
-    const auto *selectors = getHaoSelectors(hdr);
-    ASSERT_NE(nullptr, selectors);
 
     const auto data = makeDeterministicCollisionCorpus(HAO_COLLISION_SAMPLE_COUNT);
-    const auto runtimeHashes = extractRuntimeKeysForData(hdr, selectors, data);
+    const auto runtimeHashes = extractRuntimeKeysForData(hdr, data);
     const auto scalarHashes = extractScalarReferenceKeysForData(artifacts, data);
     ASSERT_EQ(runtimeHashes.size(), scalarHashes.size());
     for (size_t i = 0; i < runtimeHashes.size(); i++) {
@@ -3301,11 +3277,9 @@ TEST(HAOCollision, RuntimeExtractorFromRuleAndInputFiles) {
     ASSERT_NE(nullptr, blob.get());
     const auto *hdr = getHaoRuntimeHeader(blob);
     ASSERT_NE(nullptr, hdr);
-    const auto *selectors = getHaoSelectors(hdr);
-    ASSERT_NE(nullptr, selectors);
-    ASSERT_GT(hdr->selectorCount, 0U);
+    ASSERT_GT(hdr->keyBits, 0U);
 
-    const auto runtimeHashes = extractRuntimeKeysForBlocks(hdr, selectors, blocks);
+    const auto runtimeHashes = extractRuntimeKeysForBlocks(hdr, blocks);
     const auto scalarHashes = extractScalarReferenceKeysForBlocks(artifacts, blocks);
     ASSERT_EQ(runtimeHashes.size(), sampleCount);
     ASSERT_EQ(scalarHashes.size(), sampleCount);
@@ -3336,10 +3310,7 @@ TEST(HAOCollision, RuntimeExtractorFromRuleAndInputFiles) {
               << " collisionRate=" << collisionRate
               << " usageRate=" << usageRate
               << " keyBits=" << hdr->keyBits
-              << " selectorCount=" << hdr->selectorCount
-              << " extractMode="
-              << (hdr->extractMode == HAO_RUNTIME_EXTRACT_MODE_BEXT ? "bext"
-                                                                     : "scalar")
+              << " extractMode=bext"
               << "\n";
 
     EXPECT_GE(collisionRate, 0.0);

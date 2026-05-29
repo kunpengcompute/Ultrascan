@@ -27,6 +27,9 @@
 
 namespace ue2 {
 
+static_assert(sizeof(HAORuntimeL2Check) == HAO_RUNTIME_L2_CHECK_ALIGN,
+              "HAO L2 check must stay one aligned cache line");
+
 namespace {
 
 static constexpr u32 HAO_BUILD_MAX_SUFFIX_BYTES = 8;
@@ -135,18 +138,6 @@ std::string keyToBits(u32 key, u32 width) {
         }
     }
     return s;
-}
-
-static
-const char *extractModeName(u32 mode) {
-    switch (mode) {
-    case HAO_EXTRACT_MODE_SCALAR:
-        return "scalar";
-    case HAO_EXTRACT_MODE_BEXT:
-        return "bext";
-    default:
-        return "unknown";
-    }
 }
 
 static
@@ -691,8 +682,7 @@ void haoBuildTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
     out->valid = true;
 }
 
-// Build the extraction descriptor for the selected bits. At present this
-// chooses between scalar extraction and the BEXT-based path.
+// Build the BEXT mask used by the runtime extractor.
 template <class ArtifactsT>
 static
 void haoBuildExtract(const std::vector<HAOBitSelector> &selectors,
@@ -701,8 +691,6 @@ void haoBuildExtract(const std::vector<HAOBitSelector> &selectors,
         return;
     }
 
-    artifacts->extractMode = HAO_EXTRACT_MODE_SCALAR;
-    artifacts->windowBytes = HAO_LAYOUT_BYTES_PER_RULE_SLOT;
     artifacts->bextMask = 0;
 
     if (selectors.empty() || selectors.size() > HAO_LAYOUT_MAX_SELECTORS) {
@@ -712,7 +700,6 @@ void haoBuildExtract(const std::vector<HAOBitSelector> &selectors,
     for (const auto &selector : selectors) {
         artifacts->bextMask |= (1ULL << haoSelectorBitIndex(selector));
     }
-    artifacts->extractMode = HAO_EXTRACT_MODE_BEXT;
 }
 
 static
@@ -774,8 +761,8 @@ void dumpSelectors(const std::vector<HAOBitSelector> &selectors) {
 template <class ArtifactsT>
 static
 void dumpExtractDescriptor(const ArtifactsT &artifacts) {
-    printf("[HAO][Extract] mode=%s windowBytes=%u bextMask=0x%llx\n",
-           extractModeName(artifacts.extractMode), artifacts.windowBytes,
+    printf("[HAO][Extract] mode=bext windowBytes=%u bextMask=0x%llx\n",
+           HAO_LAYOUT_BYTES_PER_RULE_SLOT,
            (unsigned long long)artifacts.bextMask);
 }
 
@@ -852,9 +839,9 @@ void dumpHAOSummary(const ArtifactsT &artifacts) {
     HAO_SUMMARY_FMT("maxSelectedAmbigBits",   "%u", s.maxSelectedAmbigBits);
 
     printf("[HAO][Extract]\n");
-    HAO_SUMMARY_FMT("extractMode",            "%s",
-                    extractModeName(artifacts.extractMode));
-    HAO_SUMMARY_FMT("windowBytes",            "%u", artifacts.windowBytes);
+    HAO_SUMMARY_FMT("extractMode",            "%s", "bext");
+    HAO_SUMMARY_FMT("windowBytes",            "%u",
+                    HAO_LAYOUT_BYTES_PER_RULE_SLOT);
     HAO_SUMMARY_FMT("bextMask(runtime)",      "0x%016llx",
                     (unsigned long long)artifacts.bextMask);
 
@@ -2304,27 +2291,19 @@ bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
         return nullptr;
     }
 
-    const u32 selectorCount = verify_u32(artifacts.selectors.size());
+    const u32 keyBits = verify_u32(artifacts.selectors.size());
     const u32 primaryCount =
         verify_u32(artifacts.hash.primary.offsets.size());
     const u32 primaryBitmapSize =
         verify_u32(artifacts.hash.bitmap.bits.size());
-    const u32 primaryCoarseBitmapSize = 0;
-    const u32 primaryRawCount = verify_u32(
-        artifacts.hash.primary.offsets.size());
-    const u32 primaryBitmapRawSize = verify_u32(
-        artifacts.hash.bitmap.bits.size());
     const u32 l2EntryCount =
         verify_u32(artifacts.hash.l2Check.size());
     if (artifacts.hash.l2Meta.size() != l2EntryCount) {
         return nullptr;
     }
     const u32 ruleMetaCount = verify_u32(artifacts.meta.size());
-    const size_t selectorBytes =
-        sizeof(HAORuntimeBitSelector) * artifacts.selectors.size();
     const size_t primaryBitmapBytes =
         artifacts.hash.bitmap.bits.size();
-    const size_t primaryCoarseBitmapBytes = 0;
     const size_t primaryBytes =
         sizeof(u32) * artifacts.hash.primary.offsets.size();
     const size_t l2CheckBytes =
@@ -2336,26 +2315,14 @@ bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
     const size_t ruleMetaBytes =
         sizeof(HAORuntimeRuleMeta) * artifacts.meta.size();
 
-    if (primaryRawCount != primaryCount ||
-        primaryBitmapRawSize != primaryBitmapSize) {
-        return nullptr;
-    }
-
     size_t totalSize = ROUNDUP_N(sizeof(HAORuntimeHeader), alignof(u32));
-    const u32 selectorsOffset = verify_u32(totalSize);
-    totalSize += ROUNDUP_N(selectorBytes, alignof(u32));
     const u32 primaryBitmapOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(primaryBitmapBytes, alignof(u32));
-    const u32 primaryBitmapCoarseOffset = verify_u32(totalSize);
-    totalSize += ROUNDUP_N(primaryCoarseBitmapBytes, alignof(u32));
     const u32 primaryOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(primaryBytes, alignof(u32));
-    const u32 primaryBitmapRawOffset = primaryBitmapOffset;
-    const u32 primaryBitmapRawCoarseOffset = primaryBitmapCoarseOffset;
-    const u32 primaryRawOffset = primaryOffset;
-    totalSize = ROUNDUP_N(totalSize, 64);
+    totalSize = ROUNDUP_N(totalSize, HAO_RUNTIME_L2_CHECK_ALIGN);
     const u32 l2CheckOffset = verify_u32(totalSize);
-    totalSize += ROUNDUP_N(l2CheckBytes, 64);
+    totalSize += ROUNDUP_N(l2CheckBytes, HAO_RUNTIME_L2_CHECK_ALIGN);
     const u32 l2MetaOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(l2MetaBytes, alignof(u32));
     const u32 ruleMetaOffset = verify_u32(totalSize);
@@ -2369,41 +2336,19 @@ bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
     auto *hdr = reinterpret_cast<HAORuntimeHeader *>(blob.get());
     hdr->magic = HAO_RUNTIME_MAGIC;
     hdr->version = HAO_RUNTIME_VERSION;
-    hdr->flags = artifacts.hash.flags;
-    hdr->keyBits = artifacts.hash.keyBits;
-    hdr->selectorCount = selectorCount;
+    hdr->keyBits = keyBits;
     hdr->primaryCount = primaryCount;
     hdr->primaryBitmapSize = primaryBitmapSize;
-    hdr->primaryCoarseBitmapSize = primaryCoarseBitmapSize;
     hdr->l2EntryCount = l2EntryCount;
     hdr->ruleMetaCount = ruleMetaCount;
-    hdr->reservedLiteralBlobSize = 0;
-    hdr->extractMode = artifacts.extractMode;
-    hdr->windowBytes = artifacts.windowBytes;
     hdr->bextMask = artifacts.bextMask;
-    hdr->selectorsOffset = selectorsOffset;
     hdr->primaryBitmapOffset = primaryBitmapOffset;
-    hdr->primaryBitmapCoarseOffset = primaryBitmapCoarseOffset;
     hdr->primaryOffset = primaryOffset;
-    hdr->primaryBitmapRawOffset = primaryBitmapRawOffset;
-    hdr->primaryBitmapRawCoarseOffset = primaryBitmapRawCoarseOffset;
-    hdr->primaryRawOffset = primaryRawOffset;
     hdr->l2CheckOffset = l2CheckOffset;
     hdr->l2MetaOffset = l2MetaOffset;
     hdr->ruleMetaOffset = ruleMetaOffset;
-    hdr->reservedLiteralBlobOffset = 0;
-    hdr->reserved1 = 0;
-    hdr->reserved2 = 0;
 
     u8 *base = blob.get();
-    auto *selectorsOut =
-        reinterpret_cast<HAORuntimeBitSelector *>(base + selectorsOffset);
-    for (u32 i = 0; i < selectorCount; i++) {
-        selectorsOut[i].byteOffset = artifacts.selectors[i].byteOffset;
-        selectorsOut[i].bitOffset = artifacts.selectors[i].bitOffset;
-        selectorsOut[i].reserved = 0;
-    }
-
     if (primaryBitmapBytes) {
         memcpy(base + primaryBitmapOffset,
                artifacts.hash.bitmap.bits.data(),

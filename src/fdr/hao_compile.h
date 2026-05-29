@@ -45,8 +45,6 @@ static constexpr u32 HAO_LAYOUT_RULE_SLOTS_PER_ENTRY = 4U;
 static constexpr u32 HAO_LAYOUT_BYTES_PER_RULE_SLOT = 8U;
 static constexpr u32 HAO_INVALID_RULE_INDEX = ~0U;
 static constexpr u32 HAO_LAYOUT_MAX_SELECTORS = 32U;
-static constexpr u32 HAO_EXTRACT_MODE_SCALAR = 0U;
-static constexpr u32 HAO_EXTRACT_MODE_BEXT = 1U;
 static constexpr u32 HAO_ENGINE_ID = 2U;
 
 static constexpr u16 HAO_RULE_META_FLAG_NOCASE = 1U << 0;
@@ -194,8 +192,6 @@ struct HAOHashBuild {
 
 struct HAOCompileArtifacts {
     const char *selectorName = "unknown";
-    u32 extractMode = HAO_EXTRACT_MODE_SCALAR;
-    u32 windowBytes = HAO_LAYOUT_BYTES_PER_RULE_SLOT;
     u64a bextMask = 0;
     std::vector<HAOBitSelector> selectors;
     std::vector<HAOCompiledRulePlan> plans;

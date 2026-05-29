@@ -5,25 +5,19 @@
 #include "hwlm/hwlm.h"
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 20U
+#define HAO_RUNTIME_VERSION 22U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
-#define HAO_RUNTIME_FLAG_PARTIAL_COVERAGE (1U << 0)
-#define HAO_RUNTIME_KEY_BITS 22U
-#define HAO_RUNTIME_EXTRACT_MODE_SCALAR 0U
-#define HAO_RUNTIME_EXTRACT_MODE_BEXT 1U
 #define HAO_RUNTIME_L1_OFFSET_BITS 22U
 #define HAO_RUNTIME_L1_OFFSET_MASK ((1U << HAO_RUNTIME_L1_OFFSET_BITS) - 1U)
 #define HAO_RUNTIME_L1_COUNT_SHIFT HAO_RUNTIME_L1_OFFSET_BITS
 #define HAO_RUNTIME_RULE_SLOTS_PER_ENTRY 4U
 #define HAO_RUNTIME_BYTES_PER_RULE_SLOT 8U
+#define HAO_RUNTIME_L2_CHECK_ALIGN 64U
 #define HAO_RUNTIME_INVALID_RULE_INDEX 0xffffffffU
 #define HAO_RUNTIME_MAX_SELECTORS 32U
 #define HAO_BATCH_FALLBACK_WIDTH 4U
 #define HAO_BATCH_MAX_WIDTH 32U
 #define HAO_BITMAP_GROUPED_BYTES 4U
-#define HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT 3U
-#define HAO_RUNTIME_PRIMARY_COARSE_KEY_GROUP \
-    (1U << HAO_RUNTIME_PRIMARY_COARSE_KEY_SHIFT)
 
 /* Shared HAO tuning knobs used by compile-time and runtime code paths. */
 /* These remain part of the public HAO contract for the HAO-only path. */
@@ -46,11 +40,6 @@
 #define HAO_RULE_FLAG_NORUNS (1U << 1)
 #define HAO_RULE_FLAG_HAS_MASK (1U << 2)
 
-#define HAO_RUNTIME_RULE_EXACT 0U
-#define HAO_RUNTIME_RULE_NOCASE 1U
-#define HAO_RUNTIME_RULE_SMALL_CLASS_EXPAND 2U
-#define HAO_RUNTIME_RULE_MASK_CONFIRM 3U
-#define HAO_RUNTIME_RULE_UNSUPPORTED 4U
 struct HAORuntimeL2Check {
     u64a rule[HAO_RUNTIME_RULE_SLOTS_PER_ENTRY];
     u64a mask[HAO_RUNTIME_RULE_SLOTS_PER_ENTRY];
@@ -64,37 +53,17 @@ struct HAORuntimeL2Meta {
 struct HAORuntimeHeader {
     u32 magic;
     u32 version;
-    u32 flags;
     u32 keyBits;
-    u32 selectorCount;
     u32 primaryCount;
     u32 primaryBitmapSize;
-    u32 primaryCoarseBitmapSize;
     u32 l2EntryCount;
     u32 ruleMetaCount;
-    u32 reservedLiteralBlobSize;
-    u32 extractMode;
-    u32 windowBytes;
     u64a bextMask;
-    u32 selectorsOffset;
     u32 primaryBitmapOffset;
-    u32 primaryBitmapCoarseOffset;
     u32 primaryOffset;
-    u32 primaryBitmapRawOffset;
-    u32 primaryBitmapRawCoarseOffset;
-    u32 primaryRawOffset;
     u32 l2CheckOffset;
     u32 l2MetaOffset;
     u32 ruleMetaOffset;
-    u32 reservedLiteralBlobOffset;
-    u32 reserved1;
-    u32 reserved2;
-};
-
-struct HAORuntimeBitSelector {
-    u8 byteOffset;
-    u8 bitOffset;
-    u16 reserved;
 };
 
 struct HAORuntimeRuleMeta {
@@ -109,10 +78,9 @@ struct HAORuntimeRuleMeta {
 
 /* Read-only summary returned by HAO runtime blob inspection helpers. */
 struct HAORuntimeInspectSummary {
-    u32 selectorCount;
+    u32 keyBits;
     u32 primaryCount;
     u32 primaryBitmapSize;
-    u32 primaryCoarseBitmapSize;
     u32 l2EntryCount;
     u32 ruleMetaCount;
     u32 nonEmptyPrimary;
