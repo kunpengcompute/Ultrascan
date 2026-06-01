@@ -37,6 +37,43 @@ static int g_haoStatsForceEnabled;
 static int g_haoStatsEnvEnabled = -1;
 static int g_haoStatsAtexitRegistered;
 static int g_haoStatsActive;
+
+#ifndef HAO_L2_FP_TOPN
+#define HAO_L2_FP_TOPN 20U
+#endif
+
+#define HAO_L2_BUCKET_RULE_ID_LIMIT 16U
+
+struct HAOL2EntryHotStat {
+    const void *table;
+    u32 offset;
+    u32 ruleCount;
+    u32 ruleIds[HAO_RUNTIME_RULE_SLOTS_PER_ENTRY];
+    u64a visits;
+    u64a misses;
+    u64a entryHits;
+    u64a slotHits;
+};
+
+struct HAOL2BucketHotStat {
+    const void *table;
+    u32 offset;
+    u32 count;
+    u32 ruleIdCount;
+    u32 ruleIds[HAO_L2_BUCKET_RULE_ID_LIMIT];
+    u32 ruleOverflow;
+    u64a visits;
+    u64a noReports;
+    u64a reports;
+    u64a entriesVisited;
+};
+
+static struct HAOL2EntryHotStat *g_haoL2EntryStats;
+static u32 g_haoL2EntryStatsCap;
+static u32 g_haoL2EntryStatsCount;
+static struct HAOL2BucketHotStat *g_haoL2BucketStats;
+static u32 g_haoL2BucketStatsCap;
+static u32 g_haoL2BucketStatsCount;
 #endif
 
 /* Labels contain mixed ASCII and CJK text. strlen() counts bytes rather than
@@ -221,6 +258,230 @@ static double haoStatsPerMiB(u64a num, u64a bytes) {
     return ((double)num * 1048576.0) / (double)bytes;
 }
 
+static u32 haoStatsHashKey(const void *table, u32 offset) {
+    uintptr_t v = (uintptr_t)table;
+
+    v ^= (uintptr_t)offset * (uintptr_t)0x9e3779b97f4a7c15ULL;
+    v ^= v >> 33;
+    v *= (uintptr_t)0xff51afd7ed558ccdULL;
+    v ^= v >> 33;
+    return (u32)v;
+}
+
+static int haoStatsGrowEntries(void) {
+    u32 oldCap = g_haoL2EntryStatsCap;
+    u32 newCap = oldCap ? oldCap << 1 : 65536U;
+    struct HAOL2EntryHotStat *oldStats = g_haoL2EntryStats;
+    struct HAOL2EntryHotStat *newStats;
+    u32 i;
+
+    newStats = (struct HAOL2EntryHotStat *)calloc(
+        newCap, sizeof(struct HAOL2EntryHotStat));
+    if (!newStats) {
+        return 0;
+    }
+
+    g_haoL2EntryStats = newStats;
+    g_haoL2EntryStatsCap = newCap;
+    g_haoL2EntryStatsCount = 0;
+    for (i = 0; i < oldCap; i++) {
+        struct HAOL2EntryHotStat item;
+        u32 pos;
+
+        if (!oldStats[i].table) {
+            continue;
+        }
+        item = oldStats[i];
+        pos = haoStatsHashKey(item.table, item.offset) & (newCap - 1U);
+        while (newStats[pos].table) {
+            pos = (pos + 1U) & (newCap - 1U);
+        }
+        newStats[pos] = item;
+        g_haoL2EntryStatsCount++;
+    }
+    free(oldStats);
+    return 1;
+}
+
+static int haoStatsGrowBuckets(void) {
+    u32 oldCap = g_haoL2BucketStatsCap;
+    u32 newCap = oldCap ? oldCap << 1 : 32768U;
+    struct HAOL2BucketHotStat *oldStats = g_haoL2BucketStats;
+    struct HAOL2BucketHotStat *newStats;
+    u32 i;
+
+    newStats = (struct HAOL2BucketHotStat *)calloc(
+        newCap, sizeof(struct HAOL2BucketHotStat));
+    if (!newStats) {
+        return 0;
+    }
+
+    g_haoL2BucketStats = newStats;
+    g_haoL2BucketStatsCap = newCap;
+    g_haoL2BucketStatsCount = 0;
+    for (i = 0; i < oldCap; i++) {
+        struct HAOL2BucketHotStat item;
+        u32 pos;
+
+        if (!oldStats[i].table) {
+            continue;
+        }
+        item = oldStats[i];
+        pos = haoStatsHashKey(item.table, item.offset) & (newCap - 1U);
+        while (newStats[pos].table) {
+            pos = (pos + 1U) & (newCap - 1U);
+        }
+        newStats[pos] = item;
+        g_haoL2BucketStatsCount++;
+    }
+    free(oldStats);
+    return 1;
+}
+
+static struct HAOL2EntryHotStat *haoStatsEntryFor(
+    const struct HAORuntimeL2Check *l2CheckTable,
+    const struct HAORuntimeL2Meta *l2MetaTable,
+    const struct HAORuntimeRuleMeta *ruleMeta, u32 offset) {
+    u32 pos;
+    struct HAOL2EntryHotStat *rec;
+
+    if (!g_haoStatsActive || !l2CheckTable || !l2MetaTable || !ruleMeta ||
+        !offset) {
+        return NULL;
+    }
+    if (!g_haoL2EntryStatsCap ||
+        (g_haoL2EntryStatsCount + 1U) * 10U >=
+            g_haoL2EntryStatsCap * 7U) {
+        if (!haoStatsGrowEntries()) {
+            return NULL;
+        }
+    }
+
+    pos = haoStatsHashKey(l2CheckTable, offset) &
+          (g_haoL2EntryStatsCap - 1U);
+    while (g_haoL2EntryStats[pos].table &&
+           (g_haoL2EntryStats[pos].table != l2CheckTable ||
+            g_haoL2EntryStats[pos].offset != offset)) {
+        pos = (pos + 1U) & (g_haoL2EntryStatsCap - 1U);
+    }
+
+    rec = &g_haoL2EntryStats[pos];
+    if (!rec->table) {
+        u32 slot;
+
+        rec->table = l2CheckTable;
+        rec->offset = offset;
+        for (slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
+            const u32 ridx = l2MetaTable[offset].ruleIndex[slot];
+
+            if (ridx == HAO_RUNTIME_INVALID_RULE_INDEX) {
+                continue;
+            }
+            rec->ruleIds[rec->ruleCount++] = ruleMeta[ridx].id;
+        }
+        g_haoL2EntryStatsCount++;
+    }
+    return rec;
+}
+
+static struct HAOL2BucketHotStat *haoStatsBucketFor(
+    const struct HAORuntimeL2Check *l2CheckTable,
+    const struct HAORuntimeL2Meta *l2MetaTable,
+    const struct HAORuntimeRuleMeta *ruleMeta, u32 offset, u32 count) {
+    u32 pos;
+    struct HAOL2BucketHotStat *rec;
+
+    if (!g_haoStatsActive || !l2CheckTable || !l2MetaTable || !ruleMeta ||
+        !offset || !count) {
+        return NULL;
+    }
+    if (!g_haoL2BucketStatsCap ||
+        (g_haoL2BucketStatsCount + 1U) * 10U >=
+            g_haoL2BucketStatsCap * 7U) {
+        if (!haoStatsGrowBuckets()) {
+            return NULL;
+        }
+    }
+
+    pos = haoStatsHashKey(l2CheckTable, offset) &
+          (g_haoL2BucketStatsCap - 1U);
+    while (g_haoL2BucketStats[pos].table &&
+           (g_haoL2BucketStats[pos].table != l2CheckTable ||
+            g_haoL2BucketStats[pos].offset != offset)) {
+        pos = (pos + 1U) & (g_haoL2BucketStatsCap - 1U);
+    }
+
+    rec = &g_haoL2BucketStats[pos];
+    if (!rec->table) {
+        u32 n;
+
+        rec->table = l2CheckTable;
+        rec->offset = offset;
+        rec->count = count;
+        for (n = 0; n < count; n++) {
+            u32 slot;
+            const struct HAORuntimeL2Meta *meta = &l2MetaTable[offset + n];
+
+            for (slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
+                const u32 ridx = meta->ruleIndex[slot];
+
+                if (ridx == HAO_RUNTIME_INVALID_RULE_INDEX) {
+                    continue;
+                }
+                if (rec->ruleIdCount < HAO_L2_BUCKET_RULE_ID_LIMIT) {
+                    rec->ruleIds[rec->ruleIdCount++] = ruleMeta[ridx].id;
+                } else {
+                    rec->ruleOverflow = 1;
+                }
+            }
+        }
+        g_haoL2BucketStatsCount++;
+    }
+    return rec;
+}
+
+static void haoStatsObserveL2Entry(
+    const struct HAORuntimeL2Check *l2CheckTable,
+    const struct HAORuntimeL2Meta *l2MetaTable,
+    const struct HAORuntimeRuleMeta *ruleMeta, u32 offset, u32 matchMask) {
+    HAO_STATS_IF_ENABLED({
+        struct HAOL2EntryHotStat *rec =
+            haoStatsEntryFor(l2CheckTable, l2MetaTable, ruleMeta, offset);
+
+        if (rec) {
+            rec->visits++;
+            if (matchMask) {
+                rec->entryHits++;
+                rec->slotHits += popcount32(matchMask);
+            } else {
+                rec->misses++;
+            }
+        }
+    });
+}
+
+static void haoStatsObserveL2Bucket(
+    const struct HAORuntimeL2Check *l2CheckTable,
+    const struct HAORuntimeL2Meta *l2MetaTable,
+    const struct HAORuntimeRuleMeta *ruleMeta, u32 offset, u32 count,
+    u32 visitedCount, int anyReport) {
+    HAO_STATS_IF_ENABLED({
+        struct HAOL2BucketHotStat *rec =
+            haoStatsBucketFor(l2CheckTable, l2MetaTable, ruleMeta,
+                              offset, count);
+
+        if (rec) {
+            rec->visits++;
+            rec->entriesVisited += visitedCount;
+            if (anyReport) {
+                rec->reports++;
+            } else {
+                rec->noReports++;
+            }
+        }
+    });
+}
+
 static void haoStatsObserveRangeShape(u32 entryCount, u32 ruleCount) {
     HAO_STATS_IF_ENABLED({
         g_haoStats.l2RangeTotalEntries += entryCount;
@@ -258,6 +519,161 @@ static void haoStatsObserveRangeShape(u32 entryCount, u32 ruleCount) {
             g_haoStats.l2RangeCollisionBuckets++;
         }
     });
+}
+
+static int haoCmpEntryMissDesc(const void *a, const void *b) {
+    const struct HAOL2EntryHotStat * const *pa =
+        (const struct HAOL2EntryHotStat * const *)a;
+    const struct HAOL2EntryHotStat * const *pb =
+        (const struct HAOL2EntryHotStat * const *)b;
+    const struct HAOL2EntryHotStat *ra = *pa;
+    const struct HAOL2EntryHotStat *rb = *pb;
+
+    if (ra->misses != rb->misses) {
+        return ra->misses < rb->misses ? 1 : -1;
+    }
+    if (ra->visits != rb->visits) {
+        return ra->visits < rb->visits ? 1 : -1;
+    }
+    return ra->offset < rb->offset ? -1 : (ra->offset > rb->offset);
+}
+
+static int haoCmpBucketNoReportDesc(const void *a, const void *b) {
+    const struct HAOL2BucketHotStat * const *pa =
+        (const struct HAOL2BucketHotStat * const *)a;
+    const struct HAOL2BucketHotStat * const *pb =
+        (const struct HAOL2BucketHotStat * const *)b;
+    const struct HAOL2BucketHotStat *ra = *pa;
+    const struct HAOL2BucketHotStat *rb = *pb;
+
+    if (ra->noReports != rb->noReports) {
+        return ra->noReports < rb->noReports ? 1 : -1;
+    }
+    if (ra->visits != rb->visits) {
+        return ra->visits < rb->visits ? 1 : -1;
+    }
+    return ra->offset < rb->offset ? -1 : (ra->offset > rb->offset);
+}
+
+static void haoStatsPrintRuleIds(const u32 *ruleIds, u32 count,
+                                 u32 overflow) {
+    u32 i;
+
+    fputc('[', stderr);
+    for (i = 0; i < count; i++) {
+        if (i) {
+            fputc(',', stderr);
+        }
+        fprintf(stderr, "%u", ruleIds[i]);
+    }
+    if (overflow) {
+        if (count) {
+            fputc(',', stderr);
+        }
+        fputs("...", stderr);
+    }
+    fputc(']', stderr);
+}
+
+static void haoDumpL2EntryTopN(u64a totalMisses) {
+    struct HAOL2EntryHotStat **items;
+    u32 i;
+    u32 count = 0;
+    u32 limit;
+
+    if (!g_haoL2EntryStats || !g_haoL2EntryStatsCount) {
+        return;
+    }
+
+    items = (struct HAOL2EntryHotStat **)malloc(
+        sizeof(*items) * g_haoL2EntryStatsCount);
+    if (!items) {
+        return;
+    }
+
+    for (i = 0; i < g_haoL2EntryStatsCap; i++) {
+        if (g_haoL2EntryStats[i].table && g_haoL2EntryStats[i].misses) {
+            items[count++] = &g_haoL2EntryStats[i];
+        }
+    }
+    if (!count) {
+        free(items);
+        return;
+    }
+
+    qsort(items, count, sizeof(*items), haoCmpEntryMissDesc);
+    limit = count < HAO_L2_FP_TOPN ? count : HAO_L2_FP_TOPN;
+
+    fprintf(stderr, "[HAO][L2-Entry-FP-TopN]\n");
+    fprintf(stderr,
+            "  rank table offset visits misses fpRate fpShare entryHits slotHits ruleIds\n");
+    for (i = 0; i < limit; i++) {
+        const struct HAOL2EntryHotStat *rec = items[i];
+
+        fprintf(stderr,
+                "  %u %p %u %llu %llu %.5f %.5f %llu %llu ",
+                i + 1U, rec->table, rec->offset,
+                (unsigned long long)rec->visits,
+                (unsigned long long)rec->misses,
+                haoStatsPct(rec->misses, rec->visits),
+                haoStatsPct(rec->misses, totalMisses),
+                (unsigned long long)rec->entryHits,
+                (unsigned long long)rec->slotHits);
+        haoStatsPrintRuleIds(rec->ruleIds, rec->ruleCount, 0);
+        fputc('\n', stderr);
+    }
+    free(items);
+}
+
+static void haoDumpL2BucketTopN(u64a totalNoReports) {
+    struct HAOL2BucketHotStat **items;
+    u32 i;
+    u32 count = 0;
+    u32 limit;
+
+    if (!g_haoL2BucketStats || !g_haoL2BucketStatsCount) {
+        return;
+    }
+
+    items = (struct HAOL2BucketHotStat **)malloc(
+        sizeof(*items) * g_haoL2BucketStatsCount);
+    if (!items) {
+        return;
+    }
+
+    for (i = 0; i < g_haoL2BucketStatsCap; i++) {
+        if (g_haoL2BucketStats[i].table &&
+            g_haoL2BucketStats[i].noReports) {
+            items[count++] = &g_haoL2BucketStats[i];
+        }
+    }
+    if (!count) {
+        free(items);
+        return;
+    }
+
+    qsort(items, count, sizeof(*items), haoCmpBucketNoReportDesc);
+    limit = count < HAO_L2_FP_TOPN ? count : HAO_L2_FP_TOPN;
+
+    fprintf(stderr, "[HAO][L2-Bucket-NoReport-TopN]\n");
+    fprintf(stderr,
+            "  rank table offset count visits noReports noReportRate noReportShare entriesVisited ruleIds\n");
+    for (i = 0; i < limit; i++) {
+        const struct HAOL2BucketHotStat *rec = items[i];
+
+        fprintf(stderr,
+                "  %u %p %u %u %llu %llu %.5f %.5f %llu ",
+                i + 1U, rec->table, rec->offset, rec->count,
+                (unsigned long long)rec->visits,
+                (unsigned long long)rec->noReports,
+                haoStatsPct(rec->noReports, rec->visits),
+                haoStatsPct(rec->noReports, totalNoReports),
+                (unsigned long long)rec->entriesVisited);
+        haoStatsPrintRuleIds(rec->ruleIds, rec->ruleIdCount,
+                             rec->ruleOverflow);
+        fputc('\n', stderr);
+    }
+    free(items);
 }
 #else
 static really_inline
@@ -368,6 +784,9 @@ static void haoDumpRuntimeStats(void) {
         haoStatsPerMiB(g_haoStats.encodedConfirmCalls, g_haoStats.scanInputBytes));
     HAO_STAT_FMT("reportsPerMiB(每MiB报告次数)",              "%.5f",
         haoStatsPerMiB(g_haoStats.callbackReports, g_haoStats.scanInputBytes));
+
+    haoDumpL2EntryTopN(l2EntryRejects);
+    haoDumpL2BucketTopN(l2LaneNoReport);
 }
 #endif
 
@@ -552,11 +971,17 @@ int haoProcessL2Entry(
     svuint64_t laneData, svuint64_t vslotBits, u32 *lastMatchId
 #if HAO_ENABLE_RUNTIME_STATS
     ,
+    const struct HAORuntimeL2Check *l2CheckTable,
+    const struct HAORuntimeL2Meta *l2MetaTable, u32 l2Offset,
     int *anyReport
 #endif
     ) {
     HAO_STATS_ADD(verifierCalls, 1);
     u32 matchMask = haoL2MatchSve(check, meta, ctx, laneData, vslotBits);
+#if HAO_ENABLE_RUNTIME_STATS
+    haoStatsObserveL2Entry(l2CheckTable, l2MetaTable, ruleMeta,
+                           l2Offset, matchMask);
+#endif
     if (likely(!matchMask)) {
         return HWLM_SUCCESS;
     }
@@ -664,7 +1089,10 @@ int haoRunL2Range(
         rv = haoProcessL2Entry(
             &l2CheckTable[offset], &l2MetaTable[offset], ruleMeta,
             a, control, ctx, laneData, vslotBits, &lastMatchId,
+            l2CheckTable, l2MetaTable, offset,
             &anyReport);
+        haoStatsObserveL2Bucket(l2CheckTable, l2MetaTable, ruleMeta,
+                                offset, count, visitedCount, anyReport);
         haoStatsObserveRangeShape(visitedCount, bucketRuleCount);
         HAO_STATS_ADD(encodedRangeReportCalls, anyReport ? 1 : 0);
         return rv;
@@ -687,14 +1115,19 @@ int haoRunL2Range(
 
         rv = haoProcessL2Entry(
             &l2CheckTable[off], &l2MetaTable[off], ruleMeta, a, control, ctx,
-            laneData, vslotBits, &lastMatchId, &anyReport);
+            laneData, vslotBits, &lastMatchId,
+            l2CheckTable, l2MetaTable, off, &anyReport);
         if (rv == HWLM_TERMINATED) {
+            haoStatsObserveL2Bucket(l2CheckTable, l2MetaTable, ruleMeta,
+                                    offset, count, visitedCount, 1);
             haoStatsObserveRangeShape(visitedCount, bucketRuleCount);
             HAO_STATS_ADD(encodedRangeReportCalls, 1);
             return HWLM_TERMINATED;
         }
     }
 
+    haoStatsObserveL2Bucket(l2CheckTable, l2MetaTable, ruleMeta,
+                            offset, count, visitedCount, anyReport);
     haoStatsObserveRangeShape(visitedCount, bucketRuleCount);
     HAO_STATS_ADD(encodedRangeReportCalls, anyReport ? 1 : 0);
 #endif

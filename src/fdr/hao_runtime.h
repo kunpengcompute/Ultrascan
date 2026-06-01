@@ -4,10 +4,14 @@
 #include "ue2common.h"
 #include "hwlm/hwlm.h"
 
+#ifndef HAO_KEY_BITS
+#define HAO_KEY_BITS 22U
+#endif
+
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
 #define HAO_RUNTIME_VERSION 22U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
-#define HAO_RUNTIME_L1_OFFSET_BITS 22U
+#define HAO_RUNTIME_L1_OFFSET_BITS HAO_KEY_BITS
 #define HAO_RUNTIME_L1_OFFSET_MASK ((1U << HAO_RUNTIME_L1_OFFSET_BITS) - 1U)
 #define HAO_RUNTIME_L1_COUNT_SHIFT HAO_RUNTIME_L1_OFFSET_BITS
 #define HAO_RUNTIME_RULE_SLOTS_PER_ENTRY 4U
@@ -21,9 +25,6 @@
 
 /* Shared HAO tuning knobs used by compile-time and runtime code paths. */
 /* These remain part of the public HAO contract for the HAO-only path. */
-#ifndef HAO_KEY_BITS
-#define HAO_KEY_BITS 22U
-#endif
 #ifndef HAO_MAX_KEY_AMBIG_BITS
 #define HAO_MAX_KEY_AMBIG_BITS HAO_KEY_BITS
 #endif

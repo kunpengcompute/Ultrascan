@@ -36,8 +36,8 @@ static constexpr u32 HAO_ARTIFACT_FLAG_PARTIAL_L2_CAPACITY =
     1U << 1;
 static constexpr u32 HAO_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW =
     1U << 2;
-static constexpr u32 HAO_LAYOUT_KEY_BITS = 22U;
-static constexpr u32 HAO_LAYOUT_L1_OFFSET_BITS = 22U;
+static constexpr u32 HAO_LAYOUT_KEY_BITS = HAO_KEY_BITS;
+static constexpr u32 HAO_LAYOUT_L1_OFFSET_BITS = HAO_KEY_BITS;
 static constexpr u32 HAO_LAYOUT_L1_OFFSET_MASK =
     (1U << HAO_LAYOUT_L1_OFFSET_BITS) - 1U;
 static constexpr u32 HAO_LAYOUT_L1_COUNT_SHIFT = HAO_LAYOUT_L1_OFFSET_BITS;
