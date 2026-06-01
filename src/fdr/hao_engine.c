@@ -821,12 +821,13 @@ void haoLoadRawCurr32(const struct FDR_Runtime_Args *a, size_t blockStart,
 }
 
 static really_inline
-svuint32_t haoRawKeys4(svuint8_t vrow, u64a bextMask) {
-    const svuint64_t packed =
-        svbext_n_u64(svreinterpret_u64_u8(vrow), (uint64_t)bextMask);
-    const svuint32_t as32 = svreinterpret_u32_u64(packed);
-
-    return svuzp1_u32(as32, as32);
+svuint32_t haoRawKeyPair(svuint8_t vrow0, svuint8_t vrow1, u64a bextMask) {
+    const svuint64_t keys0 =
+        svbext_n_u64(svreinterpret_u64_u8(vrow0), (uint64_t)bextMask);
+    const svuint64_t keys1 =
+        svbext_n_u64(svreinterpret_u64_u8(vrow1), (uint64_t)bextMask);
+    // const svuint64_t paired = svzip1_u64(keys0, keys1);
+    return svqxtnt_u64(svqxtnb_u64(keys0), keys1);
 }
 
 static really_inline
@@ -990,19 +991,10 @@ u32 haoCollectRawEncoded(const u8 *primaryBitmap,
     const svuint8_t vrow6 = svext_u8(vlo, vhi, 31);
     const svuint8_t vrow7 = vhi;
 
-    const svuint32_t vkeys0 = haoRawKeys4(vrow0, bextMask);
-    const svuint32_t vkeys1 = haoRawKeys4(vrow1, bextMask);
-    const svuint32_t vkeys2 = haoRawKeys4(vrow2, bextMask);
-    const svuint32_t vkeys3 = haoRawKeys4(vrow3, bextMask);
-    const svuint32_t vkeys4 = haoRawKeys4(vrow4, bextMask);
-    const svuint32_t vkeys5 = haoRawKeys4(vrow5, bextMask);
-    const svuint32_t vkeys6 = haoRawKeys4(vrow6, bextMask);
-    const svuint32_t vkeys7 = haoRawKeys4(vrow7, bextMask);
-
-    const svuint32_t vkeys01  = svzip1_u32(vkeys0, vkeys1);
-    const svuint32_t vkeys23  = svzip1_u32(vkeys2, vkeys3);
-    const svuint32_t vkeys45  = svzip1_u32(vkeys4, vkeys5);
-    const svuint32_t vkeys67  = svzip1_u32(vkeys6, vkeys7);
+    const svuint32_t vkeys01 = haoRawKeyPair(vrow0, vrow1, bextMask);
+    const svuint32_t vkeys23 = haoRawKeyPair(vrow2, vrow3, bextMask);
+    const svuint32_t vkeys45 = haoRawKeyPair(vrow4, vrow5, bextMask);
+    const svuint32_t vkeys67 = haoRawKeyPair(vrow6, vrow7, bextMask);
 
     haoPrepRawKeys(primaryBitmap, vkeys01, &vbitPos01, &vbitmapBytes01);
     haoPrepRawKeys(primaryBitmap, vkeys23, &vbitPos23, &vbitmapBytes23);
@@ -1085,19 +1077,10 @@ u32 haoCollectRawTailEncoded(const u8 *primaryBitmap,
     const svuint8_t vrow6 = svext_u8(vlo, vhi, 31);
     const svuint8_t vrow7 = vhi;
 
-    const svuint32_t vkeys0 = haoRawKeys4(vrow0, bextMask);
-    const svuint32_t vkeys1 = haoRawKeys4(vrow1, bextMask);
-    const svuint32_t vkeys2 = haoRawKeys4(vrow2, bextMask);
-    const svuint32_t vkeys3 = haoRawKeys4(vrow3, bextMask);
-    const svuint32_t vkeys4 = haoRawKeys4(vrow4, bextMask);
-    const svuint32_t vkeys5 = haoRawKeys4(vrow5, bextMask);
-    const svuint32_t vkeys6 = haoRawKeys4(vrow6, bextMask);
-    const svuint32_t vkeys7 = haoRawKeys4(vrow7, bextMask);
-
-    const svuint32_t vkeys01 = svzip1_u32(vkeys0, vkeys1);
-    const svuint32_t vkeys23 = svzip1_u32(vkeys2, vkeys3);
-    const svuint32_t vkeys45 = svzip1_u32(vkeys4, vkeys5);
-    const svuint32_t vkeys67 = svzip1_u32(vkeys6, vkeys7);
+    const svuint32_t vkeys01 = haoRawKeyPair(vrow0, vrow1, bextMask);
+    const svuint32_t vkeys23 = haoRawKeyPair(vrow2, vrow3, bextMask);
+    const svuint32_t vkeys45 = haoRawKeyPair(vrow4, vrow5, bextMask);
+    const svuint32_t vkeys67 = haoRawKeyPair(vrow6, vrow7, bextMask);
 
     {
         const svbool_t pg32 = svptrue_b32();
