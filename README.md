@@ -18,7 +18,7 @@ Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 |--|--|
 | 短规则旁路技术 | 短规则旁路技术特性包括单字节短规则算法和2~4字节短规则算法，通过将导致性能瓶颈的短规则从常规规则中分离，用旁路规则算法消除冗余操作，从而大幅提升整体匹配性能。 |
 | 假阳性阻断技术 | 假阳性阻断技术特性能够减少解释器大量无用的调用，进而大幅提高Hyperscan匹配性能。  |
-| 通用字节码技术 | 通用字节码技术特性能够将Hyperscan的正则表达式编译为跨平台支持格式，该格式支持一套规则集字节码能够在x86和鲲鹏计算平台平台上运行，无需重新编译。 |
+| 通用字节码技术 | 通用字节码技术特性能够将Hyperscan的正则表达式编译为跨平台支持格式，该格式支持一套规则集字节码能够在x86和鲲鹏计算平台上运行，无需重新编译。 |
 
 ## 目录结构
 
@@ -36,7 +36,7 @@ Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │       ├── figures                                           # 中文文档图片资源目录
 │       ├── quick_start.md                                    # 快速入门
 │       ├── release_notes.md                                  # 版本说明书
-│       ├── compilation_guide.md                              # 编译指南
+│       ├── installation_guide.md                              # 编译指南
 │       ├── developer_guide.md                                # 开发指南
 │       ├── user_guide.md                                     # 用户指南
 ├── examples                                                   # 示例代码目录
@@ -117,7 +117,7 @@ Hyperscan的快速入门通过使用Hyperscan官方提供的性能Benchmark工�
 
 ## 贡献声明
 
-欢迎大家为社区做贡献，如果使用过程中有任何问题/建议，或者需要反馈特性需求和bug报告，可以提交[Issues](https://gitcode.com/boostkit/hyperscan)联系我们，具体贡献方法可参考[这里](https://gitcode.com/boostkit/community/blob/master/docs/contributor/contributing.md)。同时也欢迎大家在[讨论专区](https://gitcode.com/boostkit/community/discussions)展开讨论交流。感谢您的支持。
+欢迎大家为社区做贡献，如果使用过程中有任何问题/建议，或者需要反馈特性需求和bug报告，可以提交[Issues](https://gitcode.com/boostkit/hyperscan/issues)联系我们，具体贡献方法可参考[这里](https://gitcode.com/boostkit/community/blob/master/docs/contributor/contributing.md)。同时也欢迎大家在[讨论专区](https://gitcode.com/boostkit/community/discussions)展开讨论交流。感谢您的支持。
 
 ## 免责声明
 
