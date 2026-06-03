@@ -13,6 +13,10 @@
 #define HAO_KEY_BITS 22U
 #endif
 
+#ifndef HAO_AUTO_MIN_KEY_BITS
+#define HAO_AUTO_MIN_KEY_BITS 18U
+#endif
+
 #ifndef HAO_MAX_KEY_AMBIG_BITS
 #define HAO_MAX_KEY_AMBIG_BITS HAO_KEY_BITS
 #endif
@@ -37,7 +41,7 @@ static constexpr u32 HAO_ARTIFACT_FLAG_PARTIAL_L2_CAPACITY =
 static constexpr u32 HAO_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW =
     1U << 2;
 static constexpr u32 HAO_LAYOUT_KEY_BITS = HAO_KEY_BITS;
-static constexpr u32 HAO_LAYOUT_L1_OFFSET_BITS = HAO_KEY_BITS;
+static constexpr u32 HAO_LAYOUT_L1_OFFSET_BITS = 22U;
 static constexpr u32 HAO_LAYOUT_L1_OFFSET_MASK =
     (1U << HAO_LAYOUT_L1_OFFSET_BITS) - 1U;
 static constexpr u32 HAO_LAYOUT_L1_COUNT_SHIFT = HAO_LAYOUT_L1_OFFSET_BITS;
@@ -46,6 +50,11 @@ static constexpr u32 HAO_LAYOUT_BYTES_PER_RULE_SLOT = 8U;
 static constexpr u32 HAO_INVALID_RULE_INDEX = ~0U;
 static constexpr u32 HAO_LAYOUT_MAX_SELECTORS = 32U;
 static constexpr u32 HAO_ENGINE_ID = 2U;
+
+static_assert(HAO_LAYOUT_KEY_BITS <= HAO_LAYOUT_L1_OFFSET_BITS,
+              "HAO key bits must fit the primary key space");
+static_assert(HAO_LAYOUT_KEY_BITS <= HAO_LAYOUT_MAX_SELECTORS,
+              "HAO key bits exceed selector capacity");
 
 static constexpr u16 HAO_RULE_META_FLAG_NOCASE = 1U << 0;
 static constexpr u16 HAO_RULE_META_FLAG_NORUNS = 1U << 1;
