@@ -2037,11 +2037,8 @@ TEST(HAOCompile, BuildHaoGlobalBlobStoresRulePlanMeta) {
 
     EXPECT_EQ(srcMeta.id, meta[1].id);
     EXPECT_EQ(srcMeta.flags, meta[1].flags);
-    EXPECT_EQ(srcMeta.maskLen, meta[1].maskLen);
     EXPECT_EQ(0U, meta[1].reserved);
     EXPECT_EQ(srcMeta.groups, meta[1].groups);
-    EXPECT_EQ(srcMeta.maskWord, meta[1].maskWord);
-    EXPECT_EQ(srcMeta.cmpWord, meta[1].cmpWord);
 }
 
 TEST(HAOCompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {
@@ -2295,7 +2292,7 @@ TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveForSimpleRules) {
     EXPECT_EQ(naiveMatches, batchMatches);
 }
 
-TEST(HAORuntime, HaoRuntimeStatsTrackDirectReportPath) {
+TEST(HAORuntime, HaoRuntimeStatsTrackCallbackReports) {
     if (!HaoRuntimeStatsEnabledForTest()) {
         return;
     }
@@ -2330,10 +2327,7 @@ TEST(HAORuntime, HaoRuntimeStatsTrackDirectReportPath) {
     EXPECT_GT(stats.scanCalls, 0U);
     EXPECT_EQ(data.size(), stats.scanInputBytes);
     EXPECT_GT(stats.primaryProbeLanes, 0U);
-    EXPECT_EQ(matches.size(), stats.directReports);
     EXPECT_EQ(matches.size(), stats.callbackReports);
-    EXPECT_EQ(0U, stats.encodedConfirmCalls);
-    EXPECT_EQ(0U, stats.encodedConfirmRejects);
 }
 
 TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveAcrossBlockBoundaries) {
@@ -2732,7 +2726,6 @@ TEST(HAOCompile, HaoNocasePlanUsesRawVerifierBytes) {
     EXPECT_EQ((u8)'A', plan.verifier.bytes[7]);
     EXPECT_EQ(0xf8U, plan.verifier.validByteMask);
     EXPECT_EQ(0xf8U, plan.verifier.nocaseByteMask);
-    EXPECT_FALSE(plan.flags & HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM);
 }
 
 TEST(HAOCompile, HaoNocaseVerifierStoresL2Mask) {
@@ -2775,11 +2768,11 @@ TEST(HAOCompile, HaoNocaseVerifierStoresL2Mask) {
 
 }
 
-TEST(HAOCompile, HaoMaskRulesBecomeAnchorConfirm) {
+TEST(HAOCompile, HaoMaskRulesMergeIntoL2WhenCompatible) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 722, HWLM_ALL_GROUPS, {}, {}),
         // Use an 8-byte rule to avoid tripping the selected-bit ambiguity limit.
-        // This keeps the test focused on the supplementary-mask -> anchor-confirm path.
+        // This keeps the test focused on supplementary-mask merging into L2.
         hwlmLiteral("maskrule", false, false, 723, HWLM_ALL_GROUPS,
                     std::vector<u8>{0xff, 0xf0},
                     std::vector<u8>{'l', 0x60}),
@@ -2791,10 +2784,41 @@ TEST(HAOCompile, HaoMaskRulesBecomeAnchorConfirm) {
     ASSERT_EQ(lits.size(), artifacts.plans.size());
 
     const auto &plan = artifacts.plans[1];
-    EXPECT_EQ(HAORuleCategory::HAO_RULE_MASK_CONFIRM, plan.category);
-    EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM);
+    EXPECT_EQ(HAORuleCategory::HAO_RULE_EXACT, plan.category);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK);
-    EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_MASK_CONFIRM);
+    EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_MASK_MERGED);
+    EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_MASK_MERGED);
+    EXPECT_EQ(1U, artifacts.summary.maskRules);
+    EXPECT_EQ(1U, artifacts.summary.maskMergedRules);
+}
+
+TEST(HAOCompile, HaoNocaseMaskCaseBitMergesWithoutConfirmFallback) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 7440, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("abcd", true, false, 7441, HWLM_ALL_GROUPS,
+                    std::vector<u8>{0xff}, std::vector<u8>{'d'}),
+        hwlmLiteral("delta", false, false, 7442, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 7443, HWLM_ALL_GROUPS, {}, {}),
+    };
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
+    ASSERT_EQ(lits.size(), artifacts.plans.size());
+
+    const auto &plan = artifacts.plans[1];
+    EXPECT_EQ(HAORuleCategory::HAO_RULE_NOCASE, plan.category);
+    EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK);
+    EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_MASK_MERGED);
+    EXPECT_TRUE(plan.verifier.flags & HAO_RULE_PLAN_FLAG_MASK_MERGED);
+    EXPECT_EQ(1U, artifacts.summary.maskRules);
+    EXPECT_EQ(1U, artifacts.summary.maskMergedRules);
+
+    u32 entry = 0;
+    u32 slot = 0;
+    ASSERT_TRUE(findL2SlotForRule(artifacts.hash, plan.ruleIndex,
+                                  &entry, &slot));
+    const auto &check = artifacts.hash.l2Check[entry];
+    EXPECT_EQ((u8)0xffU, l2Byte(check.mask[slot], 7));
+    EXPECT_EQ((u8)'d', l2Byte(check.rule[slot], 7));
 }
 
 TEST(HAOCompile, HaoNocaseMaskAnchorStoresL2Mask) {
@@ -2811,9 +2835,10 @@ TEST(HAOCompile, HaoNocaseMaskAnchorStoresL2Mask) {
     ASSERT_TRUE(artifacts.hash.valid);
 
     const auto &plan = artifacts.plans[1];
-    ASSERT_EQ(HAORuleCategory::HAO_RULE_MASK_CONFIRM, plan.category);
+    ASSERT_EQ(HAORuleCategory::HAO_RULE_NOCASE, plan.category);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_NORMALIZED);
     EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK);
+    EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_MASK_MERGED);
     EXPECT_EQ(0xf0U, plan.verifier.validByteMask);
     EXPECT_EQ(0xf0U, plan.verifier.nocaseByteMask);
 
@@ -2829,8 +2854,9 @@ TEST(HAOCompile, HaoNocaseMaskAnchorStoresL2Mask) {
         if (!(plan.verifier.validByteMask & (1U << j))) {
             continue;
         }
-        EXPECT_EQ((u8)0xdfU, l2Byte(check.mask[slot], j));
-        EXPECT_EQ((u8)(plan.verifier.bytes[j] & 0xdfU),
+        const u8 expectedMask = (j == 7) ? (u8)0xffU : (u8)0xdfU;
+        EXPECT_EQ(expectedMask, l2Byte(check.mask[slot], j));
+        EXPECT_EQ((u8)(plan.verifier.bytes[j] & expectedMask),
                   l2Byte(check.rule[slot], j));
     }
 
@@ -2854,16 +2880,11 @@ TEST(HAOCompile, HaoSummaryTracksCoverageAndAnchors) {
     EXPECT_EQ(artifacts.summary.totalRules,
               artifacts.summary.fastPathRules);
 
-    u32 maskCount = 0;
-    for (const auto &plan : artifacts.plans) {
-        if (plan.category == HAORuleCategory::HAO_RULE_MASK_CONFIRM) {
-            maskCount++;
-        }
-    }
-    EXPECT_EQ(maskCount, artifacts.summary.maskConfirmRules);
+    EXPECT_EQ(1U, artifacts.summary.maskRules);
+    EXPECT_EQ(1U, artifacts.summary.maskMergedRules);
 }
 
-TEST(HAOCompile, HaoSummaryTracksDirectReportRules) {
+TEST(HAOCompile, HaoSummaryTracksRuleCategories) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("12345", false, false, 7296, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 7297, HWLM_ALL_GROUPS, {}, {}),
@@ -2876,60 +2897,6 @@ TEST(HAOCompile, HaoSummaryTracksDirectReportRules) {
 
     EXPECT_EQ(3U, artifacts.summary.exactRules);
     EXPECT_EQ(1U, artifacts.summary.nocaseRules);
-    EXPECT_EQ(lits.size(), artifacts.summary.directReportRules);
-    EXPECT_EQ(0U, artifacts.summary.fastPathConfirmRules);
-}
-
-TEST(HAOCompile, HaoDirectReportSafetyFollowsSelectorCoverage) {
-    std::vector<hwlmLiteral> lits = {
-        hwlmLiteral("alpha", false, false, 7300, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("ALPHA", true, false, 7301, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("12345", false, false, 7302, HWLM_ALL_GROUPS, {}, {}),
-        hwlmLiteral("theta", false, false, 7303, HWLM_ALL_GROUPS, {}, {})
-    };
-
-    HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
-    ASSERT_EQ(lits.size(), artifacts.plans.size());
-
-    for (u32 i = 0; i < lits.size(); i++) {
-        const auto &lit = lits[i];
-        const auto &plan = artifacts.plans[i];
-        bool expectedSafe = false;
-
-        if (!lit.noruns && lit.msk.empty() && lit.cmp.empty()) {
-            if (plan.category == HAORuleCategory::HAO_RULE_NOCASE) {
-                expectedSafe = true;
-            } else if (plan.category == HAORuleCategory::HAO_RULE_EXACT) {
-                expectedSafe = true;
-                for (u32 byteFromEnd = 0; byteFromEnd < lit.s.size();
-                     byteFromEnd++) {
-                    const u8 c =
-                        verify_u8(lit.s[lit.s.size() - byteFromEnd - 1]);
-                    bool foundCaseBit = false;
-
-                    if (!ourisalpha(c)) {
-                        continue;
-                    }
-                    for (const auto &sel : artifacts.selectors) {
-                        if (sel.byteOffset == byteFromEnd &&
-                            sel.bitOffset == 5U) {
-                            foundCaseBit = true;
-                            break;
-                        }
-                    }
-                    if (!foundCaseBit) {
-                        expectedSafe = false;
-                        break;
-                    }
-                }
-            }
-        }
-
-        EXPECT_EQ(expectedSafe,
-                  !!(plan.flags & HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE))
-            << "ruleIndex=" << i << " literal=" << lit.s;
-    }
 }
 
 TEST(HAOCompile, HaoBudgetedSelectorsKeepAllRulesFastPath) {
@@ -3004,7 +2971,8 @@ TEST(HAOCompile, HaoGlobalHashStoresAnchorConfirmFragments) {
     ASSERT_TRUE(artifacts.hash.valid);
 
     const auto &plan = artifacts.plans[1];
-    ASSERT_EQ(HAORuleCategory::HAO_RULE_MASK_CONFIRM, plan.category);
+    ASSERT_EQ(HAORuleCategory::HAO_RULE_EXACT, plan.category);
+    EXPECT_TRUE(plan.flags & HAO_RULE_PLAN_FLAG_MASK_MERGED);
 
     u32 entry = 0;
     u32 slot = 0;

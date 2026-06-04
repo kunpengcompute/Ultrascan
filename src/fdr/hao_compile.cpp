@@ -163,11 +163,20 @@ u32 haoPrimaryCountForKeyBits(u32 keyBits) {
 }
 
 /* Returns true when a literal carries supplementary mask/cmp semantics.
- * In the current HAO plan this maps to mask-confirm. */
+ * Mergeable masks are folded into L2; conflicting masks keep runtime confirm. */
 static
 bool haoHasMask(const hwlmLiteral &lit) {
     return !lit.msk.empty() || !lit.cmp.empty();
 }
+
+static
+bool normalizeMaskCmp(const hwlmLiteral &lit, std::array<u8, 8> *mskOut,
+                      std::array<u8, 8> *cmpOut, u8 *lenOut);
+
+static
+void packMaskCmpTail(const std::array<u8, 8> &msk,
+                     const std::array<u8, 8> &cmp, u8 len,
+                     u64a *maskWord, u64a *cmpWord);
 
 /* Enumerate the selected-bit key variants for one rule. HAO is fast-path
  * only, so rules that exceed HAO_MAX_KEY_AMBIG_BITS reject the whole build. */
@@ -226,8 +235,8 @@ HAOKeyExpansionInfo haoExpandKeys(
     return info;
 }
 
-/* Current first-pass rule categories are conservative: exact, nocase,
- * mask-confirm, and unsupported. */
+/* Current first-pass rule categories describe the base literal verifier.
+ * Supplementary mask/cmp payloads are merged or marked for confirm later. */
 static
 HAORuleCategory haoClassifyLiteral(const hwlmLiteral &lit,
                                    const HAOKeyExpansionInfo &expansion) {
@@ -235,57 +244,11 @@ HAORuleCategory haoClassifyLiteral(const hwlmLiteral &lit,
         return HAORuleCategory::HAO_RULE_UNSUPPORTED;
     }
 
-    if (haoHasMask(lit)) {
-        return HAORuleCategory::HAO_RULE_MASK_CONFIRM;
-    }
-
     if (lit.nocase) {
         return HAORuleCategory::HAO_RULE_NOCASE;
     }
 
     return HAORuleCategory::HAO_RULE_EXACT;
-}
-
-static
-bool haoCoverCaseBits(
-    const hwlmLiteral &lit, const std::vector<HAOBitSelector> &selectors) {
-    for (u32 byteFromEnd = 0; byteFromEnd < lit.s.size(); byteFromEnd++) {
-        const u8 c = verify_u8(lit.s[lit.s.size() - byteFromEnd - 1]);
-        bool found = false;
-
-        if (!ourisalpha(c)) {
-            continue;
-        }
-        for (const auto &sel : selectors) {
-            if (sel.byteOffset == byteFromEnd && sel.bitOffset == 5U) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            return false;
-        }
-    }
-    return true;
-}
-
-static
-bool haoCanDirectReport(const hwlmLiteral &lit,
-                            const HAOCompiledRulePlan &plan,
-                            const std::vector<HAOBitSelector> &selectors) {
-    if (plan.category != HAORuleCategory::HAO_RULE_EXACT &&
-        plan.category != HAORuleCategory::HAO_RULE_NOCASE) {
-        return false;
-    }
-    if (haoHasMask(lit) || lit.noruns) {
-        return false;
-    }
-    if (plan.category == HAORuleCategory::HAO_RULE_EXACT) {
-        if (!haoCoverCaseBits(lit, selectors)) {
-            return false;
-        }
-    }
-    return true;
 }
 
 static
@@ -371,10 +334,22 @@ const char *haoSelectorName(HAOSelectorPolicy policy) {
     }
 }
 
+static
+u8 haoCareByteMaskFromWord(u64a maskWord) {
+    u8 out = 0;
+    for (u32 i = 0; i < HAO_LAYOUT_BYTES_PER_RULE_SLOT; i++) {
+        if ((maskWord >> (i * 8U)) & 0xffU) {
+            out |= verify_u8(1U << i);
+        }
+    }
+    return out;
+}
+
 /* Build the deterministic verifier fragment that the later L2 verifier
  * consumes. hwlmLiteral stores nocase literals in canonical uppercase form;
  * nocase bytes are encoded through an L2 mask byte of 0xdf so runtime can
- * compare input bytes without normalizing them first. */
+ * compare input bytes without normalizing them first. Supplementary mask/cmp
+ * payloads must be merged into L2; a merge failure rejects the HAO plan. */
 static
 HAOVerifierFragment haoBuildCheck(const hwlmLiteral &lit,
                                              HAORuleCategory category) {
@@ -387,19 +362,53 @@ HAOVerifierFragment haoBuildCheck(const hwlmLiteral &lit,
     for (u32 j = 0; j < suffixLen; j++) {
         const u8 c = verify_u8(lit.s[len - suffixLen + j]);
         const u32 idx = laneStart + j;
+        u8 ruleByte = c;
+        u8 maskByte = verify_u8(0xffU);
+
         fragment.bytes[idx] = c;
         fragment.validByteMask |= verify_u8(1U << idx);
         if (lit.nocase && ourisalpha(c)) {
             fragment.nocaseByteMask |= verify_u8(1U << idx);
+            maskByte = verify_u8(0xdfU);
+            ruleByte = verify_u8(ruleByte & maskByte);
         }
+
+        fragment.ruleWord |= (u64a)ruleByte << (idx * 8U);
+        fragment.maskWord |= (u64a)maskByte << (idx * 8U);
     }
 
     if (category == HAORuleCategory::HAO_RULE_NOCASE) {
         fragment.flags |= verify_u8(HAO_RULE_PLAN_FLAG_NORMALIZED);
     }
-    if (category == HAORuleCategory::HAO_RULE_MASK_CONFIRM) {
-        fragment.flags |= verify_u8(HAO_RULE_PLAN_FLAG_MASK_CONFIRM);
+
+    if (haoHasMask(lit)) {
+        std::array<u8, 8> normMsk = {};
+        std::array<u8, 8> normCmp = {};
+        u8 normLen = 0;
+        if (normalizeMaskCmp(lit, &normMsk, &normCmp, &normLen) &&
+            normLen) {
+            u64a maskWord = 0;
+            u64a cmpWord = 0;
+            packMaskCmpTail(normMsk, normCmp, normLen,
+                            &maskWord, &cmpWord);
+
+            const u64a overlap = fragment.maskWord & maskWord;
+            const u64a conflict =
+                overlap & ((fragment.ruleWord ^ cmpWord));
+            if (!conflict) {
+                fragment.ruleWord =
+                    (fragment.ruleWord & fragment.maskWord) |
+                    (cmpWord & maskWord);
+                fragment.maskWord |= maskWord;
+                fragment.flags |= verify_u8(HAO_RULE_PLAN_FLAG_MASK_MERGED);
+            } else {
+                fragment.flags |=
+                    verify_u8(HAO_RULE_PLAN_FLAG_MASK_MERGE_FAILED);
+            }
+        }
     }
+
+    fragment.careByteMask = haoCareByteMaskFromWord(fragment.maskWord);
     return fragment;
 }
 
@@ -447,13 +456,21 @@ void haoBuildPlans(const std::vector<hwlmLiteral> &lits,
         }
         if (haoHasMask(lits[i])) {
             plan.flags |= HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK;
+            summary->maskRules++;
         }
         if (plan.keyExpansion.selectedAmbigBits > HAO_MAX_KEY_AMBIG_BITS) {
             plan.flags |= HAO_RULE_PLAN_FLAG_OVER_AMBIG_LIMIT;
         }
 
-        if (plan.category == HAORuleCategory::HAO_RULE_MASK_CONFIRM) {
-            plan.flags |= HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM;
+        if (plan.verifier.flags & HAO_RULE_PLAN_FLAG_MASK_MERGED) {
+            plan.flags |= HAO_RULE_PLAN_FLAG_MASK_MERGED;
+            summary->maskMergedRules++;
+        }
+        if (plan.verifier.flags & HAO_RULE_PLAN_FLAG_MASK_MERGE_FAILED) {
+            plan.flags |= HAO_RULE_PLAN_FLAG_MASK_MERGE_FAILED;
+            plan.category = HAORuleCategory::HAO_RULE_UNSUPPORTED;
+            summary->maskConfirmRules++;
+            summary->maskConflictRules++;
         }
 
         if (summary->maxSelectedAmbigBits < plan.keyExpansion.selectedAmbigBits) {
@@ -473,31 +490,14 @@ void haoBuildPlans(const std::vector<hwlmLiteral> &lits,
         case HAORuleCategory::HAO_RULE_NOCASE:
             summary->nocaseRules++;
             break;
-        case HAORuleCategory::HAO_RULE_MASK_CONFIRM:
-            summary->maskConfirmRules++;
-            break;
         case HAORuleCategory::HAO_RULE_UNSUPPORTED:
             break;
         default:
             break;
         }
 
-        const bool canDirectReport =
-            haoCanDirectReport(lits[i], plan, selectors);
-
-        if (canDirectReport) {
-            plan.flags |= HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE;
-        }
-
         if (plan.flags & HAO_RULE_PLAN_FLAG_KEY_EXPANDED) {
             summary->keyExpandedRules++;
-        }
-        if (!canDirectReport &&
-            plan.category != HAORuleCategory::HAO_RULE_UNSUPPORTED) {
-            summary->fastPathConfirmRules++;
-        }
-        if (canDirectReport) {
-            summary->directReportRules++;
         }
         if (plan.category != HAORuleCategory::HAO_RULE_UNSUPPORTED) {
             summary->fastPathRules++;
@@ -524,40 +524,24 @@ void haoInitL2(HAOL2Check *check, HAOL2Meta *meta) {
 static
 void haoAddL2Slot(const HAOCompiledRulePlan &plan, u32 localSlot,
                            HAOL2Check *check, HAOL2Meta *meta) {
-    const u8 validMask = plan.verifier.validByteMask;
-    u64a ruleWord = 0;
-    u64a maskWord = 0;
+    const u8 careMask = plan.verifier.careByteMask;
 
     assert(check);
     assert(meta);
     assert(localSlot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY);
-    assert(validMask);
+    assert(careMask);
 
     meta->ruleIndex[localSlot] = plan.ruleIndex;
-
     for (u32 i = 0; i < HAO_LAYOUT_BYTES_PER_RULE_SLOT; i++) {
-        u8 ruleByte;
-        u8 maskByte;
-
-        if (!(validMask & (1U << i))) {
+        if (!(careMask & (1U << i))) {
             continue;
         }
-
-        ruleByte = plan.verifier.bytes[i];
-        maskByte = verify_u8(0xffU);
-        if (plan.verifier.nocaseByteMask & (1U << i)) {
-            maskByte = verify_u8(0xdfU);
-            ruleByte = verify_u8(ruleByte & maskByte);
-        }
-
-        ruleWord |= (u64a)ruleByte << (i * 8U);
-        maskWord |= (u64a)maskByte << (i * 8U);
         meta->careBits |=
             1U << (localSlot * HAO_LAYOUT_BYTES_PER_RULE_SLOT + i);
     }
 
-    check->rule[localSlot] = ruleWord;
-    check->mask[localSlot] = maskWord;
+    check->rule[localSlot] = plan.verifier.ruleWord;
+    check->mask[localSlot] = plan.verifier.maskWord;
 }
 
 /* Build the HAO global single-table hash. Expanded keys go straight into the
@@ -1070,9 +1054,10 @@ void dumpHAOSummary(const ArtifactsT &artifacts) {
     HAO_SUMMARY_FMT("unsupported",            "%u", s.unsupportedRules);
     HAO_SUMMARY_FMT("exact",                  "%u", s.exactRules);
     HAO_SUMMARY_FMT("nocase",                 "%u", s.nocaseRules);
+    HAO_SUMMARY_FMT("maskRules",              "%u", s.maskRules);
+    HAO_SUMMARY_FMT("maskMerged",             "%u", s.maskMergedRules);
+    HAO_SUMMARY_FMT("maskConflict",           "%u", s.maskConflictRules);
     HAO_SUMMARY_FMT("maskConfirm",            "%u", s.maskConfirmRules);
-    HAO_SUMMARY_FMT("directReport",           "%u", s.directReportRules);
-    HAO_SUMMARY_FMT("fastPathConfirm",        "%u", s.fastPathConfirmRules);
     HAO_SUMMARY_FMT("keyExpanded",            "%u", s.keyExpandedRules);
     HAO_SUMMARY_FMT("expandedKeys",           "%u", s.totalExpandedKeys);
     HAO_SUMMARY_FMT("maxSelectedAmbigBits",   "%u", s.maxSelectedAmbigBits);
@@ -2135,15 +2120,6 @@ void haoBuildMeta(const std::vector<hwlmLiteral> &lits,
         if (lit.noruns) {
             m.flags |= HAO_RULE_META_FLAG_NORUNS;
         }
-        std::array<u8, 8> normMsk = {};
-        std::array<u8, 8> normCmp = {};
-        u8 normLen = 0;
-        if (normalizeMaskCmp(lit, &normMsk, &normCmp, &normLen) && normLen) {
-            m.flags |= HAO_RULE_META_FLAG_HAS_MASK;
-            m.maskLen = normLen;
-            packMaskCmpTail(normMsk, normCmp, normLen,
-                            &m.maskWord, &m.cmpWord);
-        }
         meta->push_back(m);
     }
 }
@@ -2168,7 +2144,8 @@ bool haoCompileCore(const std::vector<hwlmLiteral> &lits,
     haoBuildPlans(lits, artifacts->selectors, &artifacts->plans,
                       &artifacts->summary);
     if (artifacts->summary.unsupportedRules ||
-        artifacts->summary.fastPathRules != artifacts->summary.totalRules) {
+        artifacts->summary.fastPathRules != artifacts->summary.totalRules ||
+        artifacts->summary.maskRules != artifacts->summary.maskMergedRules) {
         artifacts->hash.flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
         return false;
     }
@@ -2200,7 +2177,9 @@ bool haoCandidateStatsOk(const HAOCompileSummary &summary,
                          const HAOHashStats &stats, u32 flags) {
     return !(flags & HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE) &&
            summary.fastPathRules == summary.totalRules &&
-           !summary.unsupportedRules && stats.nonEmptyPrimary;
+           !summary.unsupportedRules &&
+           summary.maskRules == summary.maskMergedRules &&
+           stats.nonEmptyPrimary;
 }
 
 static
@@ -2420,7 +2399,8 @@ bool haoBuildCandidateStats(const std::vector<hwlmLiteral> &lits,
     out->keyBits = keyBits;
 
     if (out->summary.unsupportedRules ||
-        out->summary.fastPathRules != out->summary.totalRules) {
+        out->summary.fastPathRules != out->summary.totalRules ||
+        out->summary.maskRules != out->summary.maskMergedRules) {
         out->flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
         return false;
     }
@@ -2623,7 +2603,8 @@ bool haoArtifactsOk(const HAOCompileArtifacts &artifacts) {
         return false;
     }
     if (summary.fastPathRules != summary.totalRules ||
-        summary.unsupportedRules) {
+        summary.unsupportedRules ||
+        summary.maskRules != summary.maskMergedRules) {
         return false;
     }
     return true;
@@ -2692,7 +2673,8 @@ bool analyzeHAOFeasibility(const target_t &target,
             return finish(HAOFeasibilityReason::NO_SELECTORS);
         }
         if (out->summary.unsupportedRules ||
-            out->summary.fastPathRules != out->summary.totalRules) {
+            out->summary.fastPathRules != out->summary.totalRules ||
+            out->summary.maskRules != out->summary.maskMergedRules) {
             return finish(HAOFeasibilityReason::UNSUPPORTED_LITERAL);
         }
         return finish(HAOFeasibilityReason::ARTIFACT_BUILD_FAILED);
@@ -2700,7 +2682,8 @@ bool analyzeHAOFeasibility(const target_t &target,
 
     local.flags = out->hash.flags;
     if (out->summary.unsupportedRules ||
-        out->summary.fastPathRules != out->summary.totalRules) {
+        out->summary.fastPathRules != out->summary.totalRules ||
+        out->summary.maskRules != out->summary.maskMergedRules) {
         return finish(HAOFeasibilityReason::UNSUPPORTED_LITERAL);
     }
 
@@ -2830,11 +2813,8 @@ bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
         auto &dst = ruleMetaOut[i];
         dst.id = srcMeta.id;
         dst.flags = srcMeta.flags;
-        dst.maskLen = srcMeta.maskLen;
         dst.reserved = 0;
         dst.groups = srcMeta.groups;
-        dst.maskWord = srcMeta.maskWord;
-        dst.cmpWord = srcMeta.cmpWord;
     }
     return blob;
 }

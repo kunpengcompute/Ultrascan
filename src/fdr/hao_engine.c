@@ -693,16 +693,6 @@ static void haoDumpRuntimeStats(void) {
         g_haoStats.encodedRangeCalls >= g_haoStats.encodedRangeReportCalls
             ? g_haoStats.encodedRangeCalls - g_haoStats.encodedRangeReportCalls
             : 0;
-    const u64a l2SlotEligible =
-        g_haoStats.verifierSlotHits >= g_haoStats.encodedGroupRejects
-            ? g_haoStats.verifierSlotHits - g_haoStats.encodedGroupRejects
-            : 0;
-    const u64a l2SlotFalsePos =
-        l2SlotEligible >= (g_haoStats.directReports +
-                           g_haoStats.encodedConfirmMatches)
-            ? l2SlotEligible - (g_haoStats.directReports +
-                                g_haoStats.encodedConfirmMatches)
-            : 0;
     const double avgEntriesPerRange = g_haoStats.encodedRangeCalls
         ? (double)g_haoStats.l2RangeTotalEntries /
               (double)g_haoStats.encodedRangeCalls
@@ -736,10 +726,6 @@ static void haoDumpRuntimeStats(void) {
     HAO_STAT_FMT("verifierEntryHits(verifier命中的entry数)",  "%llu", (unsigned long long)g_haoStats.verifierEntryHits);
     HAO_STAT_FMT("verifierSlotHits(verifier命中的slot数)",    "%llu", (unsigned long long)g_haoStats.verifierSlotHits);
     HAO_STAT_FMT("groupRejects(group过滤拒绝数)",             "%llu", (unsigned long long)g_haoStats.encodedGroupRejects);
-    HAO_STAT_FMT("directReports(直接上报次数)",               "%llu", (unsigned long long)g_haoStats.directReports);
-    HAO_STAT_FMT("confirmCalls(精确确认次数)",                "%llu", (unsigned long long)g_haoStats.encodedConfirmCalls);
-    HAO_STAT_FMT("confirmMatches(精确确认命中数)",            "%llu", (unsigned long long)g_haoStats.encodedConfirmMatches);
-    HAO_STAT_FMT("confirmRejects(精确确认拒绝数)",            "%llu", (unsigned long long)g_haoStats.encodedConfirmRejects);
 
     fprintf(stderr, "[HAO][L2-Buckets/二级桶分布]\n");
     HAO_STAT_FMT("avgEntriesPerRange(每次L2平均entry数)",     "%.5f", avgEntriesPerRange);
@@ -774,14 +760,8 @@ static void haoDumpRuntimeStats(void) {
         haoStatsPct(l2EntryRejects, g_haoStats.encodedEntriesVisited));
     HAO_STAT_FMT("l2LaneNoReportPct(L2无报告lane占比)",       "%.5f",
         haoStatsPct(l2LaneNoReport, g_haoStats.encodedRangeCalls));
-    HAO_STAT_FMT("l2ConfirmFalsePositivePct(L2确认假阳性率)", "%.5f",
-        haoStatsPct(g_haoStats.encodedConfirmRejects, g_haoStats.encodedConfirmCalls));
-    HAO_STAT_FMT("l2SlotFalsePositivePct(L2槽位假阳性率)",    "%.5f",
-        haoStatsPct(l2SlotFalsePos, l2SlotEligible));
     HAO_STAT_FMT("l2EntriesPerMiB(每MiB访问L2表项数)",        "%.5f",
         haoStatsPerMiB(g_haoStats.encodedEntriesVisited, g_haoStats.scanInputBytes));
-    HAO_STAT_FMT("l2ConfirmCallsPerMiB(每MiB精确确认次数)",   "%.5f",
-        haoStatsPerMiB(g_haoStats.encodedConfirmCalls, g_haoStats.scanInputBytes));
     HAO_STAT_FMT("reportsPerMiB(每MiB报告次数)",              "%.5f",
         haoStatsPerMiB(g_haoStats.callbackReports, g_haoStats.scanInputBytes));
 
@@ -903,23 +883,6 @@ static void haoInspectLayout(const struct HAORuntimeHeader *hdr,
     }
 }
 
-/* HAO receives Rose short literals (<= 8 bytes). L2 already verifies the
- * literal bytes, so the remaining confirm work is only the supplementary
- * mask/cmp payload carried by masked or mixed-sensitivity literals. */
-static really_inline
-int haoRuleMaskMatch(const struct HAORuntimeRuleMeta *rm,
-                     const struct FDR_Runtime_Args *a,
-                     const struct HAOPositionContext *ctx,
-                     svuint64_t laneData) {
-    const u8 mlen = rm->maskLen;
-    if (unlikely((u64a)mlen > (u64a)ctx->endPos + 1 + a->len_history)) {
-        return 0;
-    }
-
-    const u64a laneWord = (u64a)svlastb_u64(svptrue_b64(), laneData);
-    return (laneWord & rm->maskWord) == rm->cmpWord;
-}
-
 static really_inline
 u32 haoL2ValidSlots(u32 careBits, u32 validMask32,
                     u32 matchMask) {
@@ -999,17 +962,6 @@ int haoProcessL2Entry(
             HAO_STATS_ADD(encodedGroupRejects, 1);
             matchMask &= matchMask - 1U;
             continue;
-        }
-        if (rm->flags & HAO_RULE_FLAG_HAS_MASK) {
-            HAO_STATS_ADD(encodedConfirmCalls, 1);
-            if (!haoRuleMaskMatch(rm, a, ctx, laneData)) {
-                HAO_STATS_ADD(encodedConfirmRejects, 1);
-                matchMask &= matchMask - 1U;
-                continue;
-            }
-            HAO_STATS_ADD(encodedConfirmMatches, 1);
-        } else {
-            HAO_STATS_ADD(directReports, 1);
         }
 
         if ((rm->flags & HAO_RULE_FLAG_NORUNS) && *lastMatchId == rm->id) {

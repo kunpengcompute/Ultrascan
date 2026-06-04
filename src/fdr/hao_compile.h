@@ -58,15 +58,13 @@ static_assert(HAO_LAYOUT_KEY_BITS <= HAO_LAYOUT_MAX_SELECTORS,
 
 static constexpr u16 HAO_RULE_META_FLAG_NOCASE = 1U << 0;
 static constexpr u16 HAO_RULE_META_FLAG_NORUNS = 1U << 1;
-static constexpr u16 HAO_RULE_META_FLAG_HAS_MASK = 1U << 2;
 
 static constexpr u32 HAO_RULE_PLAN_FLAG_KEY_EXPANDED = 1U << 0;
-static constexpr u32 HAO_RULE_PLAN_FLAG_NEEDS_CONFIRM = 1U << 1;
 static constexpr u32 HAO_RULE_PLAN_FLAG_NORMALIZED = 1U << 2;
 static constexpr u32 HAO_RULE_PLAN_FLAG_HAS_SUPPLEMENTARY_MASK = 1U << 3;
 static constexpr u32 HAO_RULE_PLAN_FLAG_OVER_AMBIG_LIMIT = 1U << 4;
-static constexpr u32 HAO_RULE_PLAN_FLAG_MASK_CONFIRM = 1U << 6;
-static constexpr u32 HAO_RULE_PLAN_FLAG_DIRECT_REPORT_SAFE = 1U << 7;
+static constexpr u32 HAO_RULE_PLAN_FLAG_MASK_MERGED = 1U << 5;
+static constexpr u32 HAO_RULE_PLAN_FLAG_MASK_MERGE_FAILED = 1U << 6;
 
 struct Grey;
 struct target_t;
@@ -97,11 +95,8 @@ struct HAOL2Meta {
 struct HAOCompileRuleMeta {
     u32 id;
     u16 flags;
-    u8 maskLen;
-    u8 reserved;
+    u16 reserved;
     hwlm_group_t groups;
-    u64a maskWord;
-    u64a cmpWord;
 };
 
 /* Each HAO rule is classified into one explicit compile-time category. */
@@ -109,7 +104,6 @@ enum class HAORuleCategory : u8 {
     HAO_RULE_EXACT = 0,
     HAO_RULE_NOCASE = 1,
     HAO_RULE_SMALL_CLASS_EXPAND = 2,
-    HAO_RULE_MASK_CONFIRM = 3,
     HAO_RULE_UNSUPPORTED = 4
 };
 
@@ -133,9 +127,11 @@ struct HAOVerifierFragment {
     std::array<u8, HAO_LAYOUT_BYTES_PER_RULE_SLOT> bytes = {};
     u8 validByteMask = 0;
     u8 nocaseByteMask = 0;
+    u8 careByteMask = 0;
     u8 reserved0 = 0;
-    u8 reserved1 = 0;
     u8 flags = 0;
+    u64a ruleWord = 0;
+    u64a maskWord = 0;
 };
 
 /* Compile-time rule plan used as the core HAO build input. */
@@ -152,11 +148,12 @@ struct HAOCompileSummary {
     u32 totalRules = 0;
     u32 fastPathRules = 0;
     u32 unsupportedRules = 0;
+    u32 maskRules = 0;
+    u32 maskMergedRules = 0;
+    u32 maskConflictRules = 0;
     u32 maskConfirmRules = 0;
     u32 exactRules = 0;
     u32 nocaseRules = 0;
-    u32 fastPathConfirmRules = 0;
-    u32 directReportRules = 0;
     u32 keyExpandedRules = 0;
     u32 totalExpandedKeys = 0;
     u32 maxSelectedAmbigBits = 0;

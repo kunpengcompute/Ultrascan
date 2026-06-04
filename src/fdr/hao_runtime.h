@@ -9,7 +9,7 @@
 #endif
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 22U
+#define HAO_RUNTIME_VERSION 23U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_L1_OFFSET_BITS 22U
 #define HAO_RUNTIME_L1_OFFSET_MASK ((1U << HAO_RUNTIME_L1_OFFSET_BITS) - 1U)
@@ -39,7 +39,6 @@
 #endif
 #define HAO_RULE_FLAG_NOCASE (1U << 0)
 #define HAO_RULE_FLAG_NORUNS (1U << 1)
-#define HAO_RULE_FLAG_HAS_MASK (1U << 2)
 
 struct HAORuntimeL2Check {
     u64a rule[HAO_RUNTIME_RULE_SLOTS_PER_ENTRY];
@@ -70,11 +69,8 @@ struct HAORuntimeHeader {
 struct HAORuntimeRuleMeta {
     u32 id;
     u16 flags;
-    u8 maskLen;
-    u8 reserved;
+    u16 reserved;
     hwlm_group_t groups;
-    u64a maskWord;
-    u64a cmpWord;
 };
 
 /* Read-only summary returned by HAO runtime blob inspection helpers. */
@@ -104,10 +100,6 @@ struct HAORuntimeStats {
     u64a verifierEntryHits;
     u64a verifierSlotHits;
     u64a encodedGroupRejects;
-    u64a directReports;
-    u64a encodedConfirmCalls;
-    u64a encodedConfirmMatches;
-    u64a encodedConfirmRejects;
     u64a callbackReports;
     u64a l2RangeEntryBucketsEq1;
     u64a l2RangeEntryBuckets2To4;
