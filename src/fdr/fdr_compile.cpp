@@ -1025,6 +1025,7 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
             assert(0 && "HAO report metadata mismatch");
             return nullptr;
         }
+        dumpHAOL2MapIfEnabled(proto.lits, *haoArtifacts);
 
         if (printStats) {
             dumpHAOCompileStats(*haoArtifacts);

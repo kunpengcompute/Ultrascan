@@ -252,6 +252,9 @@ bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
 
 void dumpHAOCompileStats(const HAOCompileArtifacts &artifacts);
 
+void dumpHAOL2MapIfEnabled(const std::vector<hwlmLiteral> &lits,
+                           const HAOCompileArtifacts &artifacts);
+
 bool haoArtifactsOk(const HAOCompileArtifacts &artifacts);
 
 bool refreshHAOReports(HAOCompileArtifacts *artifacts,

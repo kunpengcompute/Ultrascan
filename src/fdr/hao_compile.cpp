@@ -809,7 +809,9 @@ std::string haoEscapeLiteral(const hwlmLiteral &lit) {
 static
 void dumpL2Map(const std::vector<hwlmLiteral> &lits,
                const HAOCompileArtifacts &artifacts) {
-    printf("[HAO][L2Map] entries=%zu\n", artifacts.hash.l2Meta.size());
+    printf("[HAO][L2Map] entries=%zu keyBits=%u selectorCount=%zu bextMask=0x%016llx\n",
+           artifacts.hash.l2Meta.size(), artifacts.hash.keyBits,
+           artifacts.selectors.size(), (unsigned long long)artifacts.bextMask);
     for (size_t entry = 1; entry < artifacts.hash.l2Meta.size(); entry++) {
         const auto &meta = artifacts.hash.l2Meta[entry];
 
@@ -822,11 +824,14 @@ void dumpL2Map(const std::vector<hwlmLiteral> &lits,
             }
 
             const auto &lit = lits[ruleIndex];
-            const u32 flags = ruleIndex < artifacts.meta.size()
-                                  ? artifacts.meta[ruleIndex].flags
-                                  : 0U;
-            printf("  entry=%zu slot=%u ruleIndex=%u id=%u flags=0x%x len=%zu nocase=%u lit=\"%s\"\n",
-                   entry, slot, ruleIndex, lit.id, flags, lit.s.size(),
+            const auto *ruleMeta = ruleIndex < artifacts.meta.size()
+                                       ? &artifacts.meta[ruleIndex]
+                                       : nullptr;
+            const u32 runtimeId = ruleMeta ? ruleMeta->id : lit.id;
+            const u32 flags = ruleMeta ? ruleMeta->flags : 0U;
+            printf("  entry=%zu slot=%u ruleIndex=%u id=%u runtimeId=%u litId=%u flags=0x%x len=%zu nocase=%u lit=\"%s\"\n",
+                   entry, slot, ruleIndex, runtimeId, runtimeId, lit.id,
+                   flags, lit.s.size(),
                    lit.nocase ? 1U : 0U,
                    haoEscapeLiteral(lit).c_str());
         }
@@ -2581,16 +2586,19 @@ bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
         printf("[HAO][Selector] mode=%s\n", artifacts->selectorName);
         dumpHAOSummary(*artifacts);
     }
-    if (haoL2MapDumpEnabled()) {
-        dumpL2Map(lits, *artifacts);
-    }
-
     return true;
 }
 
 void dumpHAOCompileStats(const HAOCompileArtifacts &artifacts) {
     printf("[HAO][Selector] mode=%s\n", artifacts.selectorName);
     dumpHAOSummary(artifacts);
+}
+
+void dumpHAOL2MapIfEnabled(const std::vector<hwlmLiteral> &lits,
+                           const HAOCompileArtifacts &artifacts) {
+    if (haoL2MapDumpEnabled()) {
+        dumpL2Map(lits, artifacts);
+    }
 }
 
 bool haoArtifactsOk(const HAOCompileArtifacts &artifacts) {
