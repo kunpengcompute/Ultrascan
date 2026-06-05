@@ -148,9 +148,53 @@ u32 haoPackedKeyMask(u32 keyBits) {
 }
 
 static really_inline
+u32 haoRuntimeEncodeKeyBits(u32 hashMode, u32 keyBits) {
+    return (keyBits & HAO_RUNTIME_KEY_BITS_MASK) |
+           (hashMode << HAO_RUNTIME_HASH_MODE_SHIFT);
+}
+
+static really_inline
+u32 haoRuntimeHeaderKeyBits(const struct HAORuntimeHeader *hdr) {
+    return hdr->keyBits & HAO_RUNTIME_KEY_BITS_MASK;
+}
+
+static really_inline
+u32 haoRuntimeHeaderHashMode(const struct HAORuntimeHeader *hdr) {
+    const u32 hashMode = hdr->keyBits >> HAO_RUNTIME_HASH_MODE_SHIFT;
+    return hashMode ? hashMode : HAO_RUNTIME_HASH_BEXT;
+}
+
+static really_inline
+u16 haoRuntimeHeaderDotVectorLane(const struct HAORuntimeHeader *hdr,
+                                  u32 lane) {
+    return (u16)(hdr->bextMask >> (lane * 16U));
+}
+
+static really_inline
 u32 haoExtractKeyBext(const struct HAORuntimeHeader *hdr, u64a window) {
     const u64a packed = haoExtractPackedBitsFallback(window, hdr->bextMask);
-    return (u32)(packed & haoPackedKeyMask(hdr->keyBits));
+    return (u32)(packed & haoPackedKeyMask(haoRuntimeHeaderKeyBits(hdr)));
+}
+
+static really_inline
+u32 haoExtractKeyDot(const struct HAORuntimeHeader *hdr, u64a window) {
+    const u32 keyMask = haoPackedKeyMask(haoRuntimeHeaderKeyBits(hdr));
+    u64a dot = 0;
+    u32 i;
+
+    for (i = 0; i < HAO_RUNTIME_DOT_VECTOR_LANES; i++) {
+        const u64a word = (window >> (i * 16U)) & 0xffffU;
+        dot += word * haoRuntimeHeaderDotVectorLane(hdr, i);
+    }
+    return (u32)(dot & keyMask);
+}
+
+static really_inline
+u32 haoExtractKey(const struct HAORuntimeHeader *hdr, u64a window) {
+    if (haoRuntimeHeaderHashMode(hdr) == HAO_RUNTIME_HASH_DOT) {
+        return haoExtractKeyDot(hdr, window);
+    }
+    return haoExtractKeyBext(hdr, window);
 }
 
 static really_inline
@@ -163,11 +207,25 @@ void haoExtractKeysFromBextWindows(const struct HAORuntimeHeader *hdr,
         return;
     }
 
-    keyMask = haoPackedKeyMask(hdr->keyBits);
+    keyMask = haoPackedKeyMask(haoRuntimeHeaderKeyBits(hdr));
     for (i = 0; i < count; i++) {
         keys[i] = (u32)(haoExtractPackedBitsFallback(windows[i],
                                                      hdr->bextMask) &
                         keyMask);
+    }
+}
+
+static really_inline
+void haoExtractKeysFromWindows(const struct HAORuntimeHeader *hdr,
+                               const u64a *windows, u32 count, u32 *keys) {
+    u32 i;
+
+    if (!hdr || !windows || !keys) {
+        return;
+    }
+
+    for (i = 0; i < count; i++) {
+        keys[i] = haoExtractKey(hdr, windows[i]);
     }
 }
 

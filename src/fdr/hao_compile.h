@@ -49,6 +49,9 @@ static constexpr u32 HAO_LAYOUT_RULE_SLOTS_PER_ENTRY = 4U;
 static constexpr u32 HAO_LAYOUT_BYTES_PER_RULE_SLOT = 8U;
 static constexpr u32 HAO_INVALID_RULE_INDEX = ~0U;
 static constexpr u32 HAO_LAYOUT_MAX_SELECTORS = 32U;
+static constexpr u32 HAO_LAYOUT_HASH_BEXT = 0U;
+static constexpr u32 HAO_LAYOUT_HASH_DOT = 1U;
+static constexpr u32 HAO_LAYOUT_DOT_VECTOR_LANES = 4U;
 static constexpr u32 HAO_ENGINE_ID = 2U;
 
 static_assert(HAO_LAYOUT_KEY_BITS <= HAO_LAYOUT_L1_OFFSET_BITS,
@@ -199,6 +202,8 @@ struct HAOHashBuild {
 struct HAOCompileArtifacts {
     const char *selectorName = "unknown";
     u64a bextMask = 0;
+    u32 hashMode = HAO_LAYOUT_HASH_BEXT;
+    std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> dotVector = {};
     std::vector<HAOBitSelector> selectors;
     std::vector<HAOCompiledRulePlan> plans;
     HAOCompileSummary summary;

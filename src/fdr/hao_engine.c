@@ -139,6 +139,13 @@ struct HAOPositionContext {
     u32 validMask32;
 };
 
+struct HAOHashRuntime {
+    u32 mode;
+    u32 keyMask;
+    u64a bextMask;
+    u16 dotVector[HAO_RUNTIME_DOT_VECTOR_LANES];
+};
+
 struct HAOPrimaryProbeState {
     u32 laneCount;
     const u32 *primaryIdx;
@@ -774,6 +781,8 @@ static void haoDumpRuntimeStats(void) {
 static int haoValidateLayout(const void *blob, u32 blobSize,
                              const struct HAORuntimeHeader **outHdr) {
     const struct HAORuntimeHeader *hdr;
+    u32 keyBits;
+    u32 hashMode;
 
     if (!blob || blobSize < sizeof(struct HAORuntimeHeader)) {
         return 0;
@@ -784,13 +793,20 @@ static int haoValidateLayout(const void *blob, u32 blobSize,
         hdr->version != HAO_RUNTIME_VERSION) {
         return 0;
     }
-    if (!hdr->keyBits || !hdr->primaryCount || !hdr->l2EntryCount) {
+    keyBits = haoRuntimeHeaderKeyBits(hdr);
+    hashMode = haoRuntimeHeaderHashMode(hdr);
+
+    if (!keyBits || !hdr->primaryCount || !hdr->l2EntryCount) {
         return 0;
     }
-    if (hdr->keyBits > HAO_RUNTIME_MAX_SELECTORS) {
+    if (keyBits > HAO_RUNTIME_MAX_SELECTORS) {
         return 0;
     }
-    if (!hdr->bextMask) {
+    if (hashMode != HAO_RUNTIME_HASH_BEXT &&
+        hashMode != HAO_RUNTIME_HASH_DOT) {
+        return 0;
+    }
+    if (hashMode == HAO_RUNTIME_HASH_BEXT && !hdr->bextMask) {
         return 0;
     }
     if ((u64a)hdr->primaryBitmapOffset + (u64a)hdr->primaryBitmapSize >
@@ -840,6 +856,19 @@ u32 haoL2MetaRuleCount(const struct HAORuntimeL2Meta *meta) {
     return count;
 }
 
+static really_inline
+void haoBuildHashRuntime(const struct HAORuntimeHeader *hdr,
+                         struct HAOHashRuntime *hash) {
+    u32 i;
+
+    hash->mode = haoRuntimeHeaderHashMode(hdr);
+    hash->keyMask = haoPackedKeyMask(haoRuntimeHeaderKeyBits(hdr));
+    hash->bextMask = hdr->bextMask;
+    for (i = 0; i < HAO_RUNTIME_DOT_VECTOR_LANES; i++) {
+        hash->dotVector[i] = haoRuntimeHeaderDotVectorLane(hdr, i);
+    }
+}
+
 /* Collect a read-only summary for inspecting HAO blobs in tests. */
 static void haoInspectLayout(const struct HAORuntimeHeader *hdr,
                              struct HAORuntimeInspectSummary *summary) {
@@ -852,7 +881,7 @@ static void haoInspectLayout(const struct HAORuntimeHeader *hdr,
     }
 
     memset(summary, 0, sizeof(*summary));
-    summary->keyBits = hdr->keyBits;
+    summary->keyBits = haoRuntimeHeaderKeyBits(hdr);
     summary->primaryCount = hdr->primaryCount;
     summary->primaryBitmapSize = hdr->primaryBitmapSize;
     summary->l2EntryCount = hdr->l2EntryCount;
@@ -1090,7 +1119,8 @@ int haoRunL2Range(
 #if defined(HS_BUILD_HAVE_SVEBITPERM) && defined(__ARM_FEATURE_SVE2_BITPERM)
 static really_inline
 int haoRunRawTailScalar(
-    u64a bextMask, u32 l2EntryCount, const u8 *primaryBitmap,
+    const struct HAOHashRuntime *hash, u32 l2EntryCount,
+    const u8 *primaryBitmap,
     const u32 *primaryHashTable,
     const struct HAORuntimeL2Check *l2CheckTable,
     const struct HAORuntimeL2Meta *l2MetaTable,
@@ -1108,7 +1138,7 @@ static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
     const struct HAORuntimeL2Check *l2CheckTable;
     const struct HAORuntimeL2Meta *l2MetaTable;
     const struct HAORuntimeRuleMeta *ruleMeta;
-    u64a bextMask;
+    struct HAOHashRuntime hash;
     size_t i;
 
     if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
@@ -1128,12 +1158,12 @@ static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
                                                     hdr->l2MetaOffset);
     ruleMeta = (const struct HAORuntimeRuleMeta *)((const u8 *)hdr +
                                                    hdr->ruleMetaOffset);
-    bextMask = hdr->bextMask;
+    haoBuildHashRuntime(hdr, &hash);
 
 #if defined(HS_BUILD_HAVE_SVEBITPERM) && defined(__ARM_FEATURE_SVE2_BITPERM)
     for (i = a->start_offset; i < a->len; i++) {
         HAO_STATS_ADD(primaryProbeLanes, 1);
-        if (haoRunRawTailScalar(bextMask, hdr->l2EntryCount, primaryBitmap,
+        if (haoRunRawTailScalar(&hash, hdr->l2EntryCount, primaryBitmap,
                                 primaryHashTable,
                                 l2CheckTable, l2MetaTable, ruleMeta, a,
                                 control, i, 1U) ==
@@ -1147,7 +1177,7 @@ static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
     (void)l2CheckTable;
     (void)l2MetaTable;
     (void)ruleMeta;
-    (void)bextMask;
+    (void)hash;
     (void)i;
 #endif
 
@@ -1206,13 +1236,52 @@ void haoLoadRawCurr32(const struct FDR_Runtime_Args *a, size_t blockStart,
 }
 
 static really_inline
-svuint32_t haoRawKeyPair(svuint8_t vrow0, svuint8_t vrow1, u64a bextMask) {
+svuint16_t haoLoadDotVector(const struct HAOHashRuntime *hash) {
+    const svbool_t pg16 = svptrue_b16();
+    u16 coeffs[HAO_BATCH_MAX_WIDTH / 2U];
+    u32 i;
+
+    for (i = 0; i < HAO_BATCH_MAX_WIDTH / 2U; i++) {
+        coeffs[i] = hash->dotVector[i & (HAO_RUNTIME_DOT_VECTOR_LANES - 1U)];
+    }
+    return svld1_u16(pg16, coeffs);
+}
+
+static really_inline
+svuint32_t haoRawKeyPairBext(svuint8_t vrow0, svuint8_t vrow1,
+                             u64a bextMask) {
     const svuint64_t keys0 =
         svbext_n_u64(svreinterpret_u64_u8(vrow0), (uint64_t)bextMask);
     const svuint64_t keys1 =
         svbext_n_u64(svreinterpret_u64_u8(vrow1), (uint64_t)bextMask);
     // const svuint64_t paired = svzip1_u64(keys0, keys1);
     return svqxtnt_u64(svqxtnb_u64(keys0), keys1);
+}
+
+static really_inline
+svuint32_t haoRawKeyPairDot(svuint8_t vrow0, svuint8_t vrow1,
+                            svuint16_t vdot, u32 keyMask) {
+    const svbool_t pg64 = svptrue_b64();
+    const svuint64_t zero = svdup_n_u64(0U);
+    const svuint64_t keys0 =
+        svand_n_u64_x(pg64,
+                      svdot_u64(zero, svreinterpret_u16_u8(vrow0), vdot),
+                      keyMask);
+    const svuint64_t keys1 =
+        svand_n_u64_x(pg64,
+                      svdot_u64(zero, svreinterpret_u16_u8(vrow1), vdot),
+                      keyMask);
+    return svqxtnt_u64(svqxtnb_u64(keys0), keys1);
+}
+
+static really_inline
+svuint32_t haoRawKeyPair(svuint8_t vrow0, svuint8_t vrow1,
+                         const struct HAOHashRuntime *hash,
+                         svuint16_t vdot) {
+    if (hash->mode == HAO_RUNTIME_HASH_DOT) {
+        return haoRawKeyPairDot(vrow0, vrow1, vdot, hash->keyMask);
+    }
+    return haoRawKeyPairBext(vrow0, vrow1, hash->bextMask);
 }
 
 static really_inline
@@ -1351,7 +1420,9 @@ int haoRunEncodedLanes(
 
 static really_inline
 u32 haoCollectRawEncoded(const u8 *primaryBitmap,
-                         const u32 *primaryHashTable, u64a bextMask,
+                         const u32 *primaryHashTable,
+                         const struct HAOHashRuntime *hash,
+                         svuint16_t vdot,
                          svuint8_t vlo, svuint8_t vhi,
                          svuint32_t vlaneBits01,
                          svuint32_t vlaneBits23,
@@ -1376,10 +1447,10 @@ u32 haoCollectRawEncoded(const u8 *primaryBitmap,
     const svuint8_t vrow6 = svext_u8(vlo, vhi, 31);
     const svuint8_t vrow7 = vhi;
 
-    const svuint32_t vkeys01 = haoRawKeyPair(vrow0, vrow1, bextMask);
-    const svuint32_t vkeys23 = haoRawKeyPair(vrow2, vrow3, bextMask);
-    const svuint32_t vkeys45 = haoRawKeyPair(vrow4, vrow5, bextMask);
-    const svuint32_t vkeys67 = haoRawKeyPair(vrow6, vrow7, bextMask);
+    const svuint32_t vkeys01 = haoRawKeyPair(vrow0, vrow1, hash, vdot);
+    const svuint32_t vkeys23 = haoRawKeyPair(vrow2, vrow3, hash, vdot);
+    const svuint32_t vkeys45 = haoRawKeyPair(vrow4, vrow5, hash, vdot);
+    const svuint32_t vkeys67 = haoRawKeyPair(vrow6, vrow7, hash, vdot);
 
     haoPrepRawKeys(primaryBitmap, vkeys01, &vbitPos01, &vbitmapBytes01);
     haoPrepRawKeys(primaryBitmap, vkeys23, &vbitPos23, &vbitmapBytes23);
@@ -1401,7 +1472,8 @@ u32 haoCollectRawEncoded(const u8 *primaryBitmap,
 
 static really_inline
 int haoRunRaw32(
-    u64a bextMask, u32 l2EntryCount, const u8 *primaryBitmap,
+    const struct HAOHashRuntime *hash, svuint16_t vdot,
+    u32 l2EntryCount, const u8 *primaryBitmap,
     const u32 *primaryHashTable,
     const struct HAORuntimeL2Check *l2CheckTable,
     const struct HAORuntimeL2Meta *l2MetaTable,
@@ -1412,7 +1484,7 @@ int haoRunRaw32(
     svuint32_t vlaneBits45, svuint32_t vlaneBits67) {
     u32 encodedByPair[4][8];
     const u32 laneMask = haoCollectRawEncoded(
-        primaryBitmap, primaryHashTable, bextMask, vlo, vhi,
+        primaryBitmap, primaryHashTable, hash, vdot, vlo, vhi,
         vlaneBits01, vlaneBits23, vlaneBits45, vlaneBits67,
         encodedByPair);
     const u32 fullValidBlock =
@@ -1432,7 +1504,9 @@ int haoRunRaw32(
 
 static really_inline
 u32 haoCollectRawTailEncoded(const u8 *primaryBitmap,
-                             const u32 *primaryHashTable, u64a bextMask,
+                             const u32 *primaryHashTable,
+                             const struct HAOHashRuntime *hash,
+                             svuint16_t vdot,
                              u32 blockLaneCount, svuint8_t vlo, svuint8_t vhi,
                              svuint32_t vlaneIds01,
                              svuint32_t vlaneIds23,
@@ -1462,10 +1536,10 @@ u32 haoCollectRawTailEncoded(const u8 *primaryBitmap,
     const svuint8_t vrow6 = svext_u8(vlo, vhi, 31);
     const svuint8_t vrow7 = vhi;
 
-    const svuint32_t vkeys01 = haoRawKeyPair(vrow0, vrow1, bextMask);
-    const svuint32_t vkeys23 = haoRawKeyPair(vrow2, vrow3, bextMask);
-    const svuint32_t vkeys45 = haoRawKeyPair(vrow4, vrow5, bextMask);
-    const svuint32_t vkeys67 = haoRawKeyPair(vrow6, vrow7, bextMask);
+    const svuint32_t vkeys01 = haoRawKeyPair(vrow0, vrow1, hash, vdot);
+    const svuint32_t vkeys23 = haoRawKeyPair(vrow2, vrow3, hash, vdot);
+    const svuint32_t vkeys45 = haoRawKeyPair(vrow4, vrow5, hash, vdot);
+    const svuint32_t vkeys67 = haoRawKeyPair(vrow6, vrow7, hash, vdot);
 
     {
         const svbool_t pg32 = svptrue_b32();
@@ -1507,7 +1581,8 @@ u32 haoCollectRawTailEncoded(const u8 *primaryBitmap,
 
 static really_inline
 int haoRunRawTailVec(
-    u64a bextMask, u32 l2EntryCount, const u8 *primaryBitmap,
+    const struct HAOHashRuntime *hash, svuint16_t vdot,
+    u32 l2EntryCount, const u8 *primaryBitmap,
     const u32 *primaryHashTable,
     const struct HAORuntimeL2Check *l2CheckTable,
     const struct HAORuntimeL2Meta *l2MetaTable,
@@ -1520,7 +1595,7 @@ int haoRunRawTailVec(
     svuint32_t vlaneBits45, svuint32_t vlaneBits67) {
     u32 encodedByPair[4][8];
     const u32 laneMask = haoCollectRawTailEncoded(
-        primaryBitmap, primaryHashTable, bextMask, blockLaneCount,
+        primaryBitmap, primaryHashTable, hash, vdot, blockLaneCount,
         vlo, vhi, vlaneIds01, vlaneIds23, vlaneIds45, vlaneIds67,
         vlaneBits01, vlaneBits23, vlaneBits45, vlaneBits67,
         encodedByPair);
@@ -1567,8 +1642,25 @@ int haoRawBitmapHitScalar(const u8 *primaryBitmap, u32 key) {
 }
 
 static really_inline
+u32 haoHashRuntimeScalar(const struct HAOHashRuntime *hash, u64a rawWord) {
+    if (hash->mode == HAO_RUNTIME_HASH_DOT) {
+        u64a dot = 0;
+        u32 i;
+
+        for (i = 0; i < HAO_RUNTIME_DOT_VECTOR_LANES; i++) {
+            const u64a word = (rawWord >> (i * 16U)) & 0xffffU;
+            dot += word * hash->dotVector[i];
+        }
+        return (u32)(dot & hash->keyMask);
+    }
+
+    return (u32)pext64(rawWord, hash->bextMask);
+}
+
+static really_inline
 int haoRunRawTailScalar(
-    u64a bextMask, u32 l2EntryCount, const u8 *primaryBitmap,
+    const struct HAOHashRuntime *hash, u32 l2EntryCount,
+    const u8 *primaryBitmap,
     const u32 *primaryHashTable,
     const struct HAORuntimeL2Check *l2CheckTable,
     const struct HAORuntimeL2Meta *l2MetaTable,
@@ -1585,7 +1677,7 @@ int haoRunRawTailScalar(
         struct HAOPositionContext ctx;
         const size_t endPos = blockStart + lane;
         const u64a rawWord = haoBuildRawWordScalar(a, endPos);
-        const u32 key = (u32)pext64(rawWord, bextMask);
+        const u32 key = haoHashRuntimeScalar(hash, rawWord);
 
         if (haoRawBitmapHitScalar(primaryBitmap, key)) {
             const u32 encoded = primaryHashTable[key];
@@ -1622,7 +1714,8 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
     const struct HAORuntimeL2Check *l2CheckTable;
     const struct HAORuntimeL2Meta *l2MetaTable;
     const struct HAORuntimeRuleMeta *ruleMeta;
-    u64a bextMask;
+    struct HAOHashRuntime hash;
+    svuint16_t vdot;
     u32 l2EntryCount;
     size_t i = a->start_offset;
 
@@ -1639,7 +1732,8 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
                                                     hdr->l2MetaOffset);
     ruleMeta = (const struct HAORuntimeRuleMeta *)((const u8 *)hdr +
                                                    hdr->ruleMetaOffset);
-    bextMask = hdr->bextMask;
+    haoBuildHashRuntime(hdr, &hash);
+    vdot = haoLoadDotVector(&hash);
     l2EntryCount = hdr->l2EntryCount;
 
     const svuint32_t vlaneBits01 = haoRawLaneBits(0U);
@@ -1659,7 +1753,7 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
         HAO_STATS_ADD(blockCalls, 1);
         HAO_STATS_ADD(blockLanes, HAO_BATCH_MAX_WIDTH);
         HAO_STATS_ADD(primaryProbeLanes, HAO_BATCH_MAX_WIDTH);
-        int rt = haoRunRaw32(bextMask, l2EntryCount, primaryBitmap,
+        int rt = haoRunRaw32(&hash, vdot, l2EntryCount, primaryBitmap,
                                 primaryHashTable, l2CheckTable,
                                 l2MetaTable, ruleMeta, a, control, i,
                                 rawPrev, rawCurr, vlaneBits01, vlaneBits23,
@@ -1683,7 +1777,7 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
         const svuint32_t vlaneIds23 = haoRawLaneIds(2U);
         const svuint32_t vlaneIds45 = haoRawLaneIds(4U);
         const svuint32_t vlaneIds67 = haoRawLaneIds(6U);
-        int rt = haoRunRawTailVec(bextMask, l2EntryCount, primaryBitmap,
+        int rt = haoRunRawTailVec(&hash, vdot, l2EntryCount, primaryBitmap,
                                     primaryHashTable, l2CheckTable,
                                     l2MetaTable, ruleMeta, a, control, i,
                                     blockLaneCount, rawPrev, rawCurr,

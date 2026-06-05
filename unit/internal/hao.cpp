@@ -531,6 +531,19 @@ u64a loadWindow64RawForTest(const std::vector<u8> &history,
 static
 u32 extractScalarKeyFromWindowForTest(const HAOCompileArtifacts &artifacts,
                                       u64a window) {
+    const u32 keyBits = artifacts.hash.keyBits;
+    const u32 keyMask = keyBits >= 32U ? 0xffffffffU :
+                        (keyBits ? ((1U << keyBits) - 1U) : 0U);
+
+    if (artifacts.hashMode == HAO_LAYOUT_HASH_DOT) {
+        u64a dot = 0;
+        for (u32 i = 0; i < HAO_LAYOUT_DOT_VECTOR_LANES; i++) {
+            const u64a word = (window >> (i * 16U)) & 0xffffU;
+            dot += word * artifacts.dotVector[i];
+        }
+        return (u32)(dot & keyMask);
+    }
+
     u64a packed = 0;
     u32 outBit = 0;
     u64a mask = artifacts.bextMask;
@@ -544,10 +557,7 @@ u32 extractScalarKeyFromWindowForTest(const HAOCompileArtifacts &artifacts,
         outBit++;
     }
 
-    if (artifacts.selectors.size() >= 32) {
-        return (u32)packed;
-    }
-    return (u32)(packed & ((1ULL << artifacts.selectors.size()) - 1ULL));
+    return (u32)(packed & keyMask);
 }
 
 static
@@ -639,7 +649,7 @@ std::vector<u32> extractRuntimeKeysForBlocks(
             const u64a window =
                 haoLoadWindow64Raw(&args, endPos,
                                    HAO_RUNTIME_BYTES_PER_RULE_SLOT);
-            keys.push_back(haoExtractKeyBext(hdr, window));
+            keys.push_back(haoExtractKey(hdr, window));
         }
     }
     return keys;
@@ -2001,7 +2011,7 @@ TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
     const auto *hdr = reinterpret_cast<const HAORuntimeHeader *>(blob.get());
     EXPECT_EQ(HAO_RUNTIME_MAGIC, hdr->magic);
     EXPECT_EQ(HAO_RUNTIME_VERSION, hdr->version);
-    EXPECT_EQ(artifacts.selectors.size(), hdr->keyBits);
+    EXPECT_EQ(artifacts.hash.keyBits, haoRuntimeHeaderKeyBits(hdr));
     EXPECT_EQ(artifacts.hash.primary.offsets.size(),
               hdr->primaryCount);
     EXPECT_EQ(artifacts.hash.bitmap.bits.size(),
@@ -2010,6 +2020,7 @@ TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
               hdr->l2EntryCount);
     EXPECT_EQ(artifacts.meta.size(), hdr->ruleMetaCount);
     EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
+    EXPECT_EQ(artifacts.hashMode, haoRuntimeHeaderHashMode(hdr));
 }
 
 TEST(HAOCompile, BuildHaoGlobalBlobStoresRulePlanMeta) {
@@ -2063,8 +2074,9 @@ TEST(HAOCompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {
     const auto *primary = getHaoPrimaryTable(hdr);
     const auto *bitmap = getHaoPrimaryBitmap(hdr);
 
-    EXPECT_EQ(artifacts.selectors.size(), hdr->keyBits);
+    EXPECT_EQ(artifacts.hash.keyBits, haoRuntimeHeaderKeyBits(hdr));
     EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
+    EXPECT_EQ(artifacts.hashMode, haoRuntimeHeaderHashMode(hdr));
     for (u32 i = 0; i < hdr->primaryCount; i++) {
         EXPECT_EQ(artifacts.hash.primary.offsets[i],
                   primary[i]);
@@ -3131,8 +3143,8 @@ TEST(HAOCollision, RuntimeExtractorReportsCollisionRateOnDeterministicCorpus) {
     ASSERT_NE(nullptr, blob.get());
     const auto *hdr = getHaoRuntimeHeader(blob);
     ASSERT_NE(nullptr, hdr);
-    ASSERT_GT(hdr->keyBits, 0U);
-    ASSERT_EQ(artifacts.selectors.size(), hdr->keyBits);
+    ASSERT_GT(haoRuntimeHeaderKeyBits(hdr), 0U);
+    ASSERT_EQ(artifacts.hash.keyBits, haoRuntimeHeaderKeyBits(hdr));
 
     const auto data = makeDeterministicCollisionCorpus(HAO_COLLISION_SAMPLE_COUNT);
     const auto runtimeHashes = extractRuntimeKeysForData(hdr, data);
@@ -3152,7 +3164,7 @@ TEST(HAOCollision, RuntimeExtractorReportsCollisionRateOnDeterministicCorpus) {
               << " collisions=" << collisions
               << " collisionRate=" << collisionRate
               << " usageRate=" << usageRate
-              << " keyBits=" << hdr->keyBits
+              << " keyBits=" << haoRuntimeHeaderKeyBits(hdr)
               << " extractMode=bext"
               << "\n";
 
@@ -3245,7 +3257,7 @@ TEST(HAOCollision, RuntimeExtractorFromRuleAndInputFiles) {
     ASSERT_NE(nullptr, blob.get());
     const auto *hdr = getHaoRuntimeHeader(blob);
     ASSERT_NE(nullptr, hdr);
-    ASSERT_GT(hdr->keyBits, 0U);
+    ASSERT_GT(haoRuntimeHeaderKeyBits(hdr), 0U);
 
     const auto runtimeHashes = extractRuntimeKeysForBlocks(hdr, blocks);
     const auto scalarHashes = extractScalarReferenceKeysForBlocks(artifacts, blocks);
@@ -3277,7 +3289,7 @@ TEST(HAOCollision, RuntimeExtractorFromRuleAndInputFiles) {
               << " collisions=" << collisions
               << " collisionRate=" << collisionRate
               << " usageRate=" << usageRate
-              << " keyBits=" << hdr->keyBits
+              << " keyBits=" << haoRuntimeHeaderKeyBits(hdr)
               << " extractMode=bext"
               << "\n";
 
