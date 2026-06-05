@@ -1,6 +1,7 @@
 #ifndef FUZZ_TEST_H
 #define FUZZ_TEST_H
 
+#include <iosfwd>
 #include <string>
 #include <vector>
 #include <memory>
@@ -41,6 +42,12 @@ public:
     virtual bool compileExtMulti(const std::vector<FuzzTestCase>& testCases) = 0;
     virtual bool compileLit(const FuzzTestCase& testCase, size_t length) = 0;
     virtual bool compileLitMulti(const std::vector<FuzzTestCase>& testCases, const std::vector<size_t>& lengths) = 0;
+    virtual bool fatCompile(const FuzzTestCase& testCase, unsigned int mode = HS_MODE_BLOCK) = 0;
+    virtual bool fatCompileMulti(const std::vector<FuzzTestCase>& testCases, unsigned int mode = HS_MODE_BLOCK) = 0;
+    virtual bool fatCompileExtMulti(const std::vector<FuzzTestCase>& testCases, unsigned int mode = HS_MODE_BLOCK) = 0;
+    virtual bool fatCompileLit(const FuzzTestCase& testCase, size_t length, unsigned int mode = HS_MODE_BLOCK) = 0;
+    virtual bool fatCompileLitMulti(const std::vector<FuzzTestCase>& testCases, const std::vector<size_t>& lengths, unsigned int mode = HS_MODE_BLOCK) = 0;
+    virtual bool fatCompileInvalidArgs() = 0;
     virtual bool expressionInfo(const FuzzTestCase& testCase) = 0;
     virtual bool expressionExtInfo(const FuzzTestCase& testCase) = 0;
     virtual bool populatePlatform() = 0;
@@ -54,6 +61,7 @@ public:
     virtual bool scanVector(const std::vector<std::string>& data) = 0;
     virtual bool cloneScratch() = 0;
     virtual bool getScratchSize() = 0;
+    virtual void printSummary(std::ostream& os) const = 0;
     virtual void reset() = 0;
 };
 

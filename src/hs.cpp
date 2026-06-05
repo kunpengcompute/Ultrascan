@@ -839,6 +839,7 @@ hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
                                 platform, db, error, Grey());
 }
 
+extern "C" HS_PUBLIC_API
 hs_error_t HS_CDECL fat_hs_compile_multi(const char *const *expressions,
                                      const unsigned *flags, const unsigned *ids,
                                      unsigned elements, unsigned mode,

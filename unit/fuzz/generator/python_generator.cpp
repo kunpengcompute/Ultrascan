@@ -1,9 +1,19 @@
 #include "../fuzz_test.h"
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
 #include <regex>
+
+namespace {
+
+bool fuzzVerbose() {
+    const char* value = std::getenv("HS_FUZZ_VERBOSE");
+    return value && value[0] != '\0' && value[0] != '0';
+}
+
+} // namespace
 
 class PythonGenerator : public Generator {
 public:
@@ -46,8 +56,10 @@ public:
         }
         
         int status = pclose(pipe);
-        std::cout << "Command exit status: " << status << std::endl;
-        std::cout << "Total lines read: " << lineCount << std::endl;
+        if (fuzzVerbose()) {
+            std::cout << "Command exit status: " << status << std::endl;
+            std::cout << "Total lines read: " << lineCount << std::endl;
+        }
         return testCases;
     }
 
