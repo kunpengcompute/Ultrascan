@@ -51,7 +51,10 @@ static constexpr u32 HAO_INVALID_RULE_INDEX = ~0U;
 static constexpr u32 HAO_LAYOUT_MAX_SELECTORS = 32U;
 static constexpr u32 HAO_LAYOUT_HASH_BEXT = 0U;
 static constexpr u32 HAO_LAYOUT_HASH_DOT = 1U;
+static constexpr u32 HAO_LAYOUT_HASH_DOT_GROUP = 2U;
 static constexpr u32 HAO_LAYOUT_DOT_VECTOR_LANES = 4U;
+static constexpr u32 HAO_LAYOUT_DOT_GROUP_COUNT =
+    HAO_LAYOUT_DOT_VECTOR_LANES;
 static constexpr u32 HAO_ENGINE_ID = 2U;
 
 static_assert(HAO_LAYOUT_KEY_BITS <= HAO_LAYOUT_L1_OFFSET_BITS,
@@ -199,6 +202,15 @@ struct HAOHashBuild {
     HAOHashStats stats;
 };
 
+struct HAODotGroupBuild {
+    const char *name = "unknown";
+    u32 knownBytes = 0;
+    std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> dotVector = {};
+    std::vector<HAOCompiledRulePlan> plans;
+    HAOCompileSummary summary;
+    HAOHashBuild hash;
+};
+
 struct HAOCompileArtifacts {
     const char *selectorName = "unknown";
     u64a bextMask = 0;
@@ -208,6 +220,7 @@ struct HAOCompileArtifacts {
     std::vector<HAOCompiledRulePlan> plans;
     HAOCompileSummary summary;
     HAOHashBuild hash;
+    std::vector<HAODotGroupBuild> dotGroups;
     std::vector<HAOCompileRuleMeta> meta;
 };
 

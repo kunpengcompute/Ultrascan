@@ -9,7 +9,7 @@
 #endif
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 24U
+#define HAO_RUNTIME_VERSION 25U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_L1_OFFSET_BITS 22U
 #define HAO_RUNTIME_L1_OFFSET_MASK ((1U << HAO_RUNTIME_L1_OFFSET_BITS) - 1U)
@@ -21,7 +21,9 @@
 #define HAO_RUNTIME_MAX_SELECTORS 32U
 #define HAO_RUNTIME_HASH_BEXT 0U
 #define HAO_RUNTIME_HASH_DOT 1U
+#define HAO_RUNTIME_HASH_DOT_GROUP 2U
 #define HAO_RUNTIME_DOT_VECTOR_LANES 4U
+#define HAO_RUNTIME_DOT_GROUP_COUNT HAO_RUNTIME_DOT_VECTOR_LANES
 #define HAO_RUNTIME_KEY_BITS_MASK 0xffU
 #define HAO_RUNTIME_HASH_MODE_SHIFT 24U
 #define HAO_BATCH_FALLBACK_WIDTH 4U
@@ -69,6 +71,20 @@ struct HAORuntimeHeader {
     u32 l2CheckOffset;
     u32 l2MetaOffset;
     u32 ruleMetaOffset;
+};
+
+struct HAORuntimeDotGroupDesc {
+    u32 keyBits;
+    u32 primaryCount;
+    u32 primaryBitmapSize;
+    u32 l2EntryCount;
+    u32 knownBytes;
+    u32 reserved;
+    u64a dotVector;
+    u32 primaryBitmapOffset;
+    u32 primaryOffset;
+    u32 l2CheckOffset;
+    u32 l2MetaOffset;
 };
 
 struct HAORuntimeRuleMeta {
