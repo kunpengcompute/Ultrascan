@@ -1,6 +1,6 @@
-# 安装指南<a name="ZH-CN_TOPIC_0000002520718454"></a>
+# 安装指南
 
-## 简介<a name="ZH-CN_TOPIC_0000002550305593"></a>
+## 简介
 
 本文基于鲲鹏920系列处理器和openEuler操作系统，提供Hyperscan的安装和编译指导。
 
@@ -18,13 +18,13 @@ Hyperscan鲲鹏计算平台软件版本主要增加了以下功能：
 
 更多关于Hyperscan的信息，请参考[鲲鹏Gitcode代码仓](https://gitcode.com/boostkit/hyperscan)。
 
-## 环境要求<a name="ZH-CN_TOPIC_0000002550305599"></a>
+## 环境要求
 
-### 已验证环境<a name="ZH-CN_TOPIC_0000002550345615"></a>
+### 已验证环境
 
 Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openEuler 22.03/openEuler 24.03 LTS SP3。若您在使用过程中遇到问题，请先检查使用的环境是否在已验证的环境范围内。
 
-### 软件要求<a name="ZH-CN_TOPIC_0000002550345611"></a>
+### 软件要求
 
 安装编译前参见本章节提供的相关链接获取对应的软件包
 
@@ -42,9 +42,9 @@ Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openE
 |SQLite|SQLite 3|可选：Hyperscan tools测试工具hsbench编译依赖SQLite 3。|使用Yum工具安装。|
 |Hyperscan|master|必选：待编译软件。|[获取链接](https://gitcode.com/boostkit/hyperscan/tree/master)|
 
-## 配置编译环境<a name="ZH-CN_TOPIC_0000002550305597"></a>
+## 配置编译环境
 
-### （可选）配置本地源<a name="ZH-CN_TOPIC_0000002550305595"></a>
+### （可选）配置本地源
 
 正确配置Yum源，以便于后续能够正常安装所需依赖包和软件。
 
@@ -86,7 +86,7 @@ Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openE
     yum makecache
     ```
 
-### 安装Ragel<a name="ZH-CN_TOPIC_0000002518785772"></a>
+### 安装Ragel
 
 由于Hyperscan的编译依赖于Ragel，本文中编译环境采用Ragel 6.10版本。
 
@@ -127,7 +127,7 @@ Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openE
 
     显示“Ragel State Machine Compiler version 6.10 March 2017”则安装成功。
 
-### 配置Boost<a name="ZH-CN_TOPIC_0000002518785768"></a>
+### 配置Boost
 
 编译Hyperscan依赖于1.57及以上版本的Boost，本文编译环境采用的是Boost 1.87版本。提供两种配置Boost的方法，请根据实际情况选择。
 
@@ -136,7 +136,7 @@ Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openE
 
 以下是两种配置方法的具体步骤：
 
-**方法一：下载软件包并建立软链接<a name="section194461025186"></a>**
+**方法一：下载软件包并建立软链接**
 
 1. 获取Boost 1.87源码包。
 
@@ -159,7 +159,7 @@ Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openE
     >![](public_sys-resources/icon-note.gif) **说明：** 
     >编译依赖Boost头文件，{boost\_path}即boost\_1\_87\_0.tar.gz解压后的全路径，此处boost\_path推荐使用绝对路径。
 
-**方法二：下载软件包并安装<a name="section1857344614147"></a>**
+**方法二：下载软件包并安装**
 
 1. 获取软件包。
 
@@ -207,7 +207,7 @@ Hyperscan当前适配的处理器鲲鹏920系列处理器，操作系统为openE
     ldconfig
     ```
 
-### 下载PCRE<a name="ZH-CN_TOPIC_0000002518625864"></a>
+### 下载PCRE
 
 Hyperscan tools工具hscollider的编译依赖PCRE 8.41及以上版本，本文采用PCRE 8.43版本。
 
@@ -218,7 +218,7 @@ Hyperscan tools工具hscollider的编译依赖PCRE 8.41及以上版本，本文�
     tar -zxf pcre-8.43.tar.gz
     ```
 
-### 安装SQLite<a name="ZH-CN_TOPIC_0000002518785774"></a>
+### 安装SQLite
 
 Hyperscan tools工具hsbench编译依赖SQLite 3，使用Yum命令安装SQLite及SQLite开发套件，安装完成后进行版本验证。
 
@@ -270,11 +270,11 @@ Hyperscan tools工具hsbench编译依赖SQLite 3，使用Yum命令安装SQLite�
 
         3. 按“Esc“键，输入`:wq!`并按“Enter“键保存并退出编辑。
 
-### 安装KHSEL<a name="ZH-CN_TOPIC_0000002550345613"></a>
+### 安装KHSEL
 
 KHSEL是Hyperscan增强软件包，可以提升Hyperscan的scan性能。目前gitcode平台dev分支已集成KHSEL源码，位于`src\kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。
 
-## 编译Hyperscan<a name="ZH-CN_TOPIC_0000002518625866"></a>
+## 编译Hyperscan
 
 在Hyperscan源码目录下添加PCRE依赖库，最后进行源码静态库、动态库或Debug模式的编译。
 

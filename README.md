@@ -22,7 +22,7 @@ Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 
 ## 目录结构
 
-```
+```text
 ├── chimera                                                    # Chimera接口目录，提供PCRE兼容的正则表达式功能
 │   ├── ch.h                                                  # Chimera公共API头文件
 │   ├── ch_compile.cpp                                        # Chimera编译时功能实现
@@ -36,7 +36,7 @@ Hyperscan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │       ├── figures                                           # 中文文档图片资源目录
 │       ├── quick_start.md                                    # 快速入门
 │       ├── release_notes.md                                  # 版本说明书
-│       ├── installation_guide.md                              # 编译指南
+│       ├── compilation_guide.md                              # 编译指南
 │       ├── developer_guide.md                                # 开发指南
 │       ├── user_guide.md                                     # 用户指南
 ├── examples                                                   # 示例代码目录
@@ -112,8 +112,8 @@ Hyperscan的快速入门通过使用Hyperscan官方提供的性能Benchmark工�
 |[版本说明书](docs/zh/release_notes.md)|提供Hyperscan每个发布版本的基础信息和特性更新信息。|
 |[安装指南](./docs/zh/installation_guide.md)|指导用户如何安装部署及编译软件。|
 |[快速入门](./docs/zh/quick_start.md)|提供快速上手验证指导。|
-|[开发指南](./docs/zh/developer_guide.md)|提供Hyperscan特性相关接口说明及定义等。|
 |[用户指南](./docs/zh/user_guide.md)|提供Hyperscan特性使用指导。|
+|[开发指南](./docs/zh/developer_guide.md)|提供Hyperscan特性相关接口说明及定义等。|
 
 ## 贡献声明
 

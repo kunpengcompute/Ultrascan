@@ -1,6 +1,6 @@
-# 开发指南<a name="ZH-CN_TOPIC_0000002549765393"></a>
+# 开发指南
 
-## 函数说明<a name="ZH-CN_TOPIC_0000002549885353"></a>
+## 函数说明
 
 >![](public_sys-resources/icon-notice.gif) **须知：** 
 >KHSEL中的函数（KHSEL\_xxx）无需被显式调用，它们作为Hyperscan的内部接口使用。
@@ -28,25 +28,25 @@ KHSEL库已优化函数如[**表 1** KHSEL库已优化函数](#KHSEL库已优化
 |fat_hs_compile_lit_multi|Hyperscan新增通用字节码批量单字节字面量编译函数，编译多个单字节字面量正则表达式。|
 
 
-## 使用说明<a name="ZH-CN_TOPIC_0000002518405558"></a>
+## 使用说明
 
 KHSEL函数源码已集成到Hyperscan仓库dev分支中，位于`src\kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。
 
-## 函数定义<a name="ZH-CN_TOPIC_0000002549885351"></a>
+## 函数定义
 
-### KHSEL\_BuildLily<a name="ZH-CN_TOPIC_0000002518245592"></a>
+### KHSEL\_BuildLily
 
-**函数功能<a name="section95941732195012"></a>**
+**函数功能**
 
 基于规则集内的单字节短规则进行规则编译，输出编译后的mask。
 
-**函数定义<a name="section1183110404506"></a>**
+**函数定义**
 
 ```c
 std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily, std::vector<u32> &reportVec, std::vector<u32> &ekeyVec); 
 ```
 
-**参数说明<a name="section1192224915509"></a>**
+**参数说明**
 
 |参数名|描述|取值范围|输入/输出|
 |--|--|--|--|
@@ -54,30 +54,30 @@ std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily, std::vector<u3
 |reportVec|短字节规则对应的reportID。|C++ vector对象，无非空限制|输入|
 |ekeyVec|短字节规则对应的ekey。|C++ vector对象，无非空限制|输入|
 
-**返回值<a name="section13615359181110"></a>**
+**返回值**
 
 规则编译后的输出。
 
 ### KHSEL\_LilyRunExec<a name="ZH-CN_TOPIC_0000002518245632"></a>
 
-**函数功能<a name="section95941732195012"></a>**
+**函数功能**
 
 基于编译输出的mask，进行运行期输入数据的匹配。
 
-**函数定义<a name="section1183110404506"></a>**
+**函数定义**
 
 ```c
 hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch); 
 ```
 
-**参数说明<a name="section1192224915509"></a>**
+**参数说明**
 
 |参数名|描述|取值范围|输入/输出|
 |--|--|--|--|
 |rose|RoseEngine对象，保存编译期输出结果，作为运行期输入。|非空|输入|
 |scratch|输入数据所需的临时内存空间。|非空|输入|
 
-**返回值<a name="section13615359181110"></a>**
+**返回值**
 
 匹配结果的错误码。
 
@@ -148,7 +148,7 @@ hs_error_t fat_hs_compile(const char *expression, unsigned int flags,
                           hs_compile_error_t **error);
 ```
 
-**参数说明<a name="section_fat_hs_compile_params"></a>**
+**参数说明**
 
 |参数名|描述|取值范围|输入/输出|
 |--|--|--|--|
@@ -159,17 +159,17 @@ hs_error_t fat_hs_compile(const char *expression, unsigned int flags,
 |db|编译成功后返回的通用数据库指针。|非空指针|输出|
 |error|编译失败时返回的错误信息。|非空指针|输出|
 
-**返回值<a name="section_fat_hs_compile_ret"></a>**
+**返回值**
 
 成功返回HS_SUCCESS，失败返回HS_COMPILER_ERROR并在error参数中提供错误详情。
 
 ### fat\_hs\_compile\_multi<a name="ZH-CN_TOPIC_fat_hs_compile_multi"></a>
 
-**函数功能<a name="section_fat_hs_compile_multi_func"></a>**
+**函数功能**
 
 批量编译多个正则表达式，生成包含x86和ARM双架构字节码的通用数据库。
 
-**函数定义<a name="section_fat_hs_compile_multi_def"></a>**
+**函数定义**
 
 ```c
 hs_error_t fat_hs_compile_multi(const char *const *expressions,
@@ -181,7 +181,7 @@ hs_error_t fat_hs_compile_multi(const char *const *expressions,
                                 hs_compile_error_t **error);
 ```
 
-**参数说明<a name="section_fat_hs_compile_multi_params"></a>**
+**参数说明**
 
 |参数名|描述|取值范围|输入/输出|
 |--|--|--|--|
@@ -194,17 +194,17 @@ hs_error_t fat_hs_compile_multi(const char *const *expressions,
 |db|编译成功后返回的通用数据库指针。|非空指针|输出|
 |error|编译失败时返回的错误信息。|非空指针|输出|
 
-**返回值<a name="section_fat_hs_compile_multi_ret"></a>**
+**返回值**
 
 成功返回HS_SUCCESS，失败返回HS_COMPILER_ERROR并在error参数中提供错误详情。
 
-### fat\_hs\_compile\_ext\_multi<a name="ZH-CN_TOPIC_fat_hs_compile_ext_multi"></a>
+### fat\_hs\_compile\_ext\_multi
 
-**函数功能<a name="section_fat_hs_compile_ext_multi_func"></a>**
+**函数功能**
 
 批量编译多个正则表达式，支持扩展参数，生成包含x86和ARM双架构字节码的通用数据库。
 
-**函数定义<a name="section_fat_hs_compile_ext_multi_def"></a>**
+**函数定义**
 
 ```c
 hs_error_t fat_hs_compile_ext_multi(const char *const *expressions,
@@ -217,7 +217,7 @@ hs_error_t fat_hs_compile_ext_multi(const char *const *expressions,
                                     hs_compile_error_t **error);
 ```
 
-**参数说明<a name="section_fat_hs_compile_ext_multi_params"></a>**
+**参数说明**
 
 |参数名|描述|取值范围|输入/输出|
 |--|--|--|--|
@@ -231,17 +231,17 @@ hs_error_t fat_hs_compile_ext_multi(const char *const *expressions,
 |db|编译成功后返回的通用数据库指针。|非空指针|输出|
 |error|编译失败时返回的错误信息。|非空指针|输出|
 
-**返回值<a name="section_fat_hs_compile_ext_multi_ret"></a>**
+**返回值**
 
 成功返回HS_SUCCESS，失败返回HS_COMPILER_ERROR并在error参数中提供错误详情。
 
-### fat\_hs\_compile\_lit<a name="ZH-CN_TOPIC_fat_hs_compile_lit"></a>
+### fat\_hs\_compile\_lit
 
-**函数功能<a name="section_fat_hs_compile_lit_func"></a>**
+**函数功能**
 
 编译单个纯字面量表达式（非正则表达式），生成包含x86和ARM双架构字节码的通用数据库。字面量表达式中的所有字符均按字面意义匹配，不解析正则语法。
 
-**函数定义<a name="section_fat_hs_compile_lit_def"></a>**
+**函数定义**
 
 ```c
 hs_error_t fat_hs_compile_lit(const char *expression, unsigned int flags,
@@ -251,7 +251,7 @@ hs_error_t fat_hs_compile_lit(const char *expression, unsigned int flags,
                               hs_compile_error_t **error);
 ```
 
-**参数说明<a name="section_fat_hs_compile_lit_params"></a>**
+**参数说明**
 
 |参数名|描述|取值范围|输入/输出|
 |--|--|--|--|
@@ -263,17 +263,17 @@ hs_error_t fat_hs_compile_lit(const char *expression, unsigned int flags,
 |db|编译成功后返回的通用数据库指针。|非空指针|输出|
 |error|编译失败时返回的错误信息。|非空指针|输出|
 
-**返回值<a name="section_fat_hs_compile_lit_ret"></a>**
+**返回值**
 
 成功返回HS_SUCCESS，失败返回HS_COMPILER_ERROR并在error参数中提供错误详情。
 
-### fat\_hs\_compile\_lit\_multi<a name="ZH-CN_TOPIC_fat_hs_compile_lit_multi"></a>
+### fat\_hs\_compile\_lit\_multi
 
-**函数功能<a name="section_fat_hs_compile_lit_multi_func"></a>**
+**函数功能**
 
 批量编译多个纯字面量表达式（非正则表达式），生成包含x86和ARM双架构字节码的通用数据库。字面量表达式中的所有字符均按字面意义匹配，不解析正则语法。
 
-**函数定义<a name="section_fat_hs_compile_lit_multi_def"></a>**
+**函数定义**
 
 ```c
 hs_error_t fat_hs_compile_lit_multi(const char *const *expressions,
@@ -286,7 +286,7 @@ hs_error_t fat_hs_compile_lit_multi(const char *const *expressions,
                                     hs_compile_error_t **error);
 ```
 
-**参数说明<a name="section_fat_hs_compile_lit_multi_params"></a>**
+**参数说明**
 
 |参数名|描述|取值范围|输入/输出|
 |--|--|--|--|
@@ -300,7 +300,7 @@ hs_error_t fat_hs_compile_lit_multi(const char *const *expressions,
 |db|编译成功后返回的通用数据库指针。|非空指针|输出|
 |error|编译失败时返回的错误信息。|非空指针|输出|
 
-**返回值<a name="section_fat_hs_compile_lit_multi_ret"></a>**
+**返回值**
 
 成功返回HS_SUCCESS，失败返回HS_COMPILER_ERROR并在error参数中提供错误详情。
 
