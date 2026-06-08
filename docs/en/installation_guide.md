@@ -150,6 +150,7 @@ The detailed configuration steps are as follows.
     ```
 
 3. Create a symbolic link.
+
     ```bash
     ln -s {boost_path}/boost include/boost
     ```

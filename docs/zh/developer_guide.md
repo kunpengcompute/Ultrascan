@@ -3,7 +3,7 @@
 ## 函数说明
 
 >![](public_sys-resources/icon-notice.gif) **须知：** 
->KHSEL中的函数（KHSEL\_xxx）无需被显式调用，它们作为Hyperscan的内部接口使用。
+>KHSEL中的函数（KHSEL\_xxx）无需被显式调用，它们作为Ultrascan的内部接口使用。
 
 KHSEL库已优化函数如[**表 1** KHSEL库已优化函数](#KHSEL库已优化函数)所示。
 
@@ -11,26 +11,26 @@ KHSEL库已优化函数如[**表 1** KHSEL库已优化函数](#KHSEL库已优化
 
 |名称|说明|
 |--|--|
-|KHSEL_BuildLily|Hyperscan新增单字节短规则匹配的编译函数。|
-|KHSEL_LilyRunExec|Hyperscan新增单字节短规则匹配的运行函数。|
-|KHSEL_BuildLilyForTeddy|Hyperscan新增2~4字节短规则匹配的编译函数。|
-|KHSEL_LilyForTeddyRunExec|Hyperscan新增2~4字节短规则匹配的运行函数。|
-
+|KHSEL_BuildLily|Ultrascan新增单字节短规则匹配的编译函数。|
+|KHSEL_LilyRunExec|Ultrascan新增单字节短规则匹配的运行函数。|
+|KHSEL_BuildLilyForTeddy|Ultrascan新增2~4字节短规则匹配的编译函数。|
+|KHSEL_LilyForTeddyRunExec|Ultrascan新增2~4字节短规则匹配的运行函数。|
 
 通用字节码功能接口[**表 2** 通用字节码功能接口](#通用字节码功能接口)所示。  
+
 **表 2** 通用字节码功能接口<a id="通用字节码功能接口"></a>
+
 |名称|说明|
 |--|--|
-|fat_hs_compile|Hyperscan新增通用字节码编译函数，编译单个正则表达式。|
-|fat_hs_compile_multi|Hyperscan新增通用字节码批量编译函数，编译多个正则表达式。|
-|fat_hs_compile_ext_multi|Hyperscan新增通用字节码扩展批量编译函数，编译多个正则表达式。|
-|fat_hs_compile_lit|Hyperscan新增通用字节码单字节字面量编译函数，编译单个单字节字面量正则表达式。|
-|fat_hs_compile_lit_multi|Hyperscan新增通用字节码批量单字节字面量编译函数，编译多个单字节字面量正则表达式。|
-
+|fat_hs_compile|Ultrascan新增通用字节码编译函数，编译单个正则表达式。|
+|fat_hs_compile_multi|Ultrascan新增通用字节码批量编译函数，编译多个正则表达式。|
+|fat_hs_compile_ext_multi|Ultrascan新增通用字节码扩展批量编译函数，编译多个正则表达式。|
+|fat_hs_compile_lit|Ultrascan新增通用字节码单字节字面量编译函数，编译单个单字节字面量正则表达式。|
+|fat_hs_compile_lit_multi|Ultrascan新增通用字节码批量单字节字面量编译函数，编译多个单字节字面量正则表达式。|
 
 ## 使用说明
 
-KHSEL函数源码已集成到Hyperscan仓库dev分支中，位于`src\kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。
+KHSEL函数源码已集成到Ultrascan仓库dev分支中，位于`src\kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。
 
 ## 函数定义
 
@@ -309,4 +309,4 @@ hs_error_t fat_hs_compile_lit_multi(const char *const *expressions,
 |文档版本|发布日期|修改说明|
 |--|--|--|
 |02|2026-06-30|第二次正式发布，基于鲲鹏920新型号处理器新增通用字节码功能。|
-|01|2026-03-30|第一次正式发布，基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短字节规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
+|01|2026-03-30|第一次正式发布，基于鲲鹏920新型号处理器优化Ultrascan 2~4字节短字节规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|

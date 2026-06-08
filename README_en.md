@@ -39,7 +39,7 @@ For more information about Hyperscan, visit the  [Kunpeng repository on GitCode]
 │       ├── figures                                           # Directory of images in Chinese documents
 │       ├── quick_start.md                                    # Quick Start
 │       ├── release_notes.md                                  # Hyperscan Release Notes
-│       ├── compilation_guide.md                              # Hyperscan Compilation Guide
+│       ├── installation_guide.md                              # Hyperscan Compilation Guide
 │       ├── developer_guide.md                                # Hyperscan Developer Guide
 │       ├── user_guide.md                                     # Hyperscan User Guide
 ├── examples                                                   # Sample code directory
@@ -95,18 +95,18 @@ For details about feature changes in each version, see [Release Notes](./docs/en
 
 ## Environment Deployment
 
-For details about the environment dependencies, installation methods, and compilation methods of Hyperscan, see [Compilation Guide](./docs/en/compilation\_guide.md).
+For details about the environment dependencies, installation methods, and compilation methods of Hyperscan, see [Compilation Guide](./docs/en/installation\_guide.md).
 
 ## Quick Start
 
-The Hyperscan quick start guide uses the performance benchmark tool hsbench provided by Hyperscan. For details, see \[quick\_start.md\]\(./docs/en/quick\_start.md\).
+The Hyperscan quick start guide uses the performance benchmark tool hsbench provided by Hyperscan. For details, see [quick_start](./docs/en/quick\_start.md).
 
 ## Helpful Links
 
 |Name|Overview|
 |--|--|
 |[Release Notes](./docs/en/release_notes.md)|Provides basic information and feature updates of each Hyperscan version.|
-|[Compilation Guide](./docs/en/compile_guide.md)|Describes how to install, deploy, and compile the software.|
+|[Compilation Guide](./docs/en/installation_guide.md)|Describes how to install, deploy, and compile the software.|
 |[Quick Start](./docs/en/quick_start.md)|Provides guidance for a quick start and verification.|
 |[User Guide](./docs/en/user_guide.md)|Provides guidance on how to use the Hyperscan feature.|
 |[Developer Guide](./docs/en/developer_guide.md)|Provides descriptions and definitions of APIs related to the Hyperscan feature.|
