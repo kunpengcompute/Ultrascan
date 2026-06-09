@@ -4,14 +4,14 @@ hsbench is a performance benchmark tool provided by Hyperscan. You can compare t
 
 1. Go to the  **build**  directory.
 
-    ```
+    ```bash
     cd build
     ```
 
 2. Obtain  [hsbench rule sets](https://cdrdv2.intel.com/v1/dl/getContent/739375)  and input data, and decompress them to the  **build/hsbench-samples**  directory.
 3. Run hsbench.
 
-    ```
+    ```bash
     ./bin/hsbench -e ./hsbench-samples/pcre/snort_literals -c ./hsbench-samples/corpora/gutenberg.db -N -n1
     ```
 
@@ -25,4 +25,3 @@ hsbench is a performance benchmark tool provided by Hyperscan. You can compare t
     - **Matches per iteration**: number of matches in each iteration using the rule set
     - **Mean throughput \(overall\)**: average throughput \(Mbit/s\)
     - **Max throughput \(per core\)**: maximum throughput among each CPU core \(Mbit/s\)
-

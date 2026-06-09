@@ -1,10 +1,13 @@
 # 快速入门
 
 ## 前提条件
-请参考[安装指南](./installation_guide.md)完成Hyperscan的安装和编译指导。
+
+请参考[安装指南](./installation_guide.md)完成Ultrascan的安装和编译指导。
 
 ## hsdump通用字节码生成工具
-对于需要编译一套规则集字节码，将该字节码部同时署到鲲鹏计算平台和x86计算平台上的场景，使用hsdump进行字节码的编译并生成编译后文件（下文称通用字节码）。hsdump是Hyperscan提供的调试工具，用于转储模式编译过程中的内部信息。通过hsdump可以编译出支持跨平台部署的字节码。
+
+对于需要编译一套规则集字节码，将该字节码部同时署到鲲鹏计算平台和x86计算平台上的场景，使用hsdump进行字节码的编译并生成编译后文件（下文称通用字节码）。hsdump是Ultrascan提供的调试工具，用于转储模式编译过程中的内部信息。通过hsdump可以编译出支持跨平台部署的字节码。
+
 1. 进入创建好的`build`目录。
 
     ```bash
@@ -33,12 +36,12 @@
     - `-X, --no_intermediate`：不转储中间数据。
 
 4. 查看输出结果。
-    hsdump会在指定输出目录中生成通用字节码文件：`db.raw`。
 
+    hsdump会在指定输出目录中生成通用字节码文件：`db.raw`。
 
 ## hsbench通用字节码性能测试
 
-hsbench是Hyperscan官方提供的性能Benchmark工具，通过hsbench的测试结果能够对比使用KHSEL库前后的性能差异。
+hsbench是Ultrascan官方提供的性能Benchmark工具，通过hsbench的测试结果能够对比使用KHSEL库前后的性能差异。
 
 1. 进入创建好的`build`目录。
 
@@ -47,6 +50,7 @@ hsbench是Hyperscan官方提供的性能Benchmark工具，通过hsbench的测试
     ```
 
 2. 获取[hsbench规则集](https://cdrdv2.intel.com/v1/dl/getContent/739375)并输入数据，并解压到`build/hsbench-samples`目录。
+
 3. 运行hsbench。
 
     不使用通用字节码：
@@ -71,7 +75,7 @@ hsbench是Hyperscan官方提供的性能Benchmark工具，通过hsbench的测试
 
     运行结果（使用规则集）：
 
-    ![](figures/zh-cn_image_0000002550013885.png)
+    <img src="figures/zh-cn_image_0000002550013885.png" style="width: 60%; height: auto;" />
 
     运行结果（使用通用字节码）：
     ![](figures/5.png)

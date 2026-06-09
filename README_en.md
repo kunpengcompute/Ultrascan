@@ -25,7 +25,7 @@ For more information about Hyperscan, visit the  [Kunpeng repository on GitCode]
 
 ## Directory Structure<a name="EN-US_TOPIC_0000002549772081"></a>
 
-```
+```text
 ├── chimera                                                    # Chimera API directory
 │   ├── ch.h                                                  # Chimera public API header file
 │   ├── ch_compile.cpp                                        # Chimera compile-time function implementation
@@ -39,7 +39,7 @@ For more information about Hyperscan, visit the  [Kunpeng repository on GitCode]
 │       ├── figures                                           # Directory of images in Chinese documents
 │       ├── quick_start.md                                    # Quick Start
 │       ├── release_notes.md                                  # Hyperscan Release Notes
-│       ├── compilation_guide.md                              # Hyperscan Compilation Guide
+│       ├── installation_guide.md                              # Hyperscan Compilation Guide
 │       ├── developer_guide.md                                # Hyperscan Developer Guide
 │       ├── user_guide.md                                     # Hyperscan User Guide
 ├── examples                                                   # Sample code directory
@@ -89,46 +89,36 @@ For more information about Hyperscan, visit the  [Kunpeng repository on GitCode]
 └── ...                                                        # Other root-level files
 ```
 
-
-## Release Notes<a name="EN-US_TOPIC_0000002518252296"></a>
+## Release Notes
 
 For details about feature changes in each version, see [Release Notes](./docs/en/release\_notes.md).
 
+## Environment Deployment
 
-## Environment Deployment<a name="EN-US_TOPIC_0000002549772083"></a>
+For details about the environment dependencies, installation methods, and compilation methods of Hyperscan, see [Compilation Guide](./docs/en/installation\_guide.md).
 
-For details about the environment dependencies, installation methods, and compilation methods of Hyperscan, see [Compilation Guide](./docs/en/compilation\_guide.md).
+## Quick Start
 
+The Hyperscan quick start guide uses the performance benchmark tool hsbench provided by Hyperscan. For details, see [quick_start](./docs/en/quick\_start.md).
 
-## Quick Start<a name="EN-US_TOPIC_0000002549892057"></a>
-
-The Hyperscan quick start guide uses the performance benchmark tool hsbench provided by Hyperscan. For details, see \[quick\_start.md\]\(./docs/en/quick\_start.md\).
-
-
-## Helpful Links<a name="EN-US_TOPIC_0000002518252300"></a>
+## Helpful Links
 
 |Name|Overview|
 |--|--|
-|[Quick Start](./docs/en/quick_start.md)|Provides guidance for a quick start and verification.|
 |[Release Notes](./docs/en/release_notes.md)|Provides basic information and feature updates of each Hyperscan version.|
-|[Compilation Guide](./docs/en/compile_guide.md)|Describes how to install, deploy, and compile the software.|
+|[Compilation Guide](./docs/en/installation_guide.md)|Describes how to install, deploy, and compile the software.|
+|[Quick Start](./docs/en/quick_start.md)|Provides guidance for a quick start and verification.|
 |[User Guide](./docs/en/user_guide.md)|Provides guidance on how to use the Hyperscan feature.|
 |[Developer Guide](./docs/en/developer_guide.md)|Provides descriptions and definitions of APIs related to the Hyperscan feature.|
 
-
-
-## Contribution Statement<a name="EN-US_TOPIC_0000002518412216"></a>
+## Contribution Statement
 
 You are welcome to contribute to the community. If you have any questions/suggestions or want to provide feedback on feature requirements and bug reports, you can submit  [issues](https://gitcode.com/boostkit/hyperscan). For details, see the  [contribution guideline](https://gitcode.com/boostkit/community/blob/master/docs/contributor/contributing.md). You are also welcome to share insights in the  [discussion zone](https://gitcode.com/boostkit/community/discussions). Thank you for your support.
 
-
-## Disclaimer<a name="EN-US_TOPIC_0000002518412214"></a>
+## Disclaimer
 
 This code repository contributes to the Hyperscan open-source project solely for performance optimization. It strictly adheres to the coding style and methods, as well as security design of the native open-source software. Any vulnerability and security issues of the software shall be resolved by the corresponding upstream communities according to their response mechanisms. Please pay attention to the notifications and version updates released by the upstream communities. The Kunpeng computing community does not assume any responsibility for the vulnerabilities and security issues of the software.
 
-
-## License<a name="EN-US_TOPIC_0000002549892075"></a>
+## License
 
 This project uses the BSD license. For details, see [LICENSE](LICENSE).
-
-
