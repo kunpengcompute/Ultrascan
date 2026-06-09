@@ -83,6 +83,25 @@ HS_FUZZ_MAX_UNIQUE_ERRORS=100 ./hyperscan_fuzz_test
 ./hyperscan_fuzz_test --gtest_filter='FuzzTests/HyperscanFuzzTest.AllInterfaces/*'
 ```
 
+并行运行主测试中的单 pattern API fuzz：
+
+```bash
+HS_FUZZ_THREADS=8 ./hyperscan_fuzz_test --gtest_filter='FuzzTests/HyperscanFuzzTest.AllInterfaces/*'
+```
+
+设置 `HS_FUZZ_THREADS` 后，Python 生成器会流式输出 pattern，主线程通过
+有界队列交给 worker 线程消费，不再一次性把所有 pattern 放进内存。队列默认
+最多缓存 4096 条，可通过 `HS_FUZZ_QUEUE_SIZE` 调整。
+
+多模式接口仍由主线程单独执行一次。并行模式下，多模式接口默认只使用前
+1024 条 pattern，避免把千万级 pattern 一次性传给 multi compile。如需调整：
+
+```bash
+HS_FUZZ_THREADS=8 HS_FUZZ_QUEUE_SIZE=8192 HS_FUZZ_MULTI_LIMIT=4096 ./hyperscan_fuzz_test --gtest_filter='FuzzTests/HyperscanFuzzTest.AllInterfaces/*'
+```
+
+设置 `HS_FUZZ_MULTI_LIMIT=0` 可以跳过多模式接口。
+
 调试时建议先把 `unit/fuzz/fuzz_test.cpp` 里的 `count` 调小，例如 `100`。
 `count` 表示每个生成器产生多少条正则表达式，不是匹配次数，也不是性能循环次数。
 

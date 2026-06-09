@@ -6,10 +6,14 @@ project(hyperscan_fuzz_test)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(HS_BUILD_DIR "${CMAKE_SOURCE_DIR}/../../build" CACHE PATH "Hyperscan build directory")
+find_package(Threads REQUIRED)
+
 # 包含头文件目录
 include_directories(
     ${CMAKE_SOURCE_DIR}/..
     ${CMAKE_SOURCE_DIR}/../../src
+    ${HS_BUILD_DIR}
 )
 
 # 启用覆盖率编译选项
@@ -21,13 +25,14 @@ set(SOURCES
     main.cpp
     fuzz_test.cpp
     generator/python_generator.cpp
+    internal/dverm_search_aligned_fuzz.cpp
     runner/hs_runner.cpp
     ../gtest/gtest-all.cc
     data/data_generator.cpp
 )
 
 # 链接库
-find_library(HS_LIBRARY hs PATHS ${CMAKE_SOURCE_DIR}/../../build/lib)
+find_library(HS_LIBRARY hs PATHS ${HS_BUILD_DIR}/lib)
 
 # 创建可执行文件
 add_executable(hyperscan_fuzz_test ${SOURCES})
@@ -35,6 +40,7 @@ add_executable(hyperscan_fuzz_test ${SOURCES})
 # 链接库
 target_link_libraries(hyperscan_fuzz_test
     ${HS_LIBRARY}
+    Threads::Threads
 )
 
 # 复制Python生成器脚本到构建目录

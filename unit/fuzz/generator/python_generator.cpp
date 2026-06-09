@@ -1,5 +1,6 @@
 #include "../fuzz_test.h"
 #include <algorithm>
+#include <cstdio>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -26,8 +27,47 @@ public:
 
     std::vector<FuzzTestCase> generate() override {
         std::vector<FuzzTestCase> testCases;
+        generateTo([&testCases](const FuzzTestCase& testCase) {
+            testCases.push_back(testCase);
+            return true;
+        });
+        return testCases;
+    }
+
+    size_t generateTo(const std::function<bool(const FuzzTestCase&)>& consumer) override {
+        // 执行命令并读取输出
+        FILE* pipe = popen(buildCommand().c_str(), "r");
+        if (!pipe) {
+            std::cerr << "Failed to open pipe" << std::endl;
+            return 0;
+        }
         
-        // 构建Python命令
+        char buffer[1024];
+        int lineCount = 0;
+        size_t delivered = 0;
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            lineCount++;
+            std::string line(buffer);
+            FuzzTestCase testCase = parseGeneratorOutput(line);
+            if (!testCase.pattern.empty()) {
+                if (!consumer(testCase)) {
+                    break;
+                }
+                delivered++;
+            }
+        }
+        
+        int status = pclose(pipe);
+        if (fuzzVerbose()) {
+            std::cout << "Command exit status: " << status << std::endl;
+            std::cout << "Total lines read: " << lineCount << std::endl;
+            std::cout << "Total test cases delivered: " << delivered << std::endl;
+        }
+        return delivered;
+    }
+
+private:
+    std::string buildCommand() const {
         std::stringstream cmd;
         // 使用相对于项目根目录的路径
         cmd << "python ../../../tools/fuzz/" << generatorType << ".py";
@@ -36,34 +76,9 @@ public:
         if (fullCharset) {
             cmd << " --full";
         }
-        
-        // 执行命令并读取输出
-        FILE* pipe = popen(cmd.str().c_str(), "r");
-        if (!pipe) {
-            std::cerr << "Failed to open pipe" << std::endl;
-            return testCases;
-        }
-        
-        char buffer[1024];
-        int lineCount = 0;
-        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-            lineCount++;
-            std::string line(buffer);
-            FuzzTestCase testCase = parseGeneratorOutput(line);
-            if (!testCase.pattern.empty()) {
-                testCases.push_back(testCase);
-            }
-        }
-        
-        int status = pclose(pipe);
-        if (fuzzVerbose()) {
-            std::cout << "Command exit status: " << status << std::endl;
-            std::cout << "Total lines read: " << lineCount << std::endl;
-        }
-        return testCases;
+        return cmd.str();
     }
 
-private:
     FuzzTestCase parseGeneratorOutput(const std::string& line) {
         FuzzTestCase testCase;
         

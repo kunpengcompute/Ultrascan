@@ -2,6 +2,7 @@
 #define FUZZ_TEST_H
 
 #include <iosfwd>
+#include <functional>
 #include <string>
 #include <vector>
 #include <memory>
@@ -29,6 +30,17 @@ public:
     virtual ~Generator() {}
     virtual void configure(const std::string& type, int depth, int count, bool fullCharset) = 0;
     virtual std::vector<FuzzTestCase> generate() = 0;
+    virtual size_t generateTo(const std::function<bool(const FuzzTestCase&)>& consumer) {
+        size_t delivered = 0;
+        std::vector<FuzzTestCase> testCases = generate();
+        for (const auto& testCase : testCases) {
+            if (!consumer(testCase)) {
+                break;
+            }
+            delivered++;
+        }
+        return delivered;
+    }
 };
 
 // 运行器接口

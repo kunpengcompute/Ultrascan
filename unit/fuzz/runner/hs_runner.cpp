@@ -22,14 +22,14 @@ bool fuzzVerbose() {
 }
 
 std::ostream& detailOut() {
-    static NullBuffer nullBuffer;
-    static std::ostream nullStream(&nullBuffer);
+    thread_local NullBuffer nullBuffer;
+    thread_local std::ostream nullStream(&nullBuffer);
     return fuzzVerbose() ? std::cout : nullStream;
 }
 
 std::ostream& detailErr() {
-    static NullBuffer nullBuffer;
-    static std::ostream nullStream(&nullBuffer);
+    thread_local NullBuffer nullBuffer;
+    thread_local std::ostream nullStream(&nullBuffer);
     return fuzzVerbose() ? std::cerr : nullStream;
 }
 
