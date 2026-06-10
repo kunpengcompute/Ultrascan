@@ -100,7 +100,7 @@
 
 |特性描述|更新说明|
 |--|--|
-|KHSEL|实现大数据Flink的replaceALL功能函数C版本算法优化，性能对比Java版本replaceALL提升2倍。基于鲲鹏920新型号处理器优化Ultrascan短字节规则匹配算法，性能领先20%。|
+|KHSEL|实现大数据Flink的replaceAll功能函数C版本算法优化，性能对比Java版本replaceAll提升2倍。基于鲲鹏920新型号处理器优化Ultrascan短字节规则匹配算法，性能领先20%。|
 
 **修改特性<a name="section16450949161512"></a>**
 
@@ -179,7 +179,7 @@
     </tr>
     <tr>
       <td style="text-align: left;">开发指南</td>
-      <td style="text-align: left;">提供Ultrascan短规则旁路技术的开发与适配。</td>
+      <td style="text-align: left;">提供Ultrascan的开发指导。</td>
       <td style="text-align: left;">开源仓</td>
     </tr>
   </tbody>

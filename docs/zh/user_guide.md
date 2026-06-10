@@ -16,6 +16,6 @@
 
 config.txt文件示例内容如下：
 
-```bash
+```text
 allowLily:1;allowNeoFdr:1;
 ```

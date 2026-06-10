@@ -50,9 +50,9 @@ std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily, std::vector<u3
 
 |参数名|描述|取值范围|输入/输出|
 |--|--|--|--|
-|lily|短字节规则。|C++ map对象，无非空限制|输入|
-|reportVec|短字节规则对应的reportID。|C++ vector对象，无非空限制|输入|
-|ekeyVec|短字节规则对应的ekey。|C++ vector对象，无非空限制|输入|
+|lily|单字节短规则。|C++ map对象，无非空限制|输入|
+|reportVec|单字节短规则对应的reportID。|C++ vector对象，无非空限制|输入|
+|ekeyVec|单字节短规则对应的ekey。|C++ vector对象，无非空限制|输入|
 
 **返回值**
 

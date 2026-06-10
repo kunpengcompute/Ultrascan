@@ -8,7 +8,7 @@ Ultrascan是一款高性能的正则表达式匹配库，它是以PCRE（Perl-co
 
 Ultrascan鲲鹏计算平台软件版本主要增加了以下功能：
 
-- 增加鲲鹏计算平台分支，且完全兼容ARMv8-a，同时确保x86平台使用不受影响。
+- 增加鲲鹏计算平台分支，且完全兼容ARMv8-A，同时确保x86平台使用不受影响。
 - 通过使用NEON指令、内联汇编、数据对齐、指令对齐、内存数据预取、静态分支预测、代码结构优化等方法，实现在鲲鹏计算平台的性能提升。
 - 发布KHSEL（Kunpeng Hyperscan Enhanced Library）软件增强包，包括短规则旁路混合模型和假阳性阻断模型。
     - KHSEL优化了大规模规则集匹配算法FDR，小规模快速匹配算法Shufti，增强了Ultrascan处理snort_literal，snort_pcre等数据集的scan性能，并且针对长规则校验的场景进行了优化。
@@ -22,7 +22,7 @@ Ultrascan鲲鹏计算平台软件版本主要增加了以下功能：
 
 ### 已验证环境
 
-Ultrascan当前适配的处理器鲲鹏920系列处理器，操作系统为openEuler 22.03 LTS SP4/openEuler 24.03 LTS SP3。若您在使用过程中遇到问题，请先检查使用的环境是否在已验证的环境范围内。
+Ultrascan当前适配鲲鹏920系列处理器，操作系统为openEuler 22.03 LTS SP4/openEuler 24.03 LTS SP3。若您在使用过程中遇到问题，请先检查使用的环境是否在已验证的环境范围内。
 
 ### 软件要求
 
@@ -272,7 +272,7 @@ Ultrascan tools工具hsbench编译依赖SQLite 3，使用Yum命令安装SQLite�
 
 ### 安装KHSEL
 
-KHSEL是Ultrascan增强软件包，可以提升Ultrascan的scan性能。目前gitcode平台dev分支已集成KHSEL源码，位于`src\kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。
+KHSEL是Ultrascan增强软件包，可以提升Ultrascan的scan性能。目前gitcode平台dev分支已集成KHSEL源码，位于`src/kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。
 
 ## 编译Ultrascan
 

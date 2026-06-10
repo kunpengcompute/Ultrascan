@@ -4,13 +4,13 @@
 
 \[2026-06-30\]: 原Hyperscan正式更名为Ultrascan，同时发布Ultrascan 5.7.0。新增通用字节码功能，支持规则集字节码跨平台部署。
 
-\[2026-03-30\]: 发布Hyperscan 2.6.0。新增基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短字节规则匹配算法。
+\[2026-03-30\]: 发布Hyperscan 2.6.0。新增基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短规则匹配算法。
 
 \[2025-12-30\]: 发布Hyperscan KHSEL 2.5.3。优化Hyperscan多模匹配算法。优化Rose解释器后端长字符串校验。增加短规则旁路算法开关。
 
 ## 项目介绍
 
-Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的大部分语法的前提下，增加了特定的语法和工作模式来保证其在真实网络场景下的实用性。Ultrascan针对不同使用场景设计了短规则旁路、假阳性阻断等高效匹配算法，以及结合SIMD指令，实现了正则表达式的高性能匹配。Ultrascan适用于部署在诸如DPI/IPS/IDS/FW等场景中。在鲲鹏平台上，基于NEON指令集对Ultrascan进行了改造，以适配AAarch64架构，同时针对算法进行了优化。
+Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的大部分语法的前提下，增加了特定的语法和工作模式来保证其在真实网络场景下的实用性。Ultrascan针对不同使用场景设计了短规则旁路、假阳性阻断等高效匹配算法，以及结合SIMD指令，实现了正则表达式的高性能匹配。Ultrascan适用于部署在诸如DPI/IPS/IDS/FW等场景中。在鲲鹏平台上，基于NEON指令集对Ultrascan进行了改造，以适配Aarch64架构，同时针对算法进行了优化。
 
 ## 特性介绍
 
@@ -91,6 +91,7 @@ Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 每个版本的特性变更详细信息，具体请参见《[版本说明书](docs/zh/release_notes.md)》。
 
 ## 约束与限制
+
 鲲鹏计算平台上，Ultrascan使用lily引擎对单字节规则、2-4字节短规则匹配场景进行性能增强，该优化特性存在如下约束：
 
 lily单字节、2-4字节短规则匹配引擎各自仅能处理至多8条单字节规则，超出部分将采用原有引擎处理。
@@ -103,7 +104,7 @@ lily单字节、2-4字节短规则匹配引擎各自仅能处理至多8条单字
 
 ## 快速入门
 
-Ultrascan的快速入门通过使用Ultrascan官方提供的性能Benchmark工具hsbench，具体请参见《[快速入门](./docs/zh/quick_start.md)》。
+介绍基于Ultrascan官方提供的性能Benchmark工具hsbench的快速入门，具体请参见《[快速入门](./docs/zh/quick_start.md)》。
 
 ## 学习文档
 
@@ -125,6 +126,6 @@ Ultrascan的快速入门通过使用Ultrascan官方提供的性能Benchmark工�
 
 ## License
 
-本项目采用BSD License许可证。详见[LICENSE](LICENSE)文件。
+本项目采用BSD许可证。详见[LICENSE](LICENSE)文件。
 
 本项目的文档适用CC-BY 4.0许可证，具体请参见[LICENSE](docs/LICENSE)文件。
