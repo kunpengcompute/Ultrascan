@@ -46,6 +46,8 @@ Ultrascan当前适配鲲鹏920系列处理器，操作系统为openEuler 22.03 L
 
 ### （可选）配置本地源
 
+>![](public_sys-resources/icon-note.gif) **说明：** 离线环境配置本地源，在线环境可以跳过这一步。
+
 正确配置Yum源，以便于后续能够正常安装所需依赖包和软件。
 
 1. 挂载系统镜像，本文以openEuler为例。
