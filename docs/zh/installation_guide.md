@@ -270,10 +270,6 @@ Ultrascan tools工具hsbench编译依赖SQLite 3，使用Yum命令安装SQLite�
 
         3. 按“Esc“键，输入`:wq!`并按“Enter“键保存并退出编辑。
 
-### 安装KHSEL
-
-KHSEL是Ultrascan增强软件包，可以提升Ultrascan的scan性能。目前gitcode平台dev分支已集成KHSEL源码，位于`src/kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。
-
 ## 编译Ultrascan
 
 在Ultrascan源码目录下添加PCRE依赖库，最后进行源码静态库、动态库或Debug模式的编译。
