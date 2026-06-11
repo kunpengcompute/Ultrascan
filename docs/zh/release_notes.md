@@ -19,7 +19,7 @@
 </tr>
 <tr id="row24726251"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.2.1"><p id="p56669300"><a name="p56669300"></a><a name="p56669300"></a>产品版本</p>
 </th>
-<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.2.1 "><p id="p11923034"><a name="p11923034"></a><a name="p11923034"></a><span id="text152431189308"><a name="text152431189308"></a><a name="text152431189308"></a>26.0.0</span></p>
+<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.2.1 "><p id="p11923034"><a name="p11923034"></a><a name="p11923034"></a><span id="text152431189308"><a name="text152431189308"></a><a name="text152431189308"></a>26.1.RC1</span></p>
 </td>
 </tr>
 <tr id="row1930811171892"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.3.1"><p id="p2030912172097"><a name="p2030912172097"></a><a name="p2030912172097"></a>软件名称</p>
@@ -158,7 +158,7 @@
   </thead>
   <tbody>
     <tr>
-      <td style="text-align: left;">5.7.0 版本说明书</td>
+      <td style="text-align: left;">版本说明书</td>
       <td style="text-align: left;">提供Ultrascan的版本发布信息。</td>
       <td style="text-align: left;">开源仓</td>
     </tr>
