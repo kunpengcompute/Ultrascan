@@ -22,7 +22,6 @@ The following functions are added to the Hyperscan version dedicated for the Kun
 
 For more information about Hyperscan, visit the  [Kunpeng repository on GitCode](https://gitcode.com/boostkit/hyperscan).
 
-
 ## Directory Structure<a name="EN-US_TOPIC_0000002549772081"></a>
 
 ```text

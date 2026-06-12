@@ -50,9 +50,9 @@ std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily, std::vector<u3
 
 |参数名|描述|取值范围|输入/输出|
 |--|--|--|--|
-|lily|短字节规则。|C++ map对象，无非空限制|输入|
-|reportVec|短字节规则对应的reportID。|C++ vector对象，无非空限制|输入|
-|ekeyVec|短字节规则对应的ekey。|C++ vector对象，无非空限制|输入|
+|lily|单字节短规则。|C++ map对象，无非空限制|输入|
+|reportVec|单字节短规则对应的reportID。|C++ vector对象，无非空限制|输入|
+|ekeyVec|单字节短规则对应的ekey。|C++ vector对象，无非空限制|输入|
 
 **返回值**
 
@@ -309,4 +309,4 @@ hs_error_t fat_hs_compile_lit_multi(const char *const *expressions,
 |文档版本|发布日期|修改说明|
 |--|--|--|
 |02|2026-06-30|第二次正式发布，基于鲲鹏920新型号处理器新增通用字节码功能。|
-|01|2026-03-30|第一次正式发布，基于鲲鹏920新型号处理器优化Ultrascan 2~4字节短字节规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
+|01|2026-03-30|第一次正式发布，基于鲲鹏920新型号处理器优化Ultrascan 2~4字节短规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
