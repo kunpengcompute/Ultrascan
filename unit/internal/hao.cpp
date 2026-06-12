@@ -2166,6 +2166,21 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutAcceptsGeneratedBlob) {
     EXPECT_EQ(artifacts.hash.stats.maxEntriesPerKey,
               summary.maxEntriesPerKey);
     EXPECT_EQ(artifacts.meta.size(), summary.ruleMetaCount);
+    const auto *hdr = reinterpret_cast<const HAORuntimeHeader *>(blob.get());
+    EXPECT_EQ(artifacts.l15TagBits, hdr->l15TagBits);
+    EXPECT_EQ(artifacts.l15TagOverlapBits, hdr->l15TagOverlapBits);
+    EXPECT_EQ(artifacts.l15TagMasks.size(), hdr->l15MaskCount);
+    if (hdr->l15TagBits) {
+        const auto *masks = reinterpret_cast<const u64a *>(
+            blob.get() + hdr->l15MaskTableOffset);
+
+        EXPECT_EQ(HAO_L15_TAG_BITS, hdr->l15TagBits);
+        EXPECT_EQ(HAO_L15_TAG_BITS, popcount64(masks[0]));
+        EXPECT_EQ(hdr->l2EntryCount, hdr->l15TagCount);
+        EXPECT_NE(0U, hdr->l15TagOffset);
+        EXPECT_NE(0U, hdr->l15MaskTableOffset);
+        EXPECT_EQ(artifacts.l15TagMask, masks[0]);
+    }
 }
 
 TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsBrokenL2Offset) {
@@ -2191,6 +2206,29 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsBrokenL2Offset) {
     EXPECT_FALSE(HaoRuntimeValidateLayoutForTest(blob.get(),
                                                  verify_u32(blob.size())));
     hdr->l2CheckOffset = savedL2CheckOffset;
+    EXPECT_TRUE(HaoRuntimeValidateLayoutForTest(blob.get(),
+                                                verify_u32(blob.size())));
+
+    const u32 savedL15TagOffset = hdr->l15TagOffset;
+    const u32 savedL15TagCount = hdr->l15TagCount;
+    const u32 savedL15TagBits = hdr->l15TagBits;
+    const u32 savedL15TagOverlapBits = hdr->l15TagOverlapBits;
+    const u32 savedL15MaskTableOffset = hdr->l15MaskTableOffset;
+    const u32 savedL15MaskCount = hdr->l15MaskCount;
+    hdr->l15TagOffset = hdr->ruleMetaOffset;
+    hdr->l15TagCount = hdr->l2EntryCount;
+    hdr->l15TagBits = HAO_L15_TAG_BITS;
+    hdr->l15TagOverlapBits = 0;
+    hdr->l15MaskTableOffset = hdr->ruleMetaOffset;
+    hdr->l15MaskCount = 1;
+    EXPECT_FALSE(HaoRuntimeValidateLayoutForTest(blob.get(),
+                                                 verify_u32(blob.size())));
+    hdr->l15TagOffset = savedL15TagOffset;
+    hdr->l15TagCount = savedL15TagCount;
+    hdr->l15TagBits = savedL15TagBits;
+    hdr->l15TagOverlapBits = savedL15TagOverlapBits;
+    hdr->l15MaskTableOffset = savedL15MaskTableOffset;
+    hdr->l15MaskCount = savedL15MaskCount;
     EXPECT_TRUE(HaoRuntimeValidateLayoutForTest(blob.get(),
                                                 verify_u32(blob.size())));
 }

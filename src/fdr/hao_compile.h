@@ -214,13 +214,19 @@ struct HAODotGroupBuild {
 struct HAOCompileArtifacts {
     const char *selectorName = "unknown";
     u64a bextMask = 0;
+    u64a l15TagMask = 0;
     u32 hashMode = HAO_LAYOUT_HASH_BEXT;
+    u32 l15TagBits = 0;
+    u32 l15TagOverlapBits = 0;
+    u32 l15TaggedEntries = 0;
     std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> dotVector = {};
     std::vector<HAOBitSelector> selectors;
     std::vector<HAOCompiledRulePlan> plans;
     HAOCompileSummary summary;
     HAOHashBuild hash;
     std::vector<HAODotGroupBuild> dotGroups;
+    std::vector<u16> l15Tags;
+    std::vector<u64a> l15TagMasks;
     std::vector<HAOCompileRuleMeta> meta;
 };
 

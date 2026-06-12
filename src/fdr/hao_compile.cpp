@@ -29,7 +29,7 @@ namespace ue2 {
 
 static_assert(sizeof(HAORuntimeL2Check) == HAO_RUNTIME_L2_CHECK_ALIGN,
               "HAO L2 check must stay one aligned cache line");
-static_assert(sizeof(HAORuntimeHeader) == 64U,
+static_assert(sizeof(HAORuntimeHeader) == 88U,
               "HAO runtime header must stay compact to keep table offsets stable");
 static_assert(HAO_LAYOUT_HASH_BEXT == HAO_RUNTIME_HASH_BEXT,
               "compile/runtime HAO BEXT hash ids must match");
@@ -1062,6 +1062,295 @@ void haoBuildTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
     out->valid = true;
 }
 
+static really_inline
+u32 haoPrimaryOffset(u32 encoded) {
+    return encoded & HAO_LAYOUT_L1_OFFSET_MASK;
+}
+
+static really_inline
+u32 haoPrimaryCount(u32 encoded) {
+    return encoded >> HAO_LAYOUT_L1_COUNT_SHIFT;
+}
+
+template <class Fn>
+static
+void haoForEachPrimaryL2Entry(const HAOHashBuild &hash, const Fn &fn) {
+    for (const u32 encoded : hash.primary.offsets) {
+        const u32 offset = haoPrimaryOffset(encoded);
+        const u32 count = haoPrimaryCount(encoded);
+
+        if (!offset || !count) {
+            continue;
+        }
+        for (u32 n = 0; n < count; n++) {
+            const u32 off = offset + n;
+            if (off >= hash.l2Check.size() || off >= hash.l2Meta.size()) {
+                break;
+            }
+            fn(off);
+        }
+    }
+}
+
+static
+bool haoEntryBitStable(const HAOL2Check &check, const HAOL2Meta &meta,
+                       u32 bit) {
+    const u64a bitMask = 1ULL << bit;
+    bool haveTag = false;
+    u32 tag = 0;
+
+    for (u32 slot = 0; slot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY; slot++) {
+        if (meta.ruleIndex[slot] == HAO_INVALID_RULE_INDEX) {
+            continue;
+        }
+        if ((check.mask[slot] & bitMask) != bitMask) {
+            return false;
+        }
+        const u32 slotTag = check.rule[slot] & bitMask ? 1U : 0U;
+        if (!haveTag) {
+            tag = slotTag;
+            haveTag = true;
+        } else if (tag != slotTag) {
+            return false;
+        }
+    }
+
+    return haveTag;
+}
+
+static
+bool haoEntryTagForMask(const HAOL2Check &check, const HAOL2Meta &meta,
+                        u64a mask, u32 *tagOut) {
+    bool haveTag = false;
+    u32 tag = 0;
+
+    assert(tagOut);
+    if (!mask) {
+        return false;
+    }
+
+    for (u32 slot = 0; slot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY; slot++) {
+        if (meta.ruleIndex[slot] == HAO_INVALID_RULE_INDEX) {
+            continue;
+        }
+        if ((check.mask[slot] & mask) != mask) {
+            return false;
+        }
+        const u32 slotTag =
+            (u32)pext64(check.rule[slot], mask) & HAO_L15_TAG_VALUE_MASK;
+        if (!haveTag) {
+            tag = slotTag;
+            haveTag = true;
+        } else if (tag != slotTag) {
+            return false;
+        }
+    }
+
+    if (!haveTag) {
+        return false;
+    }
+
+    *tagOut = tag;
+    return true;
+}
+
+static
+bool haoBuildL15TagMaskTable(const HAOCompileArtifacts &artifacts,
+                             std::vector<u64a> *masksOut,
+                             u32 *maxOverlapOut) {
+#if HAO_L15_TAG
+    struct Candidate {
+        u32 bit = 0;
+        u32 score = 0;
+        bool overlapsPrimary = false;
+    };
+
+    std::array<u32, HAO_LAYOUT_BYTES_PER_RULE_SLOT * 8U> scores = {};
+    std::vector<Candidate> nonOverlap;
+    std::vector<Candidate> overlap;
+
+    assert(masksOut);
+    assert(maxOverlapOut);
+    masksOut->clear();
+    *maxOverlapOut = 0;
+
+    if (HAO_L15_TAG_BITS != 8U || artifacts.hashMode != HAO_LAYOUT_HASH_BEXT ||
+        !artifacts.hash.valid || artifacts.hash.l2Check.size() !=
+            artifacts.hash.l2Meta.size()) {
+        return false;
+    }
+
+    haoForEachPrimaryL2Entry(artifacts.hash, [&](u32 offset) {
+        const auto &check = artifacts.hash.l2Check[offset];
+        const auto &meta = artifacts.hash.l2Meta[offset];
+        for (u32 bit = 0; bit < scores.size(); bit++) {
+            if (haoEntryBitStable(check, meta, bit)) {
+                scores[bit]++;
+            }
+        }
+    });
+
+    for (u32 bit = 0; bit < scores.size(); bit++) {
+        if (!scores[bit]) {
+            continue;
+        }
+        Candidate c;
+        c.bit = bit;
+        c.score = scores[bit];
+        c.overlapsPrimary = artifacts.bextMask & (1ULL << bit);
+        (c.overlapsPrimary ? overlap : nonOverlap).push_back(c);
+    }
+
+    auto byScore = [](const Candidate &a, const Candidate &b) {
+        if (a.score != b.score) {
+            return a.score > b.score;
+        }
+        return a.bit < b.bit;
+    };
+    std::sort(nonOverlap.begin(), nonOverlap.end(), byScore);
+    std::sort(overlap.begin(), overlap.end(), byScore);
+
+    auto addMask = [&](u32 start) {
+        u64a mask = 0;
+        u32 selected = 0;
+        u32 overlapBits = 0;
+
+        for (u32 pass = 0; pass < 2 && selected < HAO_L15_TAG_BITS; pass++) {
+            const u32 begin = pass ? 0 : start;
+            const u32 end = pass ? start : verify_u32(nonOverlap.size());
+            for (u32 i = begin; i < end && selected < HAO_L15_TAG_BITS; i++) {
+                const u64a bit = 1ULL << nonOverlap[i].bit;
+                if (mask & bit) {
+                    continue;
+                }
+                mask |= bit;
+                selected++;
+            }
+        }
+
+        if (selected < HAO_L15_TAG_MIN_NEW_BITS) {
+            return;
+        }
+
+        for (u32 i = 0; i < overlap.size() &&
+                    selected < HAO_L15_TAG_BITS &&
+                    overlapBits < HAO_L15_TAG_MAX_OVERLAP_BITS; i++) {
+            const u64a bit = 1ULL << overlap[i].bit;
+            if (mask & bit) {
+                continue;
+            }
+            mask |= bit;
+            selected++;
+            overlapBits++;
+        }
+
+        if (selected != HAO_L15_TAG_BITS ||
+            popcount64(mask & artifacts.bextMask) != overlapBits) {
+            return;
+        }
+        if (std::find(masksOut->begin(), masksOut->end(), mask) !=
+            masksOut->end()) {
+            return;
+        }
+        masksOut->push_back(mask);
+        *maxOverlapOut = std::max(*maxOverlapOut, overlapBits);
+    };
+
+    const u32 maxStarts = verify_u32(std::min<size_t>(
+        nonOverlap.size(), HAO_L15_TAG_MAX_MASKS * 2U));
+    for (u32 start = 0; start < maxStarts &&
+                        masksOut->size() < HAO_L15_TAG_MAX_MASKS; start++) {
+        addMask(start);
+    }
+
+    return !masksOut->empty();
+#else
+    (void)artifacts;
+    (void)masksOut;
+    (void)maxOverlapOut;
+    return false;
+#endif
+}
+
+static
+void haoBuildL15Tags(HAOCompileArtifacts *artifacts) {
+    u32 overlapBits = 0;
+    u32 taggedEntries = 0;
+    std::vector<u64a> masks;
+
+    assert(artifacts);
+    artifacts->l15TagMask = 0;
+    artifacts->l15TagBits = 0;
+    artifacts->l15TagOverlapBits = 0;
+    artifacts->l15TaggedEntries = 0;
+    artifacts->l15Tags.clear();
+    artifacts->l15TagMasks.clear();
+
+    if (!haoBuildL15TagMaskTable(*artifacts, &masks, &overlapBits)) {
+        return;
+    }
+
+    std::vector<std::array<u32, HAO_L15_TAG_VALUE_MASK + 1U>> tagFreq(
+        masks.size());
+    for (auto &freq : tagFreq) {
+        freq.fill(0);
+    }
+    haoForEachPrimaryL2Entry(artifacts->hash, [&](u32 offset) {
+        for (u32 maskId = 0; maskId < masks.size(); maskId++) {
+            u32 tag = 0;
+            if (haoEntryTagForMask(artifacts->hash.l2Check[offset],
+                                   artifacts->hash.l2Meta[offset],
+                                   masks[maskId], &tag)) {
+                tagFreq[maskId][tag & HAO_L15_TAG_VALUE_MASK]++;
+            }
+        }
+    });
+
+    artifacts->l15Tags.assign(artifacts->hash.l2Check.size(), 0);
+    haoForEachPrimaryL2Entry(artifacts->hash, [&](u32 offset) {
+        u32 bestMaskId = verify_u32(masks.size());
+        u32 bestTag = 0;
+        u32 bestFreq = ~0U;
+        for (u32 maskId = 0; maskId < masks.size(); maskId++) {
+            u32 tag = 0;
+            if (!haoEntryTagForMask(artifacts->hash.l2Check[offset],
+                                    artifacts->hash.l2Meta[offset],
+                                    masks[maskId], &tag)) {
+                continue;
+            }
+
+            const u32 freq = tagFreq[maskId][tag & HAO_L15_TAG_VALUE_MASK];
+            if (freq < bestFreq) {
+                bestFreq = freq;
+                bestTag = tag;
+                bestMaskId = maskId;
+            }
+        }
+
+        if (bestMaskId >= masks.size()) {
+            return;
+        }
+
+        artifacts->l15Tags[offset] =
+            verify_u16(HAO_L15_TAG_VALID |
+                       ((bestMaskId << HAO_L15_TAG_MASK_ID_SHIFT) &
+                        HAO_L15_TAG_MASK_ID_MASK) |
+                       (bestTag & HAO_L15_TAG_VALUE_MASK));
+        taggedEntries++;
+    });
+
+    if (!taggedEntries) {
+        artifacts->l15Tags.clear();
+        return;
+    }
+
+    artifacts->l15TagMask = masks.front();
+    artifacts->l15TagBits = HAO_L15_TAG_BITS;
+    artifacts->l15TagOverlapBits = overlapBits;
+    artifacts->l15TaggedEntries = taggedEntries;
+    artifacts->l15TagMasks = std::move(masks);
+}
+
 // Build the BEXT mask used by the runtime extractor.
 template <class ArtifactsT>
 static
@@ -1153,6 +1442,14 @@ void dumpExtractDescriptor(const ArtifactsT &artifacts) {
     } else {
         printf(" bextMask=0x%llx\n",
                (unsigned long long)artifacts.bextMask);
+        if (artifacts.l15TagBits) {
+            printf("[HAO][L1.5Tag] mask=0x%016llx bits=%u overlapBits=%u "
+                   "taggedEntries=%u tableEntries=%zu maskCount=%zu\n",
+                   (unsigned long long)artifacts.l15TagMask,
+                   artifacts.l15TagBits, artifacts.l15TagOverlapBits,
+                   artifacts.l15TaggedEntries, artifacts.l15Tags.size(),
+                   artifacts.l15TagMasks.size());
+        }
     }
 }
 
@@ -1555,6 +1852,16 @@ void dumpHAOSummary(const ArtifactsT &artifacts) {
     } else {
         HAO_SUMMARY_FMT("bextMask(runtime)",   "0x%016llx",
                         (unsigned long long)artifacts.bextMask);
+        HAO_SUMMARY_FMT("l15TagMask",          "0x%016llx",
+                        (unsigned long long)artifacts.l15TagMask);
+        HAO_SUMMARY_FMT("l15TagBits",          "%u",
+                        artifacts.l15TagBits);
+        HAO_SUMMARY_FMT("l15TagOverlapBits",   "%u",
+                        artifacts.l15TagOverlapBits);
+        HAO_SUMMARY_FMT("l15TagEntries",       "%u",
+                        artifacts.l15TaggedEntries);
+        HAO_SUMMARY_FMT("l15MaskCount",        "%zu",
+                        artifacts.l15TagMasks.size());
     }
     HAO_SUMMARY_FMT("keyBits", "%u", artifacts.hash.keyBits);
     HAO_SUMMARY_FMT("selectorCount", "%zu", artifacts.selectors.size());
@@ -2667,6 +2974,7 @@ bool haoCompileCore(const std::vector<hwlmLiteral> &lits,
         return false;
     }
     haoBuildTables(artifacts->plans, keyBits, &artifacts->hash);
+    haoBuildL15Tags(artifacts);
     haoBuildMeta(lits, &artifacts->meta);
     return true;
 }
@@ -3741,6 +4049,16 @@ bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
         artifacts.hash.l2Meta.size();
     const size_t ruleMetaBytes =
         sizeof(HAORuntimeRuleMeta) * artifacts.meta.size();
+    const bool haveL15Tags =
+        artifacts.hashMode == HAO_LAYOUT_HASH_BEXT && artifacts.l15TagMask &&
+        artifacts.l15TagBits == HAO_L15_TAG_BITS &&
+        artifacts.l15Tags.size() == l2EntryCount &&
+        !artifacts.l15TagMasks.empty() &&
+        artifacts.l15TagMasks.size() <= HAO_L15_TAG_MAX_MASKS;
+    const size_t l15TagBytes =
+        haveL15Tags ? sizeof(u16) * artifacts.l15Tags.size() : 0;
+    const size_t l15MaskTableBytes =
+        haveL15Tags ? sizeof(u64a) * artifacts.l15TagMasks.size() : 0;
 
     size_t totalSize = ROUNDUP_N(sizeof(HAORuntimeHeader), alignof(u32));
     const u32 primaryBitmapOffset = verify_u32(totalSize);
@@ -3754,6 +4072,12 @@ bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
     totalSize += ROUNDUP_N(l2MetaBytes, alignof(u32));
     const u32 ruleMetaOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(ruleMetaBytes, alignof(u32));
+    const u32 l15TagOffset = l15TagBytes ? verify_u32(totalSize) : 0;
+    totalSize += ROUNDUP_N(l15TagBytes, alignof(u16));
+    totalSize = ROUNDUP_N(totalSize, alignof(u64a));
+    const u32 l15MaskTableOffset =
+        l15MaskTableBytes ? verify_u32(totalSize) : 0;
+    totalSize += ROUNDUP_N(l15MaskTableBytes, alignof(u64a));
 
     auto blob = make_zeroed_bytecode_ptr<u8>(totalSize, 64);
     if (!blob) {
@@ -3777,6 +4101,15 @@ bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
     hdr->l2CheckOffset = l2CheckOffset;
     hdr->l2MetaOffset = l2MetaOffset;
     hdr->ruleMetaOffset = ruleMetaOffset;
+    hdr->l15TagOffset = haveL15Tags ? l15TagOffset : 0;
+    hdr->l15TagCount = haveL15Tags ? l2EntryCount : 0;
+    hdr->l15TagBits = haveL15Tags ? artifacts.l15TagBits : 0;
+    hdr->l15TagOverlapBits = haveL15Tags
+                                 ? artifacts.l15TagOverlapBits
+                                 : 0;
+    hdr->l15MaskTableOffset = haveL15Tags ? l15MaskTableOffset : 0;
+    hdr->l15MaskCount =
+        haveL15Tags ? verify_u32(artifacts.l15TagMasks.size()) : 0;
 
     u8 *base = blob.get();
     if (primaryBitmapBytes) {
@@ -3819,6 +4152,13 @@ bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
         dst.flags = srcMeta.flags;
         dst.reserved = 0;
         dst.groups = srcMeta.groups;
+    }
+    if (l15TagBytes) {
+        memcpy(base + l15TagOffset, artifacts.l15Tags.data(), l15TagBytes);
+    }
+    if (l15MaskTableBytes) {
+        memcpy(base + l15MaskTableOffset, artifacts.l15TagMasks.data(),
+               l15MaskTableBytes);
     }
     return blob;
 }
@@ -3911,6 +4251,12 @@ bytecode_ptr<u8> haoBuildDotGroupBlob(
     hdr->l2CheckOffset = 0;
     hdr->l2MetaOffset = 0;
     hdr->ruleMetaOffset = ruleMetaOffset;
+    hdr->l15TagOffset = 0;
+    hdr->l15TagCount = 0;
+    hdr->l15TagBits = 0;
+    hdr->l15TagOverlapBits = 0;
+    hdr->l15MaskTableOffset = 0;
+    hdr->l15MaskCount = 0;
 
     auto *descOut =
         reinterpret_cast<HAORuntimeDotGroupDesc *>(base + groupDescOffset);

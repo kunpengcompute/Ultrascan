@@ -9,7 +9,7 @@
 #endif
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 25U
+#define HAO_RUNTIME_VERSION 27U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_L1_OFFSET_BITS 22U
 #define HAO_RUNTIME_L1_OFFSET_MASK ((1U << HAO_RUNTIME_L1_OFFSET_BITS) - 1U)
@@ -29,6 +29,30 @@
 #define HAO_BATCH_FALLBACK_WIDTH 4U
 #define HAO_BATCH_MAX_WIDTH 32U
 #define HAO_BITMAP_GROUPED_BYTES 4U
+
+/* Experimental L1.5 tag filter. This is checked after an L1 hit and before
+ * L2 verification, so the secondary BEXT is only paid for candidate lanes. */
+#ifndef HAO_L15_TAG
+#define HAO_L15_TAG 0
+#endif
+
+#ifndef HAO_L15_TAG_BITS
+#define HAO_L15_TAG_BITS 8U
+#endif
+
+#ifndef HAO_L15_TAG_MAX_OVERLAP_BITS
+#define HAO_L15_TAG_MAX_OVERLAP_BITS 2U
+#endif
+
+#ifndef HAO_L15_TAG_MIN_NEW_BITS
+#define HAO_L15_TAG_MIN_NEW_BITS 6U
+#endif
+
+#define HAO_L15_TAG_VALID 0x8000U
+#define HAO_L15_TAG_MASK_ID_SHIFT 8U
+#define HAO_L15_TAG_MASK_ID_MASK 0x1f00U
+#define HAO_L15_TAG_VALUE_MASK 0x00ffU
+#define HAO_L15_TAG_MAX_MASKS 32U
 
 /* Shared HAO tuning knobs used by compile-time and runtime code paths. */
 /* These remain part of the public HAO contract for the HAO-only path. */
@@ -71,6 +95,12 @@ struct HAORuntimeHeader {
     u32 l2CheckOffset;
     u32 l2MetaOffset;
     u32 ruleMetaOffset;
+    u32 l15TagOffset;
+    u32 l15TagCount;
+    u32 l15TagBits;
+    u32 l15TagOverlapBits;
+    u32 l15MaskTableOffset;
+    u32 l15MaskCount;
 };
 
 struct HAORuntimeDotGroupDesc {
@@ -121,6 +151,8 @@ struct HAORuntimeStats {
     u64a verifierEntryHits;
     u64a verifierSlotHits;
     u64a encodedGroupRejects;
+    u64a l15TagChecks;
+    u64a l15TagRejects;
     u64a callbackReports;
     u64a l2RangeEntryBucketsEq1;
     u64a l2RangeEntryBuckets2To4;
