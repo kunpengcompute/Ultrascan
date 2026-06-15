@@ -735,6 +735,12 @@ static void haoDumpRuntimeStats(void) {
     HAO_STAT_FMT("blockCalls(分块处理次数)",                  "%llu", (unsigned long long)g_haoStats.blockCalls);
     HAO_STAT_FMT("blockLanes(分块总lane数)",                  "%llu", (unsigned long long)g_haoStats.blockLanes);
     HAO_STAT_FMT("primaryProbeLanes(L1探测lane数)",           "%llu", (unsigned long long)g_haoStats.primaryProbeLanes);
+    HAO_STAT_FMT("primaryBitmapHitLanes(bitmap命中lane数)",   "%llu", (unsigned long long)g_haoStats.primaryBitmapHitLanes);
+    HAO_STAT_FMT("bitmapHitPct(bitmap命中率)",                "%.5f",
+        haoStatsPct(g_haoStats.primaryBitmapHitLanes, g_haoStats.primaryProbeLanes));
+    HAO_STAT_FMT("primaryAliasRejects(bitmap别名拒绝数)",     "%llu", (unsigned long long)g_haoStats.primaryAliasRejects);
+    HAO_STAT_FMT("primaryAliasRejectPct(bitmap别名拒绝率)",   "%.5f",
+        haoStatsPct(g_haoStats.primaryAliasRejects, g_haoStats.primaryBitmapHitLanes));
     HAO_STAT_FMT("primaryActiveLanes(L1命中lane数)",          "%llu", (unsigned long long)g_haoStats.primaryActiveLanes);
     HAO_STAT_FMT("activePct(L1命中率)",                       "%.5f",
         haoStatsPct(g_haoStats.primaryActiveLanes, g_haoStats.primaryProbeLanes));
@@ -1824,14 +1830,10 @@ svuint32_t haoRawKeyPairDot(svuint8_t vrow0, svuint8_t vrow1,
                             svuint16_t vdot, u32 keyMask) {
     const svbool_t pg64 = svptrue_b64();
     const svuint64_t zero = svdup_n_u64(0U);
-    const svuint64_t keys0 =
-        svand_n_u64_x(pg64,
-                      svdot_u64(zero, svreinterpret_u16_u8(vrow0), vdot),
-                      keyMask);
-    const svuint64_t keys1 =
-        svand_n_u64_x(pg64,
-                      svdot_u64(zero, svreinterpret_u16_u8(vrow1), vdot),
-                      keyMask);
+    const svuint64_t keys0 = svand_n_u64_x(pg64, 
+        svdot_u64(zero, svreinterpret_u16_u8(vrow0), vdot), keyMask);
+    const svuint64_t keys1 = svand_n_u64_x(pg64, 
+        svdot_u64(zero, svreinterpret_u16_u8(vrow1), vdot), keyMask);
     return svqxtnt_u64(svqxtnb_u64(keys0), keys1);
 }
 
@@ -1846,13 +1848,32 @@ svuint32_t haoRawKeyPair(svuint8_t vrow0, svuint8_t vrow1,
 }
 
 static really_inline
+svuint32_t haoBitmapKeyVec(svbool_t pg, svuint32_t vkeys) {
+#if HAO_COMPRESSED_BITMAP
+    return svlsr_n_u32_x(pg, vkeys, HAO_COMPRESSED_BITMAP_SHIFT);
+#else
+    return vkeys;
+#endif
+}
+
+static really_inline
+u32 haoBitmapKeyScalar(u32 key) {
+#if HAO_COMPRESSED_BITMAP
+    return key >> HAO_COMPRESSED_BITMAP_SHIFT;
+#else
+    return key;
+#endif
+}
+
+static really_inline
 void haoPrepRawKeys(const u8 *primaryBitmap, svuint32_t vkeys,
                     svuint32_t *vbitPos, svuint32_t *vbitmapBytes) {
     const svbool_t pg32 = svptrue_b32();
     const u32 *primaryBitmapWords = (const u32 *)primaryBitmap;
-    const svuint32_t vwordIdx = svlsr_n_u32_x(pg32, vkeys, 5);
+    const svuint32_t vbitmapKeys = haoBitmapKeyVec(pg32, vkeys);
+    const svuint32_t vwordIdx = svlsr_n_u32_x(pg32, vbitmapKeys, 5);
 
-    *vbitPos = svand_n_u32_x(pg32, vkeys, 31U);
+    *vbitPos = svand_n_u32_x(pg32, vbitmapKeys, 31U);
     *vbitmapBytes = svld1_gather_u32index_u32(pg32, primaryBitmapWords,
                                               vwordIdx);
 }
@@ -1862,9 +1883,10 @@ void haoPrepRawKeysPred(const u8 *primaryBitmap, svbool_t pg,
                               svuint32_t vkeys, svuint32_t *vbitPos,
                               svuint32_t *vbitmapBytes) {
     const u32 *primaryBitmapWords = (const u32 *)primaryBitmap;
-    const svuint32_t vwordIdx = svlsr_n_u32_x(pg, vkeys, 5);
+    const svuint32_t vbitmapKeys = haoBitmapKeyVec(pg, vkeys);
+    const svuint32_t vwordIdx = svlsr_n_u32_x(pg, vbitmapKeys, 5);
 
-    *vbitPos = svand_n_u32_x(pg, vkeys, 31U);
+    *vbitPos = svand_n_u32_x(pg, vbitmapKeys, 31U);
     *vbitmapBytes = svld1_gather_u32index_u32(pg, primaryBitmapWords,
                                               vwordIdx);
 }
@@ -1899,10 +1921,27 @@ u32 haoRetireEncodedPair(const u32 *primaryHashTable, svuint32_t vlaneBits,
 
     const svuint32_t vencoded =
         svld1_gather_u32index_u32(phit, primaryHashTable, vkeys);
+#if HAO_COMPRESSED_BITMAP
+    const svbool_t pprimary = svcmpne_n_u32(phit, vencoded, 0U);
+    const svuint32_t vhitBits = svsel_u32(pprimary, vlaneBits, vzero);
+    const u32 laneMask = svorv_u32(pg32, vhitBits);
+
+    svst1_u32(pprimary, encodedPair, vencoded);
+#else
     const svuint32_t vhitBits = svsel_u32(phit, vlaneBits, vzero);
     const u32 laneMask = svorv_u32(pg32, vhitBits);
 
     svst1_u32(phit, encodedPair, vencoded);
+#endif
+
+#if HAO_ENABLE_RUNTIME_STATS
+    const svuint32_t vbitmapHitBits = svsel_u32(phit, vlaneBits, vzero);
+    const u32 bitmapLaneMask = svorv_u32(pg32, vbitmapHitBits);
+    HAO_STATS_ADD(primaryBitmapHitLanes,
+                  (u32)__builtin_popcount(bitmapLaneMask));
+    HAO_STATS_ADD(primaryAliasRejects,
+                  (u32)__builtin_popcount(bitmapLaneMask & ~laneMask));
+#endif
     return laneMask;
 }
 
@@ -1925,10 +1964,27 @@ u32 haoRetireEncodedPairPred(const u32 *primaryHashTable, svbool_t pvalid,
 
     const svuint32_t vencoded =
         svld1_gather_u32index_u32(phit, primaryHashTable, vkeys);
+#if HAO_COMPRESSED_BITMAP
+    const svbool_t pprimary = svcmpne_n_u32(phit, vencoded, 0U);
+    const svuint32_t vhitBits = svsel_u32(pprimary, vlaneBits, vzero);
+    const u32 laneMask = svorv_u32(pg32, vhitBits);
+
+    svst1_u32(pprimary, encodedPair, vencoded);
+#else
     const svuint32_t vhitBits = svsel_u32(phit, vlaneBits, vzero);
     const u32 laneMask = svorv_u32(pg32, vhitBits);
 
     svst1_u32(phit, encodedPair, vencoded);
+#endif
+
+#if HAO_ENABLE_RUNTIME_STATS
+    const svuint32_t vbitmapHitBits = svsel_u32(phit, vlaneBits, vzero);
+    const u32 bitmapLaneMask = svorv_u32(pg32, vbitmapHitBits);
+    HAO_STATS_ADD(primaryBitmapHitLanes,
+                  (u32)__builtin_popcount(bitmapLaneMask));
+    HAO_STATS_ADD(primaryAliasRejects,
+                  (u32)__builtin_popcount(bitmapLaneMask & ~laneMask));
+#endif
     return laneMask;
 }
 
@@ -2422,8 +2478,9 @@ u64a haoBuildRawWordScalar(const struct FDR_Runtime_Args *a, size_t endPos) {
 static really_inline
 int haoRawBitmapHitScalar(const u8 *primaryBitmap, u32 key) {
     const u32 *primaryBitmapWords = (const u32 *)primaryBitmap;
-    const u32 word = primaryBitmapWords[key >> 5U];
-    return word & (1U << (key & 31U));
+    const u32 bitmapKey = haoBitmapKeyScalar(key);
+    const u32 word = primaryBitmapWords[bitmapKey >> 5U];
+    return word & (1U << (bitmapKey & 31U));
 }
 
 static really_inline
@@ -2469,6 +2526,7 @@ int haoRunRawTailScalar(
             const u32 validMask8 = haoComputeValidMask8(a, endPos);
             const svuint64_t laneData = svdup_n_u64(rawWord);
 
+            HAO_STATS_ADD(primaryBitmapHitLanes, 1);
             if (encoded) {
                 activeCount++;
                 ctx.endPos = endPos;
@@ -2481,6 +2539,8 @@ int haoRunRawTailScalar(
                     HAO_STATS_ADD(primaryActiveLanes, activeCount);
                     return HWLM_TERMINATED;
                 }
+            } else {
+                HAO_STATS_ADD(primaryAliasRejects, 1);
             }
         }
 

@@ -9,7 +9,7 @@
 #endif
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 27U
+#define HAO_RUNTIME_VERSION 28U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_L1_OFFSET_BITS 22U
 #define HAO_RUNTIME_L1_OFFSET_MASK ((1U << HAO_RUNTIME_L1_OFFSET_BITS) - 1U)
@@ -29,6 +29,21 @@
 #define HAO_BATCH_FALLBACK_WIDTH 4U
 #define HAO_BATCH_MAX_WIDTH 32U
 #define HAO_BITMAP_GROUPED_BYTES 4U
+
+/* Experimental primary bitmap compression. A single bitmap bit represents
+ * 2^SHIFT adjacent full primary keys; the full primary table is still probed
+ * with the original key to reject compressed-bitmap aliases. */
+#ifndef HAO_COMPRESSED_BITMAP
+#define HAO_COMPRESSED_BITMAP 0
+#endif
+
+#ifndef HAO_COMPRESSED_BITMAP_SHIFT
+#define HAO_COMPRESSED_BITMAP_SHIFT 4U
+#endif
+
+#if HAO_COMPRESSED_BITMAP && HAO_COMPRESSED_BITMAP_SHIFT >= 31U
+#error "HAO_COMPRESSED_BITMAP_SHIFT must fit in a u32 key"
+#endif
 
 /* Experimental L1.5 tag filter. This is checked after an L1 hit and before
  * L2 verification, so the secondary BEXT is only paid for candidate lanes. */
@@ -143,6 +158,8 @@ struct HAORuntimeStats {
     u64a blockCalls;
     u64a blockLanes;
     u64a primaryProbeLanes;
+    u64a primaryBitmapHitLanes;
+    u64a primaryAliasRejects;
     u64a primaryActiveLanes;
     u64a encodedRangeCalls;
     u64a encodedRangeReportCalls;

@@ -31,7 +31,6 @@
 #endif
 
 #include <algorithm>
-#include <bitset>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
@@ -402,6 +401,27 @@ u32 haoSlotCount(const L2EntryT &entry) {
 }
 
 static
+u32 haoBitmapKeyForPrimaryForTest(u32 key) {
+#if HAO_COMPRESSED_BITMAP
+    return key >> HAO_COMPRESSED_BITMAP_SHIFT;
+#else
+    return key;
+#endif
+}
+
+static
+u32 haoExpectedBitmapBytesForPrimaryCountForTest(u32 primaryCount) {
+#if HAO_COMPRESSED_BITMAP
+    const u32 groupSize = 1U << HAO_COMPRESSED_BITMAP_SHIFT;
+    const u32 bitmapBits =
+        (primaryCount + groupSize - 1U) >> HAO_COMPRESSED_BITMAP_SHIFT;
+#else
+    const u32 bitmapBits = primaryCount;
+#endif
+    return (bitmapBits + 7U) / 8U;
+}
+
+static
 bool findL2SlotForRule(const HAOHashBuild &hash, u32 ruleIndex,
                        u32 *entryOut, u32 *slotOut) {
     for (u32 i = 1; i < hash.l2Meta.size(); i++) {
@@ -473,6 +493,7 @@ HAOInspectStats computeHaoInspectStats(const bytecode_ptr<u8> &blob) {
     const auto *bitmap = getHaoPrimaryBitmap(hdr);
     const auto *primary = getHaoPrimaryTable(hdr);
     const auto *l2Meta = getHaoL2MetaTable(hdr);
+    std::vector<u8> expectedBitmap(hdr->primaryBitmapSize, 0);
 
     stats.bitmapBytes = hdr->primaryBitmapSize;
     stats.totalL2Entries = hdr->l2EntryCount ? hdr->l2EntryCount - 1 : 0;
@@ -491,13 +512,19 @@ HAOInspectStats computeHaoInspectStats(const bytecode_ptr<u8> &blob) {
         if (entryCount > 1) {
             stats.multiEntryBucketCount++;
         }
+
+        const u32 bitmapKey = haoBitmapKeyForPrimaryForTest(i);
+        const u32 bitmapByte = bitmapKey / 8U;
+        EXPECT_LT(bitmapByte, expectedBitmap.size());
+        if (bitmapByte < expectedBitmap.size()) {
+            expectedBitmap[bitmapByte] |=
+                verify_u8(1U << (bitmapKey % 8U));
+        }
     }
 
-    u32 setBits = 0;
     for (u32 i = 0; i < hdr->primaryBitmapSize; i++) {
-        setBits += verify_u32(std::bitset<8>(bitmap[i]).count());
+        EXPECT_EQ(expectedBitmap[i], bitmap[i]);
     }
-    EXPECT_EQ(setBits, stats.nonEmptyL1);
 
     return stats;
 }
@@ -2999,7 +3026,7 @@ TEST(HAOCompile, HaoGlobalHashBuildsSinglePrimarySpace) {
     EXPECT_EQ(artifacts.selectors.size(), artifacts.hash.keyBits);
     EXPECT_EQ(primaryCount,
               artifacts.hash.primary.offsets.size());
-    EXPECT_EQ((primaryCount + 7U) / 8U,
+    EXPECT_EQ(haoExpectedBitmapBytesForPrimaryCountForTest(primaryCount),
               artifacts.hash.bitmap.bits.size());
     EXPECT_EQ(fastPathExpandedKeys,
               artifacts.hash.stats.totalExpandedKeysInBuckets);

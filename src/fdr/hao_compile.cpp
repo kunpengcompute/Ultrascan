@@ -177,6 +177,25 @@ u32 haoPrimaryBitmapBytes(u32 primaryCount) {
     return (primaryCount + 7U) / 8U;
 }
 
+static really_inline
+u32 haoBitmapKeyForPrimaryKey(u32 key) {
+#if HAO_COMPRESSED_BITMAP
+    return key >> HAO_COMPRESSED_BITMAP_SHIFT;
+#else
+    return key;
+#endif
+}
+
+static
+u32 haoPrimaryBitmapCountForPrimaryCount(u32 primaryCount) {
+#if HAO_COMPRESSED_BITMAP
+    const u32 groupSize = 1U << HAO_COMPRESSED_BITMAP_SHIFT;
+    return (primaryCount + groupSize - 1U) >> HAO_COMPRESSED_BITMAP_SHIFT;
+#else
+    return primaryCount;
+#endif
+}
+
 static
 void buildPrimaryBitmap(const HAOPrimaryHashTable &primaryHashTable,
                         HAOPrimaryHashBitmap *primaryHashBitmap);
@@ -1387,10 +1406,13 @@ void buildPrimaryBitmap(const HAOPrimaryHashTable &primaryHashTable,
     }
     primaryHashBitmap->bits.clear();
     const u32 primaryCount = verify_u32(primaryHashTable.offsets.size());
-    primaryHashBitmap->bits.assign(haoPrimaryBitmapBytes(primaryCount), 0);
+    const u32 bitmapCount =
+        haoPrimaryBitmapCountForPrimaryCount(primaryCount);
+    primaryHashBitmap->bits.assign(haoPrimaryBitmapBytes(bitmapCount), 0);
     for (u32 i = 0; i < primaryCount; i++) {
         if (primaryHashTable.offsets[i]) {
-            haoPrimaryBitmapSet(&primaryHashBitmap->bits, i);
+            haoPrimaryBitmapSet(&primaryHashBitmap->bits,
+                                 haoBitmapKeyForPrimaryKey(i));
         }
     }
 }
@@ -1852,6 +1874,17 @@ void dumpHAOSummary(const ArtifactsT &artifacts) {
     } else {
         HAO_SUMMARY_FMT("bextMask(runtime)",   "0x%016llx",
                         (unsigned long long)artifacts.bextMask);
+#if HAO_COMPRESSED_BITMAP
+        HAO_SUMMARY_FMT("primaryBitmapMode",   "%s",
+                        "compressed-direct");
+        HAO_SUMMARY_FMT("primaryBitmapShift",  "%u",
+                        HAO_COMPRESSED_BITMAP_SHIFT);
+#else
+        HAO_SUMMARY_FMT("primaryBitmapMode",   "%s",
+                        "full");
+#endif
+        HAO_SUMMARY_FMT("primaryBitmapBytes",  "%zu",
+                        artifacts.hash.bitmap.bits.size());
         HAO_SUMMARY_FMT("l15TagMask",          "0x%016llx",
                         (unsigned long long)artifacts.l15TagMask);
         HAO_SUMMARY_FMT("l15TagBits",          "%u",
@@ -3069,10 +3102,12 @@ static
 double haoEstimateFootprintMiB(const HAOHashStats &stats, u32 ruleCount,
                                u32 keyBits) {
     const u32 primaryCount = haoPrimaryCountForKeyBits(keyBits);
+    const u32 bitmapCount =
+        haoPrimaryBitmapCountForPrimaryCount(primaryCount);
     const u32 l2EntryCount = stats.totalL2Entries + 1U; // L2[0] is empty.
     const u64a bytes =
         (u64a)primaryCount * sizeof(u32) +
-        (u64a)haoPrimaryBitmapBytes(primaryCount) * sizeof(u8) +
+        (u64a)haoPrimaryBitmapBytes(bitmapCount) * sizeof(u8) +
         (u64a)l2EntryCount * sizeof(HAOL2Check) +
         (u64a)l2EntryCount * sizeof(HAOL2Meta) +
         (u64a)ruleCount * sizeof(HAOCompileRuleMeta);
