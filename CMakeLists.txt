@@ -51,24 +51,16 @@ else()
     set(RELEASE_BUILD FALSE)
 endif()
 
-option(HS_ENABLE_HARDENING "Enable hardening compilation and link options" OFF)
 set(HS_HARDENING_ACTIVE FALSE)
-if (HS_ENABLE_HARDENING)
-    if (RELEASE_BUILD AND CMAKE_SYSTEM_NAME MATCHES "Linux" AND
-            (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" OR
-             CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
-        set(HS_HARDENING_ACTIVE TRUE)
-        set(HS_HARDENING_COMMON_COMPILE_FLAGS "-fstack-protector -D_FORTIFY_SOURCE=2 -ftrapv")
-        set(HS_HARDENING_LIBRARY_COMPILE_FLAGS "${HS_HARDENING_COMMON_COMPILE_FLAGS} -fPIC")
-        set(HS_HARDENING_EXECUTABLE_COMPILE_FLAGS "${HS_HARDENING_COMMON_COMPILE_FLAGS} -fPIE")
-        set(HS_HARDENING_SHARED_LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -s")
-        set(HS_HARDENING_EXECUTABLE_LINK_FLAGS "${HS_HARDENING_SHARED_LINK_FLAGS} -pie")
-        message(STATUS "Hardening compilation options enabled")
-    else()
-        message(WARNING "Hardening requested but only supported for Linux release builds with GCC/Clang")
-    endif()
+if (RELEASE_BUILD AND CMAKE_SYSTEM_NAME MATCHES "Linux" AND
+        (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" OR
+         CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
+    set(HS_HARDENING_ACTIVE TRUE)
+    set(HS_HARDENING_SHARED_LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -s")
+    set(HS_HARDENING_EXECUTABLE_LINK_FLAGS "${HS_HARDENING_SHARED_LINK_FLAGS}")
+    message(STATUS "Hardening link options enabled")
 else()
-    message(STATUS "Hardening compilation options disabled")
+    message(STATUS "Hardening link options disabled")
 endif()
 
 function(hs_append_target_property target property flags)
@@ -86,20 +78,12 @@ function(hs_append_target_property target property flags)
     endif()
 endfunction()
 
-function(hs_harden_library_target target)
-    hs_append_target_property(${target} COMPILE_FLAGS
-        "${HS_HARDENING_LIBRARY_COMPILE_FLAGS}")
-endfunction()
-
 function(hs_harden_shared_target target)
-    hs_harden_library_target(${target})
     hs_append_target_property(${target} LINK_FLAGS
         "${HS_HARDENING_SHARED_LINK_FLAGS}")
 endfunction()
 
 function(hs_harden_executable_target target)
-    hs_append_target_property(${target} COMPILE_FLAGS
-        "${HS_HARDENING_EXECUTABLE_COMPILE_FLAGS}")
     hs_append_target_property(${target} LINK_FLAGS
         "${HS_HARDENING_EXECUTABLE_LINK_FLAGS}")
 endfunction()
@@ -400,7 +384,7 @@ CHECK_CXX_COMPILER_FLAG(-fvisibility=hidden HAS_CXX_HIDDEN)
 # are we using libc++
 CHECK_CXX_SYMBOL_EXISTS(_LIBCPP_VERSION ciso646 HAVE_LIBCPP)
 
-if (RELEASE_BUILD AND HS_HARDENING_ACTIVE)
+if (RELEASE_BUILD)
     if (HAS_C_HIDDEN)
         set(EXTRA_C_FLAGS "${EXTRA_C_FLAGS} -fvisibility=hidden")
     endif()
@@ -1484,33 +1468,6 @@ else (FAT_RUNTIME)
 
 
 endif (NOT FAT_RUNTIME)
-
-foreach (HS_LIBRARY_TARGET
-        hs_exec
-        hs_compile
-        hs_runtime
-        hs
-        hs_exec_shared
-        hs_compile_shared
-        hs_exec_core2
-        hs_exec_corei7
-        hs_exec_avx2
-        hs_exec_avx512
-        hs_exec_avx512vbmi
-        hs_exec_common
-        hs_exec_shared_core2
-        hs_exec_shared_corei7
-        hs_exec_shared_avx2
-        hs_exec_shared_avx512
-        hs_exec_shared_avx512vbmi
-        hs_exec_common_shared
-        expressionutil
-        databaseutil
-        corpusomatic
-        crosscompileutil
-        chimera)
-    hs_harden_library_target(${HS_LIBRARY_TARGET})
-endforeach()
 
 foreach (HS_EXECUTABLE_TARGET
         hsdump
