@@ -261,8 +261,26 @@ else()
     if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
         set(EXTRA_C_FLAGS "${EXTRA_C_FLAGS} -fsigned-char")
         set(EXTRA_CXX_FLAGS "${EXTRA_CXX_FLAGS} -fsigned-char")
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=armv8.6-a+crc+sve2+sve2-bitperm")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8.6-a+crc+sve2+sve2-bitperm")
+        set(HS_ARM_MARCH "" CACHE STRING
+            "AArch64 -march value used for this single-ISA build")
+        if (NOT HS_ARM_MARCH)
+            set(_HS_ARM_MARCH_DEFAULT "armv8.2-a+crc+sve")
+            if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND
+                EXISTS "/proc/cpuinfo")
+                file(READ "/proc/cpuinfo" _HS_ARM_CPUINFO)
+                if (_HS_ARM_CPUINFO MATCHES "(^|[ \n])svebitperm([ \n]|$)")
+                    set(_HS_ARM_MARCH_DEFAULT
+                        "armv8.6-a+crc+sve2+sve2-bitperm")
+                elseif (_HS_ARM_CPUINFO MATCHES "(^|[ \n])sve2([ \n]|$)")
+                    set(_HS_ARM_MARCH_DEFAULT "armv9-a+sve2")
+                endif()
+            endif()
+            set(HS_ARM_MARCH "${_HS_ARM_MARCH_DEFAULT}" CACHE STRING
+                "AArch64 -march value used for this single-ISA build" FORCE)
+        endif()
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=${HS_ARM_MARCH}")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=${HS_ARM_MARCH}")
+        message(STATUS "AARCH64 single-ISA build target: -march=${HS_ARM_MARCH}")
     endif()
 
     if (NOT RELEASE_BUILD)
@@ -447,7 +465,7 @@ int main(void) {
             list(GET _HS_SVE_FLAG_CANDIDATES ${_HS_SVE_IDX} _HS_SVE_FLAG)
             set(CMAKE_REQUIRED_FLAGS
                 "${_HS_ARM_REQUIRED_BASE_FLAGS} ${_HS_SVE_FLAG}")
-            set(_HS_SVE_TEST_VAR "HS_SVE_TEST_${_HS_SVE_IDX}")
+            set(_HS_SVE_TEST_VAR "HS_TOOLCHAIN_SVE_TEST_${_HS_SVE_IDX}")
             CHECK_C_SOURCE_COMPILES("${_HS_SVE_TEST_SOURCE}" ${_HS_SVE_TEST_VAR})
             if (${_HS_SVE_TEST_VAR})
                 set(HS_BUILD_HAVE_SVE TRUE)
@@ -464,7 +482,7 @@ int main(void) {
             list(GET _HS_SVE2_FLAG_CANDIDATES ${_HS_SVE2_IDX} _HS_SVE2_FLAG)
             set(CMAKE_REQUIRED_FLAGS
                 "${_HS_ARM_REQUIRED_BASE_FLAGS} ${_HS_SVE2_FLAG}")
-            set(_HS_SVE2_TEST_VAR "HS_SVE2_TEST_${_HS_SVE2_IDX}")
+            set(_HS_SVE2_TEST_VAR "HS_TOOLCHAIN_SVE2_TEST_${_HS_SVE2_IDX}")
             CHECK_C_SOURCE_COMPILES("${_HS_SVE2_TEST_SOURCE}" ${_HS_SVE2_TEST_VAR})
             if (${_HS_SVE2_TEST_VAR})
                 set(HS_BUILD_HAVE_SVE2 TRUE)
@@ -487,7 +505,7 @@ int main(void) {
             set(CMAKE_REQUIRED_FLAGS
                 "${_HS_ARM_REQUIRED_BASE_FLAGS} ${_HS_SVEBITPERM_FLAG}")
             set(_HS_SVEBITPERM_TEST_VAR
-                "HS_SVEBITPERM_TEST_${_HS_SVEBITPERM_IDX}")
+                "HS_TOOLCHAIN_SVEBITPERM_TEST_${_HS_SVEBITPERM_IDX}")
             CHECK_C_SOURCE_COMPILES("${_HS_SVEBITPERM_TEST_SOURCE}"
                                     ${_HS_SVEBITPERM_TEST_VAR})
             if (${_HS_SVEBITPERM_TEST_VAR})
@@ -509,21 +527,21 @@ int main(void) {
     set(CMAKE_REQUIRED_FLAGS "${_HS_ARM_REQUIRED_FLAGS_SAVED}")
 
     if (HS_BUILD_HAVE_SVE)
-        message(STATUS "Building with ARM SVE toolchain support (${HS_SVE_C_FLAGS})")
+        message(STATUS "ARM toolchain can compile SVE code paths (${HS_SVE_C_FLAGS})")
     else()
-        message(STATUS "Building without ARM SVE toolchain support")
+        message(STATUS "ARM toolchain cannot compile SVE code paths")
     endif()
 
     if (HS_BUILD_HAVE_SVE2)
-        message(STATUS "Building with ARM SVE2 toolchain support (${HS_SVE2_C_FLAGS})")
+        message(STATUS "ARM toolchain can compile SVE2 code paths (${HS_SVE2_C_FLAGS})")
     else()
-        message(STATUS "Building without ARM SVE2 toolchain support")
+        message(STATUS "ARM toolchain cannot compile SVE2 code paths")
     endif()
 
     if (HS_BUILD_HAVE_SVEBITPERM)
-        message(STATUS "Building with ARM SVE2 BitPerm toolchain support (${HS_SVEBITPERM_C_FLAGS})")
+        message(STATUS "ARM toolchain can compile SVE2 BitPerm code paths (${HS_SVEBITPERM_C_FLAGS})")
     else()
-        message(STATUS "Building without ARM SVE2 BitPerm toolchain support")
+        message(STATUS "ARM toolchain cannot compile SVE2 BitPerm code paths")
     endif()
 endif()
 

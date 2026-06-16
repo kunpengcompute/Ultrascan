@@ -572,11 +572,22 @@ HAOHashPolicy haoHashPolicy(void) {
                 strcmp(env, "DOT_GROUP_DRYRUN") == 0 ||
                 strcmp(env, "dot-group-dryrun") == 0)) {
         policy = static_cast<int>(HAOHashPolicy::DOT_GROUP_DRYRUN);
+    } else if (env && *env &&
+               (strcmp(env, "bext") == 0 || strcmp(env, "BEXT") == 0 ||
+                strcmp(env, "0") == 0)) {
+        policy = static_cast<int>(HAOHashPolicy::BEXT);
     } else {
         policy = static_cast<int>(HAOHashPolicy::BEXT);
     }
 
     return static_cast<HAOHashPolicy>(policy);
+}
+
+static
+bool haoHashPolicyIsExplicit(void) {
+    const char *env = getenv("HS_HAO_HASH_MODE");
+
+    return env && *env && strcmp(env, "auto") != 0 && strcmp(env, "AUTO") != 0;
 }
 
 static
@@ -3860,7 +3871,7 @@ const char *haoFeasibilityReasonName(HAOFeasibilityReason reason) {
 }
 
 bool haoCanUseBextFastPath(const target_t &target) {
-#if defined(HS_BUILD_HAVE_SVEBITPERM)
+#if defined(__ARM_FEATURE_SVE2_BITPERM)
     return target.has_sve_bitperm();
 #else
     (void)target;
@@ -3869,7 +3880,7 @@ bool haoCanUseBextFastPath(const target_t &target) {
 }
 
 bool haoHasSveBitPermPrereq(const target_t &target) {
-#if defined(HS_BUILD_HAVE_SVEBITPERM)
+#if defined(__ARM_FEATURE_SVE2_BITPERM)
     return target.has_sve_bitperm();
 #else
     (void)target;
@@ -3877,14 +3888,16 @@ bool haoHasSveBitPermPrereq(const target_t &target) {
 #endif
 }
 
-bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
-                       HAOCompileArtifacts *artifacts,
-                       HAODumpMode dumpMode) {
+static
+bool buildHAOArtifactsWithPolicy(const std::vector<hwlmLiteral> &lits,
+                                 HAOCompileArtifacts *artifacts,
+                                 HAODumpMode dumpMode,
+                                 HAOHashPolicy hashPolicy,
+                                 const char *selectorNameOverride = nullptr) {
     if (!artifacts) {
         return false;
     }
 
-    const HAOHashPolicy hashPolicy = haoHashPolicy();
     if (hashPolicy == HAOHashPolicy::DOT_GROUP_DRYRUN) {
         haoDumpDotGroupDryRun(lits);
     }
@@ -3914,6 +3927,10 @@ bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
         }
     }
 
+    if (selectorNameOverride) {
+        artifacts->selectorName = selectorNameOverride;
+    }
+
     if (dumpMode == HAODumpMode::Full) {
         printf("[HAO][Selector] mode=%s\n", artifacts->selectorName);
         haoDumpArtifacts(lits, *artifacts);
@@ -3923,6 +3940,25 @@ bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
         dumpHAOSummary(*artifacts);
     }
     return true;
+}
+
+bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
+                       HAOCompileArtifacts *artifacts,
+                       HAODumpMode dumpMode) {
+    HAOHashPolicy hashPolicy = haoHashPolicy();
+    bool defaultMappedToDot = false;
+#if !defined(__ARM_FEATURE_SVE2_BITPERM)
+    if (hashPolicy == HAOHashPolicy::BEXT) {
+        if (haoHashPolicyIsExplicit()) {
+            return false;
+        }
+        hashPolicy = HAOHashPolicy::DOT;
+        defaultMappedToDot = true;
+    }
+#endif
+    return buildHAOArtifactsWithPolicy(lits, artifacts, dumpMode, hashPolicy,
+                                       defaultMappedToDot ? "default-auto" :
+                                                            nullptr);
 }
 
 void dumpHAOCompileStats(const HAOCompileArtifacts &artifacts) {
@@ -3993,7 +4029,9 @@ bool analyzeHAOFeasibility(const target_t &target,
     (void)target;
     return finish(HAOFeasibilityReason::ARCH_UNSUPPORTED);
 #else
-    (void)target;
+    if (!target.has_sve()) {
+        return finish(HAOFeasibilityReason::ARCH_UNSUPPORTED);
+    }
 #endif
 
     if (lits.empty()) {
@@ -4011,7 +4049,28 @@ bool analyzeHAOFeasibility(const target_t &target,
         out = tempStorage.get();
     }
 
-    if (!buildHAOArtifacts(lits, out, HAODumpMode::None)) {
+    const HAOHashPolicy requestedHashPolicy = haoHashPolicy();
+    const bool explicitHashPolicy = haoHashPolicyIsExplicit();
+    const bool canUseBext = haoCanUseBextFastPath(target);
+    HAOHashPolicy effectiveHashPolicy = requestedHashPolicy;
+    bool defaultMappedToDot = false;
+    if (!canUseBext && explicitHashPolicy &&
+        requestedHashPolicy == HAOHashPolicy::BEXT) {
+        return finish(HAOFeasibilityReason::ARCH_UNSUPPORTED);
+    }
+    if (!canUseBext && !explicitHashPolicy &&
+        requestedHashPolicy == HAOHashPolicy::BEXT) {
+        effectiveHashPolicy = HAOHashPolicy::DOT;
+        defaultMappedToDot = true;
+    }
+
+    bool built = buildHAOArtifactsWithPolicy(lits, out, HAODumpMode::None,
+                                             effectiveHashPolicy);
+    if (built && defaultMappedToDot) {
+        out->selectorName = "default-auto";
+    }
+
+    if (!built) {
         local.flags = out->hash.flags;
         if (out->hashMode == HAO_LAYOUT_HASH_BEXT && out->selectors.empty()) {
             return finish(HAOFeasibilityReason::NO_SELECTORS);

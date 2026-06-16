@@ -34,6 +34,8 @@
 #include "util/arch.h"
 
 #if defined(__aarch64__) && defined(__linux__)
+#include <stdio.h>
+#include <string.h>
 #include <sys/auxv.h>
 #if defined(__has_include)
 #if __has_include(<asm/hwcap.h>)
@@ -44,6 +46,50 @@
 
 #if !defined(_WIN32) && !defined(CPUID_H_)
 #include <cpuid.h>
+#endif
+
+#if defined(__aarch64__) && defined(__linux__)
+static
+int cpuFeatureLineHas(const char *line, const char *feature) {
+    size_t len = strlen(feature);
+    const char *pos = line;
+
+    while ((pos = strstr(pos, feature)) != NULL) {
+        char after = pos[len];
+        int before = pos == line || pos[-1] == ':' || pos[-1] == ' ' ||
+                     pos[-1] == '\t';
+        if (before &&
+            (after == '\0' || after == '\n' || after == ' ' ||
+             after == '\t')) {
+            return 1;
+        }
+        pos += len;
+    }
+
+    return 0;
+}
+
+static
+int cpuInfoHasFeature(const char *feature) {
+    FILE *f = fopen("/proc/cpuinfo", "r");
+    char line[4096];
+    int found = 0;
+
+    if (!f) {
+        return 0;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "Features", 8) == 0 &&
+            cpuFeatureLineHas(line, feature)) {
+            found = 1;
+            break;
+        }
+    }
+
+    fclose(f);
+    return found;
+}
 #endif
 
 u64a cpuid_flags(void) {
@@ -106,6 +152,17 @@ u64a cpuid_flags(void) {
                HS_CPU_FEATURES_SVE;
     }
 #endif
+
+    if (cpuInfoHasFeature("sve")) {
+        cap |= HS_CPU_FEATURES_SVE;
+    }
+    if (cpuInfoHasFeature("sve2")) {
+        cap |= HS_CPU_FEATURES_SVE2 | HS_CPU_FEATURES_SVE;
+    }
+    if (cpuInfoHasFeature("svebitperm")) {
+        cap |= HS_CPU_FEATURES_SVEBITPERM | HS_CPU_FEATURES_SVE2 |
+               HS_CPU_FEATURES_SVE;
+    }
 
 #if !defined(FAT_RUNTIME) && !defined(HS_BUILD_HAVE_SVE)
     cap &= ~(HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |

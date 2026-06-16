@@ -161,6 +161,13 @@ bool checkPlatform(const hs_platform_info *p, hs_compile_error **comp_error) {
     return true;
 }
 
+static
+u64a currentArmCpuFeatures(void) {
+    return cpuid_flags() &
+           (HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |
+            HS_CPU_FEATURES_SVEBITPERM);
+}
+
 /** \brief Convert from SOM mode to bytes of precision. */
 static
 unsigned getSomPrecision(unsigned mode) {
@@ -329,7 +336,7 @@ fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
         // 为ARM创建单独的target_info，不包含AVX2/AVX512特性
         hs_platform_info arm_platform;
         arm_platform.tune = HS_TUNE_FAMILY_GENERIC;
-        arm_platform.cpu_features = 0;  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
+        arm_platform.cpu_features = currentArmCpuFeatures();  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
         target_t arm_target_info(arm_platform);
 
         CompileContext arm_cc(isStreaming, isVectored, arm_target_info, arm_grey);
@@ -471,7 +478,7 @@ fat_hs_compile_lit_multi_int(const char *const *expressions,
         // 为ARM创建单独的target_info，不包含AVX2/AVX512特性
         hs_platform_info arm_platform;
         arm_platform.tune = HS_TUNE_FAMILY_GENERIC;
-        arm_platform.cpu_features = 0;  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
+        arm_platform.cpu_features = currentArmCpuFeatures();  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
         target_t arm_target_info(arm_platform);
 
         CompileContext arm_cc(isStreaming, isVectored, arm_target_info, arm_grey);

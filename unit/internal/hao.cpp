@@ -56,6 +56,16 @@ static constexpr u32 ENGINE_ID_NEO = 1;
 static constexpr u32 ENGINE_ID_HAO = ue2::HAO_ENGINE_ID;
 static constexpr size_t HAO_COLLISION_SAMPLE_COUNT = 1U << 20;
 
+#if defined(__ARM_FEATURE_SVE2_BITPERM)
+static constexpr bool haoCurrentBinaryHasBitPerm(void) {
+    return true;
+}
+#else
+static constexpr bool haoCurrentBinaryHasBitPerm(void) {
+    return false;
+}
+#endif
+
 struct Match {
     size_t end;
     u32 id;
@@ -1974,7 +1984,8 @@ TEST(HAOCompile, CanBuildHaoRejectsTooFewLiterals) {
         hwlmLiteral("c", false, false, 6232, HWLM_ALL_GROUPS, {}, {})
     };
 
-    EXPECT_TRUE(canBuildHAO(get_current_target(), lits, grey));
+    EXPECT_EQ(haoCurrentBinaryHasBitPerm(),
+              canBuildHAO(get_current_target(), lits, grey));
 }
 
 TEST(HAOCompile, HAOProtoBuildPrefersHaoArtifacts) {
@@ -2046,8 +2057,10 @@ TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
     EXPECT_EQ(artifacts.hash.l2Check.size(),
               hdr->l2EntryCount);
     EXPECT_EQ(artifacts.meta.size(), hdr->ruleMetaCount);
-    EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
     EXPECT_EQ(artifacts.hashMode, haoRuntimeHeaderHashMode(hdr));
+    if (artifacts.hashMode == HAO_LAYOUT_HASH_BEXT) {
+        EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
+    }
 }
 
 TEST(HAOCompile, BuildHaoGlobalBlobStoresRulePlanMeta) {
@@ -2102,8 +2115,10 @@ TEST(HAOCompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {
     const auto *bitmap = getHaoPrimaryBitmap(hdr);
 
     EXPECT_EQ(artifacts.hash.keyBits, haoRuntimeHeaderKeyBits(hdr));
-    EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
     EXPECT_EQ(artifacts.hashMode, haoRuntimeHeaderHashMode(hdr));
+    if (artifacts.hashMode == HAO_LAYOUT_HASH_BEXT) {
+        EXPECT_EQ(artifacts.bextMask, hdr->bextMask);
+    }
     for (u32 i = 0; i < hdr->primaryCount; i++) {
         EXPECT_EQ(artifacts.hash.primary.offsets[i],
                   primary[i]);
@@ -2698,11 +2713,8 @@ TEST(HAOCompile, SveBitPermPrereqRequiresBuildAndTargetSupport) {
     bitpermInfo.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |
                                HS_CPU_FEATURES_SVEBITPERM;
     target_t bitpermTarget(bitpermInfo);
-#if defined(HS_BUILD_HAVE_SVEBITPERM)
-    EXPECT_TRUE(haoHasSveBitPermPrereq(bitpermTarget));
-#else
-    EXPECT_FALSE(haoHasSveBitPermPrereq(bitpermTarget));
-#endif
+    EXPECT_EQ(haoCurrentBinaryHasBitPerm(),
+              haoHasSveBitPermPrereq(bitpermTarget));
 }
 
 TEST(HAOCompile, BextFastPathRequiresSveBitPerm) {
@@ -2719,11 +2731,8 @@ TEST(HAOCompile, BextFastPathRequiresSveBitPerm) {
     bitpermInfo.cpu_features = HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |
                                HS_CPU_FEATURES_SVEBITPERM;
     target_t bitpermTarget(bitpermInfo);
-#if defined(HS_BUILD_HAVE_SVEBITPERM)
-    EXPECT_TRUE(haoCanUseBextFastPath(bitpermTarget));
-#else
-    EXPECT_FALSE(haoCanUseBextFastPath(bitpermTarget));
-#endif
+    EXPECT_EQ(haoCurrentBinaryHasBitPerm(),
+              haoCanUseBextFastPath(bitpermTarget));
 }
 
 TEST(HAOCompile, BextMaskMatchesSelectors) {
@@ -2977,6 +2986,10 @@ TEST(HAOCompile, HaoSummaryTracksRuleCategories) {
 }
 
 TEST(HAOCompile, HaoBudgetedSelectorsKeepAllRulesFastPath) {
+    if (!haoCurrentBinaryHasBitPerm()) {
+        return;
+    }
+
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 7396, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 7397, HWLM_ALL_GROUPS, {}, {}),
@@ -3023,7 +3036,12 @@ TEST(HAOCompile, HaoGlobalHashBuildsSinglePrimarySpace) {
     }
 
     const u32 primaryCount = 1U << artifacts.hash.keyBits;
-    EXPECT_EQ(artifacts.selectors.size(), artifacts.hash.keyBits);
+    if (artifacts.hashMode == HAO_LAYOUT_HASH_BEXT) {
+        EXPECT_EQ(artifacts.selectors.size(), artifacts.hash.keyBits);
+    } else {
+        EXPECT_EQ(HAO_LAYOUT_HASH_DOT, artifacts.hashMode);
+        EXPECT_TRUE(artifacts.selectors.empty());
+    }
     EXPECT_EQ(primaryCount,
               artifacts.hash.primary.offsets.size());
     EXPECT_EQ(haoExpectedBitmapBytesForPrimaryCountForTest(primaryCount),
@@ -3132,6 +3150,10 @@ TEST(HAOCompile, HaoL2CareBitsRejectInvalidBoundaryBytes) {
 }
 
 TEST(HAOExtract, BextMatchesScalar) {
+    if (!haoCurrentBinaryHasBitPerm()) {
+        return;
+    }
+
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 700, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 701, HWLM_ALL_GROUPS, {}, {}),
@@ -3162,6 +3184,10 @@ TEST(HAOExtract, BextMatchesScalar) {
 }
 
 TEST(HAOExtract, BextHistoryBoundaryConsistency) {
+    if (!haoCurrentBinaryHasBitPerm()) {
+        return;
+    }
+
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("abcz", false, false, 710, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("YY", true, false, 711, HWLM_ALL_GROUPS, {}, {}),
