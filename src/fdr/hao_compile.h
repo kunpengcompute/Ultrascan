@@ -219,6 +219,7 @@ struct HAOCompileArtifacts {
     u32 l15TagBits = 0;
     u32 l15TagOverlapBits = 0;
     u32 l15TaggedEntries = 0;
+    u64a dotInputMask = ~0ULL;
     std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> dotVector = {};
     std::vector<HAOBitSelector> selectors;
     std::vector<HAOCompiledRulePlan> plans;

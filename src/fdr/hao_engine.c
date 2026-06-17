@@ -151,6 +151,7 @@ struct HAOHashRuntime {
     u32 mode;
     u32 keyMask;
     u64a bextMask;
+    u64a dotInputMask;
     const u16 *l15Tags;
     const u64a *l15TagMasks;
     u32 l15TagCount;
@@ -1001,6 +1002,7 @@ void haoBuildHashRuntime(const struct HAORuntimeHeader *hdr,
     hash->mode = haoRuntimeHeaderHashMode(hdr);
     hash->keyMask = haoPackedKeyMask(haoRuntimeHeaderKeyBits(hdr));
     hash->bextMask = hdr->bextMask;
+    hash->dotInputMask = hdr->dotInputMask;
     hash->l15Tags = NULL;
     hash->l15TagMasks = NULL;
     hash->l15TagCount = hdr->l15TagCount;
@@ -1535,6 +1537,7 @@ void haoBuildDotGroupRuntime(const struct HAORuntimeHeader *hdr,
     group->hash.mode = HAO_RUNTIME_HASH_DOT;
     group->hash.keyMask = haoPackedKeyMask(desc->keyBits);
     group->hash.bextMask = 0;
+    group->hash.dotInputMask = ~0ULL;
     group->hash.l15Tags = NULL;
     group->hash.l15TagMasks = NULL;
     group->hash.l15TagCount = 0;
@@ -1866,10 +1869,8 @@ static really_inline
 svuint32_t haoRawKeyPairBext(svuint8_t vrow0, svuint8_t vrow1,
                              u64a bextMask) {
 #if defined(HAO_HAVE_SVEBITPERM)
-    const svuint64_t keys0 =
-        svbext_n_u64(svreinterpret_u64_u8(vrow0), (uint64_t)bextMask);
-    const svuint64_t keys1 =
-        svbext_n_u64(svreinterpret_u64_u8(vrow1), (uint64_t)bextMask);
+    const svuint64_t keys0 = svbext_n_u64(svreinterpret_u64_u8(vrow0), (uint64_t)bextMask);
+    const svuint64_t keys1 = svbext_n_u64(svreinterpret_u64_u8(vrow1), (uint64_t)bextMask);
 
     return haoPackU64KeysToU32(keys0, keys1);
 #else
@@ -1882,13 +1883,15 @@ svuint32_t haoRawKeyPairBext(svuint8_t vrow0, svuint8_t vrow1,
 
 static really_inline
 svuint32_t haoRawKeyPairDot(svuint8_t vrow0, svuint8_t vrow1,
-                            svuint16_t vdot, u32 keyMask) {
+                            svuint16_t vdot, u64a dotInputMask,
+                            u32 keyMask) {
     const svbool_t pg64 = svptrue_b64();
     const svuint64_t zero = svdup_n_u64(0U);
-    const svuint64_t keys0 = svand_n_u64_x(pg64, 
-        svdot_u64(zero, svreinterpret_u16_u8(vrow0), vdot), keyMask);
-    const svuint64_t keys1 = svand_n_u64_x(pg64, 
-        svdot_u64(zero, svreinterpret_u16_u8(vrow1), vdot), keyMask);
+    const svuint64_t words0 = svand_n_u64_x(pg64, svreinterpret_u64_u8(vrow0), dotInputMask);
+    const svuint64_t words1 = svand_n_u64_x(pg64, svreinterpret_u64_u8(vrow1), dotInputMask);
+    const svuint64_t keys0 = svand_n_u64_x(pg64, svdot_u64(zero, svreinterpret_u16_u64(words0), vdot), keyMask);
+    const svuint64_t keys1 = svand_n_u64_x(pg64, svdot_u64(zero, svreinterpret_u16_u64(words1), vdot), keyMask);
+
     return haoPackU64KeysToU32(keys0, keys1);
 }
 
@@ -1897,7 +1900,8 @@ svuint32_t haoRawKeyPair(svuint8_t vrow0, svuint8_t vrow1,
                          const struct HAOHashRuntime *hash,
                          svuint16_t vdot) {
     if (hash->mode == HAO_RUNTIME_HASH_DOT) {
-        return haoRawKeyPairDot(vrow0, vrow1, vdot, hash->keyMask);
+        return haoRawKeyPairDot(vrow0, vrow1, vdot, hash->dotInputMask,
+                                hash->keyMask);
     }
     return haoRawKeyPairBext(vrow0, vrow1, hash->bextMask);
 }
@@ -2540,11 +2544,12 @@ int haoRawBitmapHitScalar(const u8 *primaryBitmap, u32 key) {
 static really_inline
 u32 haoHashRuntimeScalar(const struct HAOHashRuntime *hash, u64a rawWord) {
     if (hash->mode == HAO_RUNTIME_HASH_DOT) {
+        const u64a maskedWord = rawWord & hash->dotInputMask;
         u64a dot = 0;
         u32 i;
 
         for (i = 0; i < HAO_RUNTIME_DOT_VECTOR_LANES; i++) {
-            const u64a word = (rawWord >> (i * 16U)) & 0xffffU;
+            const u64a word = (maskedWord >> (i * 16U)) & 0xffffU;
             dot += word * hash->dotVector[i];
         }
         return (u32)(dot & hash->keyMask);

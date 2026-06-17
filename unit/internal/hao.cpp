@@ -573,9 +573,10 @@ u32 extractScalarKeyFromWindowForTest(const HAOCompileArtifacts &artifacts,
                         (keyBits ? ((1U << keyBits) - 1U) : 0U);
 
     if (artifacts.hashMode == HAO_LAYOUT_HASH_DOT) {
+        const u64a maskedWindow = window & artifacts.dotInputMask;
         u64a dot = 0;
         for (u32 i = 0; i < HAO_LAYOUT_DOT_VECTOR_LANES; i++) {
-            const u64a word = (window >> (i * 16U)) & 0xffffU;
+            const u64a word = (maskedWindow >> (i * 16U)) & 0xffffU;
             dot += word * artifacts.dotVector[i];
         }
         return (u32)(dot & keyMask);

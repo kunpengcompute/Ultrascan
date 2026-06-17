@@ -29,7 +29,7 @@ namespace ue2 {
 
 static_assert(sizeof(HAORuntimeL2Check) == HAO_RUNTIME_L2_CHECK_ALIGN,
               "HAO L2 check must stay one aligned cache line");
-static_assert(sizeof(HAORuntimeHeader) == 88U,
+static_assert(sizeof(HAORuntimeHeader) == 96U,
               "HAO runtime header must stay compact to keep table offsets stable");
 static_assert(HAO_LAYOUT_HASH_BEXT == HAO_RUNTIME_HASH_BEXT,
               "compile/runtime HAO BEXT hash ids must match");
@@ -64,11 +64,20 @@ static constexpr u32 HAO_BUILD_MAX_L2_ENTRIES = 1U << HAO_BUILD_L2_KEY_BITS;
 #ifndef HAO_DOT_MAX_KEY_EXPANSION
 #define HAO_DOT_MAX_KEY_EXPANSION 4096U
 #endif
+#ifndef HAO_DOT_INPUT_MASK_MAX_BITS
+#define HAO_DOT_INPUT_MASK_MAX_BITS 34U
+#endif
+#ifndef HAO_DOT_VECTOR_SEARCH_ROUNDS
+#define HAO_DOT_VECTOR_SEARCH_ROUNDS 64U
+#endif
+#ifndef HAO_DOT_INPUT_MASK_GREEDY_CANDIDATES
+#define HAO_DOT_INPUT_MASK_GREEDY_CANDIDATES 32U
+#endif
 static constexpr u64a HAO_BUILD_MAX_TOTAL_PRIMARY_FOOTPRINT =
     128ULL * 1024ULL * 1024ULL;
 static constexpr u8 HAO_BUILD_STATE_DONT_CARE = 2;
 static constexpr std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES>
-    HAO_DOT_DEFAULT_VECTOR = {{0x0031U, 0x0041U, 0x0059U, 0x0026U}};
+    HAO_DOT_DEFAULT_VECTOR = {{0x010fU, 0x043fU, 0x1105U, 0x4417U}};
 static constexpr u32 HAO_DOT_GROUP_DRYRUN_DEFAULT_MIN_KEY_BITS = 14U;
 
 struct HAOBitCandidate {
@@ -112,6 +121,16 @@ struct HAOLiteralRef {
 
 static
 bool getBitState(const hwlmLiteral &lit, u32 bitIndex, u8 *state);
+
+static
+std::vector<HAOBitCandidate> buildBitCandidates(
+    const std::vector<hwlmLiteral> &lits);
+
+static
+void haoSelectBits(const std::vector<hwlmLiteral> &lits,
+                   std::vector<HAOBitSelector> *selectors,
+                   u32 *keyBitsOut, HAOSelectorMode mode,
+                   u32 targetBits);
 
 static
 void haoLitKeyMask(const hwlmLiteral &lit,
@@ -309,7 +328,8 @@ u32 haoCeilLog2(u32 value) {
 }
 
 static
-bool haoDotByteValues(u8 ruleByte, u8 maskByte, std::vector<u8> *out) {
+bool haoDotByteValues(u8 ruleByte, u8 maskByte, u8 inputMaskByte,
+                      std::vector<u8> *out) {
     if (!out) {
         return false;
     }
@@ -318,9 +338,11 @@ bool haoDotByteValues(u8 ruleByte, u8 maskByte, std::vector<u8> *out) {
     out->reserve(maskByte == 0xffU ? 1U : 2U);
     for (u32 value = 0; value <= 0xffU; value++) {
         if (((u8)value & maskByte) == ruleByte) {
-            out->push_back(verify_u8(value));
+            out->push_back(verify_u8(value & inputMaskByte));
         }
     }
+    std::sort(out->begin(), out->end());
+    out->erase(std::unique(out->begin(), out->end()), out->end());
     return !out->empty();
 }
 
@@ -390,7 +412,7 @@ static
 HAOKeyExpansionInfo haoExpandDotKeys(
     const HAOVerifierFragment &verifier,
     const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &dotVector,
-    u32 keyBits) {
+    u64a dotInputMask, u32 keyBits) {
     HAOKeyExpansionInfo info;
     const u32 keyMask = haoKeyMaskForBits(keyBits);
     std::array<std::vector<u8>, HAO_LAYOUT_BYTES_PER_RULE_SLOT> byteValues;
@@ -405,7 +427,10 @@ HAOKeyExpansionInfo haoExpandDotKeys(
             verify_u8((verifier.ruleWord >> (byte * 8U)) & 0xffU);
         const u8 maskByte =
             verify_u8((verifier.maskWord >> (byte * 8U)) & 0xffU);
-        if (!haoDotByteValues(ruleByte, maskByte, &byteValues[byte])) {
+        const u8 inputMaskByte =
+            verify_u8((dotInputMask >> (byte * 8U)) & 0xffU);
+        if (!haoDotByteValues(ruleByte, maskByte, inputMaskByte,
+                              &byteValues[byte])) {
             return info;
         }
     }
@@ -471,6 +496,41 @@ bool haoDotVectorHasNonZeroLane(
         }
     }
     return false;
+}
+
+static
+bool haoParseDotVectorEnv(
+    std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> *dotVector) {
+    const char *env = getenv("HS_HAO_DOT_VECTOR");
+    unsigned values[HAO_LAYOUT_DOT_VECTOR_LANES] = {};
+
+    if (!dotVector || !env || !*env) {
+        return false;
+    }
+    if (sscanf(env, "%u,%u,%u,%u", &values[0], &values[1], &values[2],
+               &values[3]) != (int)HAO_LAYOUT_DOT_VECTOR_LANES) {
+        printf("[HAO][Dot] ignoring invalid HS_HAO_DOT_VECTOR=%s\n", env);
+        return false;
+    }
+    for (u32 i = 0; i < HAO_LAYOUT_DOT_VECTOR_LANES; i++) {
+        (*dotVector)[i] = verify_u16(values[i] & 0xffffU);
+    }
+    return true;
+}
+
+static
+std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> haoApplyDotInputMaskToVector(
+    const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &dotVector,
+    u64a dotInputMask) {
+    std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> masked = dotVector;
+
+    for (u32 lane = 0; lane < HAO_LAYOUT_DOT_VECTOR_LANES; lane++) {
+        const u64a laneMask = (dotInputMask >> (lane * 16U)) & 0xffffU;
+        if (!laneMask) {
+            masked[lane] = 0;
+        }
+    }
+    return masked;
 }
 
 static
@@ -814,8 +874,8 @@ static
 void haoBuildDotPlansFromRefs(
     const std::vector<HAOLiteralRef> &lits,
     const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &dotVector,
-    u32 keyBits, std::vector<HAOCompiledRulePlan> *rulePlans,
-    HAOCompileSummary *summary) {
+    u64a dotInputMask, u32 keyBits,
+    std::vector<HAOCompiledRulePlan> *rulePlans, HAOCompileSummary *summary) {
     if (!rulePlans || !summary) {
         return;
     }
@@ -835,7 +895,7 @@ void haoBuildDotPlansFromRefs(
                                    : HAORuleCategory::HAO_RULE_EXACT;
         plan.verifier = haoBuildCheck(lit, plan.category);
         plan.keyExpansion = haoExpandDotKeys(plan.verifier, dotVector,
-                                             keyBits);
+                                             dotInputMask, keyBits);
         plan.category = haoClassifyLiteral(lit, plan.keyExpansion);
 
         summary->totalLiteralBytes += litLen;
@@ -915,8 +975,8 @@ static
 void haoBuildDotPlans(
     const std::vector<hwlmLiteral> &lits,
     const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &dotVector,
-    u32 keyBits, std::vector<HAOCompiledRulePlan> *rulePlans,
-    HAOCompileSummary *summary) {
+    u64a dotInputMask, u32 keyBits,
+    std::vector<HAOCompiledRulePlan> *rulePlans, HAOCompileSummary *summary) {
     std::vector<HAOLiteralRef> refs;
     refs.reserve(lits.size());
     for (u32 i = 0; i < lits.size(); i++) {
@@ -925,7 +985,222 @@ void haoBuildDotPlans(
         ref.ruleIndex = i;
         refs.push_back(ref);
     }
-    haoBuildDotPlansFromRefs(refs, dotVector, keyBits, rulePlans, summary);
+    haoBuildDotPlansFromRefs(refs, dotVector, dotInputMask, keyBits,
+                             rulePlans, summary);
+}
+
+static
+u64a haoMaskFromSelectors(const std::vector<HAOBitSelector> &selectors) {
+    u64a mask = 0;
+    for (const auto &selector : selectors) {
+        mask |= 1ULL << haoSelectorBitIndex(selector);
+    }
+    return mask;
+}
+
+static
+bool haoDotMaskBuilds(const std::vector<hwlmLiteral> &lits,
+                      const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES>
+                          &dotVector,
+                      u64a dotInputMask) {
+    std::vector<HAOCompiledRulePlan> plans;
+    HAOCompileSummary summary;
+    const auto activeVector =
+        haoApplyDotInputMaskToVector(dotVector, dotInputMask);
+
+    if (!haoDotVectorHasNonZeroLane(activeVector)) {
+        return false;
+    }
+
+    haoBuildDotPlans(lits, activeVector, dotInputMask, HAO_LAYOUT_KEY_BITS,
+                     &plans, &summary);
+    return !summary.unsupportedRules &&
+           summary.fastPathRules == summary.totalRules &&
+           summary.maskRules == summary.maskMergedRules;
+}
+
+static
+bool haoDryRunHashStats(const std::vector<HAOCompiledRulePlan> &rulePlans,
+                        u32 keyBits, HAOHashStats *stats, u32 *flags);
+
+static
+double haoDotHashChoiceCost(const HAOCompileSummary &summary,
+                            const HAOHashStats &stats, u32 keyBits,
+                            u32 flags);
+
+static
+double haoDotInputMaskCost(
+    const std::vector<hwlmLiteral> &lits,
+    const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &dotVector,
+    u64a dotInputMask) {
+    std::vector<HAOCompiledRulePlan> plans;
+    HAOCompileSummary summary;
+    HAOHashStats stats;
+    u32 flags = 0;
+    const auto activeVector =
+        haoApplyDotInputMaskToVector(dotVector, dotInputMask);
+
+    if (!haoDotVectorHasNonZeroLane(activeVector)) {
+        return std::numeric_limits<double>::infinity();
+    }
+    haoBuildDotPlans(lits, activeVector, dotInputMask, HAO_LAYOUT_KEY_BITS,
+                     &plans, &summary);
+    if (summary.unsupportedRules ||
+        summary.fastPathRules != summary.totalRules ||
+        summary.maskRules != summary.maskMergedRules) {
+        return std::numeric_limits<double>::infinity();
+    }
+    if (!haoDryRunHashStats(plans, HAO_LAYOUT_KEY_BITS, &stats, &flags)) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    return haoDotHashChoiceCost(summary, stats, HAO_LAYOUT_KEY_BITS, flags);
+}
+
+static
+u32 haoMinLiteralLen(const std::vector<hwlmLiteral> &lits) {
+    u32 minLen = HAO_LAYOUT_BYTES_PER_RULE_SLOT;
+
+    if (lits.empty()) {
+        return 0;
+    }
+    for (const auto &lit : lits) {
+        minLen = std::min(minLen, verify_u32(lit.s.size()));
+    }
+    return minLen;
+}
+
+static
+bool haoDotUseSuffixMaskSeed(const std::vector<hwlmLiteral> &lits) {
+    const u32 minLen = haoMinLiteralLen(lits);
+
+    return minLen == 1U;
+}
+
+static
+bool haoDotBitInCommonSuffix(u32 bitIndex, u32 minLen) {
+    if (!minLen || minLen > HAO_LAYOUT_BYTES_PER_RULE_SLOT) {
+        return false;
+    }
+    const u32 byte = bitIndex / 8U;
+    const u32 suffixSearchBytes = std::min<u32>(minLen + 1U, 2U);
+    const u32 firstCommonSuffixByte =
+        HAO_LAYOUT_BYTES_PER_RULE_SLOT - suffixSearchBytes;
+
+    return byte >= firstCommonSuffixByte &&
+           byte < HAO_LAYOUT_BYTES_PER_RULE_SLOT;
+}
+
+static
+u64a haoChooseDotInputMask(
+    const std::vector<hwlmLiteral> &lits,
+    const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &dotVector,
+    u32 maxBits = HAO_DOT_INPUT_MASK_MAX_BITS) {
+    std::vector<HAOBitSelector> selectors;
+    u32 keyBits = 0;
+    const u32 minLen = haoMinLiteralLen(lits);
+    const bool suffixSeed = haoDotUseSuffixMaskSeed(lits);
+    const u32 suffixSearchBytes =
+        suffixSeed ? std::min<u32>(minLen + 1U, 2U) : minLen;
+    const u32 firstCommonSuffixByte =
+        minLen && minLen <= HAO_LAYOUT_BYTES_PER_RULE_SLOT
+            ? HAO_LAYOUT_BYTES_PER_RULE_SLOT - suffixSearchBytes
+            : HAO_LAYOUT_BYTES_PER_RULE_SLOT;
+
+    u64a mask = 0;
+    if (!suffixSeed) {
+        haoSelectBits(lits, &selectors, &keyBits, HAOSelectorMode::HASH_OPT,
+                      HAO_LAYOUT_KEY_BITS);
+        mask = haoMaskFromSelectors(selectors);
+        if (!mask) {
+            return ~0ULL;
+        }
+    }
+
+    auto candidates = buildBitCandidates(lits);
+    std::sort(candidates.begin(), candidates.end(),
+              [suffixSeed, firstCommonSuffixByte]
+              (const HAOBitCandidate &a, const HAOBitCandidate &b) {
+                  if (suffixSeed) {
+                      const u32 byteA = a.bitIndex / 8U;
+                      const u32 byteB = b.bitIndex / 8U;
+                      const bool suffixA = byteA >= firstCommonSuffixByte;
+                      const bool suffixB = byteB >= firstCommonSuffixByte;
+                      if (suffixA != suffixB) {
+                          return suffixA;
+                      }
+                  }
+                  if (a.score != b.score) {
+                      return a.score > b.score;
+                  }
+                  if (a.fixedCount != b.fixedCount) {
+                      return a.fixedCount > b.fixedCount;
+                  }
+                  if (a.ambiguousCount != b.ambiguousCount) {
+                      return a.ambiguousCount < b.ambiguousCount;
+                  }
+                  return a.bitIndex > b.bitIndex;
+              });
+    if (suffixSeed) {
+        candidates.erase(
+            std::remove_if(candidates.begin(), candidates.end(),
+                           [minLen](const HAOBitCandidate &cand) {
+                               return !haoDotBitInCommonSuffix(cand.bitIndex,
+                                                               minLen);
+                           }),
+            candidates.end());
+    }
+    if (candidates.size() > HAO_DOT_INPUT_MASK_GREEDY_CANDIDATES) {
+        candidates.resize(HAO_DOT_INPUT_MASK_GREEDY_CANDIDATES);
+    }
+
+    double currentCost = haoDotInputMaskCost(lits, dotVector, mask);
+
+    while (popcount64(mask) < maxBits) {
+        u64a bestMask = mask;
+        double bestCost = currentCost;
+        bool found = false;
+
+        if (!std::isfinite(currentCost) &&
+            haoDotVectorHasNonZeroLane(
+                haoApplyDotInputMaskToVector(dotVector, mask)) &&
+            haoDotMaskBuilds(lits, dotVector, mask)) {
+            currentCost = 0.0;
+            bestCost = currentCost;
+        }
+
+        if (popcount64(mask) >= maxBits) {
+            break;
+        }
+        for (const auto &cand : candidates) {
+            if (mask & (1ULL << cand.bitIndex)) {
+                continue;
+            }
+            if (cand.entropy <= 0.0 || cand.fixedRatio < 0.50) {
+                continue;
+            }
+
+            const u64a trial = mask | (1ULL << cand.bitIndex);
+            const double cost = haoDotInputMaskCost(lits, dotVector, trial);
+            if (!std::isfinite(cost)) {
+                continue;
+            }
+            if (!found || cost < bestCost ||
+                (!std::isfinite(bestCost) && std::isfinite(cost))) {
+                bestMask = trial;
+                bestCost = cost;
+                found = true;
+            }
+        }
+        if (!found || (std::isfinite(currentCost) &&
+                       bestCost >= currentCost)) {
+            break;
+        }
+        mask = bestMask;
+        currentCost = bestCost;
+    }
+
+    return mask;
 }
 
 static
@@ -1470,6 +1745,9 @@ void dumpExtractDescriptor(const ArtifactsT &artifacts) {
         printf(" dotVector=[%u,%u,%u,%u]\n",
                artifacts.dotVector[0], artifacts.dotVector[1],
                artifacts.dotVector[2], artifacts.dotVector[3]);
+        printf("[HAO][Extract] dotInputMask=0x%016llx bits=%u\n",
+               (unsigned long long)artifacts.dotInputMask,
+               popcount64(artifacts.dotInputMask));
     } else if (artifacts.hashMode == HAO_LAYOUT_HASH_DOT_GROUP) {
         printf(" dotGroupCount=%zu\n", artifacts.dotGroups.size());
     } else {
@@ -1774,6 +2052,7 @@ void haoDumpDebugLiteral(const ArtifactsT &artifacts) {
                    : HAORuleCategory::HAO_RULE_EXACT;
         const HAOVerifierFragment verifier = haoBuildCheck(lit, category);
         expansion = haoExpandDotKeys(verifier, artifacts.dotVector,
+                                     artifacts.dotInputMask,
                                      artifacts.hash.keyBits);
         if (!expansion.expandedKeys.empty()) {
             keyValue = expansion.expandedKeys.front().keyValue;
@@ -1808,6 +2087,10 @@ void haoDumpDebugLiteral(const ArtifactsT &artifacts) {
                  artifacts.dotVector[0], artifacts.dotVector[1],
                  artifacts.dotVector[2], artifacts.dotVector[3]);
         HAO_SUMMARY_FMT("dotVector",          "%s", vectorBuf);
+        HAO_SUMMARY_FMT("dotInputMask",       "0x%016llx",
+                        (unsigned long long)artifacts.dotInputMask);
+        HAO_SUMMARY_FMT("dotInputMaskBits",   "%u",
+                        popcount64(artifacts.dotInputMask));
         HAO_SUMMARY_FMT("firstKeyValue",      "%u", keyValue);
         HAO_SUMMARY_FMT("firstKeyValueHex",   "0x%x", keyValue);
     } else {
@@ -1879,6 +2162,10 @@ void dumpHAOSummary(const ArtifactsT &artifacts) {
                  artifacts.dotVector[0], artifacts.dotVector[1],
                  artifacts.dotVector[2], artifacts.dotVector[3]);
         HAO_SUMMARY_FMT("dotVector",           "%s", vectorBuf);
+        HAO_SUMMARY_FMT("dotInputMask",        "0x%016llx",
+                        (unsigned long long)artifacts.dotInputMask);
+        HAO_SUMMARY_FMT("dotInputMaskBits",    "%u",
+                        popcount64(artifacts.dotInputMask));
     } else if (artifacts.hashMode == HAO_LAYOUT_HASH_DOT_GROUP) {
         HAO_SUMMARY_FMT("dotGroupCount",        "%zu",
                         artifacts.dotGroups.size());
@@ -2991,6 +3278,32 @@ void haoBuildMeta(const std::vector<hwlmLiteral> &lits,
     }
 }
 
+static
+std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> haoChooseDynamicDotVector(
+    const std::vector<hwlmLiteral> &lits, u64a dotInputMask,
+    const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &fallback);
+
+struct HAODotHashChoice {
+    std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> dotVector = {};
+    u64a dotInputMask = 0;
+    HAOCompileSummary summary;
+    HAOHashStats hashStats;
+    u32 flags = 0;
+    double cost = std::numeric_limits<double>::infinity();
+    bool valid = false;
+};
+
+static
+HAODotHashChoice haoChooseDotHash(
+    const std::vector<hwlmLiteral> &lits,
+    const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &baseVector);
+
+static
+HAODotHashChoice haoEvaluateDotHashChoice(
+    const std::vector<hwlmLiteral> &lits,
+    const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &baseVector,
+    u32 maxInputMaskBits, bool allowDynamicVector = true);
+
 template <class ArtifactsT>
 static
 bool haoCompileCore(const std::vector<hwlmLiteral> &lits,
@@ -3032,16 +3345,50 @@ bool haoCompileDotCore(const std::vector<hwlmLiteral> &lits,
 
     artifacts->hashMode = HAO_LAYOUT_HASH_DOT;
     artifacts->selectorName = "dot-forced";
-    artifacts->dotVector = haoBuildDotVectorForLits(lits);
+    artifacts->dotVector = HAO_DOT_DEFAULT_VECTOR;
+    const bool forcedDotVector = haoParseDotVectorEnv(&artifacts->dotVector);
     if (!haoDotVectorHasNonZeroLane(artifacts->dotVector)) {
+        artifacts->hash.flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+        return false;
+    }
+    HAODotHashChoice dotChoice;
+    if (forcedDotVector) {
+        dotChoice = haoEvaluateDotHashChoice(lits, artifacts->dotVector,
+                                             HAO_DOT_INPUT_MASK_MAX_BITS,
+                                             false);
+    } else {
+        dotChoice = haoChooseDotHash(lits, artifacts->dotVector);
+    }
+    if (dotChoice.valid) {
+        artifacts->dotInputMask = dotChoice.dotInputMask;
+        artifacts->dotVector = dotChoice.dotVector;
+    } else {
+        artifacts->dotInputMask = haoChooseDotInputMask(lits,
+                                                       artifacts->dotVector);
+        if (!forcedDotVector) {
+            artifacts->dotVector = haoChooseDynamicDotVector(
+                lits, artifacts->dotInputMask, artifacts->dotVector);
+        }
+    }
+    if ((!haoDotVectorHasNonZeroLane(artifacts->dotVector) ||
+        !haoDotMaskBuilds(lits, artifacts->dotVector,
+                          artifacts->dotInputMask)) && !forcedDotVector) {
+        artifacts->dotVector = haoBuildDotVectorForLits(lits);
+        artifacts->dotInputMask = haoChooseDotInputMask(lits,
+                                                       artifacts->dotVector);
+    }
+    if (!haoDotVectorHasNonZeroLane(artifacts->dotVector) ||
+        !haoDotMaskBuilds(lits, artifacts->dotVector,
+                          artifacts->dotInputMask)) {
         artifacts->hash.flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
         return false;
     }
     artifacts->selectors.clear();
     artifacts->bextMask = 0;
 
-    haoBuildDotPlans(lits, artifacts->dotVector, HAO_LAYOUT_KEY_BITS,
-                     &artifacts->plans, &artifacts->summary);
+    haoBuildDotPlans(lits, artifacts->dotVector, artifacts->dotInputMask,
+                     HAO_LAYOUT_KEY_BITS, &artifacts->plans,
+                     &artifacts->summary);
     if (artifacts->summary.unsupportedRules ||
         artifacts->summary.fastPathRules != artifacts->summary.totalRules ||
         artifacts->summary.maskRules != artifacts->summary.maskMergedRules) {
@@ -3276,6 +3623,281 @@ bool haoDryRunHashStats(const std::vector<HAOCompiledRulePlan> &rulePlans,
     return true;
 }
 
+struct HAODotVectorCandidate {
+    std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> dotVector = {};
+    HAOCompileSummary summary;
+    HAOHashStats hashStats;
+    u32 flags = 0;
+    double cost = std::numeric_limits<double>::infinity();
+    bool valid = false;
+};
+
+static
+u64a haoMix64(u64a x) {
+    x ^= x >> 33U;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33U;
+    x *= 0xc4ceb9fe1a85ec53ULL;
+    x ^= x >> 33U;
+    return x;
+}
+
+static
+u64a haoDotRuleSetSeed(const std::vector<hwlmLiteral> &lits,
+                       u64a dotInputMask) {
+    u64a seed = 0x9e3779b97f4a7c15ULL ^ dotInputMask;
+
+    for (const auto &lit : lits) {
+        u64a word = 0;
+        const u32 len = std::min<u32>(verify_u32(lit.s.size()),
+                                      HAO_LAYOUT_BYTES_PER_RULE_SLOT);
+        for (u32 i = 0; i < len; i++) {
+            word |= (u64a)verify_u8(lit.s[i]) << (i * 8U);
+        }
+        seed ^= haoMix64(word ^ ((u64a)len << 56U) ^
+                         (lit.nocase ? 0xa5a5a5a5a5a5a5a5ULL : 0ULL) ^
+                         (lit.noruns ? 0x5a5a5a5a5a5a5a5aULL : 0ULL));
+        seed = haoMix64(seed + 0x9e3779b97f4a7c15ULL);
+    }
+    return seed;
+}
+
+static
+u64a haoXorshift64(u64a *state) {
+    u64a x = *state ? *state : 0x2545f4914f6cdd1dULL;
+
+    x ^= x << 13U;
+    x ^= x >> 7U;
+    x ^= x << 17U;
+    *state = x;
+    return x;
+}
+
+static
+u16 haoDotOddCoeff(u64a value) {
+    u16 coeff = verify_u16(value & 0xffffU);
+
+    coeff |= 1U;
+    if (coeff == 1U) {
+        coeff = 257U;
+    }
+    return coeff;
+}
+
+static
+bool haoAddDotVectorCandidate(
+    std::vector<std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES>> *candidates,
+    std::unordered_set<u64a> *seen,
+    const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &dotVector,
+    u64a dotInputMask) {
+    assert(candidates);
+    assert(seen);
+
+    const auto masked = haoApplyDotInputMaskToVector(dotVector, dotInputMask);
+    if (!haoDotVectorHasNonZeroLane(masked)) {
+        return false;
+    }
+    const u64a key = haoPackDotVector(masked);
+    if (!seen->insert(key).second) {
+        return false;
+    }
+    candidates->push_back(masked);
+    return true;
+}
+
+static
+std::vector<std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES>>
+haoGenerateDotVectorCandidates(const std::vector<hwlmLiteral> &lits,
+                               u64a dotInputMask) {
+    std::vector<std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES>> candidates;
+    std::unordered_set<u64a> seen;
+    u64a rng = haoDotRuleSetSeed(lits, dotInputMask);
+
+    candidates.reserve(HAO_DOT_VECTOR_SEARCH_ROUNDS + 8U);
+    haoAddDotVectorCandidate(&candidates, &seen, HAO_DOT_DEFAULT_VECTOR,
+                             dotInputMask);
+    haoAddDotVectorCandidate(&candidates, &seen,
+                             {{0x0031U, 0x0041U, 0x0059U, 0x0026U}},
+                             dotInputMask);
+    haoAddDotVectorCandidate(&candidates, &seen,
+                             {{17U, 131U, 521U, 2053U}}, dotInputMask);
+    haoAddDotVectorCandidate(&candidates, &seen,
+                             {{257U, 1031U, 4099U, 16411U}}, dotInputMask);
+    haoAddDotVectorCandidate(&candidates, &seen,
+                             {{257U, 1543U, 6151U, 24593U}}, dotInputMask);
+
+    for (u32 round = 0; round < HAO_DOT_VECTOR_SEARCH_ROUNDS; round++) {
+        std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> dotVector = {};
+        for (u32 lane = 0; lane < HAO_LAYOUT_DOT_VECTOR_LANES; lane++) {
+            const u64a mixed = haoMix64(haoXorshift64(&rng) +
+                                       ((u64a)lane << 32U) + round);
+            dotVector[lane] = haoDotOddCoeff(mixed);
+        }
+        haoAddDotVectorCandidate(&candidates, &seen, dotVector,
+                                 dotInputMask);
+    }
+
+    return candidates;
+}
+
+static
+HAODotVectorCandidate haoEvaluateDotVectorCandidate(
+    const std::vector<hwlmLiteral> &lits,
+    const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &dotVector,
+    u64a dotInputMask) {
+    HAODotVectorCandidate result;
+    std::vector<HAOCompiledRulePlan> plans;
+
+    result.dotVector = dotVector;
+    if (!haoDotVectorHasNonZeroLane(dotVector)) {
+        return result;
+    }
+    haoBuildDotPlans(lits, dotVector, dotInputMask, HAO_LAYOUT_KEY_BITS,
+                     &plans, &result.summary);
+    if (result.summary.unsupportedRules ||
+        result.summary.fastPathRules != result.summary.totalRules ||
+        result.summary.maskRules != result.summary.maskMergedRules) {
+        result.flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+        return result;
+    }
+    if (!haoDryRunHashStats(plans, HAO_LAYOUT_KEY_BITS, &result.hashStats,
+                            &result.flags)) {
+        result.flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+        return result;
+    }
+
+    result.cost = haoAutoStatsCost(result.summary, result.hashStats,
+                                   HAO_LAYOUT_KEY_BITS, result.flags);
+    result.valid = std::isfinite(result.cost);
+    return result;
+}
+
+static
+double haoDotHashChoiceCost(const HAOCompileSummary &summary,
+                            const HAOHashStats &stats, u32 keyBits,
+                            u32 flags) {
+    if (!haoCandidateStatsOk(summary, stats, flags)) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    const double expansionAvg = summary.totalRules
+                                    ? static_cast<double>(
+                                          summary.totalExpandedKeys) /
+                                          static_cast<double>(
+                                              summary.totalRules)
+                                    : 0.0;
+    const double collisionPct =
+        haoPct(stats.collisionBuckets, stats.nonEmptyPrimary);
+    const double ruleGt4Pct =
+        haoPct(stats.ruleBucketsGt4, stats.nonEmptyPrimary);
+    const double avgRules = haoAvgRulesPerBucket(stats);
+
+    return
+        haoPrimaryOccupancyPct(stats.nonEmptyPrimary, keyBits) * 15.0 +
+        collisionPct * 10.0 +
+        ruleGt4Pct * 40.0 +
+        avgRules * 20.0 +
+        expansionAvg * 0.50 +
+        haoEstimateFootprintMiB(stats, summary.totalRules, keyBits) * 0.30 +
+        static_cast<double>(stats.maxRulesPerBucket) * 0.10;
+}
+
+static
+std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> haoChooseDynamicDotVector(
+    const std::vector<hwlmLiteral> &lits, u64a dotInputMask,
+    const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &fallback) {
+    auto candidates = haoGenerateDotVectorCandidates(lits, dotInputMask);
+    HAODotVectorCandidate best;
+
+    for (const auto &candidate : candidates) {
+        HAODotVectorCandidate current =
+            haoEvaluateDotVectorCandidate(lits, candidate, dotInputMask);
+        if (!current.valid) {
+            continue;
+        }
+        if (!best.valid || current.cost < best.cost ||
+            (current.cost == best.cost &&
+             current.hashStats.collisionBuckets <
+                 best.hashStats.collisionBuckets)) {
+            best = std::move(current);
+        }
+    }
+
+    if (!best.valid) {
+        return haoApplyDotInputMaskToVector(fallback, dotInputMask);
+    }
+    return best.dotVector;
+}
+
+static
+HAODotHashChoice haoEvaluateDotHashChoice(
+    const std::vector<hwlmLiteral> &lits,
+    const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &baseVector,
+    u32 maxInputMaskBits, bool allowDynamicVector) {
+    HAODotHashChoice result;
+    std::vector<HAOCompiledRulePlan> plans;
+
+    result.dotInputMask = haoChooseDotInputMask(lits, baseVector,
+                                                maxInputMaskBits);
+    result.dotVector = allowDynamicVector
+                           ? haoChooseDynamicDotVector(lits,
+                                                       result.dotInputMask,
+                                                       baseVector)
+                           : haoApplyDotInputMaskToVector(baseVector,
+                                                          result.dotInputMask);
+    if (!haoDotVectorHasNonZeroLane(result.dotVector)) {
+        return result;
+    }
+    haoBuildDotPlans(lits, result.dotVector, result.dotInputMask,
+                     HAO_LAYOUT_KEY_BITS, &plans, &result.summary);
+    if (result.summary.unsupportedRules ||
+        result.summary.fastPathRules != result.summary.totalRules ||
+        result.summary.maskRules != result.summary.maskMergedRules) {
+        result.flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+        return result;
+    }
+    if (!haoDryRunHashStats(plans, HAO_LAYOUT_KEY_BITS, &result.hashStats,
+                            &result.flags)) {
+        result.flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+        return result;
+    }
+
+    result.cost = haoDotHashChoiceCost(result.summary, result.hashStats,
+                                       HAO_LAYOUT_KEY_BITS, result.flags);
+    result.valid = std::isfinite(result.cost);
+    return result;
+}
+
+static
+HAODotHashChoice haoChooseDotHash(
+    const std::vector<hwlmLiteral> &lits,
+    const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &baseVector) {
+    static constexpr std::array<u32, 3> CANDIDATE_MAX_BITS = {{
+        24U, 28U, HAO_DOT_INPUT_MASK_MAX_BITS
+    }};
+    HAODotHashChoice best;
+    std::unordered_set<u64a> seenMasks;
+
+    for (const u32 maxBits : CANDIDATE_MAX_BITS) {
+        HAODotHashChoice current =
+            haoEvaluateDotHashChoice(lits, baseVector, maxBits);
+        if (!current.valid) {
+            continue;
+        }
+        if (!seenMasks.insert(current.dotInputMask).second) {
+            continue;
+        }
+        if (!best.valid || current.cost < best.cost ||
+            (current.cost == best.cost &&
+             current.hashStats.collisionBuckets <
+                 best.hashStats.collisionBuckets)) {
+            best = std::move(current);
+        }
+    }
+
+    return best;
+}
+
 static
 std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES>
 haoDotVectorForKnownSuffixBytes(u32 knownBytes) {
@@ -3365,8 +3987,8 @@ HAODotGroupDryRunResult haoRunDotGroupDryRunKeyBits(
         return result;
     }
 
-    haoBuildDotPlansFromRefs(group.refs, group.dotVector, keyBits, &plans,
-                             &result.summary);
+    haoBuildDotPlansFromRefs(group.refs, group.dotVector, ~0ULL, keyBits,
+                             &plans, &result.summary);
     if (result.summary.unsupportedRules ||
         result.summary.fastPathRules != result.summary.totalRules ||
         result.summary.maskRules != result.summary.maskMergedRules) {
@@ -3669,8 +4291,9 @@ bool haoCompileDotGroupCore(const std::vector<hwlmLiteral> &lits,
         group.name = groupRef.name;
         group.knownBytes = groupRef.knownBytes;
         group.dotVector = groupRef.dotVector;
-        haoBuildDotPlansFromRefs(groupRef.refs, group.dotVector, bestKeyBits,
-                                 &group.plans, &group.summary);
+        haoBuildDotPlansFromRefs(groupRef.refs, group.dotVector, ~0ULL,
+                                 bestKeyBits, &group.plans,
+                                 &group.summary);
         if (group.summary.unsupportedRules ||
             group.summary.fastPathRules != group.summary.totalRules ||
             group.summary.maskRules != group.summary.maskMergedRules) {
@@ -4054,6 +4677,11 @@ bool analyzeHAOFeasibility(const target_t &target,
     const bool canUseBext = haoCanUseBextFastPath(target);
     HAOHashPolicy effectiveHashPolicy = requestedHashPolicy;
     bool defaultMappedToDot = false;
+
+    if (!canUseBext && lits.size() < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY) {
+        return finish(HAOFeasibilityReason::TOO_FEW_LITERALS);
+    }
+
     if (!canUseBext && explicitHashPolicy &&
         requestedHashPolicy == HAOHashPolicy::BEXT) {
         return finish(HAOFeasibilityReason::ARCH_UNSUPPORTED);
@@ -4190,6 +4818,9 @@ bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
     hdr->bextMask = artifacts.hashMode == HAO_LAYOUT_HASH_DOT
                         ? haoPackDotVector(artifacts.dotVector)
                         : artifacts.bextMask;
+    hdr->dotInputMask = artifacts.hashMode == HAO_LAYOUT_HASH_DOT
+                            ? artifacts.dotInputMask
+                            : ~0ULL;
     hdr->primaryBitmapOffset = primaryBitmapOffset;
     hdr->primaryOffset = primaryOffset;
     hdr->l2CheckOffset = l2CheckOffset;
@@ -4340,6 +4971,7 @@ bytecode_ptr<u8> haoBuildDotGroupBlob(
         artifacts.hash.stats.totalL2Entries, 1U));
     hdr->ruleMetaCount = ruleMetaCount;
     hdr->bextMask = 0;
+    hdr->dotInputMask = ~0ULL;
     hdr->primaryBitmapOffset = groupDescOffset;
     hdr->primaryOffset = 0;
     hdr->l2CheckOffset = 0;

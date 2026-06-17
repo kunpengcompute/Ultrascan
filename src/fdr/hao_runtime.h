@@ -9,7 +9,7 @@
 #endif
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 28U
+#define HAO_RUNTIME_VERSION 29U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_L1_OFFSET_BITS 22U
 #define HAO_RUNTIME_L1_OFFSET_MASK ((1U << HAO_RUNTIME_L1_OFFSET_BITS) - 1U)
@@ -105,6 +105,7 @@ struct HAORuntimeHeader {
     u32 l2EntryCount;
     u32 ruleMetaCount;
     u64a bextMask;
+    u64a dotInputMask;
     u32 primaryBitmapOffset;
     u32 primaryOffset;
     u32 l2CheckOffset;

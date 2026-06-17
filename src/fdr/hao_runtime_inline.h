@@ -179,11 +179,12 @@ u32 haoExtractKeyBext(const struct HAORuntimeHeader *hdr, u64a window) {
 static really_inline
 u32 haoExtractKeyDot(const struct HAORuntimeHeader *hdr, u64a window) {
     const u32 keyMask = haoPackedKeyMask(haoRuntimeHeaderKeyBits(hdr));
+    const u64a maskedWindow = window & hdr->dotInputMask;
     u64a dot = 0;
     u32 i;
 
     for (i = 0; i < HAO_RUNTIME_DOT_VECTOR_LANES; i++) {
-        const u64a word = (window >> (i * 16U)) & 0xffffU;
+        const u64a word = (maskedWindow >> (i * 16U)) & 0xffffU;
         dot += word * haoRuntimeHeaderDotVectorLane(hdr, i);
     }
     return (u32)(dot & keyMask);
