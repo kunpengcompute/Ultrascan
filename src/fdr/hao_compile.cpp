@@ -3202,14 +3202,59 @@ void haoSelHashOpt(const std::vector<hwlmLiteral> &lits,
 
 static
 bool haoSelFixed(std::vector<HAOBitSelector> *selectors,
-                                 u32 *keyBitsOut) {
+                 u32 *keyBitsOut, u32 targetBits) {
     if (!selectors) {
         return false;
     }
 
+    auto buildSelectorsFromMask = [selectors, keyBitsOut](u64a mask) {
+        u64a m = mask;
+
+        selectors->clear();
+        if (keyBitsOut) {
+            *keyBitsOut = 0;
+        }
+
+        while (m) {
+            const u32 bit = ctz64(m);
+            HAOBitSelector selector;
+            selector.byteOffset = verify_u8(bit / 8U);
+            selector.bitOffset = verify_u8(bit % 8U);
+            selectors->push_back(selector);
+            m &= m - 1;
+        }
+
+        finalizeBitSelectors(selectors, keyBitsOut);
+    };
+
+    const char *env = getenv("HS_HAO_BEXT_MASK");
+    if (env && *env) {
+        char *end = nullptr;
+        const u64a mask = (u64a)strtoull(env, &end, 0);
+        const u32 bitCount = popcount64(mask);
+
+        selectors->clear();
+        if (keyBitsOut) {
+            *keyBitsOut = 0;
+        }
+
+        if (end == env || *end || !mask ||
+            bitCount > HAO_LAYOUT_MAX_SELECTORS) {
+            printf("[HAO][BEXT] invalid HS_HAO_BEXT_MASK=%s "
+                   "(popcount=%u targetBits=%u)\n",
+                   env, bitCount, targetBits);
+            return true;
+        }
+        if (bitCount != targetBits) {
+            return false;
+        }
+
+        buildSelectorsFromMask(mask);
+        return true;
+    }
+
 #if HAO_FIXED_BEXT_MASK
     const u64a mask = (u64a)HAO_FIXED_BEXT_MASK;
-    u64a m = mask;
 
     selectors->clear();
     if (keyBitsOut) {
@@ -3220,19 +3265,11 @@ bool haoSelFixed(std::vector<HAOBitSelector> *selectors,
         return true;
     }
 
-    while (m) {
-        const u32 bit = ctz64(m);
-        HAOBitSelector selector;
-        selector.byteOffset = verify_u8(bit / 8U);
-        selector.bitOffset = verify_u8(bit % 8U);
-        selectors->push_back(selector);
-        m &= m - 1;
-    }
-
-    finalizeBitSelectors(selectors, keyBitsOut);
+    buildSelectorsFromMask(mask);
     return true;
 #else
     (void)keyBitsOut;
+    (void)targetBits;
     return false;
 #endif
 }
@@ -3242,7 +3279,7 @@ void haoSelectBits(const std::vector<hwlmLiteral> &lits,
                    std::vector<HAOBitSelector> *selectors,
                    u32 *keyBitsOut, HAOSelectorMode mode,
                    u32 targetBits) {
-    if (haoSelFixed(selectors, keyBitsOut)) {
+    if (haoSelFixed(selectors, keyBitsOut, targetBits)) {
         return;
     }
 

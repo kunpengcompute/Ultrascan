@@ -2123,10 +2123,26 @@ u32 haoCollectRawEncoded(const u8 *primaryBitmap,
     const svuint8_t vrow6 = svext_u8(vlo, vhi, 31);
     const svuint8_t vrow7 = vhi;
 
-    const svuint32_t vkeys01 = haoRawKeyPair(vrow0, vrow1, hash, vdot);
-    const svuint32_t vkeys23 = haoRawKeyPair(vrow2, vrow3, hash, vdot);
-    const svuint32_t vkeys45 = haoRawKeyPair(vrow4, vrow5, hash, vdot);
-    const svuint32_t vkeys67 = haoRawKeyPair(vrow6, vrow7, hash, vdot);
+    svuint32_t vkeys01;
+    svuint32_t vkeys23;
+    svuint32_t vkeys45;
+    svuint32_t vkeys67;
+
+    if (hash->mode == HAO_RUNTIME_HASH_DOT) {
+        vkeys01 = haoRawKeyPairDot(vrow0, vrow1, vdot, hash->dotInputMask,
+                                   hash->keyMask);
+        vkeys23 = haoRawKeyPairDot(vrow2, vrow3, vdot, hash->dotInputMask,
+                                   hash->keyMask);
+        vkeys45 = haoRawKeyPairDot(vrow4, vrow5, vdot, hash->dotInputMask,
+                                   hash->keyMask);
+        vkeys67 = haoRawKeyPairDot(vrow6, vrow7, vdot, hash->dotInputMask,
+                                   hash->keyMask);
+    } else {
+        vkeys01 = haoRawKeyPairBext(vrow0, vrow1, hash->bextMask);
+        vkeys23 = haoRawKeyPairBext(vrow2, vrow3, hash->bextMask);
+        vkeys45 = haoRawKeyPairBext(vrow4, vrow5, hash->bextMask);
+        vkeys67 = haoRawKeyPairBext(vrow6, vrow7, hash->bextMask);
+    }
 
     haoPrepRawKeys(primaryBitmap, vkeys01, &vbitPos01, &vbitmapBytes01);
     haoPrepRawKeys(primaryBitmap, vkeys23, &vbitPos23, &vbitmapBytes23);
@@ -2213,10 +2229,26 @@ u32 haoCollectRawTailEncoded(const u8 *primaryBitmap,
     const svuint8_t vrow6 = svext_u8(vlo, vhi, 31);
     const svuint8_t vrow7 = vhi;
 
-    const svuint32_t vkeys01 = haoRawKeyPair(vrow0, vrow1, hash, vdot);
-    const svuint32_t vkeys23 = haoRawKeyPair(vrow2, vrow3, hash, vdot);
-    const svuint32_t vkeys45 = haoRawKeyPair(vrow4, vrow5, hash, vdot);
-    const svuint32_t vkeys67 = haoRawKeyPair(vrow6, vrow7, hash, vdot);
+    svuint32_t vkeys01;
+    svuint32_t vkeys23;
+    svuint32_t vkeys45;
+    svuint32_t vkeys67;
+
+    if (hash->mode == HAO_RUNTIME_HASH_DOT) {
+        vkeys01 = haoRawKeyPairDot(vrow0, vrow1, vdot, hash->dotInputMask,
+                                   hash->keyMask);
+        vkeys23 = haoRawKeyPairDot(vrow2, vrow3, vdot, hash->dotInputMask,
+                                   hash->keyMask);
+        vkeys45 = haoRawKeyPairDot(vrow4, vrow5, vdot, hash->dotInputMask,
+                                   hash->keyMask);
+        vkeys67 = haoRawKeyPairDot(vrow6, vrow7, vdot, hash->dotInputMask,
+                                   hash->keyMask);
+    } else {
+        vkeys01 = haoRawKeyPairBext(vrow0, vrow1, hash->bextMask);
+        vkeys23 = haoRawKeyPairBext(vrow2, vrow3, hash->bextMask);
+        vkeys45 = haoRawKeyPairBext(vrow4, vrow5, hash->bextMask);
+        vkeys67 = haoRawKeyPairBext(vrow6, vrow7, hash->bextMask);
+    }
 
     {
         const svbool_t pg32 = svptrue_b32();
@@ -2676,7 +2708,6 @@ static int haoRunBatchDotGroupBlob(const struct HAORuntimeHeader *hdr,
         const svuint32_t vlaneIds67 = haoRawLaneIds(6U);
         int rt;
 
-        haoLoadRawPrev32(a, i, &rawPrev);
         haoLoadRawCurr32(a, i, blockLaneCount, &rawCurr);
 
         HAO_STATS_ADD(blockCalls, 1);
@@ -2756,7 +2787,6 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
     if (i < a->len) {
         svuint8_t rawCurr;
         const u32 blockLaneCount = (u32)(a->len - i);
-        haoLoadRawPrev32(a, i, &rawPrev);
         haoLoadRawCurr32(a, i, blockLaneCount, &rawCurr);
 
         HAO_STATS_ADD(blockCalls, 1);
