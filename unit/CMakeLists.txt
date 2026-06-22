@@ -94,6 +94,7 @@ set(unit_internal_SOURCES
     internal/depth.cpp
     internal/fdr.cpp
     internal/hao.cpp
+    internal/hao_runtime_test_impl.cpp
     internal/fdr_flood.cpp
     internal/fdr_loadval.cpp
     internal/flat_set.cpp

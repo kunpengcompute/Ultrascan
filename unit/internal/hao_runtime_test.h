@@ -1,11 +1,23 @@
 #ifndef HAO_RUNTIME_TEST_H
 #define HAO_RUNTIME_TEST_H
 
-#include "hao_runtime.h"
+#include "fdr/hao_runtime.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+struct HAORuntimeInspectSummary {
+    u32 keyBits;
+    u32 primaryCount;
+    u32 primaryBitmapSize;
+    u32 l2EntryCount;
+    u32 ruleMetaCount;
+    u32 nonEmptyPrimary;
+    u32 multiEntryBucketCount;
+    u32 maxEntriesPerKey;
+    u32 totalRulesInL2;
+};
 
 hwlm_error_t HaoEngineExecNaiveForTest(const struct FDR *fdr,
                                        const struct FDR_Runtime_Args *a,
@@ -18,18 +30,9 @@ u64a HaoRuntimeRawLaneWordForTest(const u8 *prev32, const u8 *curr32,
 int HaoRuntimeValidateLayoutForTest(const void *blob, u32 blobSize);
 int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
                                  struct HAORuntimeInspectSummary *summary);
-void HaoRuntimeResetStatsForTest(void);
-void HaoRuntimeGetStatsForTest(struct HAORuntimeStats *summary);
-int HaoRuntimeStatsEnabledForTest(void);
-hwlm_error_t HaoEngineExecBlobNaiveForTest(const void *blob, u32 blobSize,
-                                           const struct FDR_Runtime_Args *a,
-                                           hwlm_group_t control);
-hwlm_error_t HaoEngineExecBlobBatchForTest(const void *blob, u32 blobSize,
-                                           const struct FDR_Runtime_Args *a,
-                                           hwlm_group_t control);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // HAO_RUNTIME_TEST_H
+#endif

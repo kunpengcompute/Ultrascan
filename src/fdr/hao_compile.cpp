@@ -1397,6 +1397,7 @@ void haoForEachPrimaryL2Entry(const HAOHashBuild &hash, const Fn &fn) {
     }
 }
 
+#if HAO_L15_TAG
 static
 bool haoEntryBitStable(const HAOL2Check &check, const HAOL2Meta &meta,
                        u32 bit) {
@@ -1422,6 +1423,7 @@ bool haoEntryBitStable(const HAOL2Check &check, const HAOL2Meta &meta,
 
     return haveTag;
 }
+#endif
 
 static
 bool haoEntryTagForMask(const HAOL2Check &check, const HAOL2Meta &meta,

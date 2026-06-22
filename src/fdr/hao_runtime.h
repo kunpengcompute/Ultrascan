@@ -28,7 +28,6 @@
 #define HAO_RUNTIME_HASH_MODE_SHIFT 24U
 #define HAO_BATCH_FALLBACK_WIDTH 4U
 #define HAO_BATCH_MAX_WIDTH 32U
-#define HAO_BITMAP_GROUPED_BYTES 4U
 
 /* Experimental primary bitmap compression. A single bitmap bit represents
  * 2^SHIFT adjacent full primary keys; the full primary table is still probed
@@ -138,53 +137,6 @@ struct HAORuntimeRuleMeta {
     u16 flags;
     u16 reserved;
     hwlm_group_t groups;
-};
-
-/* Read-only summary returned by HAO runtime blob inspection helpers. */
-struct HAORuntimeInspectSummary {
-    u32 keyBits;
-    u32 primaryCount;
-    u32 primaryBitmapSize;
-    u32 l2EntryCount;
-    u32 ruleMetaCount;
-    u32 nonEmptyPrimary;
-    u32 multiEntryBucketCount;
-    u32 maxEntriesPerKey;
-    u32 totalRulesInL2;
-};
-
-struct HAORuntimeStats {
-    u64a scanCalls;
-    u64a scanInputBytes;
-    u64a blockCalls;
-    u64a blockLanes;
-    u64a primaryProbeLanes;
-    u64a primaryBitmapHitLanes;
-    u64a primaryAliasRejects;
-    u64a primaryActiveLanes;
-    u64a encodedRangeCalls;
-    u64a encodedRangeReportCalls;
-    u64a encodedEntriesVisited;
-    u64a verifierCalls;
-    u64a verifierEntryHits;
-    u64a verifierSlotHits;
-    u64a encodedGroupRejects;
-    u64a l15TagChecks;
-    u64a l15TagRejects;
-    u64a callbackReports;
-    u64a l2RangeEntryBucketsEq1;
-    u64a l2RangeEntryBuckets2To4;
-    u64a l2RangeEntryBucketsGt4;
-    u64a l2RangeRuleBucketsEq1;
-    u64a l2RangeRuleBuckets2To4;
-    u64a l2RangeRuleBucketsGt4;
-    u64a l2RangeCollisionBuckets;
-    u64a l2RangeTotalEntries;
-    u64a l2RangeTotalRules;
-    u64a l2RangeMinEntries;
-    u64a l2RangeMaxEntries;
-    u64a l2RangeMinRules;
-    u64a l2RangeMaxRules;
 };
 
 struct FDR;

@@ -14,7 +14,7 @@
 #include "fdr/fdr_enhanced.h"
 #include "fdr/hao_compile.h"
 #include "fdr/hao_runtime.h"
-#include "fdr/hao_runtime_test.h"
+#include "hao_runtime_test.h"
 #include "fdr/hao_runtime_inline.h"
 #include "hwlm/hwlm_internal.h"
 #include "scratch.h"
@@ -340,57 +340,19 @@ std::vector<Match> runHaoDirectInOrder(const FDR *fdr,
     return g_matches;
 }
 
-/* Blob-level direct execution helper for HAO before it is wired into generic FDR execution. */
 static
-std::vector<Match> runHaoBlobDirectInOrder(const bytecode_ptr<u8> &blob,
-                                           const std::vector<u8> &data,
-                                           hwlm_group_t groups, bool useNaive) {
-    g_matches.clear();
-
-    hs_scratch scratch = {};
-    scratch.fdr_conf = nullptr;
-
-    const FDR_Runtime_Args args = {
-        data.data(),
-        data.size(),
-        nullptr,
-        0,
-        0,
-        collectCallback,
-        &scratch,
-        nullptr,
-        0
-    };
-
-    const hwlm_error_t rv = useNaive
-                                ? HaoEngineExecBlobNaiveForTest(
-                                      blob.get(), verify_u32(blob.size()),
-                                      &args, groups)
-                                : HaoEngineExecBlobBatchForTest(
-                                      blob.get(), verify_u32(blob.size()),
-                                      &args, groups);
-    EXPECT_EQ(HWLM_SUCCESS, rv);
-    return g_matches;
-}
-
-static
-std::vector<Match> runHaoBlobDirectStreamingInOrder(
-    const bytecode_ptr<u8> &blob, const std::vector<u8> &history,
-    const std::vector<u8> &data, hwlm_group_t groups, bool useNaive) {
+std::vector<Match> runHaoDirectStreamingInOrder(
+    const FDR *fdr, const std::vector<u8> &history,
+    const std::vector<u8> &data, hwlm_group_t groups) {
     g_matches.clear();
 
     hs_scratch scratch = {};
     scratch.fdr_conf = nullptr;
     const auto args = makeRuntimeArgs(data, history, &scratch);
 
-    const hwlm_error_t rv = useNaive
-                                ? HaoEngineExecBlobNaiveForTest(
-                                      blob.get(), verify_u32(blob.size()),
-                                      &args, groups)
-                                : HaoEngineExecBlobBatchForTest(
-                                      blob.get(), verify_u32(blob.size()),
-                                      &args, groups);
+    const hwlm_error_t rv = HaoEngineExec(fdr, &args, groups);
     EXPECT_EQ(HWLM_SUCCESS, rv);
+    std::sort(g_matches.begin(), g_matches.end());
     return g_matches;
 }
 
@@ -2276,7 +2238,7 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsBrokenL2Offset) {
                                                 verify_u32(blob.size())));
 }
 
-TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectForSimpleRules) {
+TEST(HAORuntime, HaoDirectMatchesFdrExecForSimpleRules) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 684, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 685, HWLM_ALL_GROUPS, {}, {}),
@@ -2290,11 +2252,6 @@ TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectForSimpleRules) {
         return;
     }
 
-    HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts));
-    auto haoBlob = buildHAOBlob(artifacts);
-    ASSERT_NE(nullptr, haoBlob.get());
-
     const std::vector<u8> data = {
         'x','a','l','p','h','a','-',
         'A','l','P','h','A','-',
@@ -2303,20 +2260,19 @@ TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectForSimpleRules) {
     };
 
     const auto haoDbMatches =
-        runHaoDirectInOrder(haoDb.get(), data, HWLM_ALL_GROUPS, true);
-    const auto haoMatches =
-        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, true);
+        runHaoDirectInOrder(haoDb.get(), data, HWLM_ALL_GROUPS, false);
+    const auto fdrMatches = runBlockInOrder(haoDb.get(), data, HWLM_ALL_GROUPS);
 
     auto sortedHaoDbMatches = haoDbMatches;
-    auto sortedHaoMatches = haoMatches;
-    /* HAO blob and FDR-integrated HAO do not yet guarantee identical
+    auto sortedHaoMatches = fdrMatches;
+    /* Direct HAO and generic FDR execution do not guarantee identical
      * same-end callback ordering. */
     std::sort(sortedHaoDbMatches.begin(), sortedHaoDbMatches.end());
     std::sort(sortedHaoMatches.begin(), sortedHaoMatches.end());
     EXPECT_EQ(sortedHaoDbMatches, sortedHaoMatches);
 }
 
-TEST(HAORuntime, HaoBlobNaiveExecRejectsBrokenLayoutCleanly) {
+TEST(HAORuntime, HaoBlobValidateRejectsBrokenLayout) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 688, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 689, HWLM_ALL_GROUPS, {}, {}),
@@ -2333,31 +2289,13 @@ TEST(HAORuntime, HaoBlobNaiveExecRejectsBrokenLayoutCleanly) {
     const u32 savedPrimaryOffset = hdr->primaryOffset;
     hdr->primaryOffset = verify_u32(haoBlob.size());
 
-    g_matches.clear();
-    hs_scratch scratch = {};
-    scratch.fdr_conf = nullptr;
-    const std::vector<u8> data = {'a', 'l', 'p', 'h', 'a'};
-    const FDR_Runtime_Args args = {
-        data.data(),
-        data.size(),
-        nullptr,
-        0,
-        0,
-        collectCallback,
-        &scratch,
-        nullptr,
-        0
-    };
-
-    EXPECT_EQ(HWLM_SUCCESS, HaoEngineExecBlobNaiveForTest(
-                                haoBlob.get(), verify_u32(haoBlob.size()),
-                                &args, HWLM_ALL_GROUPS));
-    EXPECT_TRUE(g_matches.empty());
+    EXPECT_FALSE(HaoRuntimeValidateLayoutForTest(
+        haoBlob.get(), verify_u32(haoBlob.size())));
 
     hdr->primaryOffset = savedPrimaryOffset;
 }
 
-TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveForSimpleRules) {
+TEST(HAORuntime, HaoDirectMatchesFdrExecForRepeatedSimpleRules) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 692, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 693, HWLM_ALL_GROUPS, {}, {}),
@@ -2365,10 +2303,11 @@ TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveForSimpleRules) {
         hwlmLiteral("omega", false, false, 695, HWLM_ALL_GROUPS, {}, {})
     };
 
-    HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts));
-    auto haoBlob = buildHAOBlob(artifacts);
-    ASSERT_NE(nullptr, haoBlob.get());
+    auto haoDb = buildFdrWithHint(lits, ENGINE_ID_HAO);
+    if (!haoDb || haoDb->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(haoDb.get())) {
+        skipIfNoHaoSupport();
+        return;
+    }
 
     const std::vector<u8> data = {
         'x','a','l','p','h','a','-',
@@ -2378,18 +2317,13 @@ TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveForSimpleRules) {
         'a','l','p','h','a'
     };
 
-    const auto naiveMatches =
-        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, true);
-    const auto batchMatches =
-        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, false);
-    EXPECT_EQ(naiveMatches, batchMatches);
+    const auto directMatches =
+        runHaoDirectInOrder(haoDb.get(), data, HWLM_ALL_GROUPS, false);
+    const auto fdrMatches = runBlockInOrder(haoDb.get(), data, HWLM_ALL_GROUPS);
+    EXPECT_EQ(directMatches, fdrMatches);
 }
 
-TEST(HAORuntime, HaoRuntimeStatsTrackCallbackReports) {
-    if (!HaoRuntimeStatsEnabledForTest()) {
-        return;
-    }
-
+TEST(HAORuntime, HaoRuntimePublicScanReportsCallbacks) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("12345", false, false, 8692, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 8693, HWLM_ALL_GROUPS, {}, {}),
@@ -2397,10 +2331,11 @@ TEST(HAORuntime, HaoRuntimeStatsTrackCallbackReports) {
         hwlmLiteral("90_90", false, false, 8695, HWLM_ALL_GROUPS, {}, {})
     };
 
-    HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
-    auto haoBlob = buildHAOBlob(artifacts);
-    ASSERT_NE(nullptr, haoBlob.get());
+    auto haoDb = buildFdrWithHint(lits, ENGINE_ID_HAO);
+    if (!haoDb || haoDb->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(haoDb.get())) {
+        skipIfNoHaoSupport();
+        return;
+    }
 
     const std::vector<u8> data = {
         'x','1','2','3','4','5','-',
@@ -2410,20 +2345,15 @@ TEST(HAORuntime, HaoRuntimeStatsTrackCallbackReports) {
         '1','2','3','4','5'
     };
 
-    HaoRuntimeResetStatsForTest();
     const auto matches =
-        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, false);
-    HAORuntimeStats stats = {};
-    HaoRuntimeGetStatsForTest(&stats);
+        runHaoDirectInOrder(haoDb.get(), data, HWLM_ALL_GROUPS, false);
+    const auto fdrMatches = runBlockInOrder(haoDb.get(), data, HWLM_ALL_GROUPS);
 
     EXPECT_FALSE(matches.empty());
-    EXPECT_GT(stats.scanCalls, 0U);
-    EXPECT_EQ(data.size(), stats.scanInputBytes);
-    EXPECT_GT(stats.primaryProbeLanes, 0U);
-    EXPECT_EQ(matches.size(), stats.callbackReports);
+    EXPECT_EQ(matches, fdrMatches);
 }
 
-TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveAcrossBlockBoundaries) {
+TEST(HAORuntime, HaoDirectMatchesFdrExecAcrossBlockBoundaries) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 704, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 705, HWLM_ALL_GROUPS, {}, {}),
@@ -2431,23 +2361,23 @@ TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveAcrossBlockBoundaries) {
         hwlmLiteral("omega", false, false, 707, HWLM_ALL_GROUPS, {}, {})
     };
 
-    HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts));
-    auto haoBlob = buildHAOBlob(artifacts);
-    ASSERT_NE(nullptr, haoBlob.get());
+    auto haoDb = buildFdrWithHint(lits, ENGINE_ID_HAO);
+    if (!haoDb || haoDb->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(haoDb.get())) {
+        skipIfNoHaoSupport();
+        return;
+    }
 
     const std::string text =
         "xxxxalpha-xxxxAlPhA-xxxxtheta-xxxxomega-xxxxalpha-xxxxomega";
     const std::vector<u8> data(text.begin(), text.end());
 
-    const auto naiveMatches =
-        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, true);
-    const auto batchMatches =
-        runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, false);
-    EXPECT_EQ(naiveMatches, batchMatches);
+    const auto directMatches =
+        runHaoDirectInOrder(haoDb.get(), data, HWLM_ALL_GROUPS, false);
+    const auto fdrMatches = runBlockInOrder(haoDb.get(), data, HWLM_ALL_GROUPS);
+    EXPECT_EQ(directMatches, fdrMatches);
 }
 
-TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveAcrossHistoryBoundary) {
+TEST(HAORuntime, HaoDirectMatchesStreamingAcrossHistoryBoundary) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 708, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 709, HWLM_ALL_GROUPS, {}, {}),
@@ -2455,10 +2385,11 @@ TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveAcrossHistoryBoundary) {
         hwlmLiteral("omega", false, false, 711, HWLM_ALL_GROUPS, {}, {})
     };
 
-    HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts));
-    auto haoBlob = buildHAOBlob(artifacts);
-    ASSERT_NE(nullptr, haoBlob.get());
+    auto haoDb = buildFdrWithHint(lits, ENGINE_ID_HAO);
+    if (!haoDb || haoDb->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(haoDb.get())) {
+        skipIfNoHaoSupport();
+        return;
+    }
 
     const std::vector<u8> history = {
         'x','x','x','a','l','p','h','a','-','A','l','P','h'
@@ -2467,14 +2398,14 @@ TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveAcrossHistoryBoundary) {
         'A','-','t','h','e','t','a','-','o','m','e','g','a'
     };
 
-    const auto naiveMatches = runHaoBlobDirectStreamingInOrder(
-        haoBlob, history, data, HWLM_ALL_GROUPS, true);
-    const auto batchMatches = runHaoBlobDirectStreamingInOrder(
-        haoBlob, history, data, HWLM_ALL_GROUPS, false);
-    EXPECT_EQ(naiveMatches, batchMatches);
+    const auto directMatches = runHaoDirectStreamingInOrder(
+        haoDb.get(), history, data, HWLM_ALL_GROUPS);
+    const auto fdrMatches = runStreaming(haoDb.get(), history, data,
+                                         HWLM_ALL_GROUPS);
+    EXPECT_EQ(directMatches, fdrMatches);
 }
 
-TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveAcrossHistoryAndMultipleBlocks) {
+TEST(HAORuntime, HaoDirectMatchesStreamingAcrossHistoryAndMultipleBlocks) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 712, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("ALPHA", true, false, 713, HWLM_ALL_GROUPS, {}, {}),
@@ -2482,10 +2413,11 @@ TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveAcrossHistoryAndMultipleBlocks) {
         hwlmLiteral("omega", false, false, 715, HWLM_ALL_GROUPS, {}, {})
     };
 
-    HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts));
-    auto haoBlob = buildHAOBlob(artifacts);
-    ASSERT_NE(nullptr, haoBlob.get());
+    auto haoDb = buildFdrWithHint(lits, ENGINE_ID_HAO);
+    if (!haoDb || haoDb->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(haoDb.get())) {
+        skipIfNoHaoSupport();
+        return;
+    }
 
     const std::vector<u8> history = {
         'x','x','a','l','p','h','a','-','A','l','P','h','A','-'
@@ -2494,11 +2426,11 @@ TEST(HAORuntime, HaoBlobBatchExecMatchesNaiveAcrossHistoryAndMultipleBlocks) {
         "xxxxtheta-xxxxomega-xxxxalpha-xxxxAlPhA-xxxxomega";
     const std::vector<u8> data(text.begin(), text.end());
 
-    const auto naiveMatches = runHaoBlobDirectStreamingInOrder(
-        haoBlob, history, data, HWLM_ALL_GROUPS, true);
-    const auto batchMatches = runHaoBlobDirectStreamingInOrder(
-        haoBlob, history, data, HWLM_ALL_GROUPS, false);
-    EXPECT_EQ(naiveMatches, batchMatches);
+    const auto directMatches = runHaoDirectStreamingInOrder(
+        haoDb.get(), history, data, HWLM_ALL_GROUPS);
+    const auto fdrMatches = runStreaming(haoDb.get(), history, data,
+                                         HWLM_ALL_GROUPS);
+    EXPECT_EQ(directMatches, fdrMatches);
 }
 
 TEST(HAORuntime, BuildFdrWithHaoLayoutEmbedsHaoBlob) {
@@ -2575,7 +2507,7 @@ TEST(HAORuntime, AutoHaoBuildWithHaoLayoutEmbedsBlobForMaskConfirmRules) {
     EXPECT_EQ(HAO_RUNTIME_MAGIC, magic);
 }
 
-TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectForMaskConfirmRules) {
+TEST(HAORuntime, HaoDirectMatchesFdrExecForMaskConfirmRules) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 8201, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("maskrule", false, false, 8202, HWLM_ALL_GROUPS,
@@ -2584,11 +2516,6 @@ TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectForMaskConfirmRules) {
         hwlmLiteral("ALPHA", true, false, 8203, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("theta", false, false, 8204, HWLM_ALL_GROUPS, {}, {})
     };
-    HAOCompileArtifacts artifacts;
-    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts, HAODumpMode::SummaryIfEnabled));
-    auto haoBlob = buildHAOBlob(artifacts);
-    ASSERT_NE(nullptr, haoBlob.get());
-
     auto haoDb = buildFdrWithHint(lits, ENGINE_ID_HAO);
     if (!haoDb || haoDb->engineID != ENGINE_ID_HAO || !fdrMatcherBlobOffset(haoDb.get())) {
         skipIfNoHaoSupport();
@@ -2602,8 +2529,9 @@ TEST(HAORuntime, HaoBlobNaiveExecMatchesHaoDirectForMaskConfirmRules) {
         't','h','e','t','a'
     };
 
-    auto haoDbMatches = runHaoDirectInOrder(haoDb.get(), data, HWLM_ALL_GROUPS, true);
-    auto haoMatches = runHaoBlobDirectInOrder(haoBlob, data, HWLM_ALL_GROUPS, true);
+    auto haoDbMatches = runHaoDirectInOrder(haoDb.get(), data,
+                                            HWLM_ALL_GROUPS, false);
+    auto haoMatches = runBlockInOrder(haoDb.get(), data, HWLM_ALL_GROUPS);
     std::sort(haoDbMatches.begin(), haoDbMatches.end());
     std::sort(haoMatches.begin(), haoMatches.end());
     EXPECT_EQ(haoDbMatches, haoMatches);

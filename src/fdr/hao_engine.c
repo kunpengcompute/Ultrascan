@@ -5,7 +5,6 @@
 #include "fdr_enhanced.h"
 #include "fdr_internal.h"
 #include "hao_runtime.h"
-#include "hao_runtime_test.h"
 #include "hao_runtime_inline.h"
 #include "util/bitutils.h"
 #include "util/simd_utils.h"
@@ -39,9 +38,43 @@
 #define HAO_PREFETCH_R(addr) __builtin_prefetch((addr), 0, 3)
 
 
+#if HAO_ENABLE_RUNTIME_STATS
+struct HAORuntimeStats {
+    u64a scanCalls;
+    u64a scanInputBytes;
+    u64a blockCalls;
+    u64a blockLanes;
+    u64a primaryProbeLanes;
+    u64a primaryBitmapHitLanes;
+    u64a primaryAliasRejects;
+    u64a primaryActiveLanes;
+    u64a encodedRangeCalls;
+    u64a encodedRangeReportCalls;
+    u64a encodedEntriesVisited;
+    u64a verifierCalls;
+    u64a verifierEntryHits;
+    u64a verifierSlotHits;
+    u64a encodedGroupRejects;
+    u64a l15TagChecks;
+    u64a l15TagRejects;
+    u64a callbackReports;
+    u64a l2RangeEntryBucketsEq1;
+    u64a l2RangeEntryBuckets2To4;
+    u64a l2RangeEntryBucketsGt4;
+    u64a l2RangeRuleBucketsEq1;
+    u64a l2RangeRuleBuckets2To4;
+    u64a l2RangeRuleBucketsGt4;
+    u64a l2RangeCollisionBuckets;
+    u64a l2RangeTotalEntries;
+    u64a l2RangeTotalRules;
+    u64a l2RangeMinEntries;
+    u64a l2RangeMaxEntries;
+    u64a l2RangeMinRules;
+    u64a l2RangeMaxRules;
+};
+
 static struct HAORuntimeStats g_haoStats;
 static int g_haoStatsForceEnabled;
-#if HAO_ENABLE_RUNTIME_STATS
 static int g_haoStatsEnvEnabled = -1;
 static int g_haoStatsAtexitRegistered;
 static int g_haoStatsActive;
@@ -168,110 +201,6 @@ struct HAODotGroupRuntime {
     const struct HAORuntimeL2Check *l2CheckTable;
     const struct HAORuntimeL2Meta *l2MetaTable;
 };
-
-struct HAOPrimaryProbeState {
-    u32 laneCount;
-    const u32 *primaryIdx;
-    u32 byteIndex[HAO_BATCH_MAX_WIDTH];
-    u8 bitMask[HAO_BATCH_MAX_WIDTH];
-    u32 groupedBaseByte;
-    u8 groupedSpan;
-    u8 groupedReady;
-    u16 reserved0;
-    u32 groupedLaneMaskByByteBit[HAO_BITMAP_GROUPED_BYTES][8];
-};
-
-static really_inline
-int haoPrimaryBitmapHasValue(const u8 *bitmap, u32 bitmapSize, u32 idx) {
-    if (!bitmap || idx / 8U >= bitmapSize) {
-        return 0;
-    }
-    return !!(bitmap[idx / 8U] & (1U << (idx % 8U)));
-}
-
-static really_inline
-void haoPrepProbe(
-    const u32 *primaryIdx, u32 laneCount, struct HAOPrimaryProbeState *state) {
-    u32 lane;
-    u32 minByte = 0;
-    u32 maxByte = 0;
-
-    if (!primaryIdx || !state || laneCount > HAO_BATCH_MAX_WIDTH) {
-        return;
-    }
-
-    memset(state, 0, sizeof(*state));
-    state->laneCount = laneCount;
-    state->primaryIdx = primaryIdx;
-    for (lane = 0; lane < laneCount; lane++) {
-        const u32 idx = primaryIdx[lane];
-        const u32 byteIdx = idx >> 3;
-
-        state->byteIndex[lane] = byteIdx;
-        state->bitMask[lane] = (u8)(1U << (idx & 7U));
-        if (!lane) {
-            minByte = byteIdx;
-            maxByte = byteIdx;
-        } else {
-            if (byteIdx < minByte) {
-                minByte = byteIdx;
-            }
-            if (byteIdx > maxByte) {
-                maxByte = byteIdx;
-            }
-        }
-    }
-
-    if (laneCount) {
-        const u32 span = maxByte - minByte + 1U;
-
-        if (span <= HAO_BITMAP_GROUPED_BYTES) {
-            state->groupedBaseByte = minByte;
-            state->groupedSpan = (u8)span;
-            state->groupedReady = 1;
-
-            for (lane = 0; lane < laneCount; lane++) {
-                const u32 relByte = state->byteIndex[lane] - minByte;
-                const u32 bit = primaryIdx[lane] & 7U;
-
-                state->groupedLaneMaskByByteBit[relByte][bit] |= 1U << lane;
-            }
-        }
-    }
-}
-
-static really_inline
-int haoProbeBits(const u8 *bitmap, u32 bitmapSize,
-                                 const struct HAOPrimaryProbeState *state,
-                                 u32 *activeMaskOut) {
-    u32 relByte;
-    u32 activeMask = 0;
-
-    if (!bitmap || !state || !state->laneCount || !activeMaskOut) {
-        return 0;
-    }
-
-    if (!state->groupedReady || !state->groupedSpan) {
-        return 0;
-    }
-    if (state->groupedBaseByte >= bitmapSize ||
-        state->groupedBaseByte + state->groupedSpan > bitmapSize) {
-        return 0;
-    }
-
-    for (relByte = 0; relByte < state->groupedSpan; relByte++) {
-        u32 bits = bitmap[state->groupedBaseByte + relByte];
-
-        while (bits) {
-            const u32 bit = ctz32(bits);
-            activeMask |= state->groupedLaneMaskByByteBit[relByte][bit];
-            bits &= bits - 1U;
-        }
-    }
-
-    *activeMaskOut = activeMask;
-    return 1;
-}
 
 #if HAO_ENABLE_RUNTIME_STATS
 static double haoStatsPct(u64a num, u64a den) {
@@ -1028,94 +957,6 @@ void haoAttachL15Tags(const struct HAORuntimeHeader *hdr,
 #endif
 }
 
-/* Collect a read-only summary for inspecting HAO blobs in tests. */
-static void haoInspectLayout(const struct HAORuntimeHeader *hdr,
-                             struct HAORuntimeInspectSummary *summary) {
-    const u32 *primary;
-    const struct HAORuntimeL2Meta *l2MetaTable;
-    u32 i;
-
-    if (!hdr || !summary) {
-        return;
-    }
-
-    memset(summary, 0, sizeof(*summary));
-    summary->keyBits = haoRuntimeHeaderKeyBits(hdr);
-    summary->primaryCount = hdr->primaryCount;
-    summary->primaryBitmapSize = hdr->primaryBitmapSize;
-    summary->l2EntryCount = hdr->l2EntryCount;
-    summary->ruleMetaCount = hdr->ruleMetaCount;
-
-    if (haoRuntimeHeaderHashMode(hdr) == HAO_RUNTIME_HASH_DOT_GROUP) {
-        const struct HAORuntimeDotGroupDesc *groups =
-            (const struct HAORuntimeDotGroupDesc *)((const u8 *)hdr +
-                                                    hdr->primaryBitmapOffset);
-        u32 g;
-
-        summary->primaryCount = 0;
-        summary->primaryBitmapSize = 0;
-        summary->l2EntryCount = 0;
-        for (g = 0; g < hdr->primaryCount; g++) {
-            const u32 *groupPrimary =
-                (const u32 *)((const u8 *)hdr + groups[g].primaryOffset);
-            const struct HAORuntimeL2Meta *groupL2Meta =
-                (const struct HAORuntimeL2Meta *)((const u8 *)hdr +
-                                                  groups[g].l2MetaOffset);
-            u32 n;
-
-            summary->primaryCount += groups[g].primaryCount;
-            summary->primaryBitmapSize += groups[g].primaryBitmapSize;
-            summary->l2EntryCount += groups[g].l2EntryCount;
-            for (n = 0; n < groups[g].primaryCount; n++) {
-                const u32 encoded = groupPrimary[n];
-                if (!encoded) {
-                    continue;
-                }
-                {
-                    const u32 entryCount =
-                        encoded >> HAO_RUNTIME_L1_COUNT_SHIFT;
-                    summary->nonEmptyPrimary++;
-                    if (entryCount > 1) {
-                        summary->multiEntryBucketCount++;
-                    }
-                    if (summary->maxEntriesPerKey < entryCount) {
-                        summary->maxEntriesPerKey = entryCount;
-                    }
-                }
-            }
-            for (n = 0; n < groups[g].l2EntryCount; n++) {
-                summary->totalRulesInL2 +=
-                    haoL2MetaRuleCount(&groupL2Meta[n]);
-            }
-        }
-        return;
-    }
-
-    primary = (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
-    l2MetaTable = (const struct HAORuntimeL2Meta *)((const u8 *)hdr +
-                                                    hdr->l2MetaOffset);
-
-    for (i = 0; i < hdr->primaryCount; i++) {
-        if (!primary[i]) {
-            continue;
-        }
-        {
-            const u32 entryCount = primary[i] >> HAO_RUNTIME_L1_COUNT_SHIFT;
-            summary->nonEmptyPrimary++;
-            if (entryCount > 1) {
-                summary->multiEntryBucketCount++;
-            }
-            if (summary->maxEntriesPerKey < entryCount) {
-                summary->maxEntriesPerKey = entryCount;
-            }
-        }
-    }
-
-    for (i = 0; i < hdr->l2EntryCount; i++) {
-        summary->totalRulesInL2 += haoL2MetaRuleCount(&l2MetaTable[i]);
-    }
-}
-
 static really_inline
 u32 haoL2ValidSlots(u32 careBits, u32 validMask32,
                     u32 matchMask) {
@@ -1391,75 +1232,6 @@ int haoRunL2Range(
         haoStatsObserveRangeShape(visitedCount, bucketRuleCount);
         HAO_STATS_ADD(encodedRangeReportCalls, anyReport ? 1 : 0);
     }
-#endif
-
-    return HWLM_SUCCESS;
-}
-
-#if defined(__ARM_FEATURE_SVE)
-static really_inline
-int haoRunRawTailScalar(
-    const struct HAOHashRuntime *hash, u32 l2EntryCount,
-    const u8 *primaryBitmap,
-    const u32 *primaryHashTable,
-    const struct HAORuntimeL2Check *l2CheckTable,
-    const struct HAORuntimeL2Meta *l2MetaTable,
-    const struct HAORuntimeRuleMeta *ruleMeta, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, size_t blockStart, u32 blockLaneCount);
-#endif
-
-/* Naive HAO execution path used both as a correctness baseline and as a
- * fallback when the batch kernel is not selected. */
-static int haoRunNaiveBlob(const struct HAORuntimeHeader *hdr,
-                           const struct FDR_Runtime_Args *a,
-                           hwlm_group_t *control) {
-    const u8 *primaryBitmap;
-    const u32 *primaryHashTable;
-    const struct HAORuntimeL2Check *l2CheckTable;
-    const struct HAORuntimeL2Meta *l2MetaTable;
-    const struct HAORuntimeRuleMeta *ruleMeta;
-    struct HAOHashRuntime hash;
-    size_t i;
-
-    if (!hdr || !a || !a->buf || !a->len || a->start_offset >= a->len) {
-        return HWLM_SUCCESS;
-    }
-
-    haoRefreshStatsMode();
-    HAO_STATS_ADD(scanCalls, 1);
-    HAO_STATS_ADD(scanInputBytes, a->len - a->start_offset);
-
-    primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
-    primaryHashTable =
-        (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
-    l2CheckTable = (const struct HAORuntimeL2Check *)((const u8 *)hdr +
-                                                      hdr->l2CheckOffset);
-    l2MetaTable = (const struct HAORuntimeL2Meta *)((const u8 *)hdr +
-                                                    hdr->l2MetaOffset);
-    ruleMeta = (const struct HAORuntimeRuleMeta *)((const u8 *)hdr +
-                                                   hdr->ruleMetaOffset);
-    haoBuildHashRuntime(hdr, &hash);
-    haoAttachL15Tags(hdr, &hash);
-
-#if defined(__ARM_FEATURE_SVE)
-    for (i = a->start_offset; i < a->len; i++) {
-        HAO_STATS_ADD(primaryProbeLanes, 1);
-        if (haoRunRawTailScalar(&hash, hdr->l2EntryCount, primaryBitmap,
-                                primaryHashTable,
-                                l2CheckTable, l2MetaTable, ruleMeta, a,
-                                control, i, 1U) ==
-            HWLM_TERMINATED) {
-            return HWLM_TERMINATED;
-        }
-    }
-#else
-    (void)primaryBitmap;
-    (void)primaryHashTable;
-    (void)l2CheckTable;
-    (void)l2MetaTable;
-    (void)ruleMeta;
-    (void)hash;
-    (void)i;
 #endif
 
     return HWLM_SUCCESS;
@@ -2813,10 +2585,9 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
 
 static hwlm_error_t haoExecBlobWithPath(const void *blob, u32 blobSize,
                                         const struct FDR_Runtime_Args *a,
-                                        hwlm_group_t control, int useBatch4) {
+                                        hwlm_group_t control) {
     const struct HAORuntimeHeader *hdr = NULL;
 
-    (void)useBatch4;
     if (!haoValidateLayout(blob, blobSize, &hdr)) {
         return HWLM_SUCCESS;
     }
@@ -2828,178 +2599,7 @@ static hwlm_error_t haoExecBlobWithPath(const void *blob, u32 blobSize,
         return haoRunBatchDotGroupBlob(hdr, a, &control);
     }
 
-    return useBatch4 ? haoRunBatchBlob(hdr, a, &control)
-                     : haoRunNaiveBlob(hdr, a, &control);
-}
-
-hwlm_error_t HaoEngineExecNaiveForTest(const struct FDR *fdr,
-                                       const struct FDR_Runtime_Args *a,
-                                       hwlm_group_t control) {
-    if (!fdr || !fdrMatcherBlobOffset(fdr) || !fdrMatcherBlobSize(fdr)) {
-        return HWLM_SUCCESS;
-    }
-
-    {
-        const u8 *base = (const u8 *)fdr;
-        const void *blob = base + fdrMatcherBlobOffset(fdr);
-        return haoExecBlobWithPath(blob, fdrMatcherBlobSize(fdr), a,
-                                   control, 0);
-    }
-}
-
-u32 HaoRuntimeBitmapProbeMaskForTest(const u8 *bitmap, u32 bitmapSize,
-                                     const u32 *primaryIdx, u32 laneCount,
-                                     int usePacked) {
-    u32 activeMask = 0;
-    u32 lane;
-
-    if (!bitmap || !primaryIdx || laneCount > HAO_BATCH_MAX_WIDTH) {
-        return 0;
-    }
-
-    if (!usePacked) {
-        for (lane = 0; lane < laneCount; lane++) {
-            if (haoPrimaryBitmapHasValue(bitmap, bitmapSize, primaryIdx[lane])) {
-                activeMask |= 1U << lane;
-            }
-        }
-        return activeMask;
-    }
-
-    {
-        struct HAOPrimaryProbeState probe;
-        memset(&probe, 0, sizeof(probe));
-        haoPrepProbe(primaryIdx, laneCount,
-                                                  &probe);
-
-        {
-            u32 groupedActiveMask = 0;
-            if (haoProbeBits(bitmap, bitmapSize, &probe,
-                                             &groupedActiveMask)) {
-                return groupedActiveMask;
-            }
-        }
-
-#if defined(HAVE_NEON) || defined(HAVE_SSE2)
-        {
-            u8 gatheredBytes[HAO_BATCH_MAX_WIDTH] = {0};
-
-            for (lane = 0; lane < probe.laneCount; lane++) {
-                const u32 idx = probe.byteIndex[lane];
-                gatheredBytes[lane] = idx < bitmapSize ? bitmap[idx] : 0;
-            }
-
-            for (lane = 0; lane < probe.laneCount; lane += 16U) {
-                const u32 lanesThisRound = MIN(16U, probe.laneCount - lane);
-                const u32 laneMask = lanesThisRound == 16U
-                                         ? 0xffffU
-                                         : ((1U << lanesThisRound) - 1U);
-                const m128 gathered = loadu128(gatheredBytes + lane);
-                const m128 masks = loadu128(probe.bitMask + lane);
-                const m128 masked = and128(gathered, masks);
-                const u32 roundMask =
-                    (~movemask128(eq128(masked, zeroes128()))) & laneMask;
-
-                activeMask |= roundMask << lane;
-            }
-            return activeMask;
-        }
-#else
-        for (lane = 0; lane < probe.laneCount; lane++) {
-            const u32 idx = probe.byteIndex[lane];
-            if (idx < bitmapSize && (bitmap[idx] & probe.bitMask[lane])) {
-                activeMask |= 1U << lane;
-            }
-        }
-        return activeMask;
-#endif
-    }
-}
-
-u64a HaoRuntimeRawLaneWordForTest(const u8 *prev32, const u8 *curr32,
-                                  u32 lane) {
-    if (!prev32 || !curr32 || lane >= HAO_RUNTIME_BLOCK_BYTES) {
-        return 0;
-    }
-
-#if defined(HAVE_SVE)
-    {
-        const svbool_t pgb = svptrue_b8();
-        const svbool_t pg64 = svptrue_pat_b64(SV_VL1);
-        const svuint8_t vlo = svld1_u8(pgb, prev32);
-        const svuint8_t vhi = svld1_u8(pgb, curr32);
-        const svuint8_t baseIdx = svindex_u8(25, 1);
-        const svuint8_t laneIdx =
-            svadd_n_u8_x(pgb, baseIdx, (uint8_t)lane);
-        const svuint8_t laneBytes = haoTbl2U8(vlo, vhi, laneIdx);
-
-        return (u64a)svlastb_u64(pg64, svreinterpret_u64_u8(laneBytes));
-    }
-#else
-    u8 bytes[HAO_RUNTIME_BYTES_PER_RULE_SLOT];
-    u32 i;
-
-    for (i = 0; i < HAO_RUNTIME_BYTES_PER_RULE_SLOT; i++) {
-        const u32 idx = lane + 25U + i;
-        bytes[i] = idx < HAO_RUNTIME_BLOCK_BYTES
-                     ? prev32[idx]
-                     : curr32[idx - HAO_RUNTIME_BLOCK_BYTES];
-    }
-    return unaligned_load_u64a(bytes);
-#endif
-}
-
-int HaoRuntimeValidateLayoutForTest(const void *blob, u32 blobSize) {
-    return haoValidateLayout(blob, blobSize, NULL);
-}
-
-int HaoRuntimeInspectBlobForTest(const void *blob, u32 blobSize,
-                                 struct HAORuntimeInspectSummary *summary) {
-    const struct HAORuntimeHeader *hdr = NULL;
-
-    if (!summary) {
-        return 0;
-    }
-    if (!haoValidateLayout(blob, blobSize, &hdr)) {
-        return 0;
-    }
-    haoInspectLayout(hdr, summary);
-    return 1;
-}
-
-int HaoRuntimeStatsEnabledForTest(void) {
-#if HAO_ENABLE_RUNTIME_STATS
-    return 1;
-#else
-    return 0;
-#endif
-}
-
-void HaoRuntimeResetStatsForTest(void) {
-    memset(&g_haoStats, 0, sizeof(g_haoStats));
-    g_haoStatsForceEnabled = 1;
-    haoRefreshStatsMode();
-}
-
-void HaoRuntimeGetStatsForTest(struct HAORuntimeStats *summary) {
-    if (!summary) {
-        return;
-    }
-    *summary = g_haoStats;
-    g_haoStatsForceEnabled = 0;
-    haoRefreshStatsMode();
-}
-
-hwlm_error_t HaoEngineExecBlobNaiveForTest(const void *blob, u32 blobSize,
-                                           const struct FDR_Runtime_Args *a,
-                                           hwlm_group_t control) {
-    return haoExecBlobWithPath(blob, blobSize, a, control, 0);
-}
-
-hwlm_error_t HaoEngineExecBlobBatchForTest(const void *blob, u32 blobSize,
-                                           const struct FDR_Runtime_Args *a,
-                                           hwlm_group_t control) {
-    return haoExecBlobWithPath(blob, blobSize, a, control, 1);
+    return haoRunBatchBlob(hdr, a, &control);
 }
 
 static
@@ -3014,7 +2614,7 @@ hwlm_error_t haoExec(const struct FDR *fdr,
         const u8 *base = (const u8 *)fdr;
         const void *blob = base + fdrMatcherBlobOffset(fdr);
         return haoExecBlobWithPath(blob, fdrMatcherBlobSize(fdr), a,
-                                   control, 1);
+                                   control);
     }
 }
 
