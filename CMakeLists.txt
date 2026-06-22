@@ -51,6 +51,43 @@ else()
     set(RELEASE_BUILD FALSE)
 endif()
 
+set(HS_HARDENING_ACTIVE FALSE)
+if (RELEASE_BUILD AND CMAKE_SYSTEM_NAME MATCHES "Linux" AND
+        (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" OR
+         CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
+    set(HS_HARDENING_ACTIVE TRUE)
+    set(HS_HARDENING_SHARED_LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -s")
+    set(HS_HARDENING_EXECUTABLE_LINK_FLAGS "${HS_HARDENING_SHARED_LINK_FLAGS}")
+    message(STATUS "Hardening link options enabled")
+else()
+    message(STATUS "Hardening link options disabled")
+endif()
+
+function(hs_append_target_property target property flags)
+    if (NOT HS_HARDENING_ACTIVE)
+        return()
+    endif()
+
+    if (TARGET ${target})
+        get_target_property(_old_flags ${target} ${property})
+        if (NOT _old_flags)
+            set(_old_flags "")
+        endif()
+        set_target_properties(${target} PROPERTIES
+            ${property} "${_old_flags} ${flags}")
+    endif()
+endfunction()
+
+function(hs_harden_shared_target target)
+    hs_append_target_property(${target} LINK_FLAGS
+        "${HS_HARDENING_SHARED_LINK_FLAGS}")
+endfunction()
+
+function(hs_harden_executable_target target)
+    hs_append_target_property(${target} LINK_FLAGS
+        "${HS_HARDENING_EXECUTABLE_LINK_FLAGS}")
+endfunction()
+
 set(BINDIR "${PROJECT_BINARY_DIR}/bin")
 set(LIBDIR "${PROJECT_BINARY_DIR}/lib")
 
@@ -1432,6 +1469,14 @@ else (FAT_RUNTIME)
 
 endif (NOT FAT_RUNTIME)
 
+foreach (HS_EXECUTABLE_TARGET
+        hsdump
+        hscheck
+        hscollider
+        hsbench)
+    hs_harden_executable_target(${HS_EXECUTABLE_TARGET})
+endforeach()
+
 if (NOT BUILD_SHARED_LIBS)
     install(TARGETS hs_runtime DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
@@ -1454,6 +1499,7 @@ if (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS)
         OUTPUT_NAME hs_runtime
         MACOSX_RPATH ON
         LINKER_LANGUAGE C)
+    hs_harden_shared_target(hs_runtime_shared)
     install(TARGETS hs_runtime_shared
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -1501,6 +1547,7 @@ if (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS)
         VERSION ${LIB_VERSION}
         SOVERSION ${LIB_SOVERSION}
         MACOSX_RPATH ON)
+    hs_harden_shared_target(hs_shared)
 
     install(TARGETS hs_shared
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -1517,4 +1564,10 @@ endif ()
 option(BUILD_EXAMPLES "Build Hyperscan example code (default TRUE)" TRUE)
 if(NOT WIN32 AND BUILD_EXAMPLES)
     add_subdirectory(examples)
+    foreach (HS_EXAMPLE_TARGET
+            simplegrep
+            pcapscan
+            patbench)
+        hs_harden_executable_target(${HS_EXAMPLE_TARGET})
+    endforeach()
 endif()
