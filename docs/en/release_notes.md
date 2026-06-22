@@ -2,10 +2,10 @@
 
 ## Change History<a name="EN-US_TOPIC_0000002549904611"></a>
 
-|Issue|Date|Description|
-|--|--|--|
-|02|2026-06-30|This issue is the second official release. Added the universal bytecode function based on the new Kunpeng 920 processor model.|
-|01|2026-03-30|This issue is the first official release. Optimized the Ultrascan short-byte (2–4 bytes) rule matching algorithm based on the new Kunpeng 920 processor model, and added the KHSEL_BuildLilyForTeddy and KHSEL_LilyForTeddyRunExec algorithms.|
+|Date|Description|
+|--|--|
+|2026-06-30|This issue is the second official release. Added the universal bytecode function based on the new Kunpeng 920 processor model.|
+|2026-03-30|This issue is the first official release. Optimized the Ultrascan short-byte (2–4 bytes) rule matching algorithm based on the new Kunpeng 920 processor model, and added the KHSEL_BuildLilyForTeddy and KHSEL_LilyForTeddyRunExec algorithms.|
 
 ## Version Mapping<a name="EN-US_TOPIC_0000002518405392"></a>
 
