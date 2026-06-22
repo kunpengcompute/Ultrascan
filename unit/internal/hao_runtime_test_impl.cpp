@@ -50,8 +50,7 @@ static int haoValidateLayoutForTest(const void *blob, u32 blobSize,
         return 0;
     }
     if (hashMode != HAO_RUNTIME_HASH_BEXT &&
-        hashMode != HAO_RUNTIME_HASH_DOT &&
-        hashMode != HAO_RUNTIME_HASH_DOT_GROUP) {
+        hashMode != HAO_RUNTIME_HASH_DOT) {
         return 0;
     }
     if (hashMode == HAO_RUNTIME_HASH_BEXT && !hdr->bextMask) {
@@ -62,67 +61,10 @@ static int haoValidateLayoutForTest(const void *blob, u32 blobSize,
         return 0;
     }
 #endif
-    if (hashMode == HAO_RUNTIME_HASH_DOT_GROUP &&
-        (hdr->l15TagOffset || hdr->l15TagCount ||
-         hdr->l15TagBits || hdr->l15TagOverlapBits ||
-         hdr->l15MaskTableOffset || hdr->l15MaskCount)) {
-        return 0;
-    }
     if ((u64a)hdr->ruleMetaOffset + (u64a)hdr->ruleMetaCount *
             sizeof(struct HAORuntimeRuleMeta) >
         (u64a)blobSize) {
         return 0;
-    }
-    if (hashMode == HAO_RUNTIME_HASH_DOT_GROUP) {
-        const struct HAORuntimeDotGroupDesc *groups;
-
-        if (!hdr->primaryBitmapOffset ||
-            hdr->primaryCount > HAO_RUNTIME_DOT_GROUP_COUNT ||
-            (u64a)hdr->primaryBitmapOffset +
-                (u64a)hdr->primaryCount *
-                    sizeof(struct HAORuntimeDotGroupDesc) >
-                (u64a)blobSize) {
-            return 0;
-        }
-        groups = (const struct HAORuntimeDotGroupDesc *)((const u8 *)hdr +
-                                                         hdr->primaryBitmapOffset);
-        for (u32 i = 0; i < hdr->primaryCount; i++) {
-            const struct HAORuntimeDotGroupDesc *g = &groups[i];
-            if (!g->keyBits || g->keyBits > HAO_RUNTIME_MAX_SELECTORS ||
-                !g->primaryCount || !g->l2EntryCount || !g->dotVector) {
-                return 0;
-            }
-            if ((u64a)g->primaryBitmapOffset +
-                    (u64a)g->primaryBitmapSize >
-                (u64a)blobSize) {
-                return 0;
-            }
-            if ((u64a)g->primaryOffset +
-                    (u64a)g->primaryCount * sizeof(u32) >
-                (u64a)blobSize) {
-                return 0;
-            }
-            if (!g->l2CheckOffset || !g->l2MetaOffset ||
-                (g->l2CheckOffset & (HAO_RUNTIME_L2_CHECK_ALIGN - 1U))) {
-                return 0;
-            }
-            if ((u64a)g->l2CheckOffset +
-                    (u64a)g->l2EntryCount *
-                        sizeof(struct HAORuntimeL2Check) >
-                (u64a)blobSize) {
-                return 0;
-            }
-            if ((u64a)g->l2MetaOffset +
-                    (u64a)g->l2EntryCount *
-                        sizeof(struct HAORuntimeL2Meta) >
-                (u64a)blobSize) {
-                return 0;
-            }
-        }
-        if (outHdr) {
-            *outHdr = hdr;
-        }
-        return 1;
     }
     if ((u64a)hdr->primaryBitmapOffset + (u64a)hdr->primaryBitmapSize >
         (u64a)blobSize) {
@@ -205,45 +147,6 @@ static void haoInspectLayoutForTest(const struct HAORuntimeHeader *hdr,
     summary->primaryBitmapSize = hdr->primaryBitmapSize;
     summary->l2EntryCount = hdr->l2EntryCount;
     summary->ruleMetaCount = hdr->ruleMetaCount;
-
-    if (haoRuntimeHeaderHashMode(hdr) == HAO_RUNTIME_HASH_DOT_GROUP) {
-        const struct HAORuntimeDotGroupDesc *groups =
-            (const struct HAORuntimeDotGroupDesc *)((const u8 *)hdr +
-                                                    hdr->primaryBitmapOffset);
-
-        summary->primaryCount = 0;
-        summary->primaryBitmapSize = 0;
-        summary->l2EntryCount = 0;
-        for (u32 g = 0; g < hdr->primaryCount; g++) {
-            const u32 *groupPrimary =
-                (const u32 *)((const u8 *)hdr + groups[g].primaryOffset);
-            const struct HAORuntimeL2Meta *groupL2Meta =
-                (const struct HAORuntimeL2Meta *)((const u8 *)hdr +
-                                                  groups[g].l2MetaOffset);
-
-            summary->primaryCount += groups[g].primaryCount;
-            summary->primaryBitmapSize += groups[g].primaryBitmapSize;
-            summary->l2EntryCount += groups[g].l2EntryCount;
-            for (u32 n = 0; n < groups[g].primaryCount; n++) {
-                const u32 encoded = groupPrimary[n];
-                if (!encoded) {
-                    continue;
-                }
-                const u32 entryCount =
-                    encoded >> HAO_RUNTIME_L1_COUNT_SHIFT;
-                summary->nonEmptyPrimary++;
-                summary->multiEntryBucketCount += entryCount > 1;
-                if (summary->maxEntriesPerKey < entryCount) {
-                    summary->maxEntriesPerKey = entryCount;
-                }
-            }
-            for (u32 n = 0; n < groups[g].l2EntryCount; n++) {
-                summary->totalRulesInL2 +=
-                    haoL2MetaRuleCountForTest(&groupL2Meta[n]);
-            }
-        }
-        return;
-    }
 
     const u32 *primary = (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
     const struct HAORuntimeL2Meta *l2MetaTable =

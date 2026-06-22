@@ -21,9 +21,7 @@
 #define HAO_RUNTIME_MAX_SELECTORS 32U
 #define HAO_RUNTIME_HASH_BEXT 0U
 #define HAO_RUNTIME_HASH_DOT 1U
-#define HAO_RUNTIME_HASH_DOT_GROUP 2U
 #define HAO_RUNTIME_DOT_VECTOR_LANES 4U
-#define HAO_RUNTIME_DOT_GROUP_COUNT HAO_RUNTIME_DOT_VECTOR_LANES
 #define HAO_RUNTIME_KEY_BITS_MASK 0xffU
 #define HAO_RUNTIME_HASH_MODE_SHIFT 24U
 #define HAO_BATCH_FALLBACK_WIDTH 4U
@@ -116,20 +114,6 @@ struct HAORuntimeHeader {
     u32 l15TagOverlapBits;
     u32 l15MaskTableOffset;
     u32 l15MaskCount;
-};
-
-struct HAORuntimeDotGroupDesc {
-    u32 keyBits;
-    u32 primaryCount;
-    u32 primaryBitmapSize;
-    u32 l2EntryCount;
-    u32 knownBytes;
-    u32 reserved;
-    u64a dotVector;
-    u32 primaryBitmapOffset;
-    u32 primaryOffset;
-    u32 l2CheckOffset;
-    u32 l2MetaOffset;
 };
 
 struct HAORuntimeRuleMeta {
