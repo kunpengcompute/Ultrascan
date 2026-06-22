@@ -300,7 +300,7 @@ fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
         for (unsigned int i = 0; i < elements; i++) {
             if (flags && (flags[i] & HS_FLAG_COMBINATION)) {
                 try {
-                    addExpression(x86_ng, i, expressions[i], flags[i],
+                    x86_addExpression(x86_ng, i, expressions[i], flags[i],
                                   ext ? ext[i] : nullptr, ids ? ids[i] : 0);
                 } catch (CompileError &e) {
                     /* Caught a parse error:
@@ -315,7 +315,7 @@ fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
         for (unsigned int i = 0; i < elements; i++) {
             if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
                 try {
-                    addExpression(x86_ng, i, expressions[i], flags ? flags[i] : 0,
+                    x86_addExpression(x86_ng, i, expressions[i], flags ? flags[i] : 0,
                                   ext ? ext[i] : nullptr, ids ? ids[i] : 0);
                 } catch (CompileError &e) {
                     /* Caught a parse error:
@@ -861,6 +861,7 @@ hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
                                 platform, db, error, Grey());
 }
 
+extern "C" HS_PUBLIC_API
 hs_error_t HS_CDECL fat_hs_compile_multi(const char *const *expressions,
                                      const unsigned *flags, const unsigned *ids,
                                      unsigned elements, unsigned mode,

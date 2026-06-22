@@ -225,6 +225,51 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const C
                          expr.som, expr.quiet);
 }
 
+/** \brief True if the literal expression \a expr could be added to Rose. */
+bool x86_shortcutLiteral(NG &ng, const ParsedExpression &pe) {
+    assert(pe.component);
+
+    if (!ng.cc.grey.allowLiteral) {
+        return false;
+    }
+
+    const auto &expr = pe.expr;
+
+    // XXX: don't shortcut literals with extended params (yet)
+    if (expr.min_offset || expr.max_offset != MAX_OFFSET || expr.min_length ||
+        expr.edit_distance || expr.hamm_distance) {
+        DEBUG_PRINTF("extended params not allowed\n");
+        return false;
+    }
+
+    ConstructLiteralVisitor vis;
+    try {
+        assert(pe.component);
+        pe.component->accept(vis);
+        assert(vis.repeat_stack.empty());
+    } catch (const ConstructLiteralVisitor::NotLiteral&) {
+        DEBUG_PRINTF("not a literal\n");
+        return false;
+    }
+
+    const ue2_literal &lit = vis.lit;
+
+    if (lit.empty()) {
+        DEBUG_PRINTF("empty literal\n");
+        return false;
+    }
+
+    if (expr.highlander && lit.length() <= 1) {
+        DEBUG_PRINTF("not shortcutting SEP literal\n");
+        return false;
+    }
+
+    DEBUG_PRINTF("constructed literal %s\n", dumpString(lit).c_str());
+    return ng.addLiteral(lit, expr.index, expr.report, expr.highlander,
+                         expr.som, expr.quiet);
+}
+
+
 size_t isShortLiteral(const ParsedExpression &pe) {
     if (!pe.component) {
         return 0;

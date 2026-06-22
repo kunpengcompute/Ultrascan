@@ -117,6 +117,9 @@ struct BuiltExpression {
 void addExpression(NG &ng, unsigned index, const char *expression,
                    unsigned flags, const hs_expr_ext *ext, ReportID report);
 
+void x86_addExpression(NG &ng, unsigned index, const char *expression,
+                   unsigned flags, const hs_expr_ext *ext, ReportID id);
+
 void addLitExpression(NG &ng, unsigned index, const char *expression,
                       unsigned flags, const hs_expr_ext *ext, ReportID id,
                       size_t expLength);

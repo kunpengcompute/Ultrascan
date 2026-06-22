@@ -371,9 +371,11 @@ int lilyMatch(u64a conf, const u32 *ekeyVec, u8 flagsQuiet, const u8 *ptr, hs_sc
             !isExhausted(scratch->core_info.rose, scratch->core_info.exhaustionVector, ekeyVec[index])) &&
             !(flagsQuiet & (1 << index))) {
             i = scratch->core_info.buf_offset + ptr - scratch->core_info.buf + byte;
-            int ret = RoseDeliverReport(HS_ENGINE_LILY, i + 1 , index, 0, scratch, ekeyVec[index]);
-            if (ret == 0) { // 上报异常，终止后续操作
-                return 1;
+            if (i < scratch->core_info.buf_offset + scratch->core_info.len) {
+                int ret = RoseDeliverReport(HS_ENGINE_LILY, i + 1 , index, 0, scratch, ekeyVec[index]);
+                if (ret == 0) { // 上报异常，终止后续操作
+                    return 1;
+                }
             }
         }
     } while (unlikely(!!conf));

@@ -389,6 +389,119 @@ void addExpression(NG &ng, unsigned index, const char *expression,
     }
 }
 
+
+void x86_addExpression(NG &ng, unsigned index, const char *expression,
+                   unsigned flags, const hs_expr_ext *ext, ReportID id) {
+    assert(expression);
+    const CompileContext &cc = ng.cc;
+    DEBUG_PRINTF("index=%u, id=%u, flags=%u, expr='%s'\n", index, id, flags,
+                 expression);
+
+    if (flags & HS_FLAG_COMBINATION) {
+        if (flags & ~(HS_FLAG_COMBINATION | HS_FLAG_QUIET |
+                      HS_FLAG_SINGLEMATCH)) {
+            throw CompileError("only HS_FLAG_QUIET and HS_FLAG_SINGLEMATCH "
+                               "are supported in combination "
+                               "with HS_FLAG_COMBINATION.");
+        }
+        if (flags & HS_FLAG_QUIET) {
+            DEBUG_PRINTF("skip QUIET logical combination expression %u\n", id);
+        } else {
+            u32 ekey = INVALID_EKEY;
+            u64a min_offset = 0;
+            u64a max_offset = MAX_OFFSET;
+            if (flags & HS_FLAG_SINGLEMATCH) {
+                ekey = ng.rm.getExhaustibleKey(id);
+            }
+            if (ext) {
+                validateExt(*ext);
+                if (ext->flags & ~(HS_EXT_FLAG_MIN_OFFSET |
+                                   HS_EXT_FLAG_MAX_OFFSET)) {
+                    throw CompileError("only HS_EXT_FLAG_MIN_OFFSET and "
+                                       "HS_EXT_FLAG_MAX_OFFSET extra flags "
+                                       "are supported in combination "
+                                       "with HS_FLAG_COMBINATION.");
+                }
+                if (ext->flags & HS_EXT_FLAG_MIN_OFFSET) {
+                    min_offset = ext->min_offset;
+                }
+                if (ext->flags & HS_EXT_FLAG_MAX_OFFSET) {
+                    max_offset = ext->max_offset;
+                }
+            }
+            ng.rm.pl.parseLogicalCombination(id, expression, ekey, min_offset,
+                                             max_offset);
+            DEBUG_PRINTF("parsed logical combination expression %u\n", id);
+        }
+        return;
+    }
+
+    // Ensure that our pattern isn't too long (in characters).
+    size_t maxlen = cc.grey.limitPatternLength + 1;
+    if (strnlen(expression, maxlen) >= maxlen) {
+        throw CompileError("Pattern length exceeds limit.");
+    }
+
+    // Do per-expression processing: errors here will result in an exception
+    // being thrown up to our caller
+    ParsedExpression pe(index, expression, flags, id, ext);
+    dumpExpression(pe, "orig", cc.grey);
+
+    // Apply prefiltering transformations if desired.
+    if (pe.expr.prefilter) {
+        prefilterTree(pe.component, ParseMode(flags));
+        dumpExpression(pe, "prefiltered", cc.grey);
+    }
+
+    // Expressions containing zero-width assertions and other extended pcre
+    // types aren't supported yet. This call will throw a ParseError exception
+    // if the component tree contains such a construct.
+    checkUnsupported(*pe.component);
+
+    pe.component->checkEmbeddedStartAnchor(true);
+    pe.component->checkEmbeddedEndAnchor(true);
+
+    if (cc.grey.optimiseComponentTree) {
+        optimise(pe);
+        dumpExpression(pe, "opt", cc.grey);
+    }
+
+    DEBUG_PRINTF("component=%p, nfaId=%u, reportId=%u\n",
+                 pe.component.get(), pe.expr.index, pe.expr.report);
+
+    // You can only use the SOM flags if you've also specified an SOM
+    // precision mode.
+    if (pe.expr.som != SOM_NONE && cc.streaming && !ng.ssm.somPrecision()) {
+        throw CompileError("To use a SOM expression flag in streaming mode, "
+                           "an SOM precision mode (e.g. "
+                           "HS_MODE_SOM_HORIZON_LARGE) must be specified.");
+    }
+
+    // If this expression is a literal, we can feed it directly to Rose rather
+    // than building the NFA graph.
+    if (x86_shortcutLiteral(ng, pe)) {
+        DEBUG_PRINTF("took literal short cut\n");
+        return;
+    }
+
+    auto built_expr = buildGraph(ng.rm, cc, pe);
+    if (!built_expr.g) {
+        DEBUG_PRINTF("NFA build failed on ID %u, but no exception was "
+                     "thrown.\n", pe.expr.report);
+        throw CompileError("Internal error.");
+    }
+
+    if (!pe.expr.allow_vacuous && matches_everywhere(*built_expr.g)) {
+        throw CompileError("Pattern matches empty buffer; use "
+                           "HS_FLAG_ALLOWEMPTY to enable support.");
+    }
+
+    if (!ng.addGraph(built_expr.expr, std::move(built_expr.g))) {
+        DEBUG_PRINTF("NFA addGraph failed on ID %u.\n", pe.expr.report);
+        throw CompileError("Error compiling expression.");
+    }
+}
+
 void addLitExpression(NG &ng, unsigned index, const char *expression,
                       unsigned flags, const hs_expr_ext *ext, ReportID id,
                       size_t expLength) {

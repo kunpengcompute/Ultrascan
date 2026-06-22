@@ -5,23 +5,20 @@
 >![](public_sys-resources/icon-notice.gif) **NOTICE:** 
 >Functions \(KHSEL\__xxx_\) in the KHSEL\_core library do not need to be explicitly called. They are used as internal interfaces of Hyperscan.
 
-[Table 1](#table1711314810458)  lists the optimized function in the KHSEL\_ops library.  [Table 2](#table11769195010347)  lists the optimized functions in the KHSEL\_core library.
+[Table 1](#table_1)  lists the optimized function in the KHSEL\_ops library.  [Table 2](#table_2)  lists the optimized functions in the KHSEL\_core library.
 
-**Table  1**  Optimized function in KHSEL\_ops
+**Table  1**  Optimized function in KHSEL\_ops<a id="table_1"></a>
 
 |Function|Description|
 |--|--|
 |ReplaceAllAcc|Performs string match and Replace All operations according to the fixed regular expression rule "[^A-Za-z0-9_/.]+".|
 
-
-**Table  2**  Optimized functions in KHSEL\_core
+**Table  2**  Optimized functions in KHSEL\_core<a id="table_2"></a>
 
 |Function|Description|
 |--|--|
 |KHSEL_BuildLily|Compiles short-byte rule matching.|
 |KHSEL_LilyRunExec|Executes short-byte rule matching.|
-
-
 
 ## Usage Description<a name="EN-US_TOPIC_0000002518405558"></a>
 
@@ -29,14 +26,13 @@
 
 Link  **libKHSEL\_ops.a**  using  **-L**  and  **-l**  during g++ compilation.
 
-```
+```bash
 g++ test.cpp -o test -I/usr/local/ksl/include -L/usr/local/ksl/lib -lKHSEL_ops
 ```
 
 **KHSEL\_core<a name="section121472055548"></a>**
 
 The KHSEL\_core library functions need to be compiled with Hyperscan. For details, see \[compile\_guide.md\]\(./docs/en/compile\_guide.md\).
-
 
 ## Function Syntax<a name="EN-US_TOPIC_0000002549885351"></a>
 
@@ -48,7 +44,7 @@ Performs string match and Replace All operations according to the fixed regular 
 
 **Function Syntax<a name="section1183110404506"></a>**
 
-```
+```c++
 std::string ReplaceAllAcc(const std::string& input, const std::string& replacement) 
 ```
 
@@ -58,7 +54,6 @@ std::string ReplaceAllAcc(const std::string& input, const std::string& replaceme
 |--|--|--|--|
 |input|Input string (string to be replaced)|C++ string object, which can be null.|Input|
 |replacement|Replacement string|C++ string object, which can be null.|Input|
-
 
 **Return Value<a name="section15720131195318"></a>**
 
@@ -72,7 +67,7 @@ String after the Replace All operation is performed.
 1. Create a  **testReplaceAll.cpp**  file.
 2. Press  **i**  to enter the insert mode and add the following content to the file:
 
-    ```
+    ```c++
     #include "khsel_ops.h"
     #include <iostream>
     
@@ -87,22 +82,21 @@ String after the Replace All operation is performed.
 3. Press  **Esc**, type  **:wq!**, and press  **Enter**  to save the file and exit.
 4. Compile the  **testReplaceAll.cpp**  file and specify the name of the output executable file as  **testReplaceAll**.
 
-    ```
+    ```bash
     g++ testReplaceAll.cpp -o testReplaceAll -I /usr/local/ksl/include -L /usr/local/ksl/lib -lKHSEL_ops
     ```
 
 5. Run the  **testReplaceAll**  executable file.
 
-    ```
+    ```bash
     ./testReplaceAll
     ```
 
     The execution result is as follows:
 
-    ```
+    ```bash
     HellohiHello12345hi
     ```
-
 
 ### KHSEL\_BuildLily<a name="EN-US_TOPIC_0000002518245592"></a>
 
@@ -112,7 +106,7 @@ Performs rule compilation based on short-byte rules in the rule set and outputs 
 
 **Function Syntax<a name="section1183110404506"></a>**
 
-```
+```c
 std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily, std::vector<u32> &reportVec, std::vector<u32> &ekeyVec); 
 ```
 
@@ -124,11 +118,9 @@ std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily, std::vector<u3
 |reportVec|Report ID corresponding to the short-byte rule.|C++ vector object, which can be null.|Input|
 |ekeyVec|ekey corresponding to the short-byte rule.|C++ vector object, which can be null.|Input|
 
-
 **Return Value<a name="section13615359181110"></a>**
 
 Output mask after rule compilation.
-
 
 ### KHSEL\_LilyRunExec<a name="EN-US_TOPIC_0000002518245632"></a>
 
@@ -138,7 +130,7 @@ Performs input data matching at runtime based on the output mask.
 
 **Function Syntax<a name="section1183110404506"></a>**
 
-```
+```c++
 hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch); 
 ```
 
@@ -149,10 +141,12 @@ hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratc
 |rose|RoseEngine object, which stores the output at compile time and is used as the input at runtime.|Not null|Input|
 |scratch|Temporary memory space required for input data.|Not null|Input|
 
-
 **Return Value<a name="section13615359181110"></a>**
 
 Error code of the matching result.
 
+## Change History
 
-
+|Issue|Date|Change Description|
+|--|--|--|
+|01|2026-03-30|First official release. Optimized the Hyperscan short-byte (2–4 bytes) rule matching algorithm based on the new Kunpeng 920 processor model, and added the KHSEL_BuildLilyForTeddy and KHSEL_LilyForTeddyRunExec algorithms.|

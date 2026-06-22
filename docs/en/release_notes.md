@@ -2,11 +2,9 @@
 
 ## Change History<a name="EN-US_TOPIC_0000002549904611"></a>
 
-|Version|Date|Description|
+|Issue|Date|Description|
 |--|--|--|
-|01|2025-12-30|This issue is the first official release.|
-
-
+|01|2025-12-30|First official release. <br>Optimized the Hyperscan short-byte (2–4 bytes) rule matching algorithm based on the new Kunpeng 920 processor model, and added the KHSEL_BuildLilyForTeddy and KHSEL_LilyForTeddyRunExec algorithms.|
 
 ## Version Requirements<a name="EN-US_TOPIC_0000002518405392"></a>
 
@@ -36,7 +34,6 @@
 </tbody>
 </table>
 
-
 ### OS, CPU, and Compiler<a name="EN-US_TOPIC_0000002518245458"></a>
 
 |OS|CPU|Compiler|
@@ -44,8 +41,6 @@
 |openEuler 20.03 LTS SP1|Kunpeng 920 series processors|GCC 7.3.0|
 |openEuler 22.03 LTS SP1|Kunpeng 920 series processors|GCC 10.3.1|
 |openEuler 22.03 LTS SP3|Kunpeng 920 series processors|GCC 10.3.1|
-
-
 
 ### Virus Scan Results<a name="EN-US_TOPIC_0000002549885239"></a>
 
@@ -56,9 +51,6 @@ The software packages, release documents, and product documents have been scanne
 |QiAnXin|8.0.5.5260|2025-12-25 08:00:00.0|2025-12-26 11:33:31|OK|
 |Bitdefender|7.5.1.200224|7.100031|2025-12-26 11:33:38|OK|
 |Kaspersky|12.0.0.6672|2025-12-26 10:01:00|2025-12-26 11:33:31|OK|
-
-
-
 
 ## V2.5.3<a name="EN-US_TOPIC_0000002518245468"></a>
 
@@ -72,24 +64,19 @@ None
 
 |Feature|Description|
 |--|--|
-|KHSEL|Optimized the Hyperscan multi-pattern matching algorithm.Optimized the long string validation on the Rose interpreter backend.Added a configuration item for toggling the short-rule bypass algorithm.|
-
+|KHSEL|Optimized the Hyperscan multi-pattern matching algorithm. Optimized the long string validation on the Rose interpreter backend. Added a configuration item for toggling the short-rule bypass algorithm.|
 
 **Removed Features<a name="section17862111013445"></a>**
 
 None
 
-
 ### Resolved Issues<a name="EN-US_TOPIC_0000002518405386"></a>
 
 None
 
-
 ### Known Issues<a name="EN-US_TOPIC_0000002518245472"></a>
 
 None
-
-
 
 ## V2.5.1<a name="EN-US_TOPIC_0000002518405390"></a>
 
@@ -99,8 +86,7 @@ None
 
 |Feature|Description|
 |--|--|
-|KHSEL|Optimized Flink's replaceALL function in C, improving the performance by two times compared to the replaceALL function implemented in Java.Optimized the Hyperscan short-byte rule matching algorithm based on the new Kunpeng 920 processor model, improving the performance by 20%.|
-
+|KHSEL|Optimized Flink's replaceALL function in C, improving the performance by two times compared to the replaceALL function implemented in Java. Optimized the Hyperscan short-byte rule matching algorithm based on the new Kunpeng 920 processor model, improving the performance by 20%.
 
 **Modified Features<a name="section16450949161512"></a>**
 
@@ -110,17 +96,13 @@ None
 
 None
 
-
 ### Resolved Issues<a name="EN-US_TOPIC_0000002549765223"></a>
 
 None
 
-
 ### Known Issues<a name="EN-US_TOPIC_0000002549885237"></a>
 
 None
-
-
 
 ## V2.4.0<a name="EN-US_TOPIC_0000002549885233"></a>
 
@@ -132,7 +114,6 @@ None
 |--|--|
 |KHSEL|Added the Kunpeng Hyperscan Enhanced Library (KHSEL) to improve the performance of open source Hyperscan.|
 
-
 **Modified Features<a name="section16450949161512"></a>**
 
 None
@@ -141,15 +122,55 @@ None
 
 None
 
-
 ### Resolved Issues<a name="EN-US_TOPIC_0000002518245460"></a>
 
 None
-
 
 ### Known Issues<a name="EN-US_TOPIC_0000002518245464"></a>
 
 None
 
+## Related Documentation
 
+### Related Documentation
 
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: left;">Document</th>
+      <th style="text-align: left;">Description</th>
+      <th style="text-align: left;">Delivery Method</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: left;">2.6.0 Release Notes</td>
+      <td style="text-align: left;">Provides Hyperscan version update and release information.</td>
+      <td style="text-align: left;">Open-source repository</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">Quick Start</td>
+      <td style="text-align: left;">Provides quick start tutorials to help users quickly understand and use Hyperscan.</td>
+      <td style="text-align: left;">Open-source repository</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">Installation Guide</td>
+      <td style="text-align: left;">Provides guidance on how to install and deploy Hyperscan.</td>
+      <td style="text-align: left;">Open-source repository</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">User Guide</td>
+      <td style="text-align: left;">Provides guidance on how to use Hyperscan.</td>
+      <td style="text-align: left;">Open-source repository</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">Developer Guide</td>
+      <td style="text-align: left;">Provides development and adaptation of Hyperscan short rule bypass technology.</td>
+      <td style="text-align: left;">Open-source repository</td>
+    </tr>       
+  </tbody>
+</table>
+
+### Obtaining Documentation<a name="EN-US_TOPIC_0000002547210757"></a>
+
+Visit the [Open-source repository](https://gitcode.com/boostkit/hyperscan/tree/master) to view or download related documents.
