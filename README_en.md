@@ -110,7 +110,7 @@ For details about how to quickly get started with the performance benchmark tool
 
 |Name|Description|
 |--|--|
-|[Release Notes](docs/en/release_notes.md)|Provides basic information and feature updates of each Ultrascan version.|
+|[Release Notes](./docs/en/release_notes.md)|Provides basic information and feature updates of each Ultrascan version.|
 |[Installation Guide](./docs/en/installation_guide.md)|Describes how to install, deploy, and compile the software.|
 |[Quick Start](./docs/en/quick_start.md)|Provides guidance for a quick start and verification.|
 |[User Guide](./docs/en/user_guide.md)|Provides guidance on how to use the Ultrascan feature.|
@@ -118,7 +118,7 @@ For details about how to quickly get started with the performance benchmark tool
 
 ## Contribution Statement
 
-We welcome your contributions to the community. If you have any questions/suggestions or want to provide feedback on feature requirements and bug reports, you can submit [issues](https://gitcode.com/boostkit/Ultrascan/issues). For details, see the [contribution guideline](https://gitcode.com/boostkit/community/blob/master/docs/contributor/contributing.md). You are also welcome to share insights in [Discussions](https://gitcode.com/boostkit/community/discussions). Thank you for your support.
+We welcome your contributions to the community. If you have any questions/suggestions or want to provide feedback on feature requirements and bug reports, you can submit [issues](https://gitcode.com/boostkit/Ultrascan/issues). You are also welcome to share insights in [Discussions](https://gitcode.com/boostkit/community/discussions). Thank you for your support.
 
 ## Disclaimer
 
@@ -126,6 +126,6 @@ This code repository contributes to the Ultrascan open-source project solely for
 
 ## License
 
-This project uses the BSD license. For details, see [LICENSE](docs/LICENSE).
+This project uses the BSD license. For details, see [LICENSE](LICENSE).
 
 The documents of this project are licensed under CC-BY 4.0. For details, see [LICENSE](docs/LICENSE).
