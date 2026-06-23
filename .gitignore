@@ -102,4 +102,3 @@ pcre/test-driver
 
 # ignore build and temporary dir
 build
-\.*
