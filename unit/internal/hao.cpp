@@ -26,6 +26,10 @@
 
 #include "gtest/gtest.h"
 
+#if defined(__linux__) && defined(__aarch64__) && defined(__ARM_FEATURE_SVE)
+#include <sys/prctl.h>
+#endif
+
 #ifdef HS_UNIT_HAS_HSBENCH_CORPUS_DB
 #include "tools/hsbench/data_corpus.h"
 #endif
@@ -55,6 +59,48 @@ namespace {
 static constexpr u32 ENGINE_ID_NEO = 1;
 static constexpr u32 ENGINE_ID_HAO = ue2::HAO_ENGINE_ID;
 static constexpr size_t HAO_COLLISION_SAMPLE_COUNT = 1U << 20;
+
+#if defined(__linux__) && defined(__aarch64__) && defined(__ARM_FEATURE_SVE)
+#ifndef PR_SVE_SET_VL
+#define PR_SVE_SET_VL 50
+#endif
+#ifndef PR_SVE_GET_VL
+#define PR_SVE_GET_VL 51
+#endif
+#ifndef PR_SVE_VL_LEN_MASK
+#define PR_SVE_VL_LEN_MASK 0xffff
+#endif
+#ifndef PR_SVE_VL_INHERIT
+#define PR_SVE_VL_INHERIT (1 << 17)
+#endif
+
+class ScopedSveVlForTest {
+public:
+    ~ScopedSveVlForTest() {
+        if (active && oldVl >= 0) {
+            (void)prctl(PR_SVE_SET_VL, oldVl, 0, 0, 0);
+        }
+    }
+
+    bool set(u32 vlBytes) {
+        oldVl = prctl(PR_SVE_GET_VL, 0, 0, 0, 0);
+        if (oldVl < 0) {
+            return false;
+        }
+
+        const long rv = prctl(PR_SVE_SET_VL,
+                              vlBytes | PR_SVE_VL_INHERIT, 0, 0, 0);
+        if (rv >= 0) {
+            active = true;
+        }
+        return rv >= 0 && ((u32)rv & PR_SVE_VL_LEN_MASK) == vlBytes;
+    }
+
+private:
+    long oldVl = -1;
+    bool active = false;
+};
+#endif
 
 #if defined(__ARM_FEATURE_SVE2_BITPERM)
 static constexpr bool haoCurrentBinaryHasBitPerm(void) {
@@ -2270,6 +2316,46 @@ TEST(HAORuntime, HaoDirectMatchesFdrExecForSimpleRules) {
     std::sort(sortedHaoDbMatches.begin(), sortedHaoDbMatches.end());
     std::sort(sortedHaoMatches.begin(), sortedHaoMatches.end());
     EXPECT_EQ(sortedHaoDbMatches, sortedHaoMatches);
+}
+
+TEST(HAORuntime, HaoDirectMatchesFdrExecWithSve512Vl) {
+#if defined(__linux__) && defined(__aarch64__) && defined(__ARM_FEATURE_SVE)
+    ScopedSveVlForTest sveVl;
+    if (!sveVl.set(64U)) {
+        SUCCEED() << "SVE VL=64 is not available on this host";
+        return;
+    }
+
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral("alpha", false, false, 8684, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("ALPHA", true, false, 8685, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 8686, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 8687, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("kappa", false, false, 8688, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    auto haoDb = buildFdrWithHint(lits, ENGINE_ID_HAO);
+    if (!haoDb || haoDb->engineID != ENGINE_ID_HAO ||
+        !fdrMatcherBlobOffset(haoDb.get())) {
+        skipIfNoHaoSupport();
+        return;
+    }
+
+    const std::string text =
+        "xxxxalpha-xxxxAlPhA-xxxxtheta-xxxxomega-xxxxkappa-"
+        "padding-to-cross-the-sixty-four-byte-boundary-alpha-omega-"
+        "theta-kappa-ALPHA";
+    const std::vector<u8> data(text.begin(), text.end());
+
+    auto haoMatches = runHaoDirectInOrder(haoDb.get(), data,
+                                          HWLM_ALL_GROUPS, false);
+    auto fdrMatches = runBlockInOrder(haoDb.get(), data, HWLM_ALL_GROUPS);
+    std::sort(haoMatches.begin(), haoMatches.end());
+    std::sort(fdrMatches.begin(), fdrMatches.end());
+    EXPECT_EQ(haoMatches, fdrMatches);
+#else
+    SUCCEED() << "SVE VL test requires Linux AArch64 SVE";
+#endif
 }
 
 TEST(HAORuntime, HaoBlobValidateRejectsBrokenLayout) {
