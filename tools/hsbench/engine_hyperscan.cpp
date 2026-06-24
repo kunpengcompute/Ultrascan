@@ -595,7 +595,11 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
         return nullptr;
     }
     hs_free_scratch(scratch);
-
+    
+    err = hs_database_size(target_db, &compiledSize);
+    if (err != HS_SUCCESS) {
+        return nullptr;
+    }
     // Collect summary information.
     CompileHSStats cs;
     cs.sigs_name = sigs_name;
