@@ -1177,17 +1177,17 @@ int haoRunL2Range(
 
 static really_inline
 svbool_t haoPgB8_32(void) {
-    return svwhilelt_b8((u32)0, HAO_SVE_BATCH32_BYTES);
+    return svptrue_b8();
 }
 
 static really_inline
 svbool_t haoPgB16_16(void) {
-    return svwhilelt_b16((u32)0, HAO_SVE_BATCH32_BYTES / 2U);
+    return svptrue_b16();
 }
 
 static really_inline
 svbool_t haoPgB32_8(void) {
-    return svwhilelt_b32((u32)0, HAO_SVE_BATCH32_U32_LANES);
+    return svptrue_b32();
 }
 
 static really_inline
@@ -1816,15 +1816,10 @@ u32 haoCollectRawEncoded(const u8 *primaryBitmap,
         vkeys67 = haoRawKeyPairBext(vrow6, vrow7, hash->bextMask);
     }
 
-    const svbool_t pg32 = haoPgB32_8();
-    haoPrepRawKeysPred(primaryBitmap, pg32, vkeys01, &vbitPos01,
-                       &vbitmapBytes01);
-    haoPrepRawKeysPred(primaryBitmap, pg32, vkeys23, &vbitPos23,
-                       &vbitmapBytes23);
-    haoPrepRawKeysPred(primaryBitmap, pg32, vkeys45, &vbitPos45,
-                       &vbitmapBytes45);
-    haoPrepRawKeysPred(primaryBitmap, pg32, vkeys67, &vbitPos67,
-                       &vbitmapBytes67);
+    haoPrepRawKeys(primaryBitmap, vkeys01, &vbitPos01, &vbitmapBytes01);
+    haoPrepRawKeys(primaryBitmap, vkeys23, &vbitPos23, &vbitmapBytes23);
+    haoPrepRawKeys(primaryBitmap, vkeys45, &vbitPos45, &vbitmapBytes45);
+    haoPrepRawKeys(primaryBitmap, vkeys67, &vbitPos67, &vbitmapBytes67);
 
     laneMask |= haoRetireEncodedPair(
         primaryHashTable, vlaneBits01, vkeys01, vbitPos01, vbitmapBytes01, encodedByPair[0]);
@@ -2528,11 +2523,11 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
                            hwlm_group_t *control) {
     const u32 vl = svcntb();
 
-    if (vl == HAO_SVE_BATCH64_BYTES) {
-        return haoRunBatchBlob64(hdr, a, control);
-    }
     if (vl == HAO_SVE_BATCH32_BYTES) {
         return haoRunBatchBlob32(hdr, a, control);
+    }
+    if (vl == HAO_SVE_BATCH64_BYTES) {
+        return haoRunBatchBlob64(hdr, a, control);
     }
     return haoRunBatchBlobScalar(hdr, a, control);
 }
