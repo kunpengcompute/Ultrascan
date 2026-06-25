@@ -36,6 +36,7 @@
 #include "fdr_confirm.h"
 #include "fdr_compile_internal.h"
 #include "fdr_engine_description.h"
+#include "hao_compile.h"
 #include "teddy_compile.h"
 #include "teddy_engine_description.h"
 #include "grey.h"
@@ -63,7 +64,6 @@
 #include <memory>
 #include <numeric>
 #include <set>
-#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -76,6 +76,52 @@ namespace ue2 {
 
 namespace {
 
+static
+bool haoStatsEnabled(void) {
+    const char *env = getenv("HS_HAO_STATS");
+    return env && *env && *env != '0';
+}
+
+static
+bool haoShouldPrintCompileStats(const HWLMProto &proto) {
+    if (!haoStatsEnabled()) {
+        return false;
+    }
+    if (!proto.debugName) {
+        return true;
+    }
+    return strncmp(proto.debugName, "x86/", 4) != 0;
+}
+
+static
+bool tryBuildHaoProto(const target_t &target,
+                      const std::vector<hwlmLiteral> &lits,
+                      const Grey &grey,
+                      std::unique_ptr<HAOCompileArtifacts> *out) {
+    if (out) {
+        out->reset();
+    }
+
+    HAOCompileArtifacts builtArtifacts;
+    HAOFeasibilityResult haoResult;
+    const bool haoFeasible = analyzeHAOFeasibility(target, lits, grey,
+                                                   &haoResult,
+                                                   &builtArtifacts);
+    DEBUG_PRINTF("HAO feasibility: canBuild=%u reason=%s flags=0x%x\n",
+                 haoFeasible ? 1 : 0,
+                 haoFeasibilityReasonName(haoResult.reason),
+                 haoResult.flags);
+    if (!haoFeasible) {
+        return false;
+    }
+
+    if (out) {
+        *out = ue2::make_unique<HAOCompileArtifacts>(
+            std::move(builtArtifacts));
+    }
+    return true;
+}
+
 class FDRCompiler : noncopyable {
 private:
     const FDREngineDescription &eng;
@@ -84,6 +130,7 @@ private:
     vector<hwlmLiteral> lits;
     map<BucketIndex, std::vector<LiteralIndex> > bucketToLits;
     bool make_small;
+    bytecode_ptr<u8> matcherBlob;
 
     u8 *tabIndexToMask(u32 indexInTable);
 #ifdef DEBUG
@@ -97,10 +144,11 @@ public:
     FDRCompiler(vector<hwlmLiteral> lits_in,
                 map<BucketIndex, std::vector<LiteralIndex>> bucketToLits_in,
                 const FDREngineDescription &eng_in,
-                bool make_small_in, const Grey &grey_in)
+                bool make_small_in, const Grey &grey_in,
+                bytecode_ptr<u8> matcherBlob_in = nullptr)
         : eng(eng_in), grey(grey_in), tab(eng_in.getTabSizeBytes()),
           lits(move(lits_in)), bucketToLits(move(bucketToLits_in)),
-          make_small(make_small_in) {}
+          make_small(make_small_in), matcherBlob(move(matcherBlob_in)) {}
 
     bytecode_ptr<FDR> build();
 };
@@ -165,13 +213,15 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     size_t tabSize = eng.getTabSizeBytes();
 
     // Note: we place each major structure here on a cacheline boundary.
+    size_t matcherBlobSize = matcherBlob ? matcherBlob.size() : 0;
     size_t size = ROUNDUP_CL(headerSize) + ROUNDUP_CL(tabSize) +
-                  ROUNDUP_CL(confirmTable.size()) + floodTable.size();
+                  ROUNDUP_CL(matcherBlobSize) + ROUNDUP_CL(confirmTable.size()) +
+                  floodTable.size();
 
-    DEBUG_PRINTF("sizes base=%zu tabSize=%zu confirm=%zu floodControl=%zu "
-                 "total=%zu\n",
-                 headerSize, tabSize, confirmTable.size(), floodTable.size(),
-                 size);
+    DEBUG_PRINTF("sizes base=%zu tabSize=%zu matcherBlob=%zu confirm=%zu "
+                 "floodControl=%zu total=%zu\n",
+                 headerSize, tabSize, matcherBlobSize, confirmTable.size(),
+                 floodTable.size(), size);
 
     auto fdr = make_zeroed_bytecode_ptr<FDR>(size, 64);
     assert(fdr); // otherwise would have thrown std::bad_alloc
@@ -187,6 +237,8 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     fdr->domain = eng.bits;
     fdr->domainMask = (1 << eng.bits) - 1;
     fdr->tabSize = tabSize;
+    fdr->matcherBlobOffset = 0;
+    fdr->matcherBlobSize = 0;
     fdr->stride = eng.stride;
     createInitialState(fdr.get());
 
@@ -195,6 +247,15 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     assert(ISALIGNED_CL(ptr));
     copy(tab.begin(), tab.end(), ptr);
     ptr += ROUNDUP_CL(tabSize);
+
+    // Write embedded matcher blob if present.
+    if (matcherBlob && matcherBlob.size()) {
+        assert(ISALIGNED_CL(ptr));
+        fdr->matcherBlobOffset = verify_u32(ptr - fdr_base);
+        fdr->matcherBlobSize = verify_u32(matcherBlob.size());
+        memcpy(ptr, matcherBlob.get(), matcherBlob.size());
+        ptr += ROUNDUP_CL(matcherBlob.size());
+    }
 
     // Write confirm structures.
     assert(ISALIGNED_CL(ptr));
@@ -817,6 +878,11 @@ static
 void addIncludedInfo(
                vector<hwlmLiteral> &lits, u32 nBuckets,
                map<BucketIndex, vector<LiteralIndex>> &bucketToLits) {
+    for (auto &lit : lits) {
+        lit.included_id = INVALID_LIT_ID;
+        lit.squash = 0;
+    }
+
     vector<vector<pair<u32, u32>>> lastCharMap(256);
 
     for (BucketIndex b = 0; b < nBuckets; b++) {
@@ -851,6 +917,37 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
         } else {
             DEBUG_PRINTF("build with teddy failed, will try with FDR\n");
         }
+    }
+    /* Engine id 2 is now reserved for HAO only. */
+    const bool forcedHao = hint == HAO_ENGINE_ID;
+    std::unique_ptr<FDREngineDescription> haoDes;
+    if (forcedHao) {
+        haoDes = getFdrDescription(hint);
+    } else if (hint == HINT_INVALID) {
+        haoDes = chooseHaoEngine(target, lits, make_small);
+    }
+
+    if (haoDes && haoDes->getID() == HAO_ENGINE_ID) {
+        if (forcedHao) {
+            haoDes->bits = 9;
+            haoDes->stride = 1;
+        }
+
+        auto haoBucketToLits = assignStringsToBuckets(lits, *haoDes);
+        addIncludedInfo(lits, haoDes->getNumBuckets(), haoBucketToLits);
+
+        std::unique_ptr<HAOCompileArtifacts> haoArtifacts;
+        if (tryBuildHaoProto(target, lits, grey, &haoArtifacts)) {
+            auto proto = ue2::make_unique<HWLMProto>(
+                engType, move(haoDes), lits, haoBucketToLits,
+                make_small);
+            proto->haoArtifacts = std::move(haoArtifacts);
+            return proto;
+        }
+    }
+
+    if (forcedHao) {
+        return nullptr;
     }
 
     if (grey.allowNeoFdr) {
@@ -908,9 +1005,44 @@ bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
     if (proto.teddyEng) {
         return teddyBuildTable(proto, grey);
     }
+    bytecode_ptr<u8> matcherBlob = nullptr;
+    if (proto.fdrEng && proto.fdrEng->getID() == HAO_ENGINE_ID) {
+        const bool printStats = haoShouldPrintCompileStats(proto);
+        if (printStats) {
+            printf("[HAO][Compile] matcher=%s proto=%p lits=%zu bits=%u stride=%u\n",
+                   proto.debugName ? proto.debugName : "unknown",
+                   (const void *)&proto, proto.lits.size(),
+                   proto.fdrEng->bits, proto.fdrEng->stride);
+            fflush(stdout);
+        }
+
+        HAOCompileArtifacts *haoArtifacts = proto.haoArtifacts.get();
+        if (!haoArtifacts) {
+            assert(0 && "HAO table build missing cached artifacts");
+            return nullptr;
+        }
+        if (!refreshHAOReports(haoArtifacts, proto.lits)) {
+            assert(0 && "HAO report metadata mismatch");
+            return nullptr;
+        }
+        dumpHAOL2MapIfEnabled(proto.lits, *haoArtifacts);
+
+        if (printStats) {
+            dumpHAOCompileStats(*haoArtifacts);
+        }
+
+        if (!haoArtifactsOk(*haoArtifacts)) {
+            assert(0 && "HAO feasibility mismatch: invalid coverage in table build");
+            return nullptr;
+        }
+        matcherBlob = buildHAOBlob(*haoArtifacts);
+        if (!matcherBlob) {
+            return nullptr;
+        }
+    }
 
     FDRCompiler fc(proto.lits, proto.bucketToLits, *(proto.fdrEng),
-                   proto.make_small, grey);
+                   proto.make_small, grey, move(matcherBlob));
     return fc.build();
 }
 

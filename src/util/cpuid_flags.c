@@ -33,8 +33,63 @@
 #include "hs_internal.h"
 #include "util/arch.h"
 
+#if defined(__aarch64__) && defined(__linux__)
+#include <stdio.h>
+#include <string.h>
+#include <sys/auxv.h>
+#if defined(__has_include)
+#if __has_include(<asm/hwcap.h>)
+#include <asm/hwcap.h>
+#endif
+#endif
+#endif
+
 #if !defined(_WIN32) && !defined(CPUID_H_)
 #include <cpuid.h>
+#endif
+
+#if defined(__aarch64__) && defined(__linux__)
+static
+int cpuFeatureLineHas(const char *line, const char *feature) {
+    size_t len = strlen(feature);
+    const char *pos = line;
+
+    while ((pos = strstr(pos, feature)) != NULL) {
+        char after = pos[len];
+        int before = pos == line || pos[-1] == ':' || pos[-1] == ' ' ||
+                     pos[-1] == '\t';
+        if (before &&
+            (after == '\0' || after == '\n' || after == ' ' ||
+             after == '\t')) {
+            return 1;
+        }
+        pos += len;
+    }
+
+    return 0;
+}
+
+static
+int cpuInfoHasFeature(const char *feature) {
+    FILE *f = fopen("/proc/cpuinfo", "r");
+    char line[4096];
+    int found = 0;
+
+    if (!f) {
+        return 0;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "Features", 8) == 0 &&
+            cpuFeatureLineHas(line, feature)) {
+            found = 1;
+            break;
+        }
+    }
+
+    fclose(f);
+    return found;
+}
 #endif
 
 u64a cpuid_flags(void) {
@@ -67,6 +122,59 @@ u64a cpuid_flags(void) {
 #if (!defined(FAT_RUNTIME) && !defined(HAVE_AVX512VBMI)) ||                    \
     (defined(FAT_RUNTIME) && !defined(BUILD_AVX512VBMI))
     cap &= ~HS_CPU_FEATURES_AVX512VBMI;
+#endif
+#elif defined(__aarch64__) && defined(__linux__)
+    unsigned long hwcap = getauxval(AT_HWCAP);
+    unsigned long hwcap2 = 0;
+
+#ifdef AT_HWCAP2
+    hwcap2 = getauxval(AT_HWCAP2);
+#endif
+
+#ifdef HWCAP_SVE
+    if (hwcap & HWCAP_SVE) {
+        DEBUG_PRINTF("SVE enabled\n");
+        cap |= HS_CPU_FEATURES_SVE;
+    }
+#endif
+
+#ifdef HWCAP2_SVE2
+    if (hwcap2 & HWCAP2_SVE2) {
+        DEBUG_PRINTF("SVE2 enabled\n");
+        cap |= HS_CPU_FEATURES_SVE2 | HS_CPU_FEATURES_SVE;
+    }
+#endif
+
+#ifdef HWCAP2_SVEBITPERM
+    if (hwcap2 & HWCAP2_SVEBITPERM) {
+        DEBUG_PRINTF("SVEBITPERM enabled\n");
+        cap |= HS_CPU_FEATURES_SVEBITPERM | HS_CPU_FEATURES_SVE2 |
+               HS_CPU_FEATURES_SVE;
+    }
+#endif
+
+    if (cpuInfoHasFeature("sve")) {
+        cap |= HS_CPU_FEATURES_SVE;
+    }
+    if (cpuInfoHasFeature("sve2")) {
+        cap |= HS_CPU_FEATURES_SVE2 | HS_CPU_FEATURES_SVE;
+    }
+    if (cpuInfoHasFeature("svebitperm")) {
+        cap |= HS_CPU_FEATURES_SVEBITPERM | HS_CPU_FEATURES_SVE2 |
+               HS_CPU_FEATURES_SVE;
+    }
+
+#if !defined(FAT_RUNTIME) && !defined(HS_BUILD_HAVE_SVE)
+    cap &= ~(HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |
+             HS_CPU_FEATURES_SVEBITPERM);
+#endif
+
+#if !defined(FAT_RUNTIME) && !defined(HS_BUILD_HAVE_SVE2)
+    cap &= ~(HS_CPU_FEATURES_SVE2 | HS_CPU_FEATURES_SVEBITPERM);
+#endif
+
+#if !defined(FAT_RUNTIME) && !defined(HS_BUILD_HAVE_SVEBITPERM)
+    cap &= ~HS_CPU_FEATURES_SVEBITPERM;
 #endif
 #endif
     return cap;

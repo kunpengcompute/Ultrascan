@@ -80,6 +80,7 @@ doc/dev-reference/_build/
 
 # ignore build and temporary dir
 build
+documents/
 build_debug
 pcre
 \.*

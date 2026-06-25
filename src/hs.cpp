@@ -125,7 +125,8 @@ bool checkPlatform(const hs_platform_info *p, hs_compile_error **comp_error) {
     static constexpr u32 HS_TUNE_LAST = HS_TUNE_FAMILY_ICX;
     static constexpr u32 HS_CPU_FEATURES_ALL =
         HS_CPU_FEATURES_AVX2 | HS_CPU_FEATURES_AVX512 |
-        HS_CPU_FEATURES_AVX512VBMI;
+        HS_CPU_FEATURES_AVX512VBMI | HS_CPU_FEATURES_SVE |
+        HS_CPU_FEATURES_SVE2 | HS_CPU_FEATURES_SVEBITPERM;
 
     if (!p) {
         return true;
@@ -137,6 +138,20 @@ bool checkPlatform(const hs_platform_info *p, hs_compile_error **comp_error) {
         return false;
    }
 
+    if ((p->cpu_features & HS_CPU_FEATURES_SVE2) &&
+        !(p->cpu_features & HS_CPU_FEATURES_SVE)) {
+        *comp_error = generateCompileError("SVE2 requires SVE in the platform "
+                                           "information.", -1);
+        return false;
+    }
+
+    if ((p->cpu_features & HS_CPU_FEATURES_SVEBITPERM) &&
+        !(p->cpu_features & HS_CPU_FEATURES_SVE2)) {
+        *comp_error = generateCompileError("SVEBITPERM requires SVE2 in the "
+                                           "platform information.", -1);
+        return false;
+    }
+
     if (p->tune > HS_TUNE_LAST) {
         *comp_error = generateCompileError("Invalid tuning value specified in "
                                            "the platform information.", -1);
@@ -144,6 +159,13 @@ bool checkPlatform(const hs_platform_info *p, hs_compile_error **comp_error) {
     }
 
     return true;
+}
+
+static
+u64a currentArmCpuFeatures(void) {
+    return cpuid_flags() &
+           (HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |
+            HS_CPU_FEATURES_SVEBITPERM);
 }
 
 /** \brief Convert from SOM mode to bytes of precision. */
@@ -314,7 +336,7 @@ fat_hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
         // 为ARM创建单独的target_info，不包含AVX2/AVX512特性
         hs_platform_info arm_platform;
         arm_platform.tune = HS_TUNE_FAMILY_GENERIC;
-        arm_platform.cpu_features = 0;  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
+        arm_platform.cpu_features = currentArmCpuFeatures();  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
         target_t arm_target_info(arm_platform);
 
         CompileContext arm_cc(isStreaming, isVectored, arm_target_info, arm_grey);
@@ -456,7 +478,7 @@ fat_hs_compile_lit_multi_int(const char *const *expressions,
         // 为ARM创建单独的target_info，不包含AVX2/AVX512特性
         hs_platform_info arm_platform;
         arm_platform.tune = HS_TUNE_FAMILY_GENERIC;
-        arm_platform.cpu_features = 0;  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
+        arm_platform.cpu_features = currentArmCpuFeatures();  // 不包含AVX2，这样chooseTeddyEngine会选择ID 11-18
         target_t arm_target_info(arm_platform);
 
         CompileContext arm_cc(isStreaming, isVectored, arm_target_info, arm_grey);

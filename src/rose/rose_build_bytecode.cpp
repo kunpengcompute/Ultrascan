@@ -3858,26 +3858,26 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildFinalEngine(u32 minWidth) {
     }
 
     // Build floating HWLM matcher.
-    auto ftable = buildHWLMMatcher(*this, fproto.get());
+    auto ftable = buildHWLMMatcher(*this, fproto.get(), "arm/floating");
     if (ftable) {
         proto.fmatcherOffset = bc.engine_blob.add(ftable);
         bc.resources.has_floating = true;
     }
 
     // Build delay rebuild HWLM matcher.
-    auto drtable = buildHWLMMatcher(*this, drproto.get());
+    auto drtable = buildHWLMMatcher(*this, drproto.get(), "arm/delay_rebuild");
     if (drtable) {
         proto.drmatcherOffset = bc.engine_blob.add(drtable);
     }
 
     // Build EOD-anchored HWLM matcher.
-    auto etable = buildHWLMMatcher(*this, eproto.get());
+    auto etable = buildHWLMMatcher(*this, eproto.get(), "arm/eod");
     if (etable) {
         proto.ematcherOffset = bc.engine_blob.add(etable);
     }
 
     // Build small-block HWLM matcher.
-    auto sbtable = buildHWLMMatcher(*this, sbproto.get());
+    auto sbtable = buildHWLMMatcher(*this, sbproto.get(), "arm/small_block");
     if (sbtable) {
         proto.sbmatcherOffset = bc.engine_blob.add(sbtable);
     }
@@ -4161,26 +4161,26 @@ bytecode_ptr<x86_RoseEngine> RoseBuildImpl::x86_buildFinalEngine(u32 minWidth) {
     }
 
     // Build floating HWLM matcher.
-    auto ftable = buildHWLMMatcher(*this, fproto.get());
+    auto ftable = buildHWLMMatcher(*this, fproto.get(), "x86/floating");
     if (ftable) {
         proto.fmatcherOffset = bc.engine_blob.add(ftable);
         bc.resources.has_floating = true;
     }
 
     // Build delay rebuild HWLM matcher.
-    auto drtable = buildHWLMMatcher(*this, drproto.get());
+    auto drtable = buildHWLMMatcher(*this, drproto.get(), "x86/delay_rebuild");
     if (drtable) {
         proto.drmatcherOffset = bc.engine_blob.add(drtable);
     }
 
     // Build EOD-anchored HWLM matcher.
-    auto etable = buildHWLMMatcher(*this, eproto.get());
+    auto etable = buildHWLMMatcher(*this, eproto.get(), "x86/eod");
     if (etable) {
         proto.ematcherOffset = bc.engine_blob.add(etable);
     }
 
     // Build small-block HWLM matcher.
-    auto sbtable = buildHWLMMatcher(*this, sbproto.get());
+    auto sbtable = buildHWLMMatcher(*this, sbproto.get(), "x86/small_block");
     if (sbtable) {
         proto.sbmatcherOffset = bc.engine_blob.add(sbtable);
     }

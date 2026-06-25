@@ -54,6 +54,8 @@ struct Grey {
     bool allowSheng;
     bool allowMcSheng;
     bool allowNeoFdr;
+    /* Enable the HAO literal-matcher family. */
+    bool allowHao;
     bool allowPuff;
     bool allowLiteral;
     bool allowViolet;
