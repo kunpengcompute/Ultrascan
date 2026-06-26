@@ -1478,6 +1478,28 @@ svuint32_t haoRawLaneBits(u32 pairBase) {
 }
 
 static really_inline
+u32 haoLaneMaskForCount32(u32 count) {
+    if (count >= HAO_RUNTIME_BLOCK_BYTES) {
+        return 0xffffffffU;
+    }
+    if (!count) {
+        return 0;
+    }
+    return (1U << count) - 1U;
+}
+
+static really_inline
+u64a haoLaneMaskForCount64(u32 count) {
+    if (count >= HAO_SVE_BATCH64_BYTES) {
+        return ~0ULL;
+    }
+    if (!count) {
+        return 0;
+    }
+    return ((u64a)1 << count) - 1U;
+}
+
+static really_inline
 u32 haoRetireEncodedPair(const u32 *primaryHashTable, svuint32_t vlaneBits,
                          svuint32_t vkeys, svuint32_t vbitPos,
                          svuint32_t vbitmapBytes, u32 *encodedPair) {
@@ -2056,6 +2078,7 @@ u32 haoCollectRawTailEncoded(const u8 *primaryBitmap,
             vbitmapBytes67, encodedByPair[3]);
     }
 
+    laneMask &= haoLaneMaskForCount32(blockLaneCount);
     HAO_STATS_ADD(primaryActiveLanes, (u32)__builtin_popcount(laneMask));
     return laneMask;
 }
@@ -2074,7 +2097,7 @@ int haoRunRawTailVec(
     svuint32_t vlaneIds45, svuint32_t vlaneIds67,
     svuint32_t vlaneBits01, svuint32_t vlaneBits23,
     svuint32_t vlaneBits45, svuint32_t vlaneBits67) {
-    u32 encodedByPair[4][8];
+    u32 encodedByPair[4][8] = {{0}};
     const u32 laneMask = haoCollectRawTailEncoded(
         primaryBitmap, primaryHashTable, hash, vdot, blockLaneCount,
         vlo, vhi, vlaneIds01, vlaneIds23, vlaneIds45, vlaneIds67,
@@ -2172,6 +2195,7 @@ u64a haoCollectRawTailEncoded64(const u8 *primaryBitmap,
         primaryHashTable, 3U, pvalid67, vkeys67, vbitPos67, vbitmapBytes67,
         encodedByPair[3]);
 
+    laneMask &= haoLaneMaskForCount64(blockLaneCount);
     HAO_STATS_ADD(primaryActiveLanes, popcount64(laneMask));
     return laneMask;
 }
@@ -2188,7 +2212,7 @@ int haoRunRawTailVec64(
     svuint8_t vlo, svuint8_t vhi, svuint32_t vlaneIds01,
     svuint32_t vlaneIds23, svuint32_t vlaneIds45,
     svuint32_t vlaneIds67) {
-    u32 encodedByPair[4][16];
+    u32 encodedByPair[4][16] = {{0}};
     const u64a laneMask = haoCollectRawTailEncoded64(
         primaryBitmap, primaryHashTable, hash, vdot, blockLaneCount, vlo, vhi,
         vlaneIds01, vlaneIds23, vlaneIds45, vlaneIds67, encodedByPair);
