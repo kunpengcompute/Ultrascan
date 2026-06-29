@@ -30,7 +30,7 @@ KHSEL库已优化函数如[**表 1** KHSEL库已优化函数](#KHSEL库已优化
 
 ## 使用说明
 
-KHSEL函数源码已集成到Ultrascan仓库dev分支中，位于`src\kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。
+KHSEL函数源码已集成到Ultrascan仓库dev分支中，位于`src\kunpeng-enhanced`目录下，不再需要单独安装KHSEL相关软件包。HAO算法引擎是基于并行位提取的多模匹配加速算法，源码位于`src\fdr`目录下，作为FDR内部匹配器自动接入编译期和运行期流程，用户无需显式调用HAO内部接口。
 
 ## 函数定义
 
@@ -308,5 +308,5 @@ hs_error_t fat_hs_compile_lit_multi(const char *const *expressions,
 
 |文档版本|发布日期|修改说明|
 |--|--|--|
-|02|2026-06-30|第二次正式发布，基于鲲鹏920新型号处理器新增通用字节码功能。|
+|02|2026-06-30|第二次正式发布，基于鲲鹏920新型号处理器新增通用字节码功能和HAO算法引擎。|
 |01|2026-03-30|第一次正式发布，基于鲲鹏920新型号处理器优化Ultrascan 2~4字节短规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
