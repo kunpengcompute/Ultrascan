@@ -456,23 +456,8 @@ u32 haoSlotCount(const L2EntryT &entry) {
 }
 
 static
-u32 haoBitmapKeyForPrimaryForTest(u32 key) {
-#if HAO_COMPRESSED_BITMAP
-    return key >> HAO_COMPRESSED_BITMAP_SHIFT;
-#else
-    return key;
-#endif
-}
-
-static
 u32 haoExpectedBitmapBytesForPrimaryCountForTest(u32 primaryCount) {
-#if HAO_COMPRESSED_BITMAP
-    const u32 groupSize = 1U << HAO_COMPRESSED_BITMAP_SHIFT;
-    const u32 bitmapBits =
-        (primaryCount + groupSize - 1U) >> HAO_COMPRESSED_BITMAP_SHIFT;
-#else
     const u32 bitmapBits = primaryCount;
-#endif
     return (bitmapBits + 7U) / 8U;
 }
 
@@ -680,11 +665,6 @@ void haoMutateL2MetaOutOfBounds(HAORuntimeHeader *hdr, u32 blobSize) {
 }
 
 static
-void haoMutateL15FieldsNonZero(HAORuntimeHeader *hdr, UNUSED u32 blobSize) {
-    hdr->l15TagBits = 1;
-}
-
-static
 void expectHaoLayoutMutationRejected(const HAOCompileArtifacts &artifacts,
                                      HaoHeaderMutator mutator,
                                      const char *name) {
@@ -731,12 +711,11 @@ HAOInspectStats computeHaoInspectStats(const bytecode_ptr<u8> &blob) {
             stats.multiEntryBucketCount++;
         }
 
-        const u32 bitmapKey = haoBitmapKeyForPrimaryForTest(i);
-        const u32 bitmapByte = bitmapKey / 8U;
+        const u32 bitmapByte = i / 8U;
         EXPECT_LT(bitmapByte, expectedBitmap.size());
         if (bitmapByte < expectedBitmap.size()) {
             expectedBitmap[bitmapByte] |=
-                verify_u8(1U << (bitmapKey % 8U));
+                verify_u8(1U << (i % 8U));
         }
     }
 
@@ -2521,21 +2500,6 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutAcceptsGeneratedBlob) {
     EXPECT_EQ(artifacts.hash.stats.maxEntriesPerKey,
               summary.maxEntriesPerKey);
     EXPECT_EQ(artifacts.meta.size(), summary.ruleMetaCount);
-    const auto *hdr = reinterpret_cast<const HAORuntimeHeader *>(blob.get());
-    EXPECT_EQ(artifacts.l15TagBits, hdr->l15TagBits);
-    EXPECT_EQ(artifacts.l15TagOverlapBits, hdr->l15TagOverlapBits);
-    EXPECT_EQ(artifacts.l15TagMasks.size(), hdr->l15MaskCount);
-    if (hdr->l15TagBits) {
-        const auto *masks = reinterpret_cast<const u64a *>(
-            blob.get() + hdr->l15MaskTableOffset);
-
-        EXPECT_EQ(HAO_L15_TAG_BITS, hdr->l15TagBits);
-        EXPECT_EQ(HAO_L15_TAG_BITS, popcount64(masks[0]));
-        EXPECT_EQ(hdr->l2EntryCount, hdr->l15TagCount);
-        EXPECT_NE(0U, hdr->l15TagOffset);
-        EXPECT_NE(0U, hdr->l15MaskTableOffset);
-        EXPECT_EQ(artifacts.l15TagMask, masks[0]);
-    }
 }
 
 TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsBrokenL2Offset) {
@@ -2564,28 +2528,6 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsBrokenL2Offset) {
     EXPECT_TRUE(HaoRuntimeValidateLayoutForTest(blob.get(),
                                                 verify_u32(blob.size())));
 
-    const u32 savedL15TagOffset = hdr->l15TagOffset;
-    const u32 savedL15TagCount = hdr->l15TagCount;
-    const u32 savedL15TagBits = hdr->l15TagBits;
-    const u32 savedL15TagOverlapBits = hdr->l15TagOverlapBits;
-    const u32 savedL15MaskTableOffset = hdr->l15MaskTableOffset;
-    const u32 savedL15MaskCount = hdr->l15MaskCount;
-    hdr->l15TagOffset = hdr->ruleMetaOffset;
-    hdr->l15TagCount = hdr->l2EntryCount;
-    hdr->l15TagBits = HAO_L15_TAG_BITS;
-    hdr->l15TagOverlapBits = 0;
-    hdr->l15MaskTableOffset = hdr->ruleMetaOffset;
-    hdr->l15MaskCount = 1;
-    EXPECT_FALSE(HaoRuntimeValidateLayoutForTest(blob.get(),
-                                                 verify_u32(blob.size())));
-    hdr->l15TagOffset = savedL15TagOffset;
-    hdr->l15TagCount = savedL15TagCount;
-    hdr->l15TagBits = savedL15TagBits;
-    hdr->l15TagOverlapBits = savedL15TagOverlapBits;
-    hdr->l15MaskTableOffset = savedL15MaskTableOffset;
-    hdr->l15MaskCount = savedL15MaskCount;
-    EXPECT_TRUE(HaoRuntimeValidateLayoutForTest(blob.get(),
-                                                verify_u32(blob.size())));
 }
 
 TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsHeaderFieldMatrix) {
@@ -2632,8 +2574,7 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutRejectsHeaderFieldMatrix) {
         {"l2CheckOffsetUnaligned", haoMutateL2CheckOffsetUnaligned},
         {"l2CheckOutOfBounds", haoMutateL2CheckOutOfBounds},
         {"l2MetaOffsetZero", haoMutateL2MetaOffsetZero},
-        {"l2MetaOutOfBounds", haoMutateL2MetaOutOfBounds},
-        {"l15FieldsNonZero", haoMutateL15FieldsNonZero}
+        {"l2MetaOutOfBounds", haoMutateL2MetaOutOfBounds}
     };
 
     for (const auto &c : cases) {
@@ -4165,8 +4106,7 @@ TEST(HAORuntime, InvalidHeaderFieldMatrixFallsBackCleanly) {
         {"l2CheckOffsetUnaligned", haoMutateL2CheckOffsetUnaligned},
         {"l2CheckOutOfBounds", haoMutateL2CheckOutOfBounds},
         {"l2MetaOffsetZero", haoMutateL2MetaOffsetZero},
-        {"l2MetaOutOfBounds", haoMutateL2MetaOutOfBounds},
-        {"l15FieldsNonZero", haoMutateL15FieldsNonZero}
+        {"l2MetaOutOfBounds", haoMutateL2MetaOutOfBounds}
     };
 
     for (const auto &c : cases) {

@@ -591,20 +591,20 @@ u64a haoLaneMaskForCount64(u32 count) {
 }
 
 static really_inline
-u32 haoRetireEncodedPair(const u32 *primaryHashTable, svuint32_t vlaneBits,
-                         svuint32_t vkeys, svuint32_t vbitPos,
-                         svuint32_t vbitmapBytes, u32 *encodedPair) {
-    const svbool_t pg32 = haoPgB32_8();
+svbool_t haoBitmapProbe32(svbool_t pg32, svuint32_t vbitPos,
+                          svuint32_t vbitmapBytes) {
     const svuint32_t vone = svdup_n_u32(1U);
     const svuint32_t vbitMask = svlsl_u32_x(pg32, vone, vbitPos);
     const svuint32_t vhit = svand_u32_x(pg32, vbitmapBytes, vbitMask);
-    const svbool_t phit = svcmpne_n_u32(pg32, vhit, 0U);
+
+    return svcmpne_n_u32(pg32, vhit, 0U);
+}
+
+static really_inline
+u32 haoPrimaryGather32(const u32 *primaryHashTable, svbool_t pg32,
+                       svbool_t phit, svuint32_t vlaneBits,
+                       svuint32_t vkeys, u32 *encodedPair) {
     const svuint32_t vzero = svdup_n_u32(0U);
-
-    if (likely(!svptest_any(pg32, phit))) {
-        return 0;
-    }
-
     const svuint32_t vencoded =
         svld1_gather_u32index_u32(phit, primaryHashTable, vkeys);
     const svuint32_t vhitBits = svsel_u32(phit, vlaneBits, vzero);
@@ -613,6 +613,21 @@ u32 haoRetireEncodedPair(const u32 *primaryHashTable, svuint32_t vlaneBits,
     svst1_u32(phit, encodedPair, vencoded);
 
     return laneMask;
+}
+
+static really_inline
+u32 haoRetireEncodedPair(const u32 *primaryHashTable, svuint32_t vlaneBits,
+                         svuint32_t vkeys, svuint32_t vbitPos,
+                         svuint32_t vbitmapBytes, u32 *encodedPair) {
+    const svbool_t pg32 = haoPgB32_8();
+    const svbool_t phit = haoBitmapProbe32(pg32, vbitPos, vbitmapBytes);
+
+    if (likely(!svptest_any(pg32, phit))) {
+        return 0;
+    }
+
+    return haoPrimaryGather32(primaryHashTable, pg32, phit, vlaneBits, vkeys,
+                              encodedPair);
 }
 
 static really_inline

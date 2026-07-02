@@ -5,7 +5,6 @@
 #include "hao_runtime_test.h"
 
 #include "fdr/hao_runtime_inline.h"
-#include "util/popcount.h"
 
 #include <cstring>
 
@@ -88,47 +87,6 @@ static int haoValidateLayoutForTest(const void *blob, u32 blobSize,
         (u64a)blobSize) {
         return 0;
     }
-#if HAO_L15_TAG
-    if (hdr->l15TagBits || hdr->l15TagOffset ||
-        hdr->l15TagCount || hdr->l15TagOverlapBits ||
-        hdr->l15MaskTableOffset || hdr->l15MaskCount) {
-        const u64a *masks;
-
-        if (hashMode != HAO_RUNTIME_HASH_BEXT ||
-            hdr->l15TagBits != HAO_L15_TAG_BITS ||
-            hdr->l15TagOverlapBits > HAO_L15_TAG_MAX_OVERLAP_BITS ||
-            hdr->l15TagCount != hdr->l2EntryCount ||
-            !hdr->l15MaskCount ||
-            hdr->l15MaskCount > HAO_L15_TAG_MAX_MASKS ||
-            !hdr->l15TagOffset ||
-            !hdr->l15MaskTableOffset ||
-            (hdr->l15TagOffset & (sizeof(u16) - 1U)) ||
-            (hdr->l15MaskTableOffset & (sizeof(u64a) - 1U)) ||
-            (u64a)hdr->l15TagOffset +
-                    (u64a)hdr->l15TagCount * sizeof(u16) >
-                (u64a)blobSize ||
-            (u64a)hdr->l15MaskTableOffset +
-                    (u64a)hdr->l15MaskCount * sizeof(u64a) >
-                (u64a)blobSize) {
-            return 0;
-        }
-        masks = (const u64a *)((const u8 *)hdr + hdr->l15MaskTableOffset);
-        for (u32 i = 0; i < hdr->l15MaskCount; i++) {
-            const u32 overlap = popcount64(masks[i] & hdr->bextMask);
-            if (popcount64(masks[i]) != HAO_L15_TAG_BITS ||
-                overlap > HAO_L15_TAG_MAX_OVERLAP_BITS ||
-                HAO_L15_TAG_BITS - overlap < HAO_L15_TAG_MIN_NEW_BITS) {
-                return 0;
-            }
-        }
-    }
-#else
-    if (hdr->l15TagBits || hdr->l15TagOffset ||
-        hdr->l15TagCount || hdr->l15TagOverlapBits ||
-        hdr->l15MaskTableOffset || hdr->l15MaskCount) {
-        return 0;
-    }
-#endif
     if (outHdr) {
         *outHdr = hdr;
     }

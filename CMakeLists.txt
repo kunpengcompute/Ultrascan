@@ -877,6 +877,10 @@ set (hs_exec_SRCS
     src/fdr/flood_runtime.h
     src/fdr/fdr_loadval.h
     src/fdr/hao_engine.c
+    src/fdr/hao_runtime_layout.c
+    src/fdr/hao_runtime_layout.h
+    src/fdr/hao_runtime_stats.c
+    src/fdr/hao_runtime_stats.h
     src/fdr/hao_runtime.h
     src/fdr/teddy.c
     src/fdr/teddy.h
