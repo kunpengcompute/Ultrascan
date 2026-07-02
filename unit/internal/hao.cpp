@@ -496,6 +496,71 @@ bool findL2SlotForRule(const HAOHashBuild &hash, u32 ruleIndex,
     return false;
 }
 
+static really_inline
+u32 haoPrimaryOffsetForTest(u32 encoded) {
+    return encoded & HAO_LAYOUT_L1_OFFSET_MASK;
+}
+
+static really_inline
+u32 haoPrimaryCountForTest(u32 encoded) {
+    return encoded >> HAO_LAYOUT_L1_COUNT_SHIFT;
+}
+
+static
+bool haoPrimaryBucketMatchesRulesForTest(const HAOHashBuild &hash, u32 encoded,
+                                         const std::vector<u32> &ruleIndexes) {
+    const u32 offset = haoPrimaryOffsetForTest(encoded);
+    const u32 count = haoPrimaryCountForTest(encoded);
+    const u32 expectedCount = verify_u32(
+        (ruleIndexes.size() + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY - 1U) /
+        HAO_LAYOUT_RULE_SLOTS_PER_ENTRY);
+
+    if (!offset || count != expectedCount ||
+        offset + count > hash.l2Meta.size()) {
+        return false;
+    }
+
+    for (u32 entry = 0; entry < count; entry++) {
+        const auto &meta = hash.l2Meta[offset + entry];
+        for (u32 slot = 0; slot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY; slot++) {
+            const u32 logicalSlot =
+                entry * HAO_LAYOUT_RULE_SLOTS_PER_ENTRY + slot;
+            const u32 expectedRule =
+                logicalSlot < ruleIndexes.size()
+                    ? ruleIndexes[logicalSlot]
+                    : HAO_INVALID_RULE_INDEX;
+            if (meta.ruleIndex[slot] != expectedRule) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+static
+u32 collectExpandedBucketEncodingsForTest(const HAOHashBuild &hash,
+                                          const HAOCompiledRulePlan &plan,
+                                          const std::vector<u32> &ruleIndexes,
+                                          std::set<u32> *encodings) {
+    assert(encodings);
+
+    u32 matchingKeys = 0;
+    encodings->clear();
+    for (const auto &expanded : plan.keyExpansion.expandedKeys) {
+        if (expanded.keyValue >= hash.primary.offsets.size()) {
+            continue;
+        }
+        const u32 encoded = hash.primary.offsets[expanded.keyValue];
+        if (!haoPrimaryBucketMatchesRulesForTest(hash, encoded, ruleIndexes)) {
+            continue;
+        }
+        encodings->insert(encoded);
+        matchingKeys++;
+    }
+    return matchingKeys;
+}
+
 static
 u8 l2Byte(u64a word, u32 byteIndex) {
     return verify_u8((word >> (byteIndex * 8U)) & 0xffU);
@@ -2378,7 +2443,7 @@ TEST(HAOCompile, BuildHaoGlobalBlobSelectorsAndPrimaryTableMatchArtifacts) {
 
     const HAOInspectStats stats = computeHaoInspectStats(blob);
     EXPECT_EQ(artifacts.hash.stats.nonEmptyPrimary, stats.nonEmptyL1);
-    EXPECT_EQ(artifacts.hash.stats.totalL2Entries,
+    EXPECT_EQ(artifacts.hash.stats.l2PhysicalEntries,
               stats.totalL2Entries);
 }
 
@@ -2451,7 +2516,7 @@ TEST(HAOCompile, HaoRuntimeValidateLayoutAcceptsGeneratedBlob) {
                                             &summary));
     EXPECT_EQ(artifacts.hash.stats.nonEmptyPrimary,
               summary.nonEmptyPrimary);
-    EXPECT_EQ(artifacts.hash.stats.totalL2Entries + 1U,
+    EXPECT_EQ(artifacts.hash.stats.l2PhysicalEntries + 1U,
               summary.l2EntryCount);
     EXPECT_EQ(artifacts.hash.stats.maxEntriesPerKey,
               summary.maxEntriesPerKey);
@@ -3447,6 +3512,83 @@ TEST(HAOCompile, HaoGlobalHashBuildsSinglePrimarySpace) {
     EXPECT_EQ(fastPathExpandedKeys,
               artifacts.hash.stats.totalExpandedKeysInBuckets);
     EXPECT_GT(artifacts.hash.stats.nonEmptyPrimary, 0U);
+}
+
+TEST(HAOCompile, HaoL2InternSharesExpandedSingleEntryBuckets) {
+    std::vector<hwlmLiteral> lits = {
+        hwlmLiteral(std::string("\x04\x00", 2), false, false, 780,
+                    HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("alpha", false, false, 781, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("theta", false, false, 782, HWLM_ALL_GROUPS, {}, {}),
+        hwlmLiteral("omega", false, false, 783, HWLM_ALL_GROUPS, {}, {})
+    };
+
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts,
+                                  HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
+
+    const auto &plan = artifacts.plans[0];
+    ASSERT_NE(HAORuleCategory::HAO_RULE_UNSUPPORTED, plan.category);
+    ASSERT_GT(plan.keyExpansion.expandedKeyCount, 1U);
+
+    std::set<u32> encodings;
+    const u32 matchingKeys = collectExpandedBucketEncodingsForTest(
+        artifacts.hash, plan, std::vector<u32>{plan.ruleIndex}, &encodings);
+    EXPECT_GT(matchingKeys, 1U);
+    EXPECT_EQ(1U, encodings.size());
+
+    const auto &stats = artifacts.hash.stats;
+    EXPECT_GT(stats.l2InternSavedEntries, 0U);
+    EXPECT_GT(stats.l2InternSavedSingleEntryBuckets, 0U);
+    EXPECT_EQ(stats.totalL2Entries - stats.l2InternSavedEntries,
+              stats.l2PhysicalEntries);
+    EXPECT_EQ(artifacts.hash.l2Check.size() - 1U,
+              stats.l2PhysicalEntries);
+}
+
+TEST(HAOCompile, HaoL2InternSharesExpandedMultiEntryBuckets) {
+    const u32 duplicateCount = HAO_LAYOUT_RULE_SLOTS_PER_ENTRY + 1U;
+    auto lits = makeDuplicateLiterals(std::string("\x04\x00", 2), false,
+                                      false, 790, duplicateCount,
+                                      HWLM_ALL_GROUPS);
+    lits.emplace_back("alpha", false, false, 800, HWLM_ALL_GROUPS,
+                      std::vector<u8>{}, std::vector<u8>{});
+    lits.emplace_back("theta", false, false, 801, HWLM_ALL_GROUPS,
+                      std::vector<u8>{}, std::vector<u8>{});
+    lits.emplace_back("omega", false, false, 802, HWLM_ALL_GROUPS,
+                      std::vector<u8>{}, std::vector<u8>{});
+
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(buildHAOArtifacts(lits, &artifacts,
+                                  HAODumpMode::SummaryIfEnabled));
+    ASSERT_TRUE(artifacts.hash.valid);
+    ASSERT_LE(duplicateCount, artifacts.plans.size());
+
+    std::vector<u32> ruleIndexes;
+    ruleIndexes.reserve(duplicateCount);
+    for (u32 i = 0; i < duplicateCount; i++) {
+        const auto &plan = artifacts.plans[i];
+        ASSERT_NE(HAORuleCategory::HAO_RULE_UNSUPPORTED, plan.category);
+        ruleIndexes.push_back(plan.ruleIndex);
+    }
+
+    const auto &plan = artifacts.plans[0];
+    ASSERT_GT(plan.keyExpansion.expandedKeyCount, 1U);
+
+    std::set<u32> encodings;
+    const u32 matchingKeys = collectExpandedBucketEncodingsForTest(
+        artifacts.hash, plan, ruleIndexes, &encodings);
+    EXPECT_GT(matchingKeys, 1U);
+    EXPECT_EQ(1U, encodings.size());
+
+    const auto &stats = artifacts.hash.stats;
+    EXPECT_GT(stats.l2InternSavedEntries, 0U);
+    EXPECT_GT(stats.l2InternSavedMultiEntryBuckets, 0U);
+    EXPECT_EQ(stats.totalL2Entries - stats.l2InternSavedEntries,
+              stats.l2PhysicalEntries);
+    EXPECT_EQ(artifacts.hash.l2Check.size() - 1U,
+              stats.l2PhysicalEntries);
 }
 
 TEST(HAOCompile, HaoGlobalHashStoresAnchorConfirmFragments) {

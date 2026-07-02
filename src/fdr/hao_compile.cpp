@@ -22,6 +22,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -70,6 +71,9 @@ static constexpr u32 HAO_BUILD_MAX_L2_ENTRIES = 1U << HAO_BUILD_L2_KEY_BITS;
 #endif
 #ifndef HAO_DOT_INPUT_MASK_GREEDY_CANDIDATES
 #define HAO_DOT_INPUT_MASK_GREEDY_CANDIDATES 32U
+#endif
+#ifndef HAO_L2_BUCKET_INTERN
+#define HAO_L2_BUCKET_INTERN 1
 #endif
 static constexpr u64a HAO_BUILD_MAX_TOTAL_PRIMARY_FOOTPRINT =
     128ULL * 1024ULL * 1024ULL;
@@ -1222,6 +1226,82 @@ void haoAddL2Slot(const HAOCompiledRulePlan &plan, u32 localSlot,
     check->mask[localSlot] = plan.verifier.maskWord;
 }
 
+struct HAOL2BucketInternRecord {
+    u32 offset = 0;
+    u32 entryCount = 0;
+    u32 refCount = 1;
+};
+
+static really_inline
+u64a haoHashMix(u64a h, u64a v) {
+    h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U);
+    return h;
+}
+
+static
+u64a haoHashL2Bucket(const std::vector<HAOL2Check> &checks,
+                     const std::vector<HAOL2Meta> &metas) {
+    assert(checks.size() == metas.size());
+
+    u64a h = 0xcbf29ce484222325ULL;
+    h = haoHashMix(h, verify_u32(checks.size()));
+    for (size_t i = 0; i < checks.size(); i++) {
+        const HAOL2Check &check = checks[i];
+        const HAOL2Meta &meta = metas[i];
+
+        h = haoHashMix(h, meta.careBits);
+        for (u32 slot = 0; slot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY; slot++) {
+            h = haoHashMix(h, check.rule[slot]);
+            h = haoHashMix(h, check.mask[slot]);
+            h = haoHashMix(h, meta.ruleIndex[slot]);
+        }
+    }
+    return h;
+}
+
+static really_inline
+bool haoL2CheckEqual(const HAOL2Check &a, const HAOL2Check &b) {
+    for (u32 slot = 0; slot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY; slot++) {
+        if (a.rule[slot] != b.rule[slot] ||
+            a.mask[slot] != b.mask[slot]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static really_inline
+bool haoL2MetaEqual(const HAOL2Meta &a, const HAOL2Meta &b) {
+    if (a.careBits != b.careBits) {
+        return false;
+    }
+    for (u32 slot = 0; slot < HAO_LAYOUT_RULE_SLOTS_PER_ENTRY; slot++) {
+        if (a.ruleIndex[slot] != b.ruleIndex[slot]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static
+bool haoL2BucketEqual(const std::vector<HAOL2Check> &checks,
+                      const std::vector<HAOL2Meta> &metas,
+                      const HAOHashBuild &hash, u32 offset) {
+    assert(checks.size() == metas.size());
+
+    if (offset + checks.size() > hash.l2Check.size() ||
+        offset + metas.size() > hash.l2Meta.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < checks.size(); i++) {
+        if (!haoL2CheckEqual(checks[i], hash.l2Check[offset + i]) ||
+            !haoL2MetaEqual(metas[i], hash.l2Meta[offset + i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* Build the HAO global single-table hash. Expanded keys go straight into the
  * global key space instead of being grouped by mask class. */
 static
@@ -1259,6 +1339,9 @@ void haoBuildTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
 
     std::map<u32, std::vector<u32>> keyToRuleIndexes;
     std::map<u32, const HAOCompiledRulePlan *> ruleIndexToPlan;
+#if HAO_L2_BUCKET_INTERN
+    std::unordered_map<u64a, std::vector<HAOL2BucketInternRecord>> internMap;
+#endif
     for (const auto &plan : rulePlans) {
         if (plan.category == HAORuleCategory::HAO_RULE_UNSUPPORTED) {
             out->flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
@@ -1279,21 +1362,90 @@ void haoBuildTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
             (bucketRules.size() + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY - 1) /
             HAO_LAYOUT_RULE_SLOTS_PER_ENTRY);
 
-        if (out->l2Check.size() + entryCount >
-            HAO_BUILD_MAX_L2_ENTRIES) {
-            out->flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
-            out->flags |= HAO_ARTIFACT_FLAG_PARTIAL_L2_CAPACITY;
-            return;
-        }
         if (entryCount >= (1U << (32U - HAO_LAYOUT_L1_COUNT_SHIFT))) {
             out->flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
             out->flags |= HAO_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW;
             return;
         }
 
-        const u32 l2Offset = verify_u32(out->l2Check.size());
-        out->primary.offsets[key] =
-            encodePrimaryValue(l2Offset, entryCount);
+        std::vector<HAOL2Check> bucketChecks;
+        std::vector<HAOL2Meta> bucketMetas;
+        bucketChecks.reserve(entryCount);
+        bucketMetas.reserve(entryCount);
+
+        for (u32 chunk = 0; chunk < entryCount; chunk++) {
+            HAOL2Check l2Check = {};
+            HAOL2Meta l2Meta = {};
+            const size_t begin = chunk * HAO_LAYOUT_RULE_SLOTS_PER_ENTRY;
+            const size_t end = std::min(bucketRules.size(),
+                                        begin + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY);
+
+            haoInitL2(&l2Check, &l2Meta);
+            for (size_t slot = begin; slot < end; slot++) {
+                const u32 localSlot = verify_u32(slot - begin);
+                const u32 ruleIndex = bucketRules[slot];
+                const auto planIt = ruleIndexToPlan.find(ruleIndex);
+                assert(planIt != ruleIndexToPlan.end());
+                haoAddL2Slot(*planIt->second, localSlot, &l2Check, &l2Meta);
+            }
+
+            bucketChecks.push_back(l2Check);
+            bucketMetas.push_back(l2Meta);
+        }
+
+        u32 l2Offset = 0;
+#if HAO_L2_BUCKET_INTERN
+        // Share byte-for-byte identical L2 ranges across expanded primary keys.
+        const u64a bucketHash = haoHashL2Bucket(bucketChecks, bucketMetas);
+        auto &records = internMap[bucketHash];
+        for (auto &record : records) {
+            out->stats.l2InternLookupChecks++;
+            if (record.entryCount == entryCount &&
+                haoL2BucketEqual(bucketChecks, bucketMetas, *out,
+                                 record.offset)) {
+                l2Offset = record.offset;
+                record.refCount++;
+                out->stats.l2InternHitBuckets++;
+                out->stats.l2InternSavedEntries += entryCount;
+                if (entryCount == 1U) {
+                    out->stats.l2InternSavedSingleEntryBuckets++;
+                } else {
+                    out->stats.l2InternSavedMultiEntryBuckets++;
+                }
+                out->stats.l2InternMaxRefCount =
+                    std::max(out->stats.l2InternMaxRefCount, record.refCount);
+                break;
+            }
+            out->stats.l2InternLookupMisses++;
+        }
+#endif
+
+        if (!l2Offset) {
+            if (out->l2Check.size() + entryCount >
+                HAO_BUILD_MAX_L2_ENTRIES) {
+                out->flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
+                out->flags |= HAO_ARTIFACT_FLAG_PARTIAL_L2_CAPACITY;
+                return;
+            }
+
+            l2Offset = verify_u32(out->l2Check.size());
+            out->l2Check.insert(out->l2Check.end(), bucketChecks.begin(),
+                                bucketChecks.end());
+            out->l2Meta.insert(out->l2Meta.end(), bucketMetas.begin(),
+                               bucketMetas.end());
+#if HAO_L2_BUCKET_INTERN
+            HAOL2BucketInternRecord record;
+            record.offset = l2Offset;
+            record.entryCount = entryCount;
+            record.refCount = 1U;
+            records.push_back(record);
+            out->stats.l2InternUniqueBuckets++;
+            out->stats.l2InternMaxRefCount =
+                std::max(out->stats.l2InternMaxRefCount, 1U);
+#endif
+        }
+
+        out->primary.offsets[key] = encodePrimaryValue(l2Offset, entryCount);
         out->stats.nonEmptyPrimary++;
         out->stats.totalRulesInBuckets += ruleCount;
         out->stats.totalL2Entries += entryCount;
@@ -1324,27 +1476,9 @@ void haoBuildTables(const std::vector<HAOCompiledRulePlan> &rulePlans,
         } else {
             out->stats.entryBucketsGt4++;
         }
-
-        for (u32 chunk = 0; chunk < entryCount; chunk++) {
-            HAOL2Check l2Check = {};
-            HAOL2Meta l2Meta = {};
-            const size_t begin = chunk * HAO_LAYOUT_RULE_SLOTS_PER_ENTRY;
-            const size_t end = std::min(bucketRules.size(),
-                                        begin + HAO_LAYOUT_RULE_SLOTS_PER_ENTRY);
-
-            haoInitL2(&l2Check, &l2Meta);
-            for (size_t slot = begin; slot < end; slot++) {
-                const u32 localSlot = verify_u32(slot - begin);
-                const u32 ruleIndex = bucketRules[slot];
-                const auto planIt = ruleIndexToPlan.find(ruleIndex);
-                assert(planIt != ruleIndexToPlan.end());
-                haoAddL2Slot(*planIt->second, localSlot, &l2Check, &l2Meta);
-            }
-
-            out->l2Check.push_back(l2Check);
-            out->l2Meta.push_back(l2Meta);
-        }
     }
+    out->stats.l2PhysicalEntries =
+        out->l2Check.empty() ? 0U : verify_u32(out->l2Check.size() - 1U);
     buildPrimaryBitmap(out->primary, &out->bitmap);
     out->valid = true;
 }
@@ -1620,12 +1754,14 @@ void haoBuildL15Tags(HAOCompileArtifacts *artifacts) {
             return;
         }
 
+        if (!(artifacts->l15Tags[offset] & HAO_L15_TAG_VALID)) {
+            taggedEntries++;
+        }
         artifacts->l15Tags[offset] =
             verify_u16(HAO_L15_TAG_VALID |
                        ((bestMaskId << HAO_L15_TAG_MASK_ID_SHIFT) &
                         HAO_L15_TAG_MASK_ID_MASK) |
                        (bestTag & HAO_L15_TAG_VALUE_MASK));
-        taggedEntries++;
     });
 
     if (!taggedEntries) {
@@ -2184,6 +2320,33 @@ void dumpHAOSummary(const ArtifactsT &artifacts) {
     HAO_SUMMARY_FMT("entryBucketsGt4",        "%u", h.entryBucketsGt4);
     HAO_SUMMARY_FMT("entryBucketsGt4Pct",     "%.5f",
                     haoCompilePct(h.entryBucketsGt4, h.nonEmptyPrimary));
+
+    printf("[HAO][L2-Intern]\n");
+#if HAO_L2_BUCKET_INTERN
+    HAO_SUMMARY_FMT("enabled",                "%u", 1U);
+#else
+    HAO_SUMMARY_FMT("enabled",                "%u", 0U);
+#endif
+    HAO_SUMMARY_FMT("logicalEntries",         "%u", h.totalL2Entries);
+    HAO_SUMMARY_FMT("physicalEntries",        "%u", h.l2PhysicalEntries);
+    HAO_SUMMARY_FMT("savedEntries",           "%u", h.l2InternSavedEntries);
+    HAO_SUMMARY_FMT("savedEntryPct",          "%.5f",
+                    haoCompilePct(h.l2InternSavedEntries,
+                                  h.totalL2Entries));
+    HAO_SUMMARY_FMT("uniqueBuckets",          "%u",
+                    h.l2InternUniqueBuckets);
+    HAO_SUMMARY_FMT("hitBuckets",             "%u",
+                    h.l2InternHitBuckets);
+    HAO_SUMMARY_FMT("savedSingleEntryBuckets", "%u",
+                    h.l2InternSavedSingleEntryBuckets);
+    HAO_SUMMARY_FMT("savedMultiEntryBuckets", "%u",
+                    h.l2InternSavedMultiEntryBuckets);
+    HAO_SUMMARY_FMT("maxRefCount",            "%u",
+                    h.l2InternMaxRefCount);
+    HAO_SUMMARY_FMT("lookupChecks",           "%u",
+                    h.l2InternLookupChecks);
+    HAO_SUMMARY_FMT("lookupMisses",           "%u",
+                    h.l2InternLookupMisses);
 }
 
 static
@@ -3409,7 +3572,10 @@ double haoEstimateFootprintMiB(const HAOHashStats &stats, u32 ruleCount,
     const u32 primaryCount = haoPrimaryCountForKeyBits(keyBits);
     const u32 bitmapCount =
         haoPrimaryBitmapCountForPrimaryCount(primaryCount);
-    const u32 l2EntryCount = stats.totalL2Entries + 1U; // L2[0] is empty.
+    const u32 physicalEntries =
+        stats.l2PhysicalEntries ? stats.l2PhysicalEntries
+                                : stats.totalL2Entries;
+    const u32 l2EntryCount = physicalEntries + 1U; // L2[0] is empty.
     const u64a bytes =
         (u64a)primaryCount * sizeof(u32) +
         (u64a)haoPrimaryBitmapBytes(bitmapCount) * sizeof(u8) +

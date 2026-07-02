@@ -185,6 +185,15 @@ struct HAOHashStats {
     u32 entryBucketsEq1 = 0;
     u32 entryBuckets2To4 = 0;
     u32 entryBucketsGt4 = 0;
+    u32 l2InternUniqueBuckets = 0;
+    u32 l2InternHitBuckets = 0;
+    u32 l2InternSavedEntries = 0;
+    u32 l2InternSavedSingleEntryBuckets = 0;
+    u32 l2InternSavedMultiEntryBuckets = 0;
+    u32 l2InternMaxRefCount = 0;
+    u32 l2InternLookupChecks = 0;
+    u32 l2InternLookupMisses = 0;
+    u32 l2PhysicalEntries = 0;
 };
 
 /* Artifacts for the HAO global single-table build. */
