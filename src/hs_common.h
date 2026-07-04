@@ -52,6 +52,7 @@ extern "C"
 #endif
 
 struct hs_database;
+struct fat_hs_database;
 
 /**
  * A Hyperscan pattern database.
@@ -62,6 +63,7 @@ struct hs_database;
  *  - @ref hs_compile_ext_multi()
  */
 typedef struct hs_database hs_database_t;
+typedef struct fat_hs_database fat_hs_database_t;
 
 /**
  * A type for errors returned by Hyperscan functions.
@@ -82,6 +84,7 @@ typedef int hs_error_t;
  *      @ref HS_SUCCESS on success, other values on failure.
  */
 hs_error_t HS_CDECL hs_free_database(hs_database_t *db);
+hs_error_t HS_CDECL fat_hs_free_database(fat_hs_database_t *db);
 
 /**
  * Serialize a pattern database to a stream of bytes.
@@ -107,6 +110,9 @@ hs_error_t HS_CDECL hs_free_database(hs_database_t *db);
  */
 hs_error_t HS_CDECL hs_serialize_database(const hs_database_t *db, char **bytes,
                                           size_t *length);
+hs_error_t HS_CDECL fat_hs_serialize_database(const fat_hs_database_t *db, 
+                                              char **bytes,
+                                              size_t *length);
 
 /**
  * Reconstruct a pattern database from a stream of bytes previously generated
@@ -137,6 +143,9 @@ hs_error_t HS_CDECL hs_serialize_database(const hs_database_t *db, char **bytes,
 hs_error_t HS_CDECL hs_deserialize_database(const char *bytes,
                                             const size_t length,
                                             hs_database_t **db);
+hs_error_t HS_CDECL fat_hs_deserialize_database(const char *bytes,
+                                                const size_t length,
+                                                fat_hs_database_t **db);
 
 /**
  * Reconstruct a pattern database from a stream of bytes previously generated
@@ -169,6 +178,9 @@ hs_error_t HS_CDECL hs_deserialize_database(const char *bytes,
 hs_error_t HS_CDECL hs_deserialize_database_at(const char *bytes,
                                                const size_t length,
                                                hs_database_t *db);
+hs_error_t HS_CDECL fat_hs_deserialize_database_at(const char *bytes,
+                                                   const size_t length,
+                                                   fat_hs_database_t *db);
 
 /**
  * Provides the size of the stream state allocated by a single stream opened
@@ -202,7 +214,8 @@ hs_error_t HS_CDECL hs_stream_size(const hs_database_t *database,
  */
 hs_error_t HS_CDECL hs_database_size(const hs_database_t *database,
                                      size_t *database_size);
-
+hs_error_t HS_CDECL fat_hs_database_size(const fat_hs_database_t *db, 
+                                         size_t *size);
 /**
  * Utility function for reporting the size that would be required by a
  * database if it were deserialized.
@@ -230,6 +243,9 @@ hs_error_t HS_CDECL hs_database_size(const hs_database_t *database,
 hs_error_t HS_CDECL hs_serialized_database_size(const char *bytes,
                                                 const size_t length,
                                                 size_t *deserialized_size);
+hs_error_t HS_CDECL fat_hs_serialized_database_size(const char *bytes,
+                                                    const size_t length,
+                                                    size_t *size);
 
 /**
  * Utility function providing information about a database.
@@ -248,6 +264,8 @@ hs_error_t HS_CDECL hs_serialized_database_size(const char *bytes,
  */
 hs_error_t HS_CDECL hs_database_info(const hs_database_t *database,
                                      char **info);
+hs_error_t HS_CDECL fat_hs_database_info(const fat_hs_database_t *db, 
+                                         char **info);
 
 /**
  * Utility function providing information about a serialized database.
@@ -270,7 +288,6 @@ hs_error_t HS_CDECL hs_database_info(const hs_database_t *database,
  */
 hs_error_t HS_CDECL hs_serialized_database_info(const char *bytes,
                                                 size_t length, char **info);
-
 /**
  * The type of the callback function that will be used by Hyperscan to allocate
  * more memory at runtime as required, for example in @ref hs_open_stream() to

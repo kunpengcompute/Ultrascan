@@ -44,6 +44,7 @@
 #endif
 
 struct RoseEngine;
+struct x86_RoseEngine;
 
 namespace ue2 {
 
@@ -135,12 +136,16 @@ void dumpHolder(UNUSED const NGHolder &h,
 #ifdef DUMP_SUPPORT
 void dumpReportManager(const ReportManager &rm, const Grey &grey);
 void dumpSmallWrite(const RoseEngine *rose, const Grey &grey);
+void x86_dumpSmallWrite(const x86_RoseEngine *rose, const Grey &grey);
 #else
 static UNUSED
 void dumpReportManager(const ReportManager &, const Grey &) {
 }
 static UNUSED
 void dumpSmallWrite(const RoseEngine *, const Grey &) {
+}
+static UNUSED
+void x86_dumpSmallWrite(const x86_RoseEngine *, const Grey &) {
 }
 #endif
 

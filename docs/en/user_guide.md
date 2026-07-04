@@ -1,16 +1,20 @@
-# User Guide<a name="EN-US_TOPIC_0000002518413720"></a>
+# User Guide
 
-## Activation<a name="EN-US_TOPIC_0000002518253766"></a>
+## Prerequisites
 
-You can configure the  **config.txt**  file in the  **root**  directory of Hyperscan to enable or disable the short byte optimization and false-positive blocking features. The features are enabled by default.
+You have installed and compiled Ultrascan by following instructions in [Installation Guide](./installation_guide.md).
 
->![](public_sys-resources/icon-note.gif) **NOTE:** 
->If the  **config.txt**  file is not included or the file format is incorrect, the features are disabled by default.
+## Feature Enablement
 
-- **allowLily**: used to enable or disable the short byte optimization feature. The value can be  **0**  \(disable\) or  **1**  \(enable\).
-- **allowNeoFdr**: used to enable or disable the false-positive blocking feature. The value can be  **0**  \(disable\) or  **1**  \(enable\).
+Configure the `config.txt` file in the root directory of Ultrascan to enable or disable the short-byte-rule bypass optimization and false-positive blocking features. The features are enabled by default.
 
-The following is an example of the  **config.txt**  file:
+>![](public_sys-resources/icon-note.gif) **NOTE:**
+>If the `config.txt` file is not included or the file format is incorrect, the features are disabled by default.
+
+- `allowLily`: used to enable or disable the short-byte rule bypass optimization feature. The value can be `0` (disable) or `1` (enable).
+- `allowNeoFdr`: used to enable or disable the false-positive blocking feature. The value can be `0` (disable) or `1` (enable).
+
+The following is an example of the `config.txt` file:
 
 ```text
 allowLily:1;allowNeoFdr:1;

@@ -1,209 +1,336 @@
-# Hyperscan Fuzz 测试框架
+# Hyperscan Fuzz 测试
 
-## 1. 项目介绍
+`unit/fuzz` 是一个基于 Google Test 的 fuzz 测试程序。它会调用
+`tools/fuzz` 下的 Python 生成器产生正则表达式，再用随机数据驱动
+Hyperscan 的编译、扫描、stream、scratch、fat compile 等接口。
 
-Hyperscan Fuzz 测试框架是一个专门为测试 Hyperscan 正则表达式引擎而设计的模糊测试系统。它通过生成大量随机的正则表达式模式和测试数据，全面测试 Hyperscan 的各种接口和功能，以发现潜在的问题和边界情况。
+注意：这个 fuzz 不是 libFuzzer 入口形式，不需要 `LLVMFuzzerTestOneInput`。
 
-### 1.1 测试目标
+## 1. 目录结构
 
-- 验证 Hyperscan 各种接口的稳定性和正确性
-- 发现潜在的崩溃、内存泄漏和性能问题
-- 测试边界情况和异常输入
-- 确保不同平台上的一致性行为
-
-## 2. 测试框架结构
-
-```
-fuzz/
-├── data/            # 测试数据生成器
-│   ├── data_generator.cpp
-│   └── data_generator.h
-├── generator/       # 测试用例生成器
-│   └── python_generator.cpp
-├── runner/          # 测试运行器
-│   └── hs_runner.cpp
-├── CMakeLists.txt   # 构建配置
-├── fuzz_test.cpp    # 测试主逻辑
-├── fuzz_test.h      # 测试接口定义
-└── main.cpp         # 测试入口
+```text
+unit/fuzz/
+├── data/                  # 扫描数据生成器
+├── generator/             # 调用 tools/fuzz/*.py 生成 pattern
+├── runner/                # Hyperscan API 调用封装
+├── CMakeLists.txt         # fuzz 可执行程序构建脚本
+├── fuzz_test.cpp          # Google Test 主测试逻辑
+├── fuzz_test.h            # Generator/Runner 接口定义
+└── main.cpp               # gtest main 和超时监控
 ```
 
-### 2.1 核心组件
+## 2. 依赖
 
-- **测试用例生成器**：负责生成各种正则表达式测试用例
-- **数据生成器**：负责生成各种类型的测试数据
-- **测试运行器**：负责执行测试并验证结果
-- **测试框架**：基于 Google Test 框架组织测试流程
+ARM 机器上需要：
 
-## 3. 安装和依赖
+- C/C++ 编译器
+- CMake
+- Python，最好保证 `python` 命令可用；如果系统只有 `python3`，需要把
+  `unit/fuzz/generator/python_generator.cpp` 中的 `python` 改为 `python3`
+- lcov/genhtml，用于覆盖率报告
 
-### 3.1 系统要求
+## 3. 普通编译和运行
 
-- C++11 或更高版本的编译器
-- CMake 3.10 或更高版本
-- Python 3.x（用于生成测试用例）
-- Google Test 框架（已包含在测试目录中）
-
-### 3.2 构建步骤
-
-1. 确保已构建 Hyperscan 库
-2. 进入 fuzz 测试目录
-3. 创建并进入构建目录
-4. 运行 CMake 配置
-5. 编译测试
+先在项目根目录构建 Hyperscan 本体：
 
 ```bash
-cd unit/fuzz
-mkdir build && cd build
+export HS_ROOT=/path/to/hyperscan
+cd "$HS_ROOT"
+rm -rf build
+mkdir build
+cd build
+
 cmake ..
-make
+make -j$(nproc)
 ```
 
-## 4. 使用方法
-
-### 4.1 运行测试
+再构建 fuzz：
 
 ```bash
-# 运行所有测试
-./fuzz_test
+cd "$HS_ROOT/unit/fuzz"
+rm -rf build
+mkdir build
+cd build
 
-# 运行特定类型的测试
-./fuzz_test --gtest_filter=HyperscanFuzzTest.AllInterfaces
+cmake ..
+make -j$(nproc)
 ```
 
-### 4.2 测试参数配置
-
-测试框架使用预定义的测试参数配置，位于 `fuzz_test.cpp` 文件中：
-
-```cpp
-static const FuzzTestParams testParams[] = {
-    {"aristocrats", 10, 10000000, false},
-    {"completocrats", 10, 10000000, false},
-    {"heuristocrats", 10, 10000000, false}
-};
-```
-
-参数说明：
-- **generatorType**：生成器类型（aristocrats, completocrats, heuristocrats）
-- **depth**：生成深度，控制正则表达式的复杂度
-- **count**：测试用例数量
-- **fullCharset**：是否使用完整字符集
-
-## 5. 测试用例生成
-
-### 5.1 生成器类型
-
-- **aristocrats**：生成更复杂的正则表达式
-- **completocrats**：生成更全面的正则表达式覆盖
-- **heuristocrats**：基于启发式方法生成正则表达式
-
-### 5.2 测试用例格式
-
-测试用例格式为：`ID:/pattern/flags`
-
-- **ID**：测试用例唯一标识符
-- **pattern**：正则表达式模式
-- **flags**：编译标志，如 `i`（大小写不敏感）、`m`（多行模式）等
-
-## 6. 测试数据生成
-
-测试框架生成四种类型的测试数据：
-
-- **随机文本**：包含字母和数字
-- **二进制数据**：0-255的随机字节
-- **特殊字符**：各种标点符号和特殊符号
-- **边界数据**：包含空字符、换行符、回车符等边界情况
-
-每种数据类型的长度在 0-1024 之间随机生成。
-
-## 7. 测试接口覆盖
-
-### 7.1 编译接口
-
-- `hs_compile`：编译单个正则表达式
-- `hs_compile_multi`：编译多个正则表达式
-- `hs_compile_ext_multi`：支持扩展参数的编译
-- `hs_compile_lit`：编译纯字面量表达式
-- `hs_compile_lit_multi`：编译多个纯字面量表达式
-
-### 7.2 运行时接口
-
-- `hs_scan`：在数据块上执行匹配
-- `hs_scan_stream`：在流上执行匹配
-- `hs_scan_vector`：在分散的数据上执行匹配
-
-### 7.3 流操作接口
-
-- `hs_reset_stream`：重置流状态
-- `hs_copy_stream`：复制流状态
-- `hs_reset_and_copy_stream`：重置并复制流状态
-- `hs_compress_stream`：压缩流状态
-- `hs_expand_stream`：扩展流状态
-- `hs_reset_and_expand_stream`：重置并扩展流状态
-
-### 7.4 工具接口
-
-- `hs_expression_info`：获取表达式信息
-- `hs_expression_ext_info`：获取带扩展参数的表达式信息
-- `hs_populate_platform`：获取平台信息
-- `hs_clone_scratch`：克隆临时内存
-- `hs_scratch_size`：获取临时内存大小
-
-## 8. 测试结果分析
-
-### 8.1 测试输出
-
-测试运行时会输出详细的测试信息，包括：
-- 生成的测试用例数量
-- 生成的测试数据数量
-- 每个测试用例的执行情况
-- 每个接口的测试状态
-
-### 8.2 错误处理
-
-测试框架会捕获并报告以下类型的错误：
-- 编译错误：正则表达式编译失败
-- 运行时错误：扫描过程中的错误
-- 内存错误：内存分配和释放问题
-- 崩溃：程序异常终止
-
-## 9. 示例输出
-
-```
-Generated 1000 test cases
-Generated 10 test data items
-
-=== 测试用例 1 ===
-测试 hs_compile...
-测试 hs_scan...
-测试 hs_scan_stream...
-测试 hs_compile_lit...
-测试 hs_expression_info...
-测试 hs_expression_ext_info...
-测试 hs_reset_stream...
-测试 hs_copy_stream...
-测试 hs_reset_and_copy_stream...
-测试 hs_compress_stream...
-测试 hs_expand_stream...
-测试 hs_reset_and_expand_stream...
-测试 hs_scan_vector...
-测试 hs_clone_scratch...
-测试 hs_scratch_size...
-
-=== 测试多模式接口 ===
-测试 hs_compile_multi...
-测试 hs_compile_ext_multi...
-测试 hs_compile_lit_multi...
-
-=== 测试平台接口 ===
-测试 hs_populate_platform...
-```
-
-## 9. 查看覆盖率
+运行 fuzz：
 
 ```bash
-    #  在执行fuzz测试后的当前路径下执行
-    lcov --capture --directory . --output-file coverage.info
-
-    lcov --remove coverage.info '*/gtest/*' '/usr/*' --output-file coverage.info.cleaned
+./hyperscan_fuzz_test
 ```
+
+默认只输出每组生成器的汇总信息，不再打印每个 pattern、每次 scan、
+每个 compile error 的详细日志。
+
+如果需要排查具体失败路径，可以打开详细日志：
+
+```bash
+HS_FUZZ_VERBOSE=1 ./hyperscan_fuzz_test
+```
+
+汇总里的 `unique errors` 默认最多展示 30 类错误。需要查看更多时：
+
+```bash
+HS_FUZZ_MAX_UNIQUE_ERRORS=100 ./hyperscan_fuzz_test
+```
+
+只运行主测试：
+
+```bash
+./hyperscan_fuzz_test --gtest_filter='FuzzTests/HyperscanFuzzTest.AllInterfaces/*'
+```
+
+并行运行主测试中的单 pattern API fuzz：
+
+```bash
+HS_FUZZ_THREADS=8 ./hyperscan_fuzz_test --gtest_filter='FuzzTests/HyperscanFuzzTest.AllInterfaces/*'
+```
+
+设置 `HS_FUZZ_THREADS` 后，Python 生成器会流式输出 pattern，主线程通过
+有界队列交给 worker 线程消费，不再一次性把所有 pattern 放进内存。队列默认
+最多缓存 4096 条，可通过 `HS_FUZZ_QUEUE_SIZE` 调整。
+
+多模式接口仍由主线程单独执行一次。并行模式下，多模式接口默认只使用前
+1024 条 pattern，避免把千万级 pattern 一次性传给 multi compile。如需调整：
+
+```bash
+HS_FUZZ_THREADS=8 HS_FUZZ_QUEUE_SIZE=8192 HS_FUZZ_MULTI_LIMIT=4096 ./hyperscan_fuzz_test --gtest_filter='FuzzTests/HyperscanFuzzTest.AllInterfaces/*'
+```
+
+设置 `HS_FUZZ_MULTI_LIMIT=0` 可以跳过多模式接口。
+
+调试时建议先把 `unit/fuzz/fuzz_test.cpp` 里的 `count` 调小，例如 `100`。
+`count` 表示每个生成器产生多少条正则表达式，不是匹配次数，也不是性能循环次数。
+
+## 4. 覆盖率编译
+
+如果要看 `src/hs.cpp`、`src/fat_database.c` 等源码覆盖率，必须让 Hyperscan
+本体也带 coverage 参数编译。顶层 `CMakeLists.txt` 中使用
+`ENABLE_COVERAGE` 开关。
+
+推荐的 coverage block 如下，必须包含 `CMAKE_C_FLAGS`，否则 C 文件
+`src/fat_database.c` 不会生成 `.gcno/.gcda`：
+
+```cmake
+if(ENABLE_COVERAGE)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -g -fprofile-arcs -ftest-coverage")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fprofile-arcs -ftest-coverage")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-arcs -ftest-coverage")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fprofile-arcs -ftest-coverage")
+    message(STATUS "Coverage compilation options enabled")
+else()
+    message(STATUS "Coverage compilation options disabled")
+endif()
+```
+
+重新构建 Hyperscan 本体：
+
+```bash
+export HS_ROOT=/path/to/hyperscan
+cd "$HS_ROOT"
+rm -rf build
+mkdir build
+cd build
+
+cmake .. -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+make -j$(nproc)
+```
+
+然后重新构建并运行 fuzz：
+
+```bash
+cd "$HS_ROOT/unit/fuzz"
+rm -rf build
+mkdir build
+cd build
+
+cmake ..
+make -j$(nproc)
+./hyperscan_fuzz_test
+```
+
+运行后确认已产生 `.gcda`：
+
+```bash
+cd "$HS_ROOT"
+find build -name '*.gcda' | head
+find build -name '*.gcda' | grep fat_database
+```
+
+## 5. 生成全量覆盖率报告
+
+在项目根目录执行：
+
+```bash
+cd "$HS_ROOT"
+rm -f coverage.info coverage.info.cleaned
+
+lcov --capture \
+  --directory build \
+  --directory unit/fuzz/build \
+  --ignore-errors inconsistent,inconsistent \
+  --output-file coverage.info
+```
+
+过滤 gtest 和系统头文件：
+
+```bash
+lcov --remove coverage.info \
+  '*/gtest/*' \
+  '/usr/*' \
+  --ignore-errors unused,mismatch,inconsistent \
+  --output-file coverage.info.cleaned
+```
+
+生成全量 HTML：
+
+```bash
+genhtml coverage.info.cleaned \
+  --ignore-errors inconsistent,inconsistent \
+  --output-directory coverage_report
+```
+
+报告入口：
+
+```text
+$HS_ROOT/coverage_report/index.html
+```
+
+## 6. 常见问题
+
+### 6.1 `lcov: ERROR: (empty) no .gcda files found in build`
+
+原因通常是 Hyperscan 本体没有带 coverage 编译，或者 fuzz 没有正常跑完。
+
+检查：
+
+```bash
+find build -name '*.gcno' | head
+find build -name '*.gcda' | head
+```
+
+如果没有 `.gcno`，重新使用：
+
+```bash
+cmake .. -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+```
+
+如果有 `.gcno` 但没有 `.gcda`，先运行 fuzz：
+
+```bash
+cd "$HS_ROOT/unit/fuzz/build"
+./hyperscan_fuzz_test
+```
+
+### 6.2 `coverage.info` 不能读取
+
+说明上一步 `lcov --capture` 没有成功生成 `coverage.info`。先重新 capture，
+不要直接执行 remove/extract：
+
+```bash
+lcov --capture \
+  --directory build \
+  --directory unit/fuzz/build \
+  --ignore-errors inconsistent,inconsistent \
+  --output-file coverage.info
+```
+
+### 6.3 `fat_database.c` 不在 HTML 里
+
+先确认 tracefile 里有没有记录：
+
+```bash
+grep -n 'SF:.*fat_database.c' coverage.info coverage.info.cleaned 2>/dev/null
+```
+
+再确认编译和运行数据：
+
+```bash
+find build -name '*.gcno' | grep fat_database
+find build -name '*.gcda' | grep fat_database
+```
+
+如果 `.gcno` 没有，说明顶层 `CMakeLists.txt` 没给 C 文件加 coverage 参数，
+需要检查 `CMAKE_C_FLAGS`。
+
+### 6.4 lcov 报 `inconsistent`
+
+Google Test 宏和新版 lcov/gcov 组合可能出现行号不一致，例如：
+
+```text
+lcov: ERROR: (inconsistent) mismatched end line ...
+```
+
+使用：
+
+```bash
+--ignore-errors inconsistent,inconsistent
+```
+
+### 6.5 fuzz 链接了错误的 libhs
+
+确认 fuzz 链接的是当前项目的库：
+
+```bash
+cd "$HS_ROOT/unit/fuzz/build"
+ldd ./hyperscan_fuzz_test | grep hs
+```
+
+应该指向：
+
+```text
+$HS_ROOT/build/lib/libhs.so
+```
+
+如果指向 `/usr/lib` 或 `/usr/local/lib`，覆盖率不会进当前项目的 `build`。
+
+## 7. 当前覆盖接口概览
+
+编译接口：
+
+- `hs_compile`
+- `hs_compile_multi`
+- `hs_compile_ext_multi`
+- `hs_compile_lit`
+- `hs_compile_lit_multi`
+- `fat_hs_compile`
+- `fat_hs_compile_multi`
+- `fat_hs_compile_ext_multi`
+- `fat_hs_compile_lit`
+- `fat_hs_compile_lit_multi`
+
+运行时接口：
+
+- `hs_scan`
+- `hs_scan_stream`
+- `hs_scan_vector`
+
+stream 操作：
+
+- `hs_reset_stream`
+- `hs_copy_stream`
+- `hs_reset_and_copy_stream`
+- `hs_compress_stream`
+- `hs_expand_stream`
+- `hs_reset_and_expand_stream`
+
+工具接口：
+
+- `hs_expression_info`
+- `hs_expression_ext_info`
+- `hs_populate_platform`
+- `hs_clone_scratch`
+- `hs_scratch_size`
+
+fat database 相关接口：
+
+- `fat_hs_database_size`
+- `fat_hs_database_info`
+- `fat_hs_serialize_database`
+- `fat_hs_serialized_database_size`
+- `fat_hs_deserialize_database`
+- `fat_hs_deserialize_database_at`
+- `fat_hs_free_database`

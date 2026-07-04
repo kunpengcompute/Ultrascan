@@ -30,59 +30,59 @@
 #ifndef LILY_TEDDY_COMMON_H
 #define LILY_TEDDY_COMMON_H
 
-#include "simd_arm.h"
+#include "../util/simd_arm.h"
 
 static REALLY_INLINE
 m128 prep_conf_teddy_m1(const m128 *maskBase, m128 val) {
-    m128 mask = Set16x8(0xf);
-    m128 lo = And128(val, mask);
-    m128 hi = And128(Rshift64_m128(val, 4), mask);
-    return Or128(Pshufb_m128_opt(maskBase[0 * 2], lo),
+    m128 mask = set16x8(0xf);
+    m128 lo = and128(val, mask);
+    m128 hi = and128(Rshift64_m128(val, 4), mask);
+    return or128(Pshufb_m128_opt(maskBase[0 * 2], lo),
                  Pshufb_m128_opt(maskBase[0 * 2 + 1], hi));
 }
 
 static REALLY_INLINE
 m128 prep_conf_teddy_m2(const m128 *maskBase, m128 *old_1, m128 val) {
-    m128 mask = Set16x8(0xf);
-    m128 lo = And128(val, mask);
-    m128 hi = And128(Rshift64_m128(val, 4), mask);
+    m128 mask = set16x8(0xf);
+    m128 lo = and128(val, mask);
+    m128 hi = and128(Rshift64_m128(val, 4), mask);
     m128 r = prep_conf_teddy_m1(maskBase, val);
 
-    m128 res_1 = Or128(Pshufb_m128_opt(maskBase[1 * 2], lo),
+    m128 res_1 = or128(Pshufb_m128_opt(maskBase[1 * 2], lo),
                        Pshufb_m128_opt(maskBase[1 * 2 + 1], hi));
-    m128 res_shifted_1 = Palignr(res_1, *old_1, 16 - 1);
+    m128 res_shifted_1 = palignr(res_1, *old_1, 16 - 1);
     *old_1 = res_1;
-    return Or128(r, res_shifted_1);
+    return or128(r, res_shifted_1);
 }
 
 static REALLY_INLINE
 m128 prep_conf_teddy_m3(const m128 *maskBase, m128 *old_1, m128 *old_2,
                         m128 val) {
-    m128 mask = Set16x8(0xf);
-    m128 lo = And128(val, mask);
-    m128 hi = And128(Rshift64_m128(val, 4), mask);
+    m128 mask = set16x8(0xf);
+    m128 lo = and128(val, mask);
+    m128 hi = and128(Rshift64_m128(val, 4), mask);
     m128 r = prep_conf_teddy_m2(maskBase, old_1, val);
 
-    m128 res_2 = Or128(Pshufb_m128_opt(maskBase[2 * 2], lo),
+    m128 res_2 = or128(Pshufb_m128_opt(maskBase[2 * 2], lo),
                        Pshufb_m128_opt(maskBase[2 * 2 + 1], hi));
-    m128 res_shifted_2 = Palignr(res_2, *old_2, 16 - 2);
+    m128 res_shifted_2 = palignr(res_2, *old_2, 16 - 2);
     *old_2 = res_2;
-    return Or128(r, res_shifted_2);
+    return or128(r, res_shifted_2);
 }
 
 static REALLY_INLINE
 m128 prep_conf_teddy_m4(const m128 *maskBase, m128 *old_1, m128 *old_2,
                         m128 *old_3, m128 val) {
-    m128 mask = Set16x8(0xf);
-    m128 lo = And128(val, mask);
-    m128 hi = And128(Rshift64_m128(val, 4), mask);
+    m128 mask = set16x8(0xf);
+    m128 lo = and128(val, mask);
+    m128 hi = and128(Rshift64_m128(val, 4), mask);
     m128 r = prep_conf_teddy_m3(maskBase, old_1, old_2, val);
 
-    m128 res_3 = Or128(Pshufb_m128_opt(maskBase[3 * 2], lo),
+    m128 res_3 = or128(Pshufb_m128_opt(maskBase[3 * 2], lo),
                        Pshufb_m128_opt(maskBase[3 * 2 + 1], hi));
-    m128 res_shifted_3 = Palignr(res_3, *old_3, 16 - 3);
+    m128 res_shifted_3 = palignr(res_3, *old_3, 16 - 3);
     *old_3 = res_3;
-    return Or128(r, res_shifted_3);
+    return or128(r, res_shifted_3);
 }
 
 #define FDR_EXEC_TEDDY_RES_OLD_1
@@ -104,16 +104,16 @@ m128 prep_conf_teddy_m4(const m128 *maskBase, m128 *old_1, m128 *old_2,
 #define FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK_1(p_mask)
 
 #define FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK_2(p_mask)                          \
-    res_old_1 = Or128(res_old_1, p_mask);
+    res_old_1 = or128(res_old_1, p_mask);
 
 #define FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK_3(p_mask)                          \
-    res_old_1 = Or128(res_old_1, p_mask);                                     \
-    res_old_2 = Or128(res_old_2, p_mask);
+    res_old_1 = or128(res_old_1, p_mask);                                     \
+    res_old_2 = or128(res_old_2, p_mask);
 
 #define FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK_4(p_mask)                          \
-    res_old_1 = Or128(res_old_1, p_mask);                                     \
-    res_old_2 = Or128(res_old_2, p_mask);                                     \
-    res_old_3 = Or128(res_old_3, p_mask);
+    res_old_1 = or128(res_old_1, p_mask);                                     \
+    res_old_2 = or128(res_old_2, p_mask);                                     \
+    res_old_3 = or128(res_old_3, p_mask);
 
 #define FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK(p_mask, n) FDR_EXEC_TEDDY_RES_OLD_APPLY_PMASK_##n(p_mask)
 

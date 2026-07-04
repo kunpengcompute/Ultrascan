@@ -26,14 +26,15 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "shufti_enhanced.h"
+#include "../nfa/shufti.h"
 #include "ue2common.h"
+#include "core_precomp.h"
 
 #define BATCH_SIZE 16
 #define BYTE_SIZE_FOUR 4
 #define MEMORY_FETCH 256
 
-#define GET_LO_4(chars) And128(chars, low4bits)
+#define GET_LO_4(chars) and128(chars, low4bits)
 #define GET_HI_4(chars) Rshift8_m128(chars, BYTE_SIZE_FOUR)
 
 /** \brief Naive byte-by-byte implementation. */
@@ -54,7 +55,7 @@ static REALLY_INLINE m128 BlockOpt(m128 mask_lo, m128 mask_hi, m128 chars, const
 {
     m128 c_lo  = Pshufb_m128_opt(mask_lo, GET_LO_4(chars));
     m128 c_hi  = Pshufb_m128_opt(mask_hi, GET_HI_4(chars));
-    return And128(c_lo, c_hi);
+    return and128(c_lo, c_hi);
 }
 
 static REALLY_INLINE u64a Comparemask(uint16x8_t mask)
@@ -64,10 +65,10 @@ static REALLY_INLINE u64a Comparemask(uint16x8_t mask)
 
 static REALLY_INLINE const u8 *FirstMatchOpt(const u8 *buf, m128 mask)
 {
-    uint32x4_t m = mask.vectU32;
+    uint32x4_t m = mask.vect_u32;
     uint64_t vmax = vgetq_lane_u64 (vreinterpretq_u64_u32 (vpmaxq_u32(m, m)), 0);
     if (vmax != 0) {
-        u64a z = Comparemask(mask.vectU16);
+        u64a z = Comparemask(mask.vect_u16);
         u32 pos = CTZ64(z) / BYTE_SIZE_FOUR;
         return (const u8 *)buf + pos;
     } else {
@@ -80,7 +81,7 @@ static REALLY_INLINE const u8 *FwdBlockOpt(m128 mask_lo, m128 mask_hi, m128 char
 {
     m128 z = BlockOpt(mask_lo, mask_hi, chars, low4bits, zeroes);
     m128 r;
-    r.vectU8 = vcgtq_s8(z.vectS8, zeroes.vectS8);
+    r.vect_u8 = vcgtq_s8(z.vect_s8, zeroes.vect_s8);
 
     return FirstMatchOpt(buf, r);
 }
@@ -98,12 +99,12 @@ const u8 *KHSEL_ShuftiExec(m128 mask_lo, m128 mask_hi, const u8 *buf, const u8 *
     }
 
     const m128 zeroes = zeroes128();
-    const m128 low4bits = Set16x8(0xf);
+    const m128 low4bits = set16x8(0xf);
     const u8 *rv;
     size_t min = (size_t)buf % BATCH_SIZE;
 
     // Preconditioning: most of the time our buffer won't be aligned.
-    m128 chars = Loadu128(buf);
+    m128 chars = loadu128(buf);
     rv = FwdBlockOpt(mask_lo, mask_hi, chars, buf, low4bits, zeroes);
     if (rv) {
         return rv;
@@ -125,7 +126,7 @@ const u8 *KHSEL_ShuftiExec(m128 mask_lo, m128 mask_hi, const u8 *buf, const u8 *
         buf += BATCH_SIZE;
     }
 
-    chars = Loadu128(buf_end - BATCH_SIZE);
+    chars = loadu128(buf_end - BATCH_SIZE);
     rv = FwdBlockOpt(mask_lo, mask_hi, chars, buf_end - BATCH_SIZE, low4bits, zeroes);
     if (rv) {
         return rv;

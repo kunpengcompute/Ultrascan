@@ -1678,8 +1678,11 @@ bool roleOffsetsAreValid(const RoseGraph &g) {
     return true;
 }
 #endif // NDEBUG
-
 bytecode_ptr<RoseEngine> RoseBuildImpl::buildRose(u32 minWidth) {
+    return arm_buildFinalEngine(minWidth);
+}
+
+bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildRose(u32 minWidth) {
     dumpRoseGraph(*this, "rose_early.dot");
 
     // Early check for Rose implementability.
@@ -1793,7 +1796,125 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::buildRose(u32 minWidth) {
 
     dumpRoseGraph(*this, "rose_pre_norm.dot");
 
-    return buildFinalEngine(minWidth);
+    return arm_buildFinalEngine(minWidth);
+}
+
+
+bytecode_ptr<x86_RoseEngine> RoseBuildImpl::x86_buildRose(u32 minWidth) {
+    dumpRoseGraph(*this, "rose_early.dot");
+
+    // Early check for Rose implementability.
+    assert(canImplementGraphs(*this));
+
+    // Sanity check vertex role offsets.
+    assert(roleOffsetsAreValid(g));
+
+    convertPrefixToBounds(*this);
+
+    // Turn flood-prone suffixes into suffix NFAs.
+    convertFloodProneSuffixes(*this);
+
+    // Turn repeats into Castle prototypes.
+    makeCastles(*this);
+
+    rehomeAnchoredLiterals(*this);
+
+    // If we've got a very small number of EOD-anchored literals, consider
+    // moving them into the floating table so that we only have one literal
+    // matcher to run. Note that this needs to happen before
+    // addAnchoredSmallBlockLiterals as it may create anchored literals.
+    assert(roleOffsetsAreValid(g));
+    stealEodVertices(*this);
+
+    addAnchoredSmallBlockLiterals(*this);
+
+    // Merge duplicate leaf nodes
+    dedupeSuffixes(*this);
+    if (cc.grey.roseGraphReduction) {
+        mergeDupeLeaves(*this);
+        uncalcLeaves(*this);
+    }
+
+    assert(roleOffsetsAreValid(g));
+    handleMixedSensitivity();
+
+    assignHistories(*this);
+
+    convertAnchPrefixToBounds(*this);
+
+    // Do some final graph reduction.
+    dedupeLeftfixes(*this);
+    aliasRoles(*this, false); // Don't merge leftfixes.
+    dedupeLeftfixes(*this);
+    uncalcLeaves(*this);
+
+    /* note the leftfixes which do not need to keep state across stream
+       boundaries */
+    findTransientLeftfixes();
+
+    dedupeLeftfixesVariableLag(*this);
+    mergeLeftfixesVariableLag(*this);
+    mergeSmallLeftfixes(*this);
+    mergeCastleLeftfixes(*this);
+
+    // Do a rose-merging aliasing pass.
+    aliasRoles(*this, true);
+
+    // Merging of suffixes _below_ role aliasing, as otherwise we'd have to
+    // teach role aliasing about suffix tops.
+    mergeCastleSuffixes(*this);
+    mergePuffixes(*this);
+    mergeAcyclicSuffixes(*this);
+    mergeSmallSuffixes(*this);
+
+    // Convert Castles that would be better off as NFAs back to NGHolder
+    // infixes/suffixes.
+    if (unmakeCastles(*this)) {
+        // We may be able to save some stream state by merging the newly
+        // "unmade" Castles.
+        mergeSmallSuffixes(*this);
+        mergeSmallLeftfixes(*this);
+    }
+
+    assert(!hasOrphanedTops(*this));
+
+    // Do a rose-merging aliasing pass.
+    aliasRoles(*this, true);
+    assert(!hasOrphanedTops(*this));
+
+    // Run a merge pass over the outfixes as well.
+    mergeOutfixes(*this);
+
+    assert(!danglingVertexRef(*this));
+    assert(!hasOrphanedTops(*this));
+
+    findMoreLiteralMasks(*this);
+
+    assignGroupsToLiterals(*this);
+    assignGroupsToRoles(*this);
+    findGroupSquashers(*this);
+
+    /* final prep work */
+    remapCastleTops(*this);
+    optimiseRoseTops(*this);
+    buildRoseSquashMasks(*this);
+
+    rm.assignDkeys(this);
+
+    /* transfer mpv outfix to main queue */
+    if (mpv_outfix) {
+        outfixes.push_back(move(*mpv_outfix));
+        mpv_outfix = nullptr;
+    }
+
+    assert(canImplementGraphs(*this));
+    assert(!hasOrphanedTops(*this));
+    assert(roleOffsetsAreValid(g));
+    assert(historiesAreValid(g));
+
+    dumpRoseGraph(*this, "rose_pre_norm.dot");
+
+    return x86_buildFinalEngine(minWidth);
 }
 
 } // namespace ue2

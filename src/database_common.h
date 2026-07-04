@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2015-2020, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -26,24 +26,78 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SHUFTI_H
-#define SHUFTI_H
+/** \file
+ * \brief Runtime code for hs_database common manipulation.
+ */
 
-#include "ue2common.h"
-#include "simd_arm.h"
-
+#ifndef DATABASE_COMMMON_H_D467FD6F343DDA
+#define DATABASE_COMMMON_H_D467FD6F343DDA
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-const u8 *KHSEL_ShuftiExec(m128 mask_lo, m128 mask_hi, const u8 *buf,
-    const u8 *buf_end);
+#include "hs_compile.h" // for HS_MODE_ flags
+#include "hs_version.h"
+#include "ue2common.h"
+#include "util/arch.h"
+
+#define HS_DB_VERSION HS_VERSION_32BIT
+#define HS_DB_MAGIC   (0xdbdbdbdbU)
+
+// Values in here cannot (easily) change - add new ones!
+
+// CPU type is the low 6 bits (we can't need more than 64, surely!)
+
+#define HS_PLATFORM_INTEL           1
+#define HS_PLATFORM_CPU_MASK        0x3F
+
+#define HS_PLATFORM_NOAVX2          (4<<13)
+#define HS_PLATFORM_NOAVX512        (8<<13)
+#define HS_PLATFORM_NOAVX512VBMI    (0x10<<13)
+
+/** \brief Platform features bitmask. */
+typedef u64a platform_t;
+
+static UNUSED
+const platform_t hs_current_platform = {
+#if !defined(HAVE_AVX2)
+    HS_PLATFORM_NOAVX2 |
+#endif
+#if !defined(HAVE_AVX512)
+    HS_PLATFORM_NOAVX512 |
+#endif
+#if !defined(HAVE_AVX512VBMI)
+    HS_PLATFORM_NOAVX512VBMI |
+#endif
+    0,
+};
+
+static UNUSED
+const platform_t hs_current_platform_no_avx2 = {
+    HS_PLATFORM_NOAVX2 |
+    HS_PLATFORM_NOAVX512 |
+    HS_PLATFORM_NOAVX512VBMI |
+    0,
+};
+
+static UNUSED
+const platform_t hs_current_platform_no_avx512 = {
+    HS_PLATFORM_NOAVX512 |
+    HS_PLATFORM_NOAVX512VBMI |
+    0,
+};
+
+static UNUSED
+const platform_t hs_current_platform_no_avx512vbmi = {
+    HS_PLATFORM_NOAVX512VBMI |
+    0,
+};
 
 
 #ifdef __cplusplus
-}
+} /* extern "C" */
 #endif
 
-#endif
+#endif /* DATABASE_H_D467FD6F343DDE */

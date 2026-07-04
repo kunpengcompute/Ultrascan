@@ -34,6 +34,7 @@
 #include "compiler.h"
 #include "crc32.h"
 #include "database.h"
+#include "fat_database.h"
 #include "grey.h"
 #include "hs_internal.h"
 #include "hs_runtime.h"
@@ -388,6 +389,119 @@ void addExpression(NG &ng, unsigned index, const char *expression,
     }
 }
 
+
+void x86_addExpression(NG &ng, unsigned index, const char *expression,
+                   unsigned flags, const hs_expr_ext *ext, ReportID id) {
+    assert(expression);
+    const CompileContext &cc = ng.cc;
+    DEBUG_PRINTF("index=%u, id=%u, flags=%u, expr='%s'\n", index, id, flags,
+                 expression);
+
+    if (flags & HS_FLAG_COMBINATION) {
+        if (flags & ~(HS_FLAG_COMBINATION | HS_FLAG_QUIET |
+                      HS_FLAG_SINGLEMATCH)) {
+            throw CompileError("only HS_FLAG_QUIET and HS_FLAG_SINGLEMATCH "
+                               "are supported in combination "
+                               "with HS_FLAG_COMBINATION.");
+        }
+        if (flags & HS_FLAG_QUIET) {
+            DEBUG_PRINTF("skip QUIET logical combination expression %u\n", id);
+        } else {
+            u32 ekey = INVALID_EKEY;
+            u64a min_offset = 0;
+            u64a max_offset = MAX_OFFSET;
+            if (flags & HS_FLAG_SINGLEMATCH) {
+                ekey = ng.rm.getExhaustibleKey(id);
+            }
+            if (ext) {
+                validateExt(*ext);
+                if (ext->flags & ~(HS_EXT_FLAG_MIN_OFFSET |
+                                   HS_EXT_FLAG_MAX_OFFSET)) {
+                    throw CompileError("only HS_EXT_FLAG_MIN_OFFSET and "
+                                       "HS_EXT_FLAG_MAX_OFFSET extra flags "
+                                       "are supported in combination "
+                                       "with HS_FLAG_COMBINATION.");
+                }
+                if (ext->flags & HS_EXT_FLAG_MIN_OFFSET) {
+                    min_offset = ext->min_offset;
+                }
+                if (ext->flags & HS_EXT_FLAG_MAX_OFFSET) {
+                    max_offset = ext->max_offset;
+                }
+            }
+            ng.rm.pl.parseLogicalCombination(id, expression, ekey, min_offset,
+                                             max_offset);
+            DEBUG_PRINTF("parsed logical combination expression %u\n", id);
+        }
+        return;
+    }
+
+    // Ensure that our pattern isn't too long (in characters).
+    size_t maxlen = cc.grey.limitPatternLength + 1;
+    if (strnlen(expression, maxlen) >= maxlen) {
+        throw CompileError("Pattern length exceeds limit.");
+    }
+
+    // Do per-expression processing: errors here will result in an exception
+    // being thrown up to our caller
+    ParsedExpression pe(index, expression, flags, id, ext);
+    dumpExpression(pe, "orig", cc.grey);
+
+    // Apply prefiltering transformations if desired.
+    if (pe.expr.prefilter) {
+        prefilterTree(pe.component, ParseMode(flags));
+        dumpExpression(pe, "prefiltered", cc.grey);
+    }
+
+    // Expressions containing zero-width assertions and other extended pcre
+    // types aren't supported yet. This call will throw a ParseError exception
+    // if the component tree contains such a construct.
+    checkUnsupported(*pe.component);
+
+    pe.component->checkEmbeddedStartAnchor(true);
+    pe.component->checkEmbeddedEndAnchor(true);
+
+    if (cc.grey.optimiseComponentTree) {
+        optimise(pe);
+        dumpExpression(pe, "opt", cc.grey);
+    }
+
+    DEBUG_PRINTF("component=%p, nfaId=%u, reportId=%u\n",
+                 pe.component.get(), pe.expr.index, pe.expr.report);
+
+    // You can only use the SOM flags if you've also specified an SOM
+    // precision mode.
+    if (pe.expr.som != SOM_NONE && cc.streaming && !ng.ssm.somPrecision()) {
+        throw CompileError("To use a SOM expression flag in streaming mode, "
+                           "an SOM precision mode (e.g. "
+                           "HS_MODE_SOM_HORIZON_LARGE) must be specified.");
+    }
+
+    // If this expression is a literal, we can feed it directly to Rose rather
+    // than building the NFA graph.
+    if (x86_shortcutLiteral(ng, pe)) {
+        DEBUG_PRINTF("took literal short cut\n");
+        return;
+    }
+
+    auto built_expr = buildGraph(ng.rm, cc, pe);
+    if (!built_expr.g) {
+        DEBUG_PRINTF("NFA build failed on ID %u, but no exception was "
+                     "thrown.\n", pe.expr.report);
+        throw CompileError("Internal error.");
+    }
+
+    if (!pe.expr.allow_vacuous && matches_everywhere(*built_expr.g)) {
+        throw CompileError("Pattern matches empty buffer; use "
+                           "HS_FLAG_ALLOWEMPTY to enable support.");
+    }
+
+    if (!ng.addGraph(built_expr.expr, std::move(built_expr.g))) {
+        DEBUG_PRINTF("NFA addGraph failed on ID %u.\n", pe.expr.report);
+        throw CompileError("Error compiling expression.");
+    }
+}
+
 void addLitExpression(NG &ng, unsigned index, const char *expression,
                       unsigned flags, const hs_expr_ext *ext, ReportID id,
                       size_t expLength) {
@@ -435,10 +549,10 @@ void addLitExpression(NG &ng, unsigned index, const char *expression,
 }
 
 static
-bytecode_ptr<RoseEngine> generateRoseEngine(NG &ng) {
+bytecode_ptr<RoseEngine> arm_generateRoseEngine(NG &ng) {
     const u32 minWidth =
         ng.minWidth.is_finite() ? verify_u32(ng.minWidth) : ROSE_BOUND_INF;
-    auto rose = ng.rose->buildRose(minWidth);
+    auto rose = ng.rose->arm_buildRose(minWidth);
 
     if (!rose) {
         DEBUG_PRINTF("error building rose\n");
@@ -449,6 +563,25 @@ bytecode_ptr<RoseEngine> generateRoseEngine(NG &ng) {
     dumpReportManager(ng.rm, ng.cc.grey);
     dumpSomSlotManager(ng.ssm, ng.cc.grey);
     dumpSmallWrite(rose.get(), ng.cc.grey);
+
+    return rose;
+}
+
+static
+bytecode_ptr<x86_RoseEngine> x86_generateRoseEngine(NG &ng) {
+    const u32 minWidth =
+        ng.minWidth.is_finite() ? verify_u32(ng.minWidth) : ROSE_BOUND_INF;
+    auto rose = ng.rose->x86_buildRose(minWidth);
+
+    if (!rose) {
+        DEBUG_PRINTF("error building rose\n");
+        assert(0);
+        return nullptr;
+    }
+
+    dumpReportManager(ng.rm, ng.cc.grey);
+    dumpSomSlotManager(ng.ssm, ng.cc.grey);
+    x86_dumpSmallWrite(rose.get(), ng.cc.grey);
 
     return rose;
 }
@@ -507,11 +640,58 @@ hs_database_t *dbCreate(const char *in_bytecode, size_t len, u64a platform) {
     return db;
 }
 
+static
+fat_hs_database_t *FatdbCreate(const char *x86_bytecode, size_t x86_len,
+                           const char *arm_bytecode, size_t arm_len,
+                           u64a platform, u64a arm_platform) {
+size_t db_len = sizeof(struct fat_hs_database) + x86_len + arm_len + 128;
+    DEBUG_PRINTF("fat db size %zu\n", db_len);
+
+    struct fat_hs_database *db = (struct fat_hs_database *)hs_database_alloc(db_len);
+    if (hs_check_alloc(db) != HS_SUCCESS) {
+        hs_database_free(db);
+        return nullptr;
+    }
+
+    memset(db, 0, db_len);
+
+    db->magic = HS_DB_MAGIC;
+    db->version = HS_DB_VERSION;
+    db->x86_length = x86_len;
+    db->arm_length = arm_len;
+    db->platform = platform;
+    db->arm_platform = arm_platform;
+
+    // x86 字节码偏移（64字节对齐）
+    size_t shift = (uintptr_t)db->bytes & 0x3f;
+    db->x86_bytecode = offsetof(struct fat_hs_database, bytes) - shift;
+    char *x86_ptr = (char *)db + db->x86_bytecode;
+    assert(ISALIGNED_CL(x86_ptr));
+    memcpy(x86_ptr, x86_bytecode, x86_len);
+
+    // ARM 字节码偏移（64字节对齐）
+    // 先计算 x86 字节码结束位置
+    char *x86_end = x86_ptr + x86_len;
+    // 将结束地址向上对齐到 64 字节边界
+    char *arm_ptr = (char *)(((uintptr_t)x86_end + 63) & ~63);
+    // 计算相对于 db 起始的偏移量
+    db->arm_bytecode = arm_ptr - (char *)db;
+    assert(ISALIGNED_CL(arm_ptr));
+    memcpy(arm_ptr, arm_bytecode, arm_len);
+
+    // 先算X86的CRC32
+    db->x86_crc32 = Crc32c_ComputeBuf(0, x86_ptr, x86_len);
+    // 再算ARM的CRC32
+    db->arm_crc32 = Crc32c_ComputeBuf(0, arm_ptr, arm_len);
+
+    return (fat_hs_database_t *)db;
+}
+
 
 struct hs_database *build(NG &ng, unsigned int *length, u8 pureFlag) {
     assert(length);
 
-    auto rose = generateRoseEngine(ng);
+    auto rose = arm_generateRoseEngine(ng);
     struct RoseEngine *roseHead = rose.get();
     roseHead->pureLiteral = pureFlag;
 
@@ -534,6 +714,56 @@ struct hs_database *build(NG &ng, unsigned int *length, u8 pureFlag) {
 
     return db;
 }
+
+
+struct fat_hs_database *fat_build(NG &x86_ng, NG &arm_ng, unsigned int *length, u8 pureFlag) {
+    assert(length);
+    // 生成 x86 字节码
+    auto x86_rose = x86_generateRoseEngine(x86_ng);
+    struct x86_RoseEngine *x86_roseHead = x86_rose.get();
+    x86_roseHead->pureLiteral = pureFlag;
+
+    if (!x86_rose) {
+        throw CompileError("Unable to generate x86 bytecode.");
+    }
+    size_t x86_len = x86_rose.size();
+    if (!x86_len) {
+        DEBUG_PRINTF("x86 RoseEngine has zero length\n");
+        assert(0);
+        throw CompileError("Internal error.");
+    }
+
+    // 生成 ARM 字节码
+    auto arm_rose = arm_generateRoseEngine(arm_ng);
+    struct RoseEngine *arm_roseHead = arm_rose.get();
+    arm_roseHead->pureLiteral = pureFlag;
+
+    if (!arm_rose) {
+        throw CompileError("Unable to generate ARM bytecode.");
+    }
+    size_t arm_len = arm_rose.size();
+    if (!arm_len) {
+        DEBUG_PRINTF("ARM RoseEngine has zero length\n");
+        assert(0);
+        throw CompileError("Internal error.");
+    }
+
+    // 构建 FAT Database
+    const char *x86_bytecode = (const char *)(x86_rose.get());
+    const char *arm_bytecode = (const char *)(arm_rose.get());
+    const platform_t p = target_to_platform(x86_ng.cc.target_info);
+    const platform_t arm_p = target_to_platform(arm_ng.cc.target_info);
+    
+    struct fat_hs_database *db = FatdbCreate(x86_bytecode, x86_len, 
+                                         arm_bytecode, arm_len, p, arm_p);
+    if (!db) {
+        throw CompileError("Could not allocate memory for bytecode.");
+    }
+
+    *length = x86_len + arm_len;
+    return db;
+}
+
 
 static
 void stripFromPositions(vector<PositionInfo> &v, Position pos) {

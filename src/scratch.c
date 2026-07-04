@@ -32,6 +32,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "allocator.h"
 #include "hs_internal.h"

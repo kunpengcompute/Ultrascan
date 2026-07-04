@@ -35,6 +35,7 @@
 
 #include "ue2common.h"
 #include "database.h"
+#include "fat_database.h"
 #include "compiler/expression_info.h"
 #include "parser/Component.h"
 #include "util/noncopyable.h"
@@ -116,6 +117,9 @@ struct BuiltExpression {
 void addExpression(NG &ng, unsigned index, const char *expression,
                    unsigned flags, const hs_expr_ext *ext, ReportID report);
 
+void x86_addExpression(NG &ng, unsigned index, const char *expression,
+                   unsigned flags, const hs_expr_ext *ext, ReportID id);
+
 void addLitExpression(NG &ng, unsigned index, const char *expression,
                       unsigned flags, const hs_expr_ext *ext, ReportID id,
                       size_t expLength);
@@ -135,6 +139,8 @@ void addLitExpression(NG &ng, unsigned index, const char *expression,
  *      hs_database_free() function.
  */
 struct hs_database *build(NG &ng, unsigned int *length, u8 pureFlag);
+struct fat_hs_database *fat_build(NG &x86_ng, NG &arm_ng, unsigned int *length, 
+                              u8 pureFlag);
 
 /**
  * Constructs an NFA graph from the given expression tree.

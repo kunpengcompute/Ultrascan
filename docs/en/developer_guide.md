@@ -1,152 +1,312 @@
-# Developer Guide<a name="EN-US_TOPIC_0000002549765393"></a>
+# Developer Guide
 
-## Function Description<a name="EN-US_TOPIC_0000002549885353"></a>
+## Function Description
 
->![](public_sys-resources/icon-notice.gif) **NOTICE:** 
->Functions \(KHSEL\__xxx_\) in the KHSEL\_core library do not need to be explicitly called. They are used as internal interfaces of Hyperscan.
+>![](public_sys-resources/icon-notice.gif) **NOTICE:**
+>Functions (KHSEL_*xxx*) in KHSEL do not need to be explicitly called. They are used as internal interfaces of Ultrascan.
 
-[Table 1](#table_1)  lists the optimized function in the KHSEL\_ops library.  [Table 2](#table_2)  lists the optimized functions in the KHSEL\_core library.
+[**Table 1**](#optimized-functions-in-khsel) lists the optimized functions in KHSEL.
 
-**Table  1**  Optimized function in KHSEL\_ops<a id="table_1"></a>
-
-|Function|Description|
-|--|--|
-|ReplaceAllAcc|Performs string match and Replace All operations according to the fixed regular expression rule "[^A-Za-z0-9_/.]+".|
-
-**Table  2**  Optimized functions in KHSEL\_core<a id="table_2"></a>
+**Table 1** Optimized functions in KHSEL<a id="optimized-functions-in-khsel"></a>
 
 |Function|Description|
 |--|--|
-|KHSEL_BuildLily|Compiles short-byte rule matching.|
-|KHSEL_LilyRunExec|Executes short-byte rule matching.|
+|KHSEL_BuildLily|A new Ultrascan function that compiles short-rule (single byte) matching.|
+|KHSEL_LilyRunExec|A new Ultrascan function that executes short-rule (single byte) matching.|
+|KHSEL_BuildLilyForTeddy|A new Ultrascan function that compiles short-rule (2–4 bytes) matching.|
+|KHSEL_LilyForTeddyRunExec|A new Ultrascan function that executes short-rule (2–4 bytes) matching.|
 
-## Usage Description<a name="EN-US_TOPIC_0000002518405558"></a>
+[**Table 2**](#universal-bytecode-function-apis) lists the universal bytecode function APIs. 
 
-**KHSEL\_ops<a name="section157951035849"></a>**
+**Table 2** Universal bytecode function APIs<a id="universal-bytecode-function-apis"></a>
 
-Link  **libKHSEL\_ops.a**  using  **-L**  and  **-l**  during g++ compilation.
+|Function|Description|
+|--|--|
+|fat_hs_compile|A new Ultrascan function that compiles a single regular expression into universal bytecode.|
+|fat_hs_compile_multi|A new Ultrascan function that batch compiles multiple regular expressions into universal bytecode.|
+|fat_hs_compile_ext_multi|A new extended Ultrascan function that batch compiles multiple regular expressions into universal bytecode.|
+|fat_hs_compile_lit|A new Ultrascan function that compiles the expression represented by a single-byte literal into universal bytecode.|
+|fat_hs_compile_lit_multi|A new Ultrascan function that batch compiles multiple expressions represented by single-byte literals into universal bytecode.|
 
-```bash
-g++ test.cpp -o test -I/usr/local/ksl/include -L/usr/local/ksl/lib -lKHSEL_ops
-```
+## Usage Description
 
-**KHSEL\_core<a name="section121472055548"></a>**
+The KHSEL function source code has been integrated into the `dev` branch of the Ultrascan repository and is stored in the `src\kunpeng-enhanced` directory. Therefore, you do not need to install the KHSEL software packages separately.
 
-The KHSEL\_core library functions need to be compiled with Hyperscan. For details, see \[compile\_guide.md\]\(./docs/en/compile\_guide.md\).
+## Function Definition
 
-## Function Syntax<a name="EN-US_TOPIC_0000002549885351"></a>
+### KHSEL\_BuildLily
 
-### ReplaceAllAcc<a name="EN-US_TOPIC_0000002518245588"></a>
+**Function Usage**
 
-**Function Usage<a name="section95941732195012"></a>**
+Compiles single-byte rules in the rule set and outputs a compiled mask.
 
-Performs string match and Replace All operations according to the fixed regular expression rule "\[^A-Za-z0-9\_/.\]+" based on the shufti algorithm.
-
-**Function Syntax<a name="section1183110404506"></a>**
-
-```c++
-std::string ReplaceAllAcc(const std::string& input, const std::string& replacement) 
-```
-
-**Parameters<a name="section1192224915509"></a>**
-
-|Parameter|Description|Value Range|Input/Output|
-|--|--|--|--|
-|input|Input string (string to be replaced)|C++ string object, which can be null.|Input|
-|replacement|Replacement string|C++ string object, which can be null.|Input|
-
-**Return Value<a name="section15720131195318"></a>**
-
-String after the Replace All operation is performed.
-
->![](public_sys-resources/icon-notice.gif) **NOTICE:** 
->The input string is not modified.
-
-**Example<a name="section518716218534"></a>**
-
-1. Create a  **testReplaceAll.cpp**  file.
-2. Press  **i**  to enter the insert mode and add the following content to the file:
-
-    ```c++
-    #include "khsel_ops.h"
-    #include <iostream>
-    
-    int main() {
-        std::string input = "Hello*#$&@Hello12345!()";
-        std::string replacement = "hi";
-        std::cout << ReplaceAllAcc(input, replacement) << std::endl;
-        return 0;
-    }
-    ```
-
-3. Press  **Esc**, type  **:wq!**, and press  **Enter**  to save the file and exit.
-4. Compile the  **testReplaceAll.cpp**  file and specify the name of the output executable file as  **testReplaceAll**.
-
-    ```bash
-    g++ testReplaceAll.cpp -o testReplaceAll -I /usr/local/ksl/include -L /usr/local/ksl/lib -lKHSEL_ops
-    ```
-
-5. Run the  **testReplaceAll**  executable file.
-
-    ```bash
-    ./testReplaceAll
-    ```
-
-    The execution result is as follows:
-
-    ```bash
-    HellohiHello12345hi
-    ```
-
-### KHSEL\_BuildLily<a name="EN-US_TOPIC_0000002518245592"></a>
-
-**Function Usage<a name="section95941732195012"></a>**
-
-Performs rule compilation based on short-byte rules in the rule set and outputs a compiled mask.
-
-**Function Syntax<a name="section1183110404506"></a>**
+**Function Syntax**
 
 ```c
 std::vector<u8> KHSEL_BuildLily(std::map<char, lilyReport> &lily, std::vector<u32> &reportVec, std::vector<u32> &ekeyVec); 
 ```
 
-**Parameters<a name="section1192224915509"></a>**
+**Parameters**
 
 |Parameter|Description|Value Range|Input/Output|
 |--|--|--|--|
-|lily|Short-byte rule.|C++ map object, which can be null.|Input|
-|reportVec|Report ID corresponding to the short-byte rule.|C++ vector object, which can be null.|Input|
-|ekeyVec|ekey corresponding to the short-byte rule.|C++ vector object, which can be null.|Input|
+|lily|Single-byte rule.|C++ map object, which can be empty.|Input|
+|reportVec|Report ID corresponding to the single-byte rule.|C++ vector object, which can be empty.|Input|
+|ekeyVec|ekey corresponding to the single-byte rule.|C++ vector object, which can be empty.|Input|
 
-**Return Value<a name="section13615359181110"></a>**
+**Return Value**
 
 Output mask after rule compilation.
 
 ### KHSEL\_LilyRunExec<a name="EN-US_TOPIC_0000002518245632"></a>
 
-**Function Usage<a name="section95941732195012"></a>**
+**Function Usage**
 
 Performs input data matching at runtime based on the output mask.
 
-**Function Syntax<a name="section1183110404506"></a>**
+**Function Syntax**
 
-```c++
+```c
 hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch); 
 ```
 
-**Parameters<a name="section1192224915509"></a>**
+**Parameters**
 
 |Parameter|Description|Value Range|Input/Output|
 |--|--|--|--|
-|rose|RoseEngine object, which stores the output at compile time and is used as the input at runtime.|Not null|Input|
-|scratch|Temporary memory space required for input data.|Not null|Input|
+|rose|RoseEngine object, which stores the output at compile time and is used as the input at runtime.|Not empty|Input|
+|scratch|Temporary memory space required for input data.|Not empty|Input|
 
-**Return Value<a name="section13615359181110"></a>**
+**Return Value**
 
 Error code of the matching result.
 
+### KHSEL\_BuildLilyForTeddy
+
+**Function Usage**
+
+Compiles 2-to-4-byte rules in the rule set and outputs a compiled mask.
+
+**Function Syntax**
+
+```c
+ue2::bytecode_ptr<lilyTeddy> KHSEL_BuildLilyForTeddy(std::map<std::string, lilyReport> &lilyForTeddy,
+                                        std::priority_queue<LilyForTeddyPair, std::vector<LilyForTeddyPair>, CompareStringLength> &lilyForTeddyPQ,
+                                        std::vector<u32> &reportVec, std::vector<u32> &ekeyVec, std::vector<u32> &lenVec);
+```
+
+**Parameters**
+
+|Parameter| Description                  | Value Range                      |Input/Output|
+|--|----------------------|----------------------------|--|
+|lilyForTeddy| 2-to-4-byte rule.            | C++ map object, which can be empty.           |Input|
+|lilyForTeddyPQ| Priority queue of the 2-to-4-byte rules sorted by rule length.| C++ priority_queue object, which can be empty.|Input|
+|reportVec| Report ID corresponding to the 2-to-4-byte rule. | C++ vector object, which can be empty.        |Input|
+|ekeyVec| ekey corresponding to the 2-to-4-byte rule.     | C++ vector object, which can be empty.        |Input|
+|lenVec| Length of the 2-to-4-byte rule.     | C++ vector object, which can be empty.        |Input|
+
+**Return Value**
+
+Output mask after rule compilation.
+
+### KHSEL\_LilyForTeddyRunExec
+
+**Function Usage**
+
+Performs input data matching at runtime based on the output mask.
+
+**Function Syntax**
+
+```c
+hs_error_t KHSEL_LilyForTeddyRunExec(const struct RoseEngine *rose, hs_scratch_t *scratch);
+```
+
+**Parameters**
+
+|Parameter|Description|Value Range|Input/Output|
+|--|--|--|--|
+|rose|RoseEngine object, which stores the output at compile time and is used as the input at runtime.|Not empty|Input|
+|scratch|Temporary memory space required for input data.|Not empty|Input|
+
+**Return Value**
+
+Error code of the matching result.
+
+### fat\_hs\_compile
+
+**Function Usage**
+
+Compiles a single regular expression to generate a database that contains x86 and Arm bytecode.
+
+**Function Syntax**
+
+```c
+hs_error_t fat_hs_compile(const char *expression, unsigned int flags,
+                          unsigned int mode,
+                          const hs_platform_info_t *platform,
+                          fat_hs_database_t **db,
+                          hs_compile_error_t **error);
+```
+
+**Parameters**
+
+|Parameter|Description|Value Range|Input/Output|
+|--|--|--|--|
+|expression|Regular expression string, ending with null.|Non-empty character string|Input|
+|flags|Expression compilation flag. Multiple flags can be combined using the OR operation.|<code>HS_FLAG_CASELESS</code>, <code>HS_FLAG_DOTALL</code>, <code>HS_FLAG_MULTILINE</code>, etc.|Input|
+|mode|Compilation mode, which specifies the database type.|<code>HS_MODE_STREAM</code>, <code>HS_MODE_BLOCK</code>, or <code>HS_MODE_VECTORED</code>|Input|
+|platform|Target platform information. The null value indicates the current host platform.|The value can be null.|Input|
+|db|Returned pointer to the general database after successful compilation.|Non-null pointer|Output|
+|error|Error information returned when the compilation fails.|Non-null pointer|Output|
+
+**Return Value**
+
+If the operation is successful, `HS_SUCCESS` is returned. If the operation fails, `HS_COMPILER_ERROR` is returned and the error details are provided in the `error` parameter.
+
+### fat\_hs\_compile\_multi<a name="EN-US_TOPIC_fat_hs_compile_multi"></a>
+
+**Function Usage**
+
+Batch compiles multiple regular expressions to generate a database that contains x86 and Arm bytecode.
+
+**Function Syntax**
+
+```c
+hs_error_t fat_hs_compile_multi(const char *const *expressions,
+                                const unsigned int *flags,
+                                const unsigned int *ids,
+                                unsigned int elements, unsigned int mode,
+                                const hs_platform_info_t *platform,
+                                fat_hs_database_t **db,
+                                hs_compile_error_t **error);
+```
+
+**Parameters**
+
+|Parameter|Description|Value Range|Input/Output|
+|--|--|--|--|
+|expressions|Regular expression string array, with each element ending with null.|Non-empty array|Input|
+|flags|Array of compilation flags corresponding to each expression.|The value can be null. If the value is null, all flags are <code>0</code>.|Input|
+|ids|Array of IDs corresponding to each expression.|The value can be null. If the value is null, all IDs are <code>0</code>.|Input|
+|elements|Number of elements in the expression array.|> 0|Input|
+|mode|Compilation mode, which specifies the database type.|<code>HS_MODE_STREAM</code>, <code>HS_MODE_BLOCK</code>, or <code>HS_MODE_VECTORED</code>|Input|
+|platform|Target platform information. The null value indicates the current host platform.|The value can be null.|Input|
+|db|Returned pointer to the general database after successful compilation.|Non-null pointer|Output|
+|error|Error information returned when the compilation fails.|Non-null pointer|Output|
+
+**Return Value**
+
+If the operation is successful, `HS_SUCCESS` is returned. If the operation fails, `HS_COMPILER_ERROR` is returned and the error details are provided in the `error` parameter.
+
+### fat\_hs\_compile\_ext\_multi
+
+**Function Usage**
+
+With support for extended parameters, batch compiles multiple regular expressions to generate a database that contains x86 and Arm bytecode.
+
+**Function Syntax**
+
+```c
+hs_error_t fat_hs_compile_ext_multi(const char *const *expressions,
+                                    const unsigned int *flags,
+                                    const unsigned int *ids,
+                                    const hs_expr_ext_t *const *ext,
+                                    unsigned int elements, unsigned int mode,
+                                    const hs_platform_info_t *platform,
+                                    fat_hs_database_t **db,
+                                    hs_compile_error_t **error);
+```
+
+**Parameters**
+
+|Parameter|Description|Value Range|Input/Output|
+|--|--|--|--|
+|expressions|Regular expression string array, with each element ending with null.|Non-empty array|Input|
+|flags|Array of compilation flags corresponding to each expression.|The value can be null. If the value is null, all flags are <code>0</code>.|Input|
+|ids|Array of IDs corresponding to each expression.|The value can be null. If the value is null, all IDs are <code>0</code>.|Input|
+|ext|Array of pointers to the extended parameter structures corresponding to each expression, which is used to set extended attributes such as the minimum and maximum matching lengths.|The value can be null.|Input|
+|elements|Number of elements in the expression array.|> 0|Input|
+|mode|Compilation mode, which specifies the database type.|<code>HS_MODE_STREAM</code>, <code>HS_MODE_BLOCK</code>, or <code>HS_MODE_VECTORED</code>|Input|
+|platform|Target platform information. The null value indicates the current host platform.|The value can be null.|Input|
+|db|Returned pointer to the general database after successful compilation.|Non-null pointer|Output|
+|error|Error information returned when the compilation fails.|Non-null pointer|Output|
+
+**Return Value**
+
+If the operation is successful, `HS_SUCCESS` is returned. If the operation fails, `HS_COMPILER_ERROR` is returned and the error details are provided in the `error` parameter.
+
+### fat\_hs\_compile\_lit
+
+**Function Usage**
+
+Compiles a single literal expression (not a regular expression) to generate a database that contains x86 and Arm bytecode. All characters in the literal expression are matched literally and are not parsed by the regular expression syntax.
+
+**Function Syntax**
+
+```c
+hs_error_t fat_hs_compile_lit(const char *expression, unsigned int flags,
+                              const size_t len, unsigned int mode,
+                              const hs_platform_info_t *platform,
+                              fat_hs_database_t **db,
+                              hs_compile_error_t **error);
+```
+
+**Parameters**
+
+|Parameter|Description|Value Range|Input/Output|
+|--|--|--|--|
+|expression|Literal expression string.|Non-empty character string|Input|
+|flags|Expression compilation flag.|<code>HS_FLAG_CASELESS</code>, <code>HS_FLAG_SINGLEMATCH</code>, or <code>HS_FLAG_SOM_LEFTMOST</code>|Input|
+|len|Length (in bytes) of the literal expression. The expression can contain <code>\0</code>.|> 0|Input|
+|mode|Compilation mode, which specifies the database type.|<code>HS_MODE_STREAM</code>, <code>HS_MODE_BLOCK</code>, or <code>HS_MODE_VECTORED</code>|Input|
+|platform|Target platform information. The null value indicates the current host platform.|The value can be null.|Input|
+|db|Returned pointer to the general database after successful compilation.|Non-null pointer|Output|
+|error|Error information returned when the compilation fails.|Non-null pointer|Output|
+
+**Return Value**
+
+If the operation is successful, `HS_SUCCESS` is returned. If the operation fails, `HS_COMPILER_ERROR` is returned and the error details are provided in the `error` parameter.
+
+### fat\_hs\_compile\_lit\_multi
+
+**Function Usage**
+
+Batch compiles multiple literal expressions (not regular expressions) to generate a database that contains x86 and Arm bytecode. All characters in the literal expressions are matched literally and are not parsed by the regular expression syntax.
+
+**Function Syntax**
+
+```c
+hs_error_t fat_hs_compile_lit_multi(const char *const *expressions,
+                                    const unsigned int *flags,
+                                    const unsigned int *ids,
+                                    const size_t *lens,
+                                    unsigned int elements, unsigned int mode,
+                                    const hs_platform_info_t *platform,
+                                    fat_hs_database_t **db,
+                                    hs_compile_error_t **error);
+```
+
+**Parameters**
+
+|Parameter|Description|Value Range|Input/Output|
+|--|--|--|--|
+|expressions|Array of literal expression strings.|Non-empty array|Input|
+|flags|Array of compilation flags corresponding to each expression.|The value can be null. If the value is null, all flags are <code>0</code>.|Input|
+|ids|Array of IDs corresponding to each expression.|The value can be null. If the value is null, all IDs are <code>0</code>.|Input|
+|lens|Array of lengths (in bytes) for each literal expression. The expressions can contain <code>\0</code>.|Non-empty array|Input|
+|elements|Number of elements in the expression array.|> 0|Input|
+|mode|Compilation mode, which specifies the database type.|<code>HS_MODE_STREAM</code>, <code>HS_MODE_BLOCK</code>, or <code>HS_MODE_VECTORED</code>|Input|
+|platform|Target platform information. The null value indicates the current host platform.|The value can be null.|Input|
+|db|Returned pointer to the general database after successful compilation.|Non-null pointer|Output|
+|error|Error information returned when the compilation fails.|Non-null pointer|Output|
+
+**Return Value**
+
+If the operation is successful, `HS_SUCCESS` is returned. If the operation fails, `HS_COMPILER_ERROR` is returned and the error details are provided in the `error` parameter.
+
 ## Change History
 
-|Issue|Date|Change Description|
+|Issue|Date|Description|
 |--|--|--|
-|01|2026-03-30|First official release. Optimized the Hyperscan short-byte (2–4 bytes) rule matching algorithm based on the new Kunpeng 920 processor model, and added the KHSEL_BuildLilyForTeddy and KHSEL_LilyForTeddyRunExec algorithms.|
+|02|2026-06-30|This issue is the second official release. Added the universal bytecode function based on the new Kunpeng 920 processor model.|
+|01|2026-03-30|This issue is the first official release. Optimized the Ultrascan short-byte (2–4 bytes) rule matching algorithm based on the new Kunpeng 920 processor model, and added the KHSEL_BuildLilyForTeddy and KHSEL_LilyForTeddyRunExec algorithms.|
