@@ -36,7 +36,7 @@ Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │       ├── figures                                           # 中文文档图片资源目录
 │       ├── quick_start.md                                    # 快速入门
 │       ├── release_notes.md                                  # 版本说明书
-│       ├── installation_guide.md                              # 编译指南
+│       ├── installation_guide.md                              # 安装指南
 │       ├── developer_guide.md                                # 开发指南
 │       ├── user_guide.md                                     # 用户指南
 ├── examples                                                   # 示例代码目录

@@ -1,13 +1,6 @@
 # 用户指南
 
 ## 前提条件
-<<<<<<< HEAD
-
-请参考[安装指南](./installation_guide.md)完成Hyperscan的安装和编译指导。
-
-## 特性使能
-=======
->>>>>>> upstream/dev_26.1.RC1
 
 请参考[安装指南](./installation_guide.md)完成Ultrascan的安装和编译指导。
 
