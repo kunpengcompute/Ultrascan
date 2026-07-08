@@ -745,6 +745,39 @@ hs_error_t HS_CDECL fat_hs_compile_lit_multi(const char * const *expressions,
 hs_error_t HS_CDECL hs_free_compile_error(hs_compile_error_t *error);
 
 /**
+ * Set global Grey override parameters for all subsequent compile calls.
+ *
+ * This function allows the caller to set compiler optimisation switches
+ * programmatically, replacing the old config.txt file mechanism.
+ * The overrides string uses the same format as the old config.txt:
+ * "key1:value1;key2:value2;..."
+ *
+ * Must be called before any hs_compile_*() calls. The overrides will be
+ * applied to every subsequent compile call until hs_reset_grey_overrides()
+ * is called.
+ *
+ * @param overrides
+ *      Override string in "key:value;key:value;..." format.
+ *      Pass NULL or "" to reset all overrides to defaults.
+ *
+ * @return
+ *      HS_SUCCESS on success, HS_INVALID if the string contains
+ *      unrecognised keys.
+ */
+hs_error_t HS_CDECL hs_set_grey_overrides(const char *overrides);
+
+/**
+ * Reset all Grey overrides to their default values.
+ *
+ * Clears any overrides previously set via hs_set_grey_overrides().
+ * Subsequent compile calls will use the hard-coded default values.
+ *
+ * @return
+ *      HS_SUCCESS on success.
+ */
+hs_error_t HS_CDECL hs_reset_grey_overrides(void);
+
+/**
  * Utility function providing information about a regular expression. The
  * information provided in @ref hs_expr_info_t includes the minimum and maximum
  * width of a pattern match.
@@ -1071,6 +1104,31 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * instructions. Using AVX512VBMI implies the use of AVX512.
  */
 #define HS_CPU_FEATURES_AVX512VBMI       (1ULL << 4)
+
+/**
+ * CPU features flag - Arm Scalable Vector Extension (SVE)
+ *
+ * Setting this flag indicates that the target platform supports SVE
+ * instructions.
+ */
+#define HS_CPU_FEATURES_SVE              (1ULL << 5)
+
+/**
+ * CPU features flag - Arm Scalable Vector Extension 2 (SVE2)
+ *
+ * Setting this flag indicates that the target platform supports SVE2
+ * instructions. Using SVE2 implies the use of SVE.
+ */
+#define HS_CPU_FEATURES_SVE2             (1ULL << 6)
+
+/**
+ * CPU features flag - Arm SVE2 Bit Permute extension (SVEBITPERM)
+ *
+ * Setting this flag indicates that the target platform supports the optional
+ * SVE2 bit permute instructions. Using SVEBITPERM implies the use of SVE2
+ * and SVE.
+ */
+#define HS_CPU_FEATURES_SVEBITPERM       (1ULL << 7)
 
 /** @} */
 
