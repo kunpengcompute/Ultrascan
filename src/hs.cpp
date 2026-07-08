@@ -971,6 +971,36 @@ hs_error_t HS_CDECL fat_hs_compile_lit_multi(const char * const *expressions,
                                         Grey());
 }
 
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL hs_set_grey_overrides(const char *overrides) {
+    if (overrides == nullptr || overrides[0] == '\0') {
+        ue2::resetGreyOverrides();
+        return HS_SUCCESS;
+    }
+
+    std::string s(overrides);
+
+    // Reject "help" or "help:" prefix - this is a debug-only feature.
+    if (s == "help" || s.compare(0, 5, "help:") == 0) {
+        return HS_INVALID;
+    }
+
+    // Validate the overrides string by applying to a temporary Grey.
+    ue2::Grey test_grey(false);
+    if (!ue2::applyGreyOverrides(&test_grey, s)) {
+        return HS_INVALID;
+    }
+
+    ue2::setGreyOverrides(s);
+    return HS_SUCCESS;
+}
+
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL hs_reset_grey_overrides(void) {
+    ue2::resetGreyOverrides();
+    return HS_SUCCESS;
+}
+
 static
 hs_error_t hs_expression_info_int(const char *expression, unsigned int flags,
                                   const hs_expr_ext_t *ext, unsigned int mode,

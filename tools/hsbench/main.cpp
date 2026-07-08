@@ -42,7 +42,6 @@
 #include "util/expression_path.h"
 #include "util/string_util.h"
 
-#include "grey.h"
 #include "hs.h"
 #include "ue2common.h"
 #include "util/make_unique.h"
@@ -245,8 +244,7 @@ struct BenchmarkSigs {
 
 /** Process command-line arguments. Prints usage and exits on error. */
 static
-void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets,
-                 UNUSED unique_ptr<Grey> &grey) {
+void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets) {
     const char options[] = "-b:c:Cd:e:E:G:hHi:n:No:p:PsS:U:Vw:z:"
 #if defined(HAVE_DECL_PTHREAD_SETAFFINITY_NP) || defined(_WIN32)
         "T:" // add the thread flag
@@ -320,11 +318,12 @@ void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets,
             }
             forceEditDistance = true;
             break;
-#ifndef RELEASE_BUILD
         case 'G':
-            applyGreyOverrides(grey.get(), string(optarg));
+            if (hs_set_grey_overrides(optarg) != HS_SUCCESS) {
+                usage("Invalid grey overrides");
+                exit(1);
+            }
             break;
-#endif
         case 'h':
             usage(nullptr);
             exit(0);
@@ -1059,8 +1058,6 @@ void runBenchmark(const Engine &db,
 
 //main driver
 int HS_CDECL main(int argc, char *argv[]) {
-    unique_ptr<Grey> grey;
-    grey = make_unique<Grey>();
     setlocale(LC_ALL, ""); // use the user's locale
 
 #ifndef NDEBUG
@@ -1068,7 +1065,7 @@ int HS_CDECL main(int argc, char *argv[]) {
 #endif
 
     vector<BenchmarkSigs> sigSets;
-    processArgs(argc, argv, sigSets, grey);
+    processArgs(argc, argv, sigSets);
 
     // read in and process our corpus
     vector<DataBlock> corpus_blocks;
@@ -1139,7 +1136,7 @@ int HS_CDECL main(int argc, char *argv[]) {
 #endif
                 } else {
                     engine = fat_buildEngineHyperscan(exprMap, scan_mode, s.name,
-                                                  sigName, *grey);
+                                                  sigName);
                 }
 
                 if (!engine) {

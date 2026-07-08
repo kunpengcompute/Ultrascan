@@ -32,10 +32,9 @@
 #include <algorithm>
 #include <cstdlib> // exit
 #include <string>
-#include <unistd.h>
 #include <limits.h>
 #include <cstring>
-#include <fstream>
+#include <mutex>
 #include <vector>
 
 #define DEFAULT_MAX_HISTORY 110
@@ -43,6 +42,25 @@
 using namespace std;
 
 namespace ue2 {
+
+// Global overrides storage, protected by mutex for thread safety.
+static std::string g_overrides;
+static std::mutex g_overrides_mutex;
+
+void setGreyOverrides(const std::string &overrides) {
+    std::lock_guard<std::mutex> lock(g_overrides_mutex);
+    g_overrides = overrides;
+}
+
+void resetGreyOverrides() {
+    std::lock_guard<std::mutex> lock(g_overrides_mutex);
+    g_overrides.clear();
+}
+
+std::string getGreyOverrides() {
+    std::lock_guard<std::mutex> lock(g_overrides_mutex);
+    return g_overrides;
+}
 
 Grey::Grey(bool applyOverrides) :
                    optimiseComponentTree(true),
@@ -175,56 +193,14 @@ Grey::Grey(bool applyOverrides) :
         return;
     }
     
-    char exe_path[PATH_MAX];
-    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-    if (len == -1) {
-        char cwd[PATH_MAX];
-        if (!getcwd(cwd, sizeof(cwd))) {
-            return;
-        }
-        std::string path = std::string(cwd) + "/config.txt";
-        if (access(path.c_str(), F_OK) != 0) {
-            return;
-        }
-        
-        std::ifstream file(path);
-        if (!file.is_open()) {
-            return;
-        }
-
-        std::string line;
-        if (std::getline(file, line)) {
-            applyGreyOverrides(this, line);
-        }
-        file.close();
-        return;
+    // Apply globally-set overrides instead of reading from config.txt file.
+    std::string overrides;
+    {
+        std::lock_guard<std::mutex> lock(g_overrides_mutex);
+        overrides = g_overrides;
     }
-    
-    exe_path[len] = '\0';
-    
-    std::string exe_dir(exe_path);
-    size_t last_slash = exe_dir.find_last_of('/');
-    if (last_slash != std::string::npos) {
-        exe_dir = exe_dir.substr(0, last_slash);
-    }
-    
-    std::vector<std::string> config_paths;
-    config_paths.push_back(exe_dir + "/config.txt");
-    config_paths.push_back(exe_dir + "/../config.txt");
-    config_paths.push_back(exe_dir + "/../../config.txt");
-    
-    for (const auto& path : config_paths) {
-        if (access(path.c_str(), F_OK) == 0) {
-            std::ifstream file(path);
-            if (file.is_open()) {
-                std::string line;
-                if (std::getline(file, line)) {
-                    applyGreyOverrides(this, line);
-                }
-                file.close();
-                return;
-            }
-        }
+    if (!overrides.empty()) {
+        applyGreyOverrides(this, overrides);
     }
 }
 
@@ -235,13 +211,14 @@ using boost::lexical_cast;
 
 namespace ue2 {
 
-void applyGreyOverrides(Grey *g, const string &s) {
+bool applyGreyOverrides(Grey *g, const string &s) {
     string::const_iterator p = s.begin();
     string::const_iterator pe = s.end();
     string help = "help:0";
     bool invalid_key_seen = false;
 
     Grey defaultg(false);
+    Grey staged = *g;
 
     if (s == "help" || s == "help:") {
         printf("Valid grey overrides:\n");
@@ -253,6 +230,11 @@ void applyGreyOverrides(Grey *g, const string &s) {
         string::const_iterator ke = find(p, pe, ':');
 
         if (ke == pe) {
+            // No colon found in remaining string: treat as invalid format.
+            // Skip leading semicolons (which can appear between entries).
+            if (p != pe && *p != ';') {
+                invalid_key_seen = true;
+            }
             break;
         }
 
@@ -274,7 +256,7 @@ void applyGreyOverrides(Grey *g, const string &s) {
         /* surely there exists a nice template to go with this macro to make
          * all the boring code disappear */
 #define G_UPDATE(k) do {                                                \
-            if (key == ""#k) { g->k = value; done = 1;}                 \
+            if (key == ""#k) { staged.k = value; done = 1;}            \
             if (key == "help") {                                        \
                 printf("\t%-30s\tdefault: %s\n", #k,                    \
                        lexical_cast<string>(defaultg.k).c_str());       \
@@ -401,61 +383,61 @@ void applyGreyOverrides(Grey *g, const string &s) {
 
 #undef G_UPDATE
         if (key == "simple_som") {
-            g->allowHaigLit = false;
-            g->allowLitHaig = false;
-            g->allowSomChain = false;
-            g->somMaxRevNfaLength = 0;
+            staged.allowHaigLit = false;
+            staged.allowLitHaig = false;
+            staged.allowSomChain = false;
+            staged.somMaxRevNfaLength = 0;
             done = true;
         }
         if (key == "forceOutfixesNFA") {
-            g->allowAnchoredAcyclic = false;
-            g->allowCastle = false;
-            g->allowDecoratedLiteral = false;
-            g->allowGough = false;
-            g->allowHaigLit = false;
-            g->allowLbr = false;
-            g->allowLimExNFA = true;
-            g->allowLitHaig = false;
-            g->allowMcClellan = false;
-            g->allowPuff = false;
-            g->allowLiteral = false;
-            g->allowViolet = false;
-            g->allowSmallLiteralSet = false;
-            g->roseMasks = false;
+            staged.allowAnchoredAcyclic = false;
+            staged.allowCastle = false;
+            staged.allowDecoratedLiteral = false;
+            staged.allowGough = false;
+            staged.allowHaigLit = false;
+            staged.allowLbr = false;
+            staged.allowLimExNFA = true;
+            staged.allowLitHaig = false;
+            staged.allowMcClellan = false;
+            staged.allowPuff = false;
+            staged.allowLiteral = false;
+            staged.allowViolet = false;
+            staged.allowSmallLiteralSet = false;
+            staged.roseMasks = false;
             done = true;
         }
         if (key == "forceOutfixesDFA") {
-            g->allowAnchoredAcyclic = false;
-            g->allowCastle = false;
-            g->allowDecoratedLiteral = false;
-            g->allowGough = false;
-            g->allowHaigLit = false;
-            g->allowLbr = false;
-            g->allowLimExNFA = false;
-            g->allowLitHaig = false;
-            g->allowMcClellan = true;
-            g->allowPuff = false;
-            g->allowLiteral = false;
-            g->allowViolet = false;
-            g->allowSmallLiteralSet = false;
-            g->roseMasks = false;
+            staged.allowAnchoredAcyclic = false;
+            staged.allowCastle = false;
+            staged.allowDecoratedLiteral = false;
+            staged.allowGough = false;
+            staged.allowHaigLit = false;
+            staged.allowLbr = false;
+            staged.allowLimExNFA = false;
+            staged.allowLitHaig = false;
+            staged.allowMcClellan = true;
+            staged.allowPuff = false;
+            staged.allowLiteral = false;
+            staged.allowViolet = false;
+            staged.allowSmallLiteralSet = false;
+            staged.roseMasks = false;
             done = true;
         }
         if (key == "forceOutfixes") {
-            g->allowAnchoredAcyclic = false;
-            g->allowCastle = false;
-            g->allowDecoratedLiteral = false;
-            g->allowGough = true;
-            g->allowHaigLit = false;
-            g->allowLbr = false;
-            g->allowLimExNFA = true;
-            g->allowLitHaig = false;
-            g->allowMcClellan = true;
-            g->allowPuff = false;
-            g->allowLiteral = false;
-            g->allowViolet = false;
-            g->allowSmallLiteralSet = false;
-            g->roseMasks = false;
+            staged.allowAnchoredAcyclic = false;
+            staged.allowCastle = false;
+            staged.allowDecoratedLiteral = false;
+            staged.allowGough = true;
+            staged.allowHaigLit = false;
+            staged.allowLbr = false;
+            staged.allowLimExNFA = true;
+            staged.allowLitHaig = false;
+            staged.allowMcClellan = true;
+            staged.allowPuff = false;
+            staged.allowLiteral = false;
+            staged.allowViolet = false;
+            staged.allowSmallLiteralSet = false;
+            staged.roseMasks = false;
             done = true;
         }
 
@@ -472,11 +454,12 @@ void applyGreyOverrides(Grey *g, const string &s) {
     }
 
     if (invalid_key_seen) {
-        applyGreyOverrides(g, "help");
-        exit(1);
+        return false;
     }
 
-    assert(g->maxAnchoredRegion < 64); /* a[lm]_log_sum have limited capacity */
+    assert(staged.maxAnchoredRegion < 64); /* a[lm]_log_sum have limited capacity */
+    *g = staged;
+    return true;
 }
 
 } // namespace ue2
