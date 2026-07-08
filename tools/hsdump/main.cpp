@@ -50,6 +50,9 @@
 #include "hs_compile.h"
 #include "hs_internal.h"
 #include "scratch_dump.h"
+#include "fat_database.h"
+#include "database.h"
+#include "database_common.h"
 
 #include <cassert>
 #include <cerrno>
@@ -110,6 +113,66 @@ int use_literal_api = 0;
 
 } // namespace
 
+typedef struct {
+    hs_database_t* x86_db;
+    hs_database_t* arm_db;
+} SplitDatabases;
+
+
+static SplitDatabases splitDB(const fat_hs_database_t* fat_db) {
+    SplitDatabases result = {nullptr, nullptr};
+    
+    if (!fat_db) {
+        return result;
+    }
+    
+    if (fat_db->x86_length > 0) {
+        size_t x86_size = sizeof(hs_database) + fat_db->x86_length;
+        result.x86_db = (hs_database_t*)malloc(x86_size);
+        if (result.x86_db) {
+            result.x86_db->magic = fat_db->magic;
+            result.x86_db->version = fat_db->version;
+            result.x86_db->length = fat_db->x86_length;
+            result.x86_db->platform = fat_db->platform;
+            result.x86_db->crc32 = fat_db->x86_crc32;
+            result.x86_db->reserved0 = fat_db->reserved0;
+            result.x86_db->reserved1 = fat_db->reserved1;
+            
+            uintptr_t shift = (uintptr_t)result.x86_db->bytes & 0x3f;
+            result.x86_db->bytecode = offsetof(struct hs_database, bytes) - shift;
+            
+            const char* x86_bytecode = (const char*)fat_db + fat_db->x86_bytecode;
+            char* x86_ptr = (char*)result.x86_db + result.x86_db->bytecode;
+            memcpy(x86_ptr, x86_bytecode, fat_db->x86_length);
+        }
+    }
+    
+    if (fat_db->arm_length > 0) {
+        size_t arm_size = sizeof(hs_database) + fat_db->arm_length;
+        result.arm_db = (hs_database_t*)malloc(arm_size);
+        if (result.arm_db) {
+            result.arm_db->magic = fat_db->magic;
+            result.arm_db->version = fat_db->version;
+            result.arm_db->length = fat_db->arm_length;
+            result.arm_db->platform = fat_db->arm_platform;
+            result.arm_db->crc32 = fat_db->arm_crc32;
+            result.arm_db->reserved0 = fat_db->reserved0;
+            result.arm_db->reserved1 = fat_db->reserved1;
+            
+            uintptr_t shift = (uintptr_t)result.arm_db->bytes & 0x3f;
+            result.arm_db->bytecode = offsetof(struct hs_database, bytes) - shift;
+            
+            const char* arm_bytecode = (const char*)fat_db + fat_db->arm_bytecode;
+            char* arm_ptr = (char*)result.arm_db + result.arm_db->bytecode;
+            memcpy(arm_ptr, arm_bytecode, fat_db->arm_length);
+        }
+    }
+    
+    return result;
+}
+
+
+
 // Usage statement.
 static
 void usage(const char *name, const char *error) {
@@ -129,7 +192,7 @@ void usage(const char *name, const char *error) {
     printf("                  WARNING: existing files in output directory are"
            " deleted.\n");
     printf("  -x NAME         Cross-compile for arch NAME\n");
-    printf("  -D, --dump_db   Dump the final database.\n");
+    printf("  -U, --dump_db   Dump the final database (fat database format).\n");
     printf("  -P, --print     Echo signature set to stdout.\n");
     printf("  -X, --no_intermediate\n");
     printf("                  Do not dump intermediate data.\n");
@@ -154,9 +217,9 @@ void usage(const char *name, const char *error) {
 
 static
 void processArgs(int argc, char *argv[], Grey &grey) {
-    static const char *options = "d:De:E:G:hLNo:Ps:VXx:z:8";
+    static const char *options = "d:e:E:G:hLNo:Ps:UVXx:z:8";
     static struct option longOptions[] = {
-        {"dump_db",             no_argument,        nullptr, 'D'},
+        {"dump_db",             no_argument,        nullptr, 'U'},
         {"help",                no_argument,        nullptr, 'h'},
         {"output",              required_argument,  nullptr, 'o'},
         {"block",               no_argument,        nullptr, 'N'},
@@ -177,7 +240,7 @@ void processArgs(int argc, char *argv[], Grey &grey) {
             break;
         }
         switch (c) {
-        case 'D':
+        case 'U':
             dump_db = true;
             break;
 
@@ -299,12 +362,12 @@ void processArgs(int argc, char *argv[], Grey &grey) {
 }
 
 static
-void dumpDb(const struct hs_database *out, const Grey &grey) {
+void dumpDb(const fat_hs_database_t *out, const Grey &grey) {
     char *bytes = nullptr;
     size_t len = 0;
-    hs_error_t err = hs_serialize_database(out, &bytes, &len);
+    hs_error_t err = fat_hs_serialize_database(out, &bytes, &len);
     if (err != HS_SUCCESS) {
-        printf("ERROR: hs_serialize_database() failed with error %u\n", err);
+        printf("ERROR: fat_hs_serialize_database() failed with error %u\n", err);
         return;
     }
 
@@ -350,9 +413,19 @@ void clearDir(const string &path) {
             continue;
         }
         string f = path + '/' + name;
-        if (unlink(f.c_str()) < 0) {
-            printf("ERROR: couldn't remove file %s: %s\n", f.c_str(),
-                   strerror(errno));
+        struct stat st;
+        if (stat(f.c_str(), &st) == 0) {
+            if (S_ISDIR(st.st_mode)) {
+                // 递归删除子目录
+                clearDir(f);
+                rmdir(f.c_str());
+            } else {
+                // 删除文件
+                if (unlink(f.c_str()) < 0) {
+                    printf("ERROR: couldn't remove file %s: %s\n", f.c_str(),
+                           strerror(errno));
+                }
+            }
         }
     }
     closedir(dir);
@@ -379,8 +452,16 @@ void clearDir(const string &path) {
             continue;
         }
 
-        if (!DeleteFile(fname.c_str())) {
-            printf("ERROR: couldn't remove file %s\n", fname.c_str());
+        // Check if it's a directory
+        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            // Recursively clear subdirectory
+            clearDir(fname);
+            RemoveDirectory(fname.c_str());
+        } else {
+            // Delete file
+            if (!DeleteFile(fname.c_str())) {
+                printf("ERROR: couldn't remove file %s\n", fname.c_str());
+            }
         }
 
     } while (FindNextFile(hFind, &ffd) != 0);
@@ -456,41 +537,95 @@ unsigned buildMode() {
 }
 
 static
-void dumpScratch(const hs_database_t *db, const Grey &grey) {
-    hs_scratch_t *scratch = nullptr;
-    hs_error_t err = hs_alloc_scratch(db, &scratch);
-    if (err == HS_SUCCESS) {
-        FILE *f = fopen((grey.dumpPath + "scratch.txt").c_str(), "w");
-        if (f) {
-            dumpScratch(scratch, f);
-            fclose(f);
-        } else {
-            printf("ERROR: could not open %s: %s\n",
-                   (grey.dumpPath + "scratch.txt").c_str(), strerror(errno));
-        }
-    } else {
-        printf("ERROR: hs_alloc_scratch() failed with error %u\n", err);
+void dumpScratch(const fat_hs_database_t *db, const Grey &grey) {
+    SplitDatabases split = splitDB(db);
+    
+    FILE *f = fopen((grey.dumpPath + "scratch.txt").c_str(), "w");
+    if (!f) {
+        printf("ERROR: could not open %s: %s\n",
+               (grey.dumpPath + "scratch.txt").c_str(), strerror(errno));
+        if (split.x86_db) free(split.x86_db);
+        if (split.arm_db) free(split.arm_db);
+        return;
     }
-    hs_free_scratch(scratch);
+    
+    // 输出 x86 scratch 信息
+    if (split.x86_db) {
+        hs_scratch_t *scratch = nullptr;
+        hs_error_t err = hs_alloc_scratch(split.x86_db, &scratch);
+        if (err == HS_SUCCESS) {
+            fprintf(f, "=== X86_64 Scratch ===\n");
+            dumpScratch(scratch, f);
+            fprintf(f, "\n");
+            hs_free_scratch(scratch);
+        } else {
+            fprintf(f, "ERROR: x86 hs_alloc_scratch() failed with error %u\n", err);
+        }
+    }
+    
+    // 输出 arm scratch 信息
+    if (split.arm_db) {
+        hs_scratch_t *scratch = nullptr;
+        hs_error_t err = hs_alloc_scratch(split.arm_db, &scratch);
+        if (err == HS_SUCCESS) {
+            fprintf(f, "=== AARCH64 Scratch ===\n");
+            dumpScratch(scratch, f);
+            fprintf(f, "\n");
+            hs_free_scratch(scratch);
+        } else {
+            fprintf(f, "ERROR: arm hs_alloc_scratch() failed with error %u\n", err);
+        }
+    }
+    
+    fclose(f);
+    if (split.x86_db) free(split.x86_db);
+    if (split.arm_db) free(split.arm_db);
 }
 
 static
-void dumpInfo(const hs_database_t *db, const Grey &grey) {
-    char *info = nullptr;
-    hs_error_t err = hs_database_info(db, &info);
-    if (err == HS_SUCCESS) {
-        FILE *f = fopen((grey.dumpPath + "db_info.txt").c_str(), "w");
-        if (f) {
-            fprintf(f, "%s\n", info);
-            fclose(f);
-        } else {
-            printf("ERROR: could not open %s: %s\n",
-                   (grey.dumpPath + "db_info.txt").c_str(), strerror(errno));
-        }
-    } else {
-        printf("ERROR: hs_database_info() failed with error %u\n", err);
+void dumpInfo(const fat_hs_database_t *db, const Grey &grey) {
+    SplitDatabases split = splitDB(db);
+    
+    FILE *f = fopen((grey.dumpPath + "db_info.txt").c_str(), "w");
+    if (!f) {
+        printf("ERROR: could not open %s: %s\n",
+               (grey.dumpPath + "db_info.txt").c_str(), strerror(errno));
+        if (split.x86_db) free(split.x86_db);
+        if (split.arm_db) free(split.arm_db);
+        return;
     }
-    free(info);
+    
+    // 输出 x86 数据库信息
+    if (split.x86_db) {
+        char *info = nullptr;
+        hs_error_t err = hs_database_info(split.x86_db, &info);
+        if (err == HS_SUCCESS) {
+            fprintf(f, "=== X86_64 Database ===\n");
+            fprintf(f, "%s\n", info);
+            fprintf(f, "\n");
+        } else {
+            fprintf(f, "ERROR: x86 hs_database_info() failed with error %u\n", err);
+        }
+        free(info);
+    }
+    
+    // 输出 arm 数据库信息
+    if (split.arm_db) {
+        char *info = nullptr;
+        hs_error_t err = hs_database_info(split.arm_db, &info);
+        if (err == HS_SUCCESS) {
+            fprintf(f, "=== AARCH64 Database ===\n");
+            fprintf(f, "%s\n", info);
+            fprintf(f, "\n");
+        } else {
+            fprintf(f, "ERROR: arm hs_database_info() failed with error %u\n", err);
+        }
+        free(info);
+    }
+    
+    fclose(f);
+    if (split.x86_db) free(split.x86_db);
+    if (split.arm_db) free(split.arm_db);
 }
 
 static
@@ -503,7 +638,7 @@ unsigned int dumpDataMulti(const vector<const char *> &patterns,
 
     printf("Compiling %zu patterns.\n", patterns.size());
 
-    hs_database_t *db = nullptr;
+    fat_hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err;
 
     hs_error_t err;
@@ -514,14 +649,14 @@ unsigned int dumpDataMulti(const vector<const char *> &patterns,
         for (unsigned int i = 0; i < count; i++) {
             lens[i] = strlen(patterns[i]);
         }
-        err = hs_compile_lit_multi_int(patterns.data(), flags.data(),
+        err = fat_hs_compile_lit_multi_int(patterns.data(), flags.data(),
                                        ids.data(), ext.c_array(), lens.data(),
                                        count, mode, plat_info.get(), &db,
                                        &compile_err, grey);
     } else {
-        err = hs_compile_multi_int(patterns.data(), flags.data(), ids.data(),
-                                   ext.c_array(), count, mode, plat_info.get(),
-                                   &db, &compile_err, grey);
+        err = fat_hs_compile_multi_int(patterns.data(), flags.data(), ids.data(),
+                               ext.c_array(), count, mode, plat_info.get(),
+                               &db, &compile_err, grey);
     }
 
     if (err != HS_SUCCESS) {
@@ -542,7 +677,7 @@ unsigned int dumpDataMulti(const vector<const char *> &patterns,
         dumpDb(db, grey);
     }
 
-    hs_free_database(db);
+    fat_hs_free_database(db);
     return 0;
 }
 

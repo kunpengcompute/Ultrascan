@@ -353,6 +353,18 @@ void dumpSmallWrite(const RoseEngine *rose, const Grey &grey) {
     smwrDumpNFA(smwr, false, grey.dumpPath);
 }
 
+void x86_dumpSmallWrite(const x86_RoseEngine *rose, const Grey &grey) {
+    if (!grey.dumpFlags) {
+        return;
+    }
+
+    const struct SmallWriteEngine *smwr = x86_getSmallWrite(rose);
+    smwrDumpText(smwr, StdioFile(grey.dumpPath + "smallwrite.txt", "w"));
+    smwrDumpNFA(smwr, false, grey.dumpPath);
+}
+
+
+
 static
 const char *reportTypeToString(ReportType type) {
 #define REPORT_TYPE_CASE(x) case x: return #x

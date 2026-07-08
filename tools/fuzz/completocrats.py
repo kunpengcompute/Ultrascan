@@ -10,6 +10,10 @@ parser.add_option("-d", "--depth",
                   action="store", type="int", dest="depth", default=200,
                   help="Depth of generation (akin to maximum length)")
 
+parser.add_option("-c", "--count",
+                  action="store", type="int", dest="count", default=1000,
+                  help="Number of expressions to generate")
+
 parser.add_option("-f", "--full",
                   action="store_true", dest="full", default=False,
                   help="Use a full character set including unprintables")
@@ -34,6 +38,8 @@ srange = [ chr(c) for c in crange ]
 
 i = 0
 for x in product(srange, repeat = options.depth):
+    if i >= options.count:
+        break
     line = str(i) + ":/" + "".join(x) + "/"
     print (line)
     i += 1

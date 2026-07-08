@@ -11,8 +11,10 @@ option(ENABLE_COVERAGE "Enable coverage compilation options" OFF)
 
 if(ENABLE_COVERAGE)
     # 添加覆盖率编译选项
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -g -fprofile-arcs -ftest-coverage")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fprofile-arcs -ftest-coverage")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-arcs -ftest-coverage")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fprofile-arcs -ftest-coverage")
     message(STATUS "Coverage compilation options enabled")
 else()
     message(STATUS "Coverage compilation options disabled")
@@ -48,6 +50,43 @@ if(CMAKE_BUILD_TYPE MATCHES RELEASE|RELWITHDEBINFO|MINSIZEREL)
 else()
     set(RELEASE_BUILD FALSE)
 endif()
+
+set(HS_HARDENING_ACTIVE FALSE)
+if (RELEASE_BUILD AND CMAKE_SYSTEM_NAME MATCHES "Linux" AND
+        (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" OR
+         CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
+    set(HS_HARDENING_ACTIVE TRUE)
+    set(HS_HARDENING_SHARED_LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -s")
+    set(HS_HARDENING_EXECUTABLE_LINK_FLAGS "${HS_HARDENING_SHARED_LINK_FLAGS}")
+    message(STATUS "Hardening link options enabled")
+else()
+    message(STATUS "Hardening link options disabled")
+endif()
+
+function(hs_append_target_property target property flags)
+    if (NOT HS_HARDENING_ACTIVE)
+        return()
+    endif()
+
+    if (TARGET ${target})
+        get_target_property(_old_flags ${target} ${property})
+        if (NOT _old_flags)
+            set(_old_flags "")
+        endif()
+        set_target_properties(${target} PROPERTIES
+            ${property} "${_old_flags} ${flags}")
+    endif()
+endfunction()
+
+function(hs_harden_shared_target target)
+    hs_append_target_property(${target} LINK_FLAGS
+        "${HS_HARDENING_SHARED_LINK_FLAGS}")
+endfunction()
+
+function(hs_harden_executable_target target)
+    hs_append_target_property(${target} LINK_FLAGS
+        "${HS_HARDENING_EXECUTABLE_LINK_FLAGS}")
+endfunction()
 
 set(BINDIR "${PROJECT_BINARY_DIR}/bin")
 set(LIBDIR "${PROJECT_BINARY_DIR}/lib")
@@ -652,6 +691,8 @@ set (hs_exec_common_SRCS
     src/util/cpuid_flags.c
     src/util/cpuid_flags.h
     src/util/multibit.c
+    src/fat_database.c
+    src/fat_database.h
     )
 
 set (hs_exec_SRCS
@@ -800,6 +841,7 @@ set (hs_exec_SRCS
     src/util/uniform_ops.h
     src/database.c
     src/database.h
+    src/database_common.h
 )
 
 set (hs_exec_avx2_SRCS
@@ -811,7 +853,9 @@ set (hs_exec_avx2_SRCS
 SET (hs_compile_SRCS
     ${hs_HEADERS}
     src/crc32.h
+    src/database_common.h
     src/database.h
+    src/fat_database.h
     src/grey.cpp
     src/grey.h
     src/hs.cpp
@@ -1189,33 +1233,26 @@ SET (hs_compile_SRCS
     src/util/uniform_ops.h
     src/util/unordered.h
     src/util/verify_types.h
-    src/kunpeng-enhanced/fdr_enhanced.h
-    src/kunpeng-enhanced/khsel_core.h
-    src/kunpeng-enhanced/khsel_ops.h
-    src/kunpeng-enhanced/khsel_type.h
-    src/kunpeng-enhanced/khsel_typebase.h
-    src/kunpeng-enhanced/khsel.h
-    src/kunpeng-enhanced/lily.h
-    src/kunpeng-enhanced/shufti_enhanced.h
-    src/kunpeng-enhanced/ue2common.h
-    src/kunpeng-enhanced/fdr_enhanced.c
-    src/kunpeng-enhanced/runtime_lily.c
-    src/kunpeng-enhanced/shufti.c
-    src/kunpeng-enhanced/lily.cpp
-    src/kunpeng-enhanced/compare.h
-    src/kunpeng-enhanced/core_precomp.h
-    src/kunpeng-enhanced/fdr_confirm.h
-    src/kunpeng-enhanced/fdr_loadval.h
-    src/kunpeng-enhanced/khsel_fdr_internal.h
-    src/kunpeng-enhanced/khsel_hwlm.h
-    src/kunpeng-enhanced/khsel_runtime.h
-    src/kunpeng-enhanced/multbit.h
-    src/kunpeng-enhanced/report.h
-    src/kunpeng-enhanced/rose_internal.h
-    src/kunpeng-enhanced/scratch.h
-    src/kunpeng-enhanced/simd_arm.h
-    src/kunpeng-enhanced/simd_types.h
 )
+
+# 始终编译 lily.cpp，支持交叉编译
+list(APPEND hs_compile_SRCS
+    src/kunpeng-enhanced/lily.cpp
+)
+
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+    list(APPEND hs_compile_SRCS
+        src/kunpeng-enhanced/khsel_core.h
+        src/kunpeng-enhanced/khsel_ops.h
+        src/kunpeng-enhanced/khsel_type.h
+        src/kunpeng-enhanced/khsel_typebase.h
+        src/kunpeng-enhanced/fdr_enhanced.c
+        src/kunpeng-enhanced/runtime_lily.c
+        src/kunpeng-enhanced/shufti.c
+        src/kunpeng-enhanced/compare.h
+        src/kunpeng-enhanced/core_precomp.h
+    )
+endif()
 
 set(hs_dump_SRCS
     src/scratch_dump.cpp
@@ -1432,6 +1469,14 @@ else (FAT_RUNTIME)
 
 endif (NOT FAT_RUNTIME)
 
+foreach (HS_EXECUTABLE_TARGET
+        hsdump
+        hscheck
+        hscollider
+        hsbench)
+    hs_harden_executable_target(${HS_EXECUTABLE_TARGET})
+endforeach()
+
 if (NOT BUILD_SHARED_LIBS)
     install(TARGETS hs_runtime DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
@@ -1454,6 +1499,7 @@ if (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS)
         OUTPUT_NAME hs_runtime
         MACOSX_RPATH ON
         LINKER_LANGUAGE C)
+    hs_harden_shared_target(hs_runtime_shared)
     install(TARGETS hs_runtime_shared
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -1501,6 +1547,7 @@ if (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS)
         VERSION ${LIB_VERSION}
         SOVERSION ${LIB_SOVERSION}
         MACOSX_RPATH ON)
+    hs_harden_shared_target(hs_shared)
 
     install(TARGETS hs_shared
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -1517,4 +1564,10 @@ endif ()
 option(BUILD_EXAMPLES "Build Hyperscan example code (default TRUE)" TRUE)
 if(NOT WIN32 AND BUILD_EXAMPLES)
     add_subdirectory(examples)
+    foreach (HS_EXAMPLE_TARGET
+            simplegrep
+            pcapscan
+            patbench)
+        hs_harden_executable_target(${HS_EXAMPLE_TARGET})
+    endforeach()
 endif()

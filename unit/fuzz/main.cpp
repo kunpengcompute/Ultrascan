@@ -5,7 +5,7 @@
 #include <csignal>
 
 // 超时时间（小时）
-const int TIMEOUT_HOURS = 3;
+const int TIMEOUT_HOURS = 8;
 
 // 信号处理函数
 void signal_handler(int signal) {

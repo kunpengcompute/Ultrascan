@@ -57,6 +57,7 @@
 #include <sstream>
 #include <set>
 #include <thread>
+#include <stdio.h>
 
 #ifndef _WIN32
 #include <getopt.h>
@@ -82,6 +83,8 @@ using boost::adaptors::map_keys;
 bool echo_matches = false;
 bool saveDatabases = false;
 bool loadDatabases = false;
+bool loadSerializedDb = false;
+string serializedDbPath("");
 string serializePath("");
 unsigned int somPrecisionMode = HS_MODE_SOM_HORIZON_LARGE;
 bool forceEditDistance = false;
@@ -107,7 +110,6 @@ string sigName(""); // info only
 vector<unsigned int> threadCores;
 Timer totalTimer;
 double totalSecs = 0;
-
 SqlDB out_db;
 
 typedef void (*thread_func_t)(void *context);
@@ -195,6 +197,7 @@ void usage(const char *error) {
     printf("  -h              Display help and exit.\n");
     printf("  -G OVERRIDES    Overrides for the grey box.\n");
     printf("  -e PATH         Path to expression directory.\n");
+    printf("  -U FILE         Load serialized database from FILE (hsdump -U output).\n");
     printf("  -s FILE         Signature file to use.\n");
     printf("  -z NUM          Signature ID to use.\n");
     printf("  -c FILE         File to use as corpus.\n");
@@ -244,7 +247,7 @@ struct BenchmarkSigs {
 static
 void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets,
                  UNUSED unique_ptr<Grey> &grey) {
-    const char options[] = "-b:c:Cd:e:E:G:hHi:n:No:p:PsS:Vw:z:"
+    const char options[] = "-b:c:Cd:e:E:G:hHi:n:No:p:PsS:U:Vw:z:"
 #if defined(HAVE_DECL_PTHREAD_SETAFFINITY_NP) || defined(_WIN32)
         "T:" // add the thread flag
 #endif
@@ -304,6 +307,10 @@ void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets,
         }
         case 'e':
             exprPath.assign(optarg);
+            break;
+        case 'U':
+            loadSerializedDb = true;
+            serializedDbPath.assign(optarg);
             break;
         case 'E':
             if (!fromString(optarg, editDistance)) {
@@ -434,8 +441,19 @@ void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets,
     }
 
     // Must have a valid expression path
-    if (exprPath.empty()) {
-        usage("Must specify an expression path with the -e option.");
+    if (exprPath.empty() && serializedDbPath.empty()) {
+        usage("Must specify an expression path with the -e or a serialized database with -U.");
+        exit(1);
+    }
+
+    if (!exprPath.empty() && !serializedDbPath.empty()) {
+        usage("Cannot specify both -e and -U.");
+        exit(1);
+    }
+
+    // 如果使用 -U，则不需要 signature sets
+    if (loadSerializedDb && !sigSets.empty()) {
+        usage("Cannot use -s or -z with -U (database already contains patterns).");
         exit(1);
     }
 
@@ -1039,7 +1057,7 @@ void runBenchmark(const Engine &db,
 }
 } // namespace
 
-/** Main driver. */
+//main driver
 int HS_CDECL main(int argc, char *argv[]) {
     unique_ptr<Grey> grey;
     grey = make_unique<Grey>();
@@ -1052,21 +1070,6 @@ int HS_CDECL main(int argc, char *argv[]) {
     vector<BenchmarkSigs> sigSets;
     processArgs(argc, argv, sigSets, grey);
 
-    // read in and process our expressions
-    ExpressionMap exprMapTemplate;
-    loadExpressions(exprPath, exprMapTemplate);
-
-    // If we have no signature sets, the user wants us to benchmark all the
-    // known expressions together.
-    if (sigSets.empty()) {
-        SignatureSet sigs;
-        sigs.reserve(exprMapTemplate.size());
-        for (auto i : exprMapTemplate | map_keys) {
-            sigs.push_back(i);
-        }
-        sigSets.emplace_back(exprPath, move(sigs));
-    }
-
     // read in and process our corpus
     vector<DataBlock> corpus_blocks;
     try {
@@ -1075,47 +1078,89 @@ int HS_CDECL main(int argc, char *argv[]) {
         printf("Corpus data error: %s\n", e.msg.c_str());
         return 1;
     }
+
     try {
         if (!sqloutFile.empty()) {
             out_db.open(sqloutFile);
         }
 
-        for (const auto &s : sigSets) {
-            auto exprMap = limitToSignatures(exprMapTemplate, s.sigs);
-            if (exprMap.empty()) {
-                continue;
-            }
-
+        // ========== 从序列化数据库加载的分支 ==========
+        if (loadSerializedDb) {
             unique_ptr<Engine> engine;
-            if (useHybrid) {
-#if defined(HS_HYBRID)
-                engine = buildEngineChimera(exprMap, s.name, sigName);
-            } else if (usePcre) {
-                engine = buildEnginePcre(exprMap, s.name, sigName);
-#endif
-            } else {
-                engine = buildEngineHyperscan(exprMap, scan_mode, s.name,
-                                              sigName, *grey);
-            }
-
+            engine = buildEngineFromSerialized(serializedDbPath, scan_mode);
+            
             if (!engine) {
-                printf("Error: expressions failed to compile.\n");
+                printf("Error: failed to load serialized database from %s\n", 
+                       serializedDbPath.c_str());
                 exit(1);
             }
 
             if (dumpCsvOut) {
                 engine->printCsvStats();
             } else if (sqloutFile.empty()) {
-                // Display global results.
                 engine->printStats();
                 printf("\n");
-
             } else {
                 out_db.exec("BEGIN");
                 engine->sqlStats(out_db);
             }
 
             runBenchmark(*engine, corpus_blocks);
+        } 
+        // ========== 原有的表达式编译分支 ==========
+        else {
+            // read in and process our expressions
+            ExpressionMap exprMapTemplate;
+            loadExpressions(exprPath, exprMapTemplate);
+
+            // If we have no signature sets, the user wants us to benchmark all the
+            // known expressions together.
+            if (sigSets.empty()) {
+                SignatureSet sigs;
+                sigs.reserve(exprMapTemplate.size());
+                for (auto i : exprMapTemplate | map_keys) {
+                    sigs.push_back(i);
+                }
+                sigSets.emplace_back(exprPath, move(sigs));
+            }
+
+            for (const auto &s : sigSets) {
+                auto exprMap = limitToSignatures(exprMapTemplate, s.sigs);
+                if (exprMap.empty()) {
+                    continue;
+                }
+
+                unique_ptr<Engine> engine;
+                if (useHybrid) {
+#if defined(HS_HYBRID)
+                    engine = buildEngineChimera(exprMap, s.name, sigName);
+                } else if (usePcre) {
+                    engine = buildEnginePcre(exprMap, s.name, sigName);
+#endif
+                } else {
+                    engine = fat_buildEngineHyperscan(exprMap, scan_mode, s.name,
+                                                  sigName, *grey);
+                }
+
+                if (!engine) {
+                    printf("Error: expressions failed to compile.\n");
+                    exit(1);
+                }
+
+                if (dumpCsvOut) {
+                    engine->printCsvStats();
+                } else if (sqloutFile.empty()) {
+                    // Display global results.
+                    engine->printStats();
+                    printf("\n");
+
+                } else {
+                    out_db.exec("BEGIN");
+                    engine->sqlStats(out_db);
+                }
+
+                runBenchmark(*engine, corpus_blocks);
+            }
         }
     } catch (const SqlFailure &f) {
         cerr << f.message << '\n';

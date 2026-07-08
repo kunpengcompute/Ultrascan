@@ -38,6 +38,7 @@
 #include "timer.h"
 
 #include "database.h"
+#include "fat_database.h"
 #include "hs_compile.h"
 #include "hs_internal.h"
 #include "hs_runtime.h"
@@ -52,7 +53,7 @@
 #include <string>
 #include <utility>
 #include <vector>
-
+#include <stdio.h>
 #include <boost/crc.hpp>
 
 using namespace std;
@@ -326,21 +327,18 @@ unsigned makeModeFlags(ScanMode scan_mode) {
  */
 static
 string dbSettingsHash(const string &filename, u32 mode) {
+    // 只使用文件名，不含路径
+    size_t pos = filename.find_last_of("/\\");
+    string basename = (pos == string::npos) ? filename : filename.substr(pos + 1);
+    
     ostringstream info_oss;
-
-    info_oss << filename.c_str() << ' ';
-    info_oss << mode << ' ';
-
-    string info = info_oss.str();
-
+    info_oss << basename << ' ' << mode << ' ';
+    
     boost::crc_32_type crc;
-
-    crc.process_bytes(info.data(), info.length());
-
-    // return STL string with printable version of digest
+    crc.process_bytes(info_oss.str().data(), info_oss.str().length());
+    
     ostringstream oss;
     oss << hex << setw(8) << setfill('0') << crc.checksum() << dec;
-
     return oss.str();
 }
 
@@ -351,8 +349,62 @@ string dbFilename(const std::string &name, unsigned mode) {
     return oss.str();
 }
 
+SplitDatabases splitDB(const fat_hs_database_t* fat_db) {
+    SplitDatabases result = {nullptr, nullptr};
+    
+    if (!fat_db) {
+        return result;
+    }
+    
+    // 拆分 x86 数据库
+    if (fat_db->x86_length > 0) {
+        size_t x86_size = sizeof(hs_database) + fat_db->x86_length;
+        result.x86_db = (hs_database_t*)malloc(x86_size);
+        if (result.x86_db) {
+            result.x86_db->magic = fat_db->magic;
+            result.x86_db->version = fat_db->version;
+            result.x86_db->length = fat_db->x86_length;
+            result.x86_db->platform = fat_db->platform;
+            result.x86_db->crc32 = fat_db->x86_crc32;
+            result.x86_db->reserved0 = fat_db->reserved0;
+            result.x86_db->reserved1 = fat_db->reserved1;
+            
+            uintptr_t shift = (uintptr_t)result.x86_db->bytes & 0x3f;
+            result.x86_db->bytecode = offsetof(struct hs_database, bytes) - shift;
+            
+            const char* x86_bytecode = (const char*)fat_db + fat_db->x86_bytecode;
+            char* x86_ptr = (char*)result.x86_db + result.x86_db->bytecode;
+            memcpy(x86_ptr, x86_bytecode, fat_db->x86_length);
+        }
+    }
+    
+    // 拆分 arm 数据库
+    if (fat_db->arm_length > 0) {
+        size_t arm_size = sizeof(hs_database) + fat_db->arm_length;
+        result.arm_db = (hs_database_t*)malloc(arm_size);
+        if (result.arm_db) {
+            result.arm_db->magic = fat_db->magic;
+            result.arm_db->version = fat_db->version;
+            result.arm_db->length = fat_db->arm_length;
+            result.arm_db->platform = fat_db->arm_platform;
+            result.arm_db->crc32 = fat_db->arm_crc32;
+            result.arm_db->reserved0 = fat_db->reserved0;
+            result.arm_db->reserved1 = fat_db->reserved1;
+            
+            uintptr_t shift = (uintptr_t)result.arm_db->bytes & 0x3f;
+            result.arm_db->bytecode = offsetof(struct hs_database, bytes) - shift;
+            
+            const char* arm_bytecode = (const char*)fat_db + fat_db->arm_bytecode;
+            char* arm_ptr = (char*)result.arm_db + result.arm_db->bytecode;
+            memcpy(arm_ptr, arm_bytecode, fat_db->arm_length);
+        }
+    }
+    
+    return result;
+}
+
 std::unique_ptr<EngineHyperscan>
-buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
+fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
                      const std::string &name, const std::string &sigs_name,
                      UNUSED const ue2::Grey &grey) {
     if (expressions.empty()) {
@@ -369,11 +421,10 @@ buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
 
     unsigned int mode = makeModeFlags(scan_mode);
 
-    hs_database_t *db;
+    fat_hs_database_t *db;
     hs_error_t err;
-
     if (loadDatabases) {
-        db = loadDatabase(dbFilename(name, mode).c_str());
+        db = fat_loadDatabase(dbFilename(name, mode).c_str());
         if (!db) {
             return nullptr;
         }
@@ -424,7 +475,6 @@ buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
 
         hs_compile_error_t *compile_err;
         Timer timer;
-
 #ifndef RELEASE_BUILD
         if (useLiteralApi) {
             // Pattern length computation should be done before timer start.
@@ -433,17 +483,16 @@ buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
                 lens[i] = strlen(patterns[i]);
             }
             timer.start();
-            err = hs_compile_lit_multi_int(patterns.data(), flags.data(),
-                                           ids.data(), ext_ptr.data(),
-                                           lens.data(), count, full_mode,
-                                           nullptr, &db, &compile_err, grey);
+            err = fat_hs_compile_lit_multi_int(patterns.data(), flags.data(),
+                                               ids.data(), ext_ptr.data(),
+                                               lens.data(), count, full_mode,
+                                               nullptr, &db, &compile_err, grey);
             timer.complete();
         } else {
             timer.start();
-            err = hs_compile_multi_int(patterns.data(), flags.data(),
-                                       ids.data(), ext_ptr.data(), count,
-                                       full_mode, nullptr, &db, &compile_err,
-                                       grey);
+            err = fat_hs_compile_ext_multi(patterns.data(), flags.data(),
+                                           ids.data(), ext_ptr.data(), count,
+                                           full_mode, nullptr, &db, &compile_err);
             timer.complete();
         }
 #else
@@ -454,19 +503,18 @@ buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
                 lens[i] = strlen(patterns[i]);
             }
             timer.start();
-            err = hs_compile_lit_multi(patterns.data(), flags.data(),
-                                       ids.data(), lens.data(), count,
-                                       full_mode, nullptr, &db, &compile_err);
+            err = fat_hs_compile_lit_multi(patterns.data(), flags.data(),
+                                           ids.data(), lens.data(), count,
+                                           full_mode, nullptr, &db, &compile_err);
             timer.complete();
         } else {
             timer.start();
-            err = hs_compile_ext_multi(patterns.data(), flags.data(),
-                                       ids.data(), ext_ptr.data(), count,
-                                       full_mode, nullptr, &db, &compile_err);
+            err = fat_hs_compile_ext_multi(patterns.data(), flags.data(),
+                                           ids.data(), ext_ptr.data(), count,
+                                           full_mode, nullptr, &db, &compile_err);
             timer.complete();
         }
-#endif
-
+#endif   
         compileSecs = timer.seconds();
         peakMemorySize = getPeakHeap();
 
@@ -481,45 +529,63 @@ buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
             return nullptr;
         }
     }
-
-    // copy the db into huge pages (where available) to reduce TLB pressure
-    db = get_huge(db);
-    if (!db) {
-        return nullptr;
-    }
-
-    err = hs_database_size(db, &compiledSize);
-    if (err != HS_SUCCESS) {
-        return nullptr;
-    }
-    assert(compiledSize > 0);
-
+    
     if (saveDatabases) {
-        saveDatabase(db, dbFilename(name, mode).c_str());
+        fat_saveDatabase(db, dbFilename(name, mode).c_str());
+    }   
+    //copy the db into huge pages (where available) to reduce TLB pressure
+    SplitDatabases split = splitDB(db);
+
+     // 根据当前架构选择数据库
+#if defined(ARCH_X86_64)
+    hs_database_t* target_db = split.x86_db;
+    if (split.arm_db) {
+        free(split.arm_db);
+    }
+#elif defined(ARCH_AARCH64)
+    hs_database_t* target_db = split.arm_db;
+    if (split.x86_db) {
+        free(split.x86_db);
+    }
+#else
+    hs_database_t* target_db = split.x86_db;
+    if (split.arm_db) {
+        free(split.arm_db);
+    }
+#endif
+    
+    if (!target_db) {
+        fat_hs_free_database(db);
+        return nullptr;
+    }
+
+    // 释放 fat_hs_database
+    fat_hs_free_database(db);
+    // 使用 get_huge 加载到大页内存
+    target_db = get_huge(target_db);
+    if (!target_db) {
+        return nullptr;
     }
 
     if (mode & HS_MODE_STREAM) {
-        err = hs_stream_size(db, &streamSize);
+        err = hs_stream_size(target_db, &streamSize);
         if (err != HS_SUCCESS) {
             return nullptr;
         }
     } else {
-        streamSize = 0;
+            streamSize = 0;
     }
-
     char *info;
-    err = hs_database_info(db, &info);
+    err = hs_database_info(target_db, &info);
     if (err != HS_SUCCESS) {
         return nullptr;
     } else {
         db_info = string(info);
         free(info);
     }
-
-    // Allocate scratch temporarily to find its size: this is a good test
-    // anyway.
+    
     hs_scratch_t *scratch = nullptr;
-    err = hs_alloc_scratch(db, &scratch);
+    err = hs_alloc_scratch(target_db, &scratch);
     if (err != HS_SUCCESS) {
         return nullptr;
     }
@@ -542,12 +608,133 @@ buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
     cs.db_info = db_info;
     cs.expressionCount = expressions.size();
     cs.compiledSize = compiledSize;
-    cs.crc32 = db->crc32;
+    cs.crc32 = target_db->crc32;
     cs.streaming = mode & HS_MODE_STREAM;
     cs.streamSize = streamSize;
     cs.scratchSize = scratchSize;
     cs.compileSecs = compileSecs;
     cs.peakMemorySize = peakMemorySize;
+    return ue2::make_unique<EngineHyperscan>(target_db, std::move(cs));
+}
 
+std::unique_ptr<EngineHyperscan>
+buildEngineFromSerialized(const std::string &dbPath, ScanMode scan_mode) {
+    
+    // 尝试加载 fat 数据库
+    fat_hs_database_t *fat_db = fat_loadDatabase(dbPath.c_str(), true);
+    hs_database_t *db = nullptr;
+    
+    if (fat_db) {
+        // 成功加载 fat 数据库，拆分并选择当前架构
+        SplitDatabases split = splitDB(fat_db);
+        fat_hs_free_database(fat_db);
+        
+#if defined(ARCH_X86_64)
+        db = split.x86_db;
+        if (split.arm_db) free(split.arm_db);
+#elif defined(ARCH_AARCH64)
+        db = split.arm_db;
+        if (split.x86_db) free(split.x86_db);
+#else
+        db = split.x86_db;
+        if (split.arm_db) free(split.arm_db);
+#endif
+        
+        if (!db) {
+            printf("Error: no compatible database found for current architecture.\n");
+            return nullptr;
+        }
+    } else {
+        // 尝试加载普通数据库
+        db = loadDatabase(dbPath.c_str(), true);
+        if (!db) {
+            printf("Error: failed to load database.\n");
+            return nullptr;
+        }
+    }
+    
+    // 获取数据库信息
+    char *info = nullptr;
+    hs_error_t err = hs_database_info(db, &info);
+    if (err != HS_SUCCESS || !info) {
+        printf("Error: failed to get database info.\n");
+        hs_free_database(db);
+        return nullptr;
+    }
+    
+    std::string db_info = info;
+    free(info);
+    
+    // 从 db_info 字符串解析模式
+    // 格式: "Version: X.X.X Features: XXX Mode: STREAM/BLOCK/VECTORED"
+    std::string db_mode;
+    size_t mode_pos = db_info.find("Mode: ");
+    if (mode_pos != std::string::npos) {
+        mode_pos += 6; // "Mode: " 的长度
+        size_t mode_end = db_info.find_first_of(" \t\n", mode_pos);
+        if (mode_end == std::string::npos) {
+            db_mode = db_info.substr(mode_pos);
+        } else {
+            db_mode = db_info.substr(mode_pos, mode_end - mode_pos);
+        }
+    }
+    
+    // 检查模式匹配
+    std::string expected_mode_str;
+    switch (scan_mode) {
+        case ScanMode::BLOCK: expected_mode_str = "BLOCK"; break;
+        case ScanMode::STREAMING: expected_mode_str = "STREAM"; break;
+        case ScanMode::VECTORED: expected_mode_str = "VECTORED"; break;
+    }
+    
+    if (db_mode != expected_mode_str) {
+        printf("Error: database mode mismatch!\n");
+        printf("  Expected: %s\n", expected_mode_str.c_str());
+        printf("  Database: %s\n", db_mode.empty() ? "UNKNOWN" : db_mode.c_str());
+        hs_free_database(db);
+        return nullptr;
+    }
+    
+    // 加载到大页内存
+    db = get_huge(db);
+    if (!db) {
+        return nullptr;
+    }
+    
+    // 获取数据库大小信息
+    size_t compiledSize = 0, streamSize = 0, scratchSize = 0;
+    hs_database_size(db, &compiledSize);
+    
+    if (scan_mode == ScanMode::STREAMING) {
+        hs_stream_size(db, &streamSize);
+    }
+    
+    // 获取 scratch 大小
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    if (err != HS_SUCCESS) {
+        printf("Error: failed to allocate scratch.\n");
+        hs_free_database(db);
+        return nullptr;
+    }
+    
+    hs_scratch_size(scratch, &scratchSize);
+    hs_free_scratch(scratch);
+    
+    // 构建 CompileHSStats
+    CompileHSStats cs;
+    cs.sigs_name = dbPath;
+    size_t pos = dbPath.find_last_of("/\\");
+    cs.signatures = (pos == string::npos) ? dbPath : dbPath.substr(pos + 1);
+    cs.db_info = db_info;
+    cs.expressionCount = 0;  // 从序列化数据库无法获取
+    cs.compiledSize = compiledSize;
+    cs.crc32 = db->crc32;
+    cs.streaming = (scan_mode == ScanMode::STREAMING);
+    cs.streamSize = streamSize;
+    cs.scratchSize = scratchSize;
+    cs.compileSecs = 0;  // 无编译时间
+    cs.peakMemorySize = 0;
+    
     return ue2::make_unique<EngineHyperscan>(db, std::move(cs));
 }

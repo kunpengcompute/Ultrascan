@@ -74,6 +74,14 @@ typedef hwlm_group_t hwlmcb_rv_t;
 /** \brief Max length of the literal passed to HWLM. */
 #define HWLM_LITERAL_MAX_LEN 8
 
+#define KHSEL_HWLM_ALL_GROUPS         ((hwlm_group_t)~0ULL)
+#define KHSEL_HWLM_CONTINUE_MATCHING  KHSEL_HWLM_ALL_GROUPS
+#define KHSEL_HWLM_TERMINATE_MATCHING 0
+#define KHSEL_HWLM_SUCCESS       0
+#define KHSEL_HWLM_TERMINATED    1
+#define KHSEL_HWLM_ERROR_UNKNOWN 2
+#define KHSEL_HWLM_LITERAL_MAX_LEN 8
+
 struct hs_scratch;
 struct HWLM;
 

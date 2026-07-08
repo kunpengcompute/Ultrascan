@@ -78,27 +78,8 @@ doc/dev-reference/doxygen_sqlite3.db
 doc/dev-reference/doxygen_xml/
 doc/dev-reference/_build/
 
-# Autotools noise in pcre
-pcre/INSTALL
-pcre/Makefile
-pcre/Makefile.in
-pcre/aclocal.m4
-pcre/ar-lib
-pcre/compile
-pcre/config.*
-pcre/configure
-pcre/depcomp
-pcre/install-sh
-pcre/*.pc
-pcre/libtool
-pcre/ltmain.sh
-pcre/missing
-pcre/pcre-config
-pcre/pcre.h
-pcre/pcre_stringpiece.h
-pcre/pcrecpparg.h
-pcre/stamp-h1
-pcre/test-driver
-
 # ignore build and temporary dir
 build
+build_debug
+pcre
+\.*

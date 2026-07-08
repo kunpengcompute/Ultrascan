@@ -32,6 +32,7 @@
 #include "ue2common.h"
 
 struct RoseEngine;
+struct x86_RoseEngine;
 
 namespace ue2 {
 
@@ -40,6 +41,7 @@ struct RoseResources;
 /* used by heuristics to determine the small write engine. High numbers are
  * intended to indicate a lightweight rose. */
 u32 roseQuality(const RoseResources &res, const RoseEngine *rose);
+u32 x86_roseQuality(const RoseResources &res, const x86_RoseEngine *rose);
 
 }
 

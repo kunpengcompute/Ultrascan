@@ -30,10 +30,14 @@
 #define DATABASE_UTIL_H
 
 struct hs_database;
+struct fat_hs_database;
 
 bool saveDatabase(const hs_database *db, const char *filename,
                   bool verbose = false);
+bool fat_saveDatabase(const fat_hs_database *db, const char *filename,
+                      bool verbose = false);
 
 hs_database *loadDatabase(const char *filename, bool verbose = false);
+fat_hs_database *fat_loadDatabase(const char *filename, bool verbose = false);
 
 #endif /* DATABASE_UTIL_H */

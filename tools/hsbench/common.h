@@ -42,6 +42,8 @@ extern bool forceEditDistance;
 extern unsigned editDistance;
 extern bool printCompressSize;
 extern bool useLiteralApi;
+extern bool loadSerializedDb;
+extern std::string serializedDbPath;
 
 /** Structure for the result of a single complete scan. */
 struct ResultEntry {
