@@ -30,6 +30,7 @@
 
 #include "ng_violet.h"
 
+#include "fp_collector.h"
 #include "grey.h"
 #include "ng_depth.h"
 #include "ng_dominators.h"
@@ -201,6 +202,38 @@ struct VertLitInfo {
 };
 
 #define LAST_CHANCE_STRONG_LEN 1
+
+static
+bool fpFeedbackLiteralIsBad(const CompileContext &cc, const ue2_literal &lit) {
+    if (!cc.fp_feedback) {
+        return false;
+    }
+
+    if (cc.fp_block_checked_count) {
+        (*cc.fp_block_checked_count)++;
+    }
+
+    if (!hs_fp_feedback_literal_is_bad(cc.fp_feedback, lit.c_str(),
+                                       lit.length(), lit.any_nocase())) {
+        return false;
+    }
+
+    if (cc.fp_blocked_count) {
+        (*cc.fp_blocked_count)++;
+    }
+    return true;
+}
+
+static
+bool fpFeedbackLiteralSetHasBad(const CompileContext &cc,
+                                const set<ue2_literal> &lits) {
+    for (const auto &lit : lits) {
+        if (fpFeedbackLiteralIsBad(cc, lit)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 /**
  * \brief Comparator class for comparing different literal cuts.
@@ -1101,9 +1134,15 @@ bool can_match(const NGHolder &g, const ue2_literal &lit, bool overhang_ok) {
 
 static
 bool splitRoseEdge(const NGHolder &base_graph, RoseInGraph &vg,
-                   const vector<RoseInEdge> &ee, const VertLitInfo &split) {
+                   const vector<RoseInEdge> &ee, const CompileContext &cc,
+                   const VertLitInfo &split) {
     const vector<NFAVertex> &splitters = split.vv;
     assert(!splitters.empty());
+
+    if (fpFeedbackLiteralSetHasBad(cc, split.lit)) {
+        DEBUG_PRINTF("skipping Violet literal split due to fp feedback\n");
+        return false;
+    }
 
     shared_ptr<NGHolder> lhs = make_shared<NGHolder>();
     shared_ptr<NGHolder> rhs = make_shared<NGHolder>();
@@ -1432,7 +1471,8 @@ bool doNetflowCut(NGHolder &h,
                   const vector<NFAVertexDepth> *depths,
                   RoseInGraph &vg,
                   const vector<RoseInEdge> &ee, bool for_prefix,
-                  const Grey &grey, u32 min_allowed_length = 0U) {
+                  const CompileContext &cc, u32 min_allowed_length = 0U) {
+    const Grey &grey = cc.grey;
     ENSURE_AT_LEAST(&min_allowed_length, grey.minRoseNetflowLiteralLength);
 
     DEBUG_PRINTF("doing netflow cut\n");
@@ -1465,6 +1505,12 @@ bool doNetflowCut(NGHolder &h,
     for (const auto &e : cut) {
         set<ue2_literal> lits = getLiteralSet(h, e);
         sanitizeAndCompressAndScore(lits);
+
+        if (fpFeedbackLiteralSetHasBad(cc, lits)) {
+            DEBUG_PRINTF("skipping netflow cut due to fp feedback\n");
+            cut_lits.clear();
+            return false;
+        }
 
         if (grey.allowNeoFdr) {
             for (const auto &lit : lits) {
@@ -1587,7 +1633,7 @@ void avoidOutfixes(RoseInGraph &vg, bool last_chance,
 
     unique_ptr<VertLitInfo>  split = findBestNormalSplit(h, vg, {e}, cc);
 
-    if (split && splitRoseEdge(h, vg, {e}, *split)) {
+    if (split && splitRoseEdge(h, vg, {e}, cc, *split)) {
         DEBUG_PRINTF("split on simple literal\n");
         return;
     }
@@ -1599,13 +1645,13 @@ void avoidOutfixes(RoseInGraph &vg, bool last_chance,
 
         split = findBestPrefixSplit(h, depths, vg, {e}, last_chance, cc);
 
-        if (split && splitRoseEdge(h, vg, {e}, *split)) {
+        if (split && splitRoseEdge(h, vg, {e}, cc, *split)) {
             DEBUG_PRINTF("split on simple literal\n");
             return;
         }
     }
 
-    doNetflowCut(h, nullptr, vg, {e}, false, cc.grey);
+    doNetflowCut(h, nullptr, vg, {e}, false, cc);
 }
 
 static
@@ -2122,7 +2168,7 @@ bool improvePrefix(NGHolder &h, RoseInGraph &vg, const vector<RoseInEdge> &ee,
     auto split = findBestPrefixSplit(h, depths, vg, ee, false, cc);
 
     if (split && (split->creates_transient || split->creates_anchored)
-        && splitRoseEdge(h, vg, ee, *split)) {
+        && splitRoseEdge(h, vg, ee, cc, *split)) {
         DEBUG_PRINTF("split on simple literal\n");
         return true;
     }
@@ -2130,11 +2176,11 @@ bool improvePrefix(NGHolder &h, RoseInGraph &vg, const vector<RoseInEdge> &ee,
     /* large back edges may prevent us identifing anchored or transient cases
      * properly - use a simple walk instead */
 
-    if (doNetflowCut(h, &depths, vg, ee, true, cc.grey)) {
+    if (doNetflowCut(h, &depths, vg, ee, true, cc)) {
         return true;
     }
 
-    if (split && splitRoseEdge(h, vg, ee, *split)) {
+    if (split && splitRoseEdge(h, vg, ee, cc, *split)) {
         /* use the simple split even though it doesn't create a transient
          * prefix */
         DEBUG_PRINTF("split on simple literal\n");
@@ -2142,7 +2188,7 @@ bool improvePrefix(NGHolder &h, RoseInGraph &vg, const vector<RoseInEdge> &ee,
     }
 
     /* look for netflow cuts which don't produce good prefixes */
-    if (doNetflowCut(h, &depths, vg, ee, false, cc.grey)) {
+    if (doNetflowCut(h, &depths, vg, ee, false, cc)) {
         return true;
     }
 
@@ -2254,7 +2300,7 @@ bool extractStrongLiteral(NGHolder &h, RoseInGraph &vg,
 
     if (split && min_len(split->lit) >= STRONG_LITERAL_LENGTH) {
         DEBUG_PRINTF("splitting simple literal\n");
-        return splitRoseEdge(h, vg, ee, *split);
+        return splitRoseEdge(h, vg, ee, cc, *split);
     }
 
     return false;
@@ -2318,14 +2364,14 @@ bool improveInfix(NGHolder &h, RoseInGraph &vg, const vector<RoseInEdge> &ee,
     unique_ptr<VertLitInfo> split = findBestNormalSplit(h, vg, ee, cc);
 
     if (split && min_len(split->lit) >= INFIX_MIN_SPLIT_LITERAL_LEN
-        && splitRoseEdge(h, vg, ee, *split)) {
+        && splitRoseEdge(h, vg, ee, cc, *split)) {
         DEBUG_PRINTF("splitting simple literal\n");
         return true;
     }
 
     DEBUG_PRINTF("trying for a netflow cut\n");
     /* look for netflow cuts which don't produce good prefixes */
-    bool rv = doNetflowCut(h, nullptr, vg, ee, false, cc.grey, 8);
+    bool rv = doNetflowCut(h, nullptr, vg, ee, false, cc, 8);
 
     DEBUG_PRINTF("did netfow cut? = %d\n", (int)rv);
 
@@ -2695,14 +2741,14 @@ bool leadingDotStartLiteral(const NGHolder &h, VertLitInfo *out, const Grey &gre
 
 static
 bool lookForDoubleCut(const NGHolder &h, const vector<RoseInEdge> &ee,
-                      RoseInGraph &vg, const Grey &grey) {
+                      RoseInGraph &vg, const CompileContext &cc) {
     VertLitInfo info;
-    if (!leadingDotStartLiteral(h, &info, grey)
-        || min_len(info.lit) < grey.violetDoubleCutLiteralLen) {
+    if (!leadingDotStartLiteral(h, &info, cc.grey)
+        || min_len(info.lit) < cc.grey.violetDoubleCutLiteralLen) {
         return false;
     }
     DEBUG_PRINTF("performing split\n");
-    return splitRoseEdge(h, vg, ee, {info});
+    return splitRoseEdge(h, vg, ee, cc, info);
 }
 
 static
@@ -2722,7 +2768,7 @@ void lookForDoubleCut(RoseInGraph &vg, const CompileContext &cc) {
     for (const auto &m : right_edges) {
         const NGHolder *h = m.first;
         const auto &edges = m.second;
-        lookForDoubleCut(*h, edges, vg, cc.grey);
+        lookForDoubleCut(*h, edges, vg, cc);
     }
 }
 
@@ -2828,14 +2874,14 @@ bool trailingDotStarLiteral(const NGHolder &h, VertLitInfo *out) {
 static
 bool lookForTrailingLiteralDotStar(const NGHolder &h,
                                    const vector<RoseInEdge> &ee,
-                                   RoseInGraph &vg, const Grey &grey) {
+                                   RoseInGraph &vg, const CompileContext &cc) {
     VertLitInfo info;
     if (!trailingDotStarLiteral(h, &info)
-        || min_len(info.lit) < grey.violetDoubleCutLiteralLen) {
+        || min_len(info.lit) < cc.grey.violetDoubleCutLiteralLen) {
         return false;
     }
     DEBUG_PRINTF("performing split\n");
-    return splitRoseEdge(h, vg, ee, info);
+    return splitRoseEdge(h, vg, ee, cc, info);
 }
 
 /* In streaming mode, active engines have to be caught up at stream boundaries
@@ -2863,9 +2909,9 @@ void decomposeLiteralChains(RoseInGraph &vg, const CompileContext &cc) {
         for (const auto &m : right_edges) {
             const NGHolder *h = m.first;
             const vector<RoseInEdge> &ee = m.second;
-            bool rv = lookForDoubleCut(*h, ee, vg, cc.grey);
+            bool rv = lookForDoubleCut(*h, ee, vg, cc);
             if (!rv && h->kind != NFA_SUFFIX) {
-                rv = lookForTrailingLiteralDotStar(*h, ee, vg, cc.grey);
+                rv = lookForTrailingLiteralDotStar(*h, ee, vg, cc);
             }
             changed |= rv;
         }
@@ -2878,7 +2924,7 @@ bool lookForCleanSplit(const NGHolder &h, const vector<RoseInEdge> &ee,
     unique_ptr<VertLitInfo> split = findBestCleanSplit(h, cc);
 
     if (split) {
-        return splitRoseEdge(h, vg, {ee}, *split);
+        return splitRoseEdge(h, vg, {ee}, cc, *split);
     }
 
     return false;
@@ -3066,13 +3112,13 @@ bool splitForImplementability(RoseInGraph &vg, NGHolder &h,
         split = findBestLastChanceSplit(h, vg, edges, cc);
     }
 
-    if (split && splitRoseEdge(h, vg, edges, *split)) {
+    if (split && splitRoseEdge(h, vg, edges, cc, *split)) {
         DEBUG_PRINTF("split on simple literal\n");
         return true;
     }
 
     DEBUG_PRINTF("trying to netflow\n");
-    bool rv = doNetflowCut(h, nullptr, vg, edges, false, cc.grey);
+    bool rv = doNetflowCut(h, nullptr, vg, edges, false, cc);
     DEBUG_PRINTF("done\n");
 
     return rv;

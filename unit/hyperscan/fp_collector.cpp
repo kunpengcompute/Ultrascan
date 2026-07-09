@@ -233,7 +233,7 @@ TEST(FpCollector, BlockScanMatchesNormalScan) {
 }
 
 TEST(FpCollector, BlockScanRecordsFalsePositiveTrigger) {
-    const char *expr = "foo";
+    const char *expr = "foo|bar";
     unsigned int flags = 0;
     unsigned int id = 1;
     hs_expr_ext ext = {};
@@ -399,6 +399,15 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
         ASSERT_TRUE(c.matches.empty());
     }
 
+    const char data2[] = "bar";
+    for (u32 i = 0; i < 1000; i++) {
+        CallBackContext c;
+        ASSERT_EQ(HS_SUCCESS,
+                  hs_scan_with_collector(db, data2, sizeof(data2) - 1, 0,
+                                         scratch, record_cb, &c, collector));
+        ASSERT_TRUE(c.matches.empty());
+    }
+
     hs_fp_report_t *report = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
     ASSERT_NE(nullptr, report);
@@ -524,6 +533,53 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
     ASSERT_EQ(HS_SUCCESS, hs_free_database(normal_ext_db));
     hs_free_compile_error(ctx_ext_err);
     hs_free_compile_error(normal_ext_err);
+
+    const char *violet_expr = "bar.*foo";
+    unsigned int violet_flags = 0;
+    unsigned int violet_id = 11;
+    hs_database_t *normal_violet_db = nullptr;
+    hs_database_t *ctx_violet_db = nullptr;
+    hs_compile_error_t *normal_violet_err = nullptr;
+    hs_compile_error_t *ctx_violet_err = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_multi(&violet_expr, &violet_flags, &violet_id, 1,
+                               HS_MODE_BLOCK, nullptr, &normal_violet_db,
+                               &normal_violet_err));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_multi_with_context(&violet_expr, &violet_flags,
+                                            &violet_id, 1, HS_MODE_BLOCK,
+                                            nullptr, ctx, &ctx_violet_db,
+                                            &ctx_violet_err));
+    ASSERT_NE(nullptr, normal_violet_db);
+    ASSERT_NE(nullptr, ctx_violet_db);
+    EXPECT_GE(hs_compile_context_block_checked_count(ctx), 1U);
+
+    hs_scratch_t *normal_violet_scratch = nullptr;
+    hs_scratch_t *ctx_violet_scratch = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_alloc_scratch(normal_violet_db, &normal_violet_scratch));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_alloc_scratch(ctx_violet_db, &ctx_violet_scratch));
+
+    const char violet_data[] = "barXYZfoo";
+    CallBackContext normal_violet_matches;
+    CallBackContext ctx_violet_matches;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan(normal_violet_db, violet_data, sizeof(violet_data) - 1,
+                      0, normal_violet_scratch, record_cb,
+                      &normal_violet_matches));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan(ctx_violet_db, violet_data, sizeof(violet_data) - 1, 0,
+                      ctx_violet_scratch, record_cb, &ctx_violet_matches));
+    ASSERT_EQ(normal_violet_matches.matches, ctx_violet_matches.matches);
+
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(ctx_violet_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(normal_violet_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(ctx_violet_db));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(normal_violet_db));
+    hs_free_compile_error(ctx_violet_err);
+    hs_free_compile_error(normal_violet_err);
+
     ASSERT_EQ(HS_SUCCESS, hs_free_scratch(ctx_scratch));
     ASSERT_EQ(HS_SUCCESS, hs_free_scratch(normal_scratch));
     ASSERT_EQ(HS_SUCCESS, hs_free_database(ctx_db));
