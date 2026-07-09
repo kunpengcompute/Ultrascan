@@ -124,6 +124,25 @@ typedef struct hs_compile_error {
 } hs_compile_error_t;
 
 /**
+ * Create a compile context for false-positive feedback aware compile calls.
+ */
+hs_error_t HS_CDECL hs_compile_context_create(hs_compile_context_t **ctx);
+
+/**
+ * Set false-positive feedback on a compile context.
+ *
+ * The context takes an internal copy of the feedback object. Passing NULL as
+ * feedback clears any existing feedback from the context.
+ */
+hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
+    hs_compile_context_t *ctx, const hs_fp_feedback_t *feedback);
+
+/**
+ * Free a compile context. NULL may also be safely provided.
+ */
+hs_error_t HS_CDECL hs_compile_context_free(hs_compile_context_t *ctx);
+
+/**
  * A type containing information on the target platform which may optionally be
  * provided to the compile calls (@ref hs_compile(), @ref hs_compile_multi(),
  * @ref hs_compile_ext_multi()).
@@ -453,6 +472,16 @@ hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
                                      hs_database_t **db,
                                      hs_compile_error_t **error);
 
+hs_error_t HS_CDECL hs_compile_multi_with_context(
+                                     const char *const *expressions,
+                                     const unsigned int *flags,
+                                     const unsigned int *ids,
+                                     unsigned int elements, unsigned int mode,
+                                     const hs_platform_info_t *platform,
+                                     const hs_compile_context_t *ctx,
+                                     hs_database_t **db,
+                                     hs_compile_error_t **error);
+
 hs_error_t HS_CDECL fat_hs_compile_multi(const char *const *expressions,
                                      const unsigned int *flags,
                                      const unsigned int *ids,
@@ -551,6 +580,18 @@ hs_error_t HS_CDECL hs_compile_ext_multi(const char *const *expressions,
                                 unsigned int elements, unsigned int mode,
                                 const hs_platform_info_t *platform,
                                 hs_database_t **db, hs_compile_error_t **error);
+
+hs_error_t HS_CDECL hs_compile_ext_multi_with_context(
+                                const char *const *expressions,
+                                const unsigned int *flags,
+                                const unsigned int *ids,
+                                const hs_expr_ext_t *const *ext,
+                                unsigned int elements, unsigned int mode,
+                                const hs_platform_info_t *platform,
+                                const hs_compile_context_t *ctx,
+                                hs_database_t **db,
+                                hs_compile_error_t **error);
+
 hs_error_t HS_CDECL fat_hs_compile_ext_multi(const char *const *expressions,
                                 const unsigned int *flags,
                                 const unsigned int *ids,

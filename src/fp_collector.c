@@ -39,6 +39,12 @@
 #include "scratch.h"
 #include "ue2common.h"
 
+#define HS_FP_BAD_MIN_TRIGGER_COUNT 1000ULL
+#define HS_FP_BAD_MIN_FP_RATE_NUM 99ULL
+#define HS_FP_BAD_MIN_FP_RATE_DEN 100ULL
+#define HS_FP_BAD_MIN_WASTE_SHARE_NUM 5ULL
+#define HS_FP_BAD_MIN_WASTE_SHARE_DEN 100ULL
+
 struct hs_fp_counter {
     u32 key;
     u8 used;
@@ -91,8 +97,29 @@ struct hs_fp_report {
     u64a dropped_trigger_count;
 };
 
+struct hs_fp_feedback_entry {
+    u32 key;
+    u32 fragment_id;
+    u32 literal_count;
+    u8 table;
+    u8 flags;
+    u8 length;
+    u8 mask_length;
+    u8 bytes[ROSE_FP_FRAGMENT_BYTES_MAX];
+    u8 mask[ROSE_FP_FRAGMENT_BYTES_MAX];
+    u8 cmp[ROSE_FP_FRAGMENT_BYTES_MAX];
+    u64a trigger_count;
+    u64a true_trigger_count;
+    u64a final_report_count;
+    u64a false_positive_trigger_count;
+};
+
 struct hs_fp_feedback {
-    u64a reserved;
+    struct hs_fp_feedback_entry *entries;
+    u32 bad_fragment_count;
+    u64a scan_bytes;
+    u64a scan_calls;
+    u64a total_false_positive_trigger_count;
 };
 
 static
@@ -102,6 +129,27 @@ u64a sat_add_u64a(u64a a, u64a b) {
         return max;
     }
     return a + b;
+}
+
+static
+u64a sub_or_zero_u64a(u64a a, u64a b) {
+    return a > b ? a - b : 0;
+}
+
+static
+char ratio_at_least(u64a num, u64a den, u64a min_num, u64a min_den) {
+    if (!den) {
+        return 0;
+    }
+
+    const u64a max = ~(u64a)0;
+    if (num <= max / min_den && den <= max / min_num) {
+        return num * min_den >= den * min_num;
+    }
+
+    long double lhs = (long double)num / (long double)den;
+    long double rhs = (long double)min_num / (long double)min_den;
+    return lhs >= rhs;
 }
 
 static
@@ -210,6 +258,110 @@ void fill_report_entry(struct hs_fp_report_entry *entry,
     memcpy(entry->bytes, meta->bytes, sizeof(entry->bytes));
     memcpy(entry->mask, meta->mask, sizeof(entry->mask));
     memcpy(entry->cmp, meta->cmp, sizeof(entry->cmp));
+}
+
+static
+u64a count_total_false_positive_triggers(const hs_fp_report_t *report) {
+    u64a total = 0;
+    for (u32 i = 0; i < report->entry_count; i++) {
+        const struct hs_fp_report_entry *entry = report->entries + i;
+        u64a fp = sub_or_zero_u64a(entry->trigger_count,
+                                   entry->true_trigger_count);
+        total = sat_add_u64a(total, fp);
+    }
+    return total;
+}
+
+static
+char report_entry_is_bad_fragment(const struct hs_fp_report_entry *entry,
+                                  u64a total_false_positive) {
+    u64a fp = sub_or_zero_u64a(entry->trigger_count,
+                               entry->true_trigger_count);
+
+    if (entry->trigger_count < HS_FP_BAD_MIN_TRIGGER_COUNT ||
+        fp < HS_FP_BAD_MIN_TRIGGER_COUNT) {
+        return 0;
+    }
+
+    if (!ratio_at_least(fp, entry->trigger_count,
+                        HS_FP_BAD_MIN_FP_RATE_NUM,
+                        HS_FP_BAD_MIN_FP_RATE_DEN)) {
+        return 0;
+    }
+
+    if (!ratio_at_least(fp, total_false_positive,
+                        HS_FP_BAD_MIN_WASTE_SHARE_NUM,
+                        HS_FP_BAD_MIN_WASTE_SHARE_DEN)) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static
+u32 count_bad_fragments(const hs_fp_report_t *report,
+                        u64a total_false_positive) {
+    u32 count = 0;
+    for (u32 i = 0; i < report->entry_count; i++) {
+        if (report_entry_is_bad_fragment(report->entries + i,
+                                         total_false_positive)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static
+void fill_feedback_entry(struct hs_fp_feedback_entry *dst,
+                         const struct hs_fp_report_entry *src) {
+    dst->key = src->key;
+    dst->fragment_id = src->fragment_id;
+    dst->literal_count = src->literal_count;
+    dst->table = src->table;
+    dst->flags = src->flags;
+    dst->length = src->length;
+    dst->mask_length = src->mask_length;
+    memcpy(dst->bytes, src->bytes, sizeof(dst->bytes));
+    memcpy(dst->mask, src->mask, sizeof(dst->mask));
+    memcpy(dst->cmp, src->cmp, sizeof(dst->cmp));
+    dst->trigger_count = src->trigger_count;
+    dst->true_trigger_count = src->true_trigger_count;
+    dst->final_report_count = src->final_report_count;
+    dst->false_positive_trigger_count =
+        sub_or_zero_u64a(src->trigger_count, src->true_trigger_count);
+}
+
+static
+hs_error_t build_feedback_entries(const hs_fp_report_t *report,
+                                  hs_fp_feedback_t *feedback,
+                                  u64a total_false_positive) {
+    feedback->bad_fragment_count =
+        count_bad_fragments(report, total_false_positive);
+    if (!feedback->bad_fragment_count) {
+        return HS_SUCCESS;
+    }
+
+    feedback->entries =
+        hs_misc_alloc(sizeof(*feedback->entries) *
+                      feedback->bad_fragment_count);
+    if (!feedback->entries) {
+        return HS_NOMEM;
+    }
+    memset(feedback->entries, 0,
+           sizeof(*feedback->entries) * feedback->bad_fragment_count);
+
+    u32 out = 0;
+    for (u32 i = 0; i < report->entry_count; i++) {
+        const struct hs_fp_report_entry *entry = report->entries + i;
+        if (!report_entry_is_bad_fragment(entry, total_false_positive)) {
+            continue;
+        }
+
+        fill_feedback_entry(feedback->entries + out, entry);
+        out++;
+    }
+    assert(out == feedback->bad_fragment_count);
+    return HS_SUCCESS;
 }
 
 static
@@ -468,6 +620,19 @@ hs_error_t HS_CDECL hs_fp_feedback_build(const hs_fp_report_t *report,
     }
 
     memset(f, 0, sizeof(*f));
+    f->scan_bytes = report->scan_bytes;
+    f->scan_calls = report->scan_calls;
+    f->total_false_positive_trigger_count =
+        count_total_false_positive_triggers(report);
+
+    hs_error_t err =
+        build_feedback_entries(report, f,
+                               f->total_false_positive_trigger_count);
+    if (err != HS_SUCCESS) {
+        hs_misc_free(f);
+        return err;
+    }
+
     *feedback = f;
     return HS_SUCCESS;
 }
@@ -475,8 +640,43 @@ hs_error_t HS_CDECL hs_fp_feedback_build(const hs_fp_report_t *report,
 HS_PUBLIC_API
 hs_error_t HS_CDECL hs_fp_feedback_free(hs_fp_feedback_t *feedback) {
     if (feedback) {
+        hs_misc_free(feedback->entries);
         hs_misc_free(feedback);
     }
+    return HS_SUCCESS;
+}
+
+hs_error_t hs_fp_feedback_clone(const hs_fp_feedback_t *src,
+                                hs_fp_feedback_t **dst) {
+    if (!src || !dst) {
+        return HS_INVALID;
+    }
+    *dst = NULL;
+
+    hs_fp_feedback_t *copy = hs_misc_alloc(sizeof(*copy));
+    if (!copy) {
+        return HS_NOMEM;
+    }
+    memset(copy, 0, sizeof(*copy));
+
+    copy->bad_fragment_count = src->bad_fragment_count;
+    copy->scan_bytes = src->scan_bytes;
+    copy->scan_calls = src->scan_calls;
+    copy->total_false_positive_trigger_count =
+        src->total_false_positive_trigger_count;
+
+    if (src->bad_fragment_count) {
+        copy->entries =
+            hs_misc_alloc(sizeof(*copy->entries) * src->bad_fragment_count);
+        if (!copy->entries) {
+            hs_misc_free(copy);
+            return HS_NOMEM;
+        }
+        memcpy(copy->entries, src->entries,
+               sizeof(*copy->entries) * src->bad_fragment_count);
+    }
+
+    *dst = copy;
     return HS_SUCCESS;
 }
 
@@ -679,6 +879,78 @@ hs_error_t hs_fp_report_entry_info(const hs_fp_report_t *report, u32 index,
     }
     if (final_report_count) {
         *final_report_count = entry->final_report_count;
+    }
+
+    return HS_SUCCESS;
+}
+
+u32 hs_fp_feedback_bad_fragment_count(const hs_fp_feedback_t *feedback) {
+    return feedback ? feedback->bad_fragment_count : 0;
+}
+
+u64a hs_fp_feedback_total_false_positive_trigger_count(
+        const hs_fp_feedback_t *feedback) {
+    return feedback ? feedback->total_false_positive_trigger_count : 0;
+}
+
+hs_error_t hs_fp_feedback_bad_fragment_info(const hs_fp_feedback_t *feedback,
+                                            u32 index, u32 *key,
+                                            u32 *fragment_id,
+                                            u32 *literal_count, u8 *table,
+                                            u8 *flags, const u8 **bytes,
+                                            size_t *length, const u8 **mask,
+                                            const u8 **cmp,
+                                            size_t *mask_length,
+                                            u64a *trigger_count,
+                                            u64a *true_trigger_count,
+                                            u64a *final_report_count,
+                                            u64a *false_positive_count) {
+    if (!feedback || index >= feedback->bad_fragment_count) {
+        return HS_INVALID;
+    }
+
+    const struct hs_fp_feedback_entry *entry = feedback->entries + index;
+    if (key) {
+        *key = entry->key;
+    }
+    if (fragment_id) {
+        *fragment_id = entry->fragment_id;
+    }
+    if (literal_count) {
+        *literal_count = entry->literal_count;
+    }
+    if (table) {
+        *table = entry->table;
+    }
+    if (flags) {
+        *flags = entry->flags;
+    }
+    if (bytes) {
+        *bytes = entry->bytes;
+    }
+    if (length) {
+        *length = entry->length;
+    }
+    if (mask) {
+        *mask = entry->mask;
+    }
+    if (cmp) {
+        *cmp = entry->cmp;
+    }
+    if (mask_length) {
+        *mask_length = entry->mask_length;
+    }
+    if (trigger_count) {
+        *trigger_count = entry->trigger_count;
+    }
+    if (true_trigger_count) {
+        *true_trigger_count = entry->true_trigger_count;
+    }
+    if (final_report_count) {
+        *final_report_count = entry->final_report_count;
+    }
+    if (false_positive_count) {
+        *false_positive_count = entry->false_positive_trigger_count;
     }
 
     return HS_SUCCESS;

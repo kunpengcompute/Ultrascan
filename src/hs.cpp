@@ -30,6 +30,7 @@
  * \brief Compiler front-end, including public API calls for compilation.
  */
 #include "allocator.h"
+#include "fp_collector.h"
 #include "ue2common.h"
 #include "grey.h"
 #include "hs_compile.h"
@@ -61,6 +62,10 @@
 
 using namespace std;
 using namespace ue2;
+
+struct hs_compile_context {
+    hs_fp_feedback_t *fp_feedback;
+};
 
 /** \brief Cheap check that no unexpected mode flags are on. */
 static
@@ -848,6 +853,53 @@ hs_error_t HS_CDECL fat_hs_compile(const char *expression, unsigned flags,
                                 platform, db, error, Grey());
 }
 
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL hs_compile_context_create(hs_compile_context_t **ctx) {
+    if (!ctx) {
+        return HS_INVALID;
+    }
+    *ctx = nullptr;
+
+    hs_compile_context_t *out =
+        (hs_compile_context_t *)hs_misc_alloc(sizeof(*out));
+    if (!out) {
+        return HS_NOMEM;
+    }
+
+    memset(out, 0, sizeof(*out));
+    *ctx = out;
+    return HS_SUCCESS;
+}
+
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
+        hs_compile_context_t *ctx, const hs_fp_feedback_t *feedback) {
+    if (!ctx) {
+        return HS_INVALID;
+    }
+
+    hs_fp_feedback_t *copy = nullptr;
+    if (feedback) {
+        hs_error_t err = hs_fp_feedback_clone(feedback, &copy);
+        if (err != HS_SUCCESS) {
+            return err;
+        }
+    }
+
+    hs_fp_feedback_free(ctx->fp_feedback);
+    ctx->fp_feedback = copy;
+    return HS_SUCCESS;
+}
+
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL hs_compile_context_free(hs_compile_context_t *ctx) {
+    if (ctx) {
+        hs_fp_feedback_free(ctx->fp_feedback);
+        hs_misc_free(ctx);
+    }
+    return HS_SUCCESS;
+}
+
 
 extern "C" HS_PUBLIC_API
 hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
@@ -856,6 +908,21 @@ hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
                                      const hs_platform_info_t *platform,
                                      hs_database_t **db,
                                      hs_compile_error_t **error) {
+    const hs_expr_ext * const *ext = nullptr; // unused for this call.
+    return hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
+                                platform, db, error, Grey());
+}
+
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL hs_compile_multi_with_context(
+                                     const char *const *expressions,
+                                     const unsigned *flags, const unsigned *ids,
+                                     unsigned elements, unsigned mode,
+                                     const hs_platform_info_t *platform,
+                                     const hs_compile_context_t *ctx,
+                                     hs_database_t **db,
+                                     hs_compile_error_t **error) {
+    (void)ctx;
     const hs_expr_ext * const *ext = nullptr; // unused for this call.
     return hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
                                 platform, db, error, Grey());
@@ -881,6 +948,21 @@ hs_error_t HS_CDECL hs_compile_ext_multi(const char * const *expressions,
                                      const hs_platform_info_t *platform,
                                      hs_database_t **db,
                                      hs_compile_error_t **error) {
+    return hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
+                                platform, db, error, Grey());
+}
+
+extern "C" HS_PUBLIC_API
+hs_error_t HS_CDECL hs_compile_ext_multi_with_context(
+                                     const char * const *expressions,
+                                     const unsigned *flags, const unsigned *ids,
+                                     const hs_expr_ext * const *ext,
+                                     unsigned elements, unsigned mode,
+                                     const hs_platform_info_t *platform,
+                                     const hs_compile_context_t *ctx,
+                                     hs_database_t **db,
+                                     hs_compile_error_t **error) {
+    (void)ctx;
     return hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
                                 platform, db, error, Grey());
 }

@@ -8,8 +8,13 @@ EXPORTS
    hs_close_stream
    hs_close_stream_with_collector
    hs_compile
+   hs_compile_context_create
+   hs_compile_context_free
+   hs_compile_context_set_fp_feedback
    hs_compile_ext_multi
+   hs_compile_ext_multi_with_context
    hs_compile_multi
+   hs_compile_multi_with_context
    hs_compress_stream
    hs_copy_stream
    hs_database_info
