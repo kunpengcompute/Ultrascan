@@ -53,6 +53,7 @@ set(unit_hyperscan_SOURCES
     hyperscan/behaviour.cpp
     hyperscan/expr_info.cpp
     hyperscan/extparam.cpp
+    hyperscan/grey_overrides.cpp
     hyperscan/identical.cpp
     hyperscan/literals.cpp
     hyperscan/logical_combination.cpp
@@ -77,6 +78,13 @@ endif()
 
 
 if (NOT (RELEASE_BUILD OR FAT_RUNTIME))
+set(HS_UNIT_HAS_HSBENCH_CORPUS_DB OFF)
+include (${CMAKE_MODULE_PATH}/sqlite3.cmake)
+if (SQLITE3_FOUND)
+    include_directories(SYSTEM ${SQLITE3_INCLUDE_DIRS})
+    set(HS_UNIT_HAS_HSBENCH_CORPUS_DB ON)
+endif()
+
 set(unit_internal_SOURCES
     ${gtest_SOURCES}
     internal/bitfield.cpp
@@ -86,6 +94,8 @@ set(unit_internal_SOURCES
     internal/database.cpp
     internal/depth.cpp
     internal/fdr.cpp
+    internal/hao.cpp
+    internal/hao_runtime_test_impl.cpp
     internal/fdr_flood.cpp
     internal/fdr_loadval.cpp
     internal/flat_set.cpp
@@ -131,6 +141,13 @@ set(unit_internal_SOURCES
     internal/main.cpp
     )
 
+if (HS_UNIT_HAS_HSBENCH_CORPUS_DB)
+list(APPEND unit_internal_SOURCES
+    ${PROJECT_SOURCE_DIR}/tools/hsbench/data_corpus.cpp
+    ${PROJECT_SOURCE_DIR}/tools/hsbench/data_corpus.h
+    )
+endif()
+
 if(WIN32 AND (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS))
 add_executable(unit-internal ${unit_internal_SOURCES} $<TARGET_OBJECTS:hs_compile_shared> $<TARGET_OBJECTS:hs_exec_shared>)
 else()
@@ -138,6 +155,10 @@ add_executable(unit-internal ${unit_internal_SOURCES})
 endif()
 set_target_properties(unit-internal PROPERTIES COMPILE_FLAGS "${HS_CXX_FLAGS}")
 target_link_libraries(unit-internal hs corpusomatic)
+if (HS_UNIT_HAS_HSBENCH_CORPUS_DB)
+target_compile_definitions(unit-internal PRIVATE HS_UNIT_HAS_HSBENCH_CORPUS_DB=1)
+target_link_libraries(unit-internal ${SQLITE3_LDFLAGS})
+endif()
 endif(NOT (RELEASE_BUILD OR FAT_RUNTIME))
 
 if (BUILD_CHIMERA)

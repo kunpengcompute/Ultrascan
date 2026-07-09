@@ -38,6 +38,8 @@ EXPORTS
    hs_set_misc_allocator
    hs_set_scratch_allocator
    hs_set_stream_allocator
+   hs_set_grey_overrides
+   hs_reset_grey_overrides
    hs_stream_size
    hs_valid_platform
    hs_version

@@ -2,8 +2,8 @@ cmake_minimum_required (VERSION 2.8.11)
 project (hyperscan C CXX)
 
 set (HS_MAJOR_VERSION 5)
-set (HS_MINOR_VERSION 4)
-set (HS_PATCH_VERSION 2)
+set (HS_MINOR_VERSION 7)
+set (HS_PATCH_VERSION 0)
 set (HS_VERSION ${HS_MAJOR_VERSION}.${HS_MINOR_VERSION}.${HS_PATCH_VERSION})
 
 # 覆盖率编译选项开关
@@ -300,8 +300,26 @@ else()
     if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
         set(EXTRA_C_FLAGS "${EXTRA_C_FLAGS} -fsigned-char")
         set(EXTRA_CXX_FLAGS "${EXTRA_CXX_FLAGS} -fsigned-char")
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=armv8-a+crc")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8-a+crc")
+        set(HS_ARM_MARCH "" CACHE STRING
+            "AArch64 -march value used for this single-ISA build")
+        if (NOT HS_ARM_MARCH)
+            set(_HS_ARM_MARCH_DEFAULT "armv8.2-a+crc+sve")
+            if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND
+                EXISTS "/proc/cpuinfo")
+                file(READ "/proc/cpuinfo" _HS_ARM_CPUINFO)
+                if (_HS_ARM_CPUINFO MATCHES "(^|[ \n])svebitperm([ \n]|$)")
+                    set(_HS_ARM_MARCH_DEFAULT
+                        "armv8.6-a+crc+sve2+sve2-bitperm")
+                elseif (_HS_ARM_CPUINFO MATCHES "(^|[ \n])sve2([ \n]|$)")
+                    set(_HS_ARM_MARCH_DEFAULT "armv9-a+sve2")
+                endif()
+            endif()
+            set(HS_ARM_MARCH "${_HS_ARM_MARCH_DEFAULT}" CACHE STRING
+                "AArch64 -march value used for this single-ISA build" FORCE)
+        endif()
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=${HS_ARM_MARCH}")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=${HS_ARM_MARCH}")
+        message(STATUS "AARCH64 single-ISA build target: -march=${HS_ARM_MARCH}")
     endif()
 
     if (NOT RELEASE_BUILD)
@@ -422,6 +440,148 @@ endif ()
 
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|i386")
     include (${CMAKE_MODULE_PATH}/arch.cmake)
+endif()
+
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+    set(HS_BUILD_HAVE_SVE FALSE)
+    set(HS_BUILD_HAVE_SVE2 FALSE)
+    set(HS_BUILD_HAVE_SVEBITPERM FALSE)
+    set(HS_SVE_C_FLAGS "")
+    set(HS_SVE2_C_FLAGS "")
+    set(HS_SVEBITPERM_C_FLAGS "")
+
+    set(_HS_ARM_REQUIRED_FLAGS_SAVED "${CMAKE_REQUIRED_FLAGS}")
+    set(_HS_ARM_REQUIRED_BASE_FLAGS
+        "${CMAKE_C_FLAGS} ${EXTRA_C_FLAGS} ${ARCH_C_FLAGS}")
+
+    set(_HS_SVE_FLAG_CANDIDATES
+        "-march=armv8.2-a+sve"
+        "-march=armv9-a+sve")
+    set(_HS_SVE2_FLAG_CANDIDATES
+        "-march=armv9-a+sve2"
+        "-march=armv8.6-a+sve2")
+    set(_HS_SVEBITPERM_FLAG_CANDIDATES
+        "-march=armv9-a+sve2-bitperm"
+        "-march=armv8.6-a+sve2-bitperm")
+
+    set(_HS_SVE_TEST_SOURCE
+"#include <arm_sve.h>
+#if !defined(__ARM_FEATURE_SVE)
+#error no sve
+#endif
+int main(void) {
+    return 0;
+}")
+
+    set(_HS_SVE2_TEST_SOURCE
+"#include <arm_sve.h>
+#if !defined(__ARM_FEATURE_SVE2)
+#error no sve2
+#endif
+int main(void) {
+    return 0;
+}")
+
+    set(_HS_SVEBITPERM_TEST_SOURCE
+"#include <stdint.h>
+#include <arm_sve.h>
+#if !defined(__ARM_FEATURE_SVE2_BITPERM)
+#error no sve2 bitperm
+#endif
+int main(void) {
+    svbool_t pg = svptrue_b64();
+    svuint64_t data = svdup_n_u64(UINT64_C(0x123456789abcdef0));
+    svuint64_t out = svbext_n_u64(data, UINT64_C(0x0000ffff0000ffff));
+    uint64_t tmp[32] = {0};
+    svst1_u64(pg, tmp, out);
+    return (int)tmp[0];
+}")
+
+    list(LENGTH _HS_SVE_FLAG_CANDIDATES _HS_SVE_FLAG_COUNT)
+    if (_HS_SVE_FLAG_COUNT GREATER 0)
+        math(EXPR _HS_SVE_LAST "${_HS_SVE_FLAG_COUNT} - 1")
+        foreach(_HS_SVE_IDX RANGE 0 ${_HS_SVE_LAST})
+            list(GET _HS_SVE_FLAG_CANDIDATES ${_HS_SVE_IDX} _HS_SVE_FLAG)
+            set(CMAKE_REQUIRED_FLAGS
+                "${_HS_ARM_REQUIRED_BASE_FLAGS} ${_HS_SVE_FLAG}")
+            set(_HS_SVE_TEST_VAR "HS_TOOLCHAIN_SVE_TEST_${_HS_SVE_IDX}")
+            CHECK_C_SOURCE_COMPILES("${_HS_SVE_TEST_SOURCE}" ${_HS_SVE_TEST_VAR})
+            if (${_HS_SVE_TEST_VAR})
+                set(HS_BUILD_HAVE_SVE TRUE)
+                set(HS_SVE_C_FLAGS "${_HS_SVE_FLAG}")
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    list(LENGTH _HS_SVE2_FLAG_CANDIDATES _HS_SVE2_FLAG_COUNT)
+    if (_HS_SVE2_FLAG_COUNT GREATER 0)
+        math(EXPR _HS_SVE2_LAST "${_HS_SVE2_FLAG_COUNT} - 1")
+        foreach(_HS_SVE2_IDX RANGE 0 ${_HS_SVE2_LAST})
+            list(GET _HS_SVE2_FLAG_CANDIDATES ${_HS_SVE2_IDX} _HS_SVE2_FLAG)
+            set(CMAKE_REQUIRED_FLAGS
+                "${_HS_ARM_REQUIRED_BASE_FLAGS} ${_HS_SVE2_FLAG}")
+            set(_HS_SVE2_TEST_VAR "HS_TOOLCHAIN_SVE2_TEST_${_HS_SVE2_IDX}")
+            CHECK_C_SOURCE_COMPILES("${_HS_SVE2_TEST_SOURCE}" ${_HS_SVE2_TEST_VAR})
+            if (${_HS_SVE2_TEST_VAR})
+                set(HS_BUILD_HAVE_SVE2 TRUE)
+                set(HS_SVE2_C_FLAGS "${_HS_SVE2_FLAG}")
+                if (NOT HS_BUILD_HAVE_SVE)
+                    set(HS_BUILD_HAVE_SVE TRUE)
+                    set(HS_SVE_C_FLAGS "${_HS_SVE2_FLAG}")
+                endif()
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    list(LENGTH _HS_SVEBITPERM_FLAG_CANDIDATES _HS_SVEBITPERM_FLAG_COUNT)
+    if (_HS_SVEBITPERM_FLAG_COUNT GREATER 0)
+        math(EXPR _HS_SVEBITPERM_LAST "${_HS_SVEBITPERM_FLAG_COUNT} - 1")
+        foreach(_HS_SVEBITPERM_IDX RANGE 0 ${_HS_SVEBITPERM_LAST})
+            list(GET _HS_SVEBITPERM_FLAG_CANDIDATES ${_HS_SVEBITPERM_IDX}
+                 _HS_SVEBITPERM_FLAG)
+            set(CMAKE_REQUIRED_FLAGS
+                "${_HS_ARM_REQUIRED_BASE_FLAGS} ${_HS_SVEBITPERM_FLAG}")
+            set(_HS_SVEBITPERM_TEST_VAR
+                "HS_TOOLCHAIN_SVEBITPERM_TEST_${_HS_SVEBITPERM_IDX}")
+            CHECK_C_SOURCE_COMPILES("${_HS_SVEBITPERM_TEST_SOURCE}"
+                                    ${_HS_SVEBITPERM_TEST_VAR})
+            if (${_HS_SVEBITPERM_TEST_VAR})
+                set(HS_BUILD_HAVE_SVEBITPERM TRUE)
+                set(HS_SVEBITPERM_C_FLAGS "${_HS_SVEBITPERM_FLAG}")
+                if (NOT HS_BUILD_HAVE_SVE2)
+                    set(HS_BUILD_HAVE_SVE2 TRUE)
+                    set(HS_SVE2_C_FLAGS "${_HS_SVEBITPERM_FLAG}")
+                endif()
+                if (NOT HS_BUILD_HAVE_SVE)
+                    set(HS_BUILD_HAVE_SVE TRUE)
+                    set(HS_SVE_C_FLAGS "${_HS_SVEBITPERM_FLAG}")
+                endif()
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    set(CMAKE_REQUIRED_FLAGS "${_HS_ARM_REQUIRED_FLAGS_SAVED}")
+
+    if (HS_BUILD_HAVE_SVE)
+        message(STATUS "ARM toolchain can compile SVE code paths (${HS_SVE_C_FLAGS})")
+    else()
+        message(STATUS "ARM toolchain cannot compile SVE code paths")
+    endif()
+
+    if (HS_BUILD_HAVE_SVE2)
+        message(STATUS "ARM toolchain can compile SVE2 code paths (${HS_SVE2_C_FLAGS})")
+    else()
+        message(STATUS "ARM toolchain cannot compile SVE2 code paths")
+    endif()
+
+    if (HS_BUILD_HAVE_SVEBITPERM)
+        message(STATUS "ARM toolchain can compile SVE2 BitPerm code paths (${HS_SVEBITPERM_C_FLAGS})")
+    else()
+        message(STATUS "ARM toolchain cannot compile SVE2 BitPerm code paths")
+    endif()
 endif()
 
 # testing a builtin takes a little more work
@@ -716,6 +876,12 @@ set (hs_exec_SRCS
     src/fdr/fdr_confirm_runtime.h
     src/fdr/flood_runtime.h
     src/fdr/fdr_loadval.h
+    src/fdr/hao_engine.c
+    src/fdr/hao_runtime_layout.c
+    src/fdr/hao_runtime_layout.h
+    src/fdr/hao_runtime_stats.c
+    src/fdr/hao_runtime_stats.h
+    src/fdr/hao_runtime.h
     src/fdr/teddy.c
     src/fdr/teddy.h
     src/fdr/teddy_internal.h
@@ -849,7 +1015,6 @@ set (hs_exec_avx2_SRCS
     src/util/masked_move.c
 )
 
-
 SET (hs_compile_SRCS
     ${hs_HEADERS}
     src/crc32.h
@@ -882,6 +1047,9 @@ SET (hs_compile_SRCS
     src/fdr/fdr_engine_description.cpp
     src/fdr/fdr_engine_description.h
     src/fdr/fdr_internal.h
+    src/fdr/hao_compile.cpp
+    src/fdr/hao_compile.h
+    src/fdr/hao_runtime.h
     src/fdr/flood_compile.cpp
     src/fdr/teddy_compile.cpp
     src/fdr/teddy_compile.h

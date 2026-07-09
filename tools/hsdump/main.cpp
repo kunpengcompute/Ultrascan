@@ -275,11 +275,13 @@ void processArgs(int argc, char *argv[], Grey &grey) {
             patternfile = optarg;
             break;
 
-#ifndef RELEASE_BUILD
         case 'G':
-            applyGreyOverrides(&grey, string(optarg));
+            if (hs_set_grey_overrides(optarg) != HS_SUCCESS ||
+                !applyGreyOverrides(&grey, string(optarg))) {
+                usage(argv[0], "Invalid grey overrides");
+                exit(1);
+            }
             break;
-#endif
 
         case 'L':
             somFlags |= HS_FLAG_SOM_LEFTMOST;
