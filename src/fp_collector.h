@@ -59,6 +59,23 @@ void hs_fp_collector_record_final_report(struct hs_scratch *scratch);
 hs_error_t hs_fp_feedback_clone(const hs_fp_feedback_t *src,
                                 hs_fp_feedback_t **dst);
 
+u32 hs_fp_feedback_count_matches_in_rose(const hs_fp_feedback_t *feedback,
+                                         const struct RoseEngine *rose,
+                                         u32 *checked_count);
+
+char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
+                                   const char *bytes, size_t length,
+                                   char nocase);
+
+u32 hs_compile_context_observe_checked_count(
+        const hs_compile_context_t *ctx);
+
+u32 hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx);
+
+u32 hs_compile_context_block_checked_count(const hs_compile_context_t *ctx);
+
+u32 hs_compile_context_blocked_count(const hs_compile_context_t *ctx);
+
 u64a hs_fp_report_scan_calls(const hs_fp_report_t *report);
 
 u64a hs_fp_report_scan_bytes(const hs_fp_report_t *report);

@@ -65,7 +65,56 @@ using namespace ue2;
 
 struct hs_compile_context {
     hs_fp_feedback_t *fp_feedback;
+    u32 fp_observe_checked_count;
+    u32 fp_observe_hit_count;
+    u32 fp_block_checked_count;
+    u32 fp_blocked_count;
 };
+
+static
+void resetCompileContextObserve(const hs_compile_context_t *ctx) {
+    if (!ctx) {
+        return;
+    }
+
+    hs_compile_context_t *mutable_ctx =
+        const_cast<hs_compile_context_t *>(ctx);
+    mutable_ctx->fp_observe_checked_count = 0;
+    mutable_ctx->fp_observe_hit_count = 0;
+}
+
+static
+void resetCompileContextDiagnostics(const hs_compile_context_t *ctx) {
+    resetCompileContextObserve(ctx);
+    if (!ctx) {
+        return;
+    }
+
+    hs_compile_context_t *mutable_ctx =
+        const_cast<hs_compile_context_t *>(ctx);
+    mutable_ctx->fp_block_checked_count = 0;
+    mutable_ctx->fp_blocked_count = 0;
+}
+
+static
+void observeCompileFeedback(const hs_compile_context_t *ctx,
+                            const hs_database_t *db) {
+    resetCompileContextObserve(ctx);
+    if (!ctx || !ctx->fp_feedback || !db) {
+        return;
+    }
+
+    const struct RoseEngine *rose =
+        (const struct RoseEngine *)hs_get_bytecode(db);
+    u32 checked_count = 0;
+    u32 hit_count = hs_fp_feedback_count_matches_in_rose(
+        ctx->fp_feedback, rose, &checked_count);
+
+    hs_compile_context_t *mutable_ctx =
+        const_cast<hs_compile_context_t *>(ctx);
+    mutable_ctx->fp_observe_checked_count = checked_count;
+    mutable_ctx->fp_observe_hit_count = hit_count;
+}
 
 /** \brief Cheap check that no unexpected mode flags are on. */
 static
@@ -538,7 +587,10 @@ hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
                      const unsigned *ids, const hs_expr_ext *const *ext,
                      unsigned elements, unsigned mode,
                      const hs_platform_info_t *platform, hs_database_t **db,
-                     hs_compile_error_t **comp_error, const Grey &g) {
+                     hs_compile_error_t **comp_error, const Grey &g,
+                     const hs_compile_context_t *fp_ctx) {
+    resetCompileContextDiagnostics(fp_ctx);
+
     // Check the args: note that it's OK for flags, ids or ext to be null.
     if (!comp_error) {
         if (db) {
@@ -615,7 +667,14 @@ hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
     }
 
     try {
-        CompileContext cc(isStreaming, isVectored, target_info, g);
+        hs_compile_context_t *mutable_fp_ctx =
+            const_cast<hs_compile_context_t *>(fp_ctx);
+        CompileContext cc(isStreaming, isVectored, target_info, g,
+                          fp_ctx ? fp_ctx->fp_feedback : nullptr,
+                          mutable_fp_ctx ?
+                              &mutable_fp_ctx->fp_block_checked_count : nullptr,
+                          mutable_fp_ctx ?
+                              &mutable_fp_ctx->fp_blocked_count : nullptr);
         NG ng(cc, elements, somPrecision);
 
         if (count_2_4_byte_literals > 8) {
@@ -888,6 +947,7 @@ hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
 
     hs_fp_feedback_free(ctx->fp_feedback);
     ctx->fp_feedback = copy;
+    resetCompileContextDiagnostics(ctx);
     return HS_SUCCESS;
 }
 
@@ -898,6 +958,27 @@ hs_error_t HS_CDECL hs_compile_context_free(hs_compile_context_t *ctx) {
         hs_misc_free(ctx);
     }
     return HS_SUCCESS;
+}
+
+extern "C"
+u32 hs_compile_context_observe_checked_count(
+        const hs_compile_context_t *ctx) {
+    return ctx ? ctx->fp_observe_checked_count : 0;
+}
+
+extern "C"
+u32 hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx) {
+    return ctx ? ctx->fp_observe_hit_count : 0;
+}
+
+extern "C"
+u32 hs_compile_context_block_checked_count(const hs_compile_context_t *ctx) {
+    return ctx ? ctx->fp_block_checked_count : 0;
+}
+
+extern "C"
+u32 hs_compile_context_blocked_count(const hs_compile_context_t *ctx) {
+    return ctx ? ctx->fp_blocked_count : 0;
 }
 
 
@@ -922,10 +1003,16 @@ hs_error_t HS_CDECL hs_compile_multi_with_context(
                                      const hs_compile_context_t *ctx,
                                      hs_database_t **db,
                                      hs_compile_error_t **error) {
-    (void)ctx;
     const hs_expr_ext * const *ext = nullptr; // unused for this call.
-    return hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
-                                platform, db, error, Grey());
+    hs_error_t err = hs_compile_multi_int(expressions, flags, ids, ext,
+                                          elements, mode, platform, db, error,
+                                          Grey(), ctx);
+    if (err == HS_SUCCESS) {
+        observeCompileFeedback(ctx, db ? *db : nullptr);
+    } else {
+        resetCompileContextDiagnostics(ctx);
+    }
+    return err;
 }
 
 extern "C" HS_PUBLIC_API
@@ -962,9 +1049,15 @@ hs_error_t HS_CDECL hs_compile_ext_multi_with_context(
                                      const hs_compile_context_t *ctx,
                                      hs_database_t **db,
                                      hs_compile_error_t **error) {
-    (void)ctx;
-    return hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
-                                platform, db, error, Grey());
+    hs_error_t err = hs_compile_multi_int(expressions, flags, ids, ext,
+                                          elements, mode, platform, db, error,
+                                          Grey(), ctx);
+    if (err == HS_SUCCESS) {
+        observeCompileFeedback(ctx, db ? *db : nullptr);
+    } else {
+        resetCompileContextDiagnostics(ctx);
+    }
+    return err;
 }
 
 extern "C" HS_PUBLIC_API

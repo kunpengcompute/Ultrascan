@@ -680,6 +680,88 @@ hs_error_t hs_fp_feedback_clone(const hs_fp_feedback_t *src,
     return HS_SUCCESS;
 }
 
+static
+char feedback_entry_matches_meta(const struct hs_fp_feedback_entry *entry,
+                                 const struct RoseFpFragmentMeta *meta) {
+    if (entry->table != meta->table ||
+        entry->flags != meta->flags ||
+        entry->length != meta->length ||
+        entry->mask_length != meta->maskLength) {
+        return 0;
+    }
+
+    if (memcmp(entry->bytes, meta->bytes, entry->length)) {
+        return 0;
+    }
+
+    if (entry->mask_length &&
+        (memcmp(entry->mask, meta->mask, entry->mask_length) ||
+         memcmp(entry->cmp, meta->cmp, entry->mask_length))) {
+        return 0;
+    }
+
+    return 1;
+}
+
+u32 hs_fp_feedback_count_matches_in_rose(const hs_fp_feedback_t *feedback,
+                                         const struct RoseEngine *rose,
+                                         u32 *checked_count) {
+    if (checked_count) {
+        *checked_count = 0;
+    }
+    if (!feedback || !feedback->bad_fragment_count || !rose) {
+        return 0;
+    }
+
+    if (checked_count) {
+        *checked_count = feedback->bad_fragment_count;
+    }
+
+    const struct RoseFpFragmentMeta *meta = getRoseFpFragmentMeta(rose);
+    if (!meta) {
+        return 0;
+    }
+
+    u32 hit_count = 0;
+    for (u32 i = 0; i < feedback->bad_fragment_count; i++) {
+        const struct hs_fp_feedback_entry *entry = feedback->entries + i;
+        for (u32 j = 0; j < rose->fpFragmentMetaCount; j++) {
+            if (feedback_entry_matches_meta(entry, meta + j)) {
+                hit_count++;
+                break;
+            }
+        }
+    }
+
+    return hit_count;
+}
+
+char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
+                                   const char *bytes, size_t length,
+                                   char nocase) {
+    if (!feedback || !feedback->bad_fragment_count || !bytes || !length) {
+        return 0;
+    }
+
+    const u8 flags = nocase ? ROSE_FP_FRAGMENT_FLAG_NOCASE : 0;
+
+    for (u32 i = 0; i < feedback->bad_fragment_count; i++) {
+        const struct hs_fp_feedback_entry *entry = feedback->entries + i;
+        if (!entry->length || entry->length > length ||
+            entry->mask_length ||
+            ((entry->flags & ROSE_FP_FRAGMENT_FLAG_NOCASE) != flags)) {
+            continue;
+        }
+
+        const char *suffix = bytes + length - entry->length;
+        if (!memcmp(entry->bytes, suffix, entry->length)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 hs_error_t hs_fp_collector_check_db(const hs_fp_collector_t *collector,
                                     const hs_database_t *db) {
     if (!collector) {

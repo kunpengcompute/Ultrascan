@@ -33,6 +33,7 @@
 
 #include "ng_literal_component.h"
 
+#include "fp_collector.h"
 #include "grey.h"
 #include "ng.h"
 #include "ng_prune.h"
@@ -185,7 +186,25 @@ bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v, const bool anchored,
             return false;
         }
     }
-    ng.rose->add(anchored, eod, ue2_literal(literal, nocase), g[u].reports);
+
+    ue2_literal rose_literal(literal, nocase);
+    if (ng.cc.fp_feedback) {
+        if (ng.cc.fp_block_checked_count) {
+            (*ng.cc.fp_block_checked_count)++;
+        }
+        if (hs_fp_feedback_literal_is_bad(ng.cc.fp_feedback,
+                                          rose_literal.c_str(),
+                                          rose_literal.length(),
+                                          rose_literal.any_nocase())) {
+            DEBUG_PRINTF("skipping literal split due to fp feedback\n");
+            if (ng.cc.fp_blocked_count) {
+                (*ng.cc.fp_blocked_count)++;
+            }
+            return false;
+        }
+    }
+
+    ng.rose->add(anchored, eod, rose_literal, g[u].reports);
 
     // Remove the terminal vertex. Later, we rely on pruneUseless to remove the
     // other vertices in this chain, since they'll no longer lead to an accept.

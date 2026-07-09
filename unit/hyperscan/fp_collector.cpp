@@ -138,6 +138,10 @@ TEST(FpCollector, NullArguments) {
                   nullptr, 0, nullptr, nullptr, nullptr, nullptr, nullptr,
                   nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
                   nullptr, nullptr, nullptr));
+    EXPECT_EQ(0U, hs_compile_context_observe_checked_count(nullptr));
+    EXPECT_EQ(0U, hs_compile_context_observe_hit_count(nullptr));
+    EXPECT_EQ(0U, hs_compile_context_block_checked_count(nullptr));
+    EXPECT_EQ(0U, hs_compile_context_blocked_count(nullptr));
     ASSERT_EQ(HS_INVALID, hs_compile_context_create(nullptr));
     ASSERT_EQ(HS_INVALID, hs_compile_context_set_fp_feedback(nullptr, nullptr));
 
@@ -438,6 +442,8 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
                                             nullptr, ctx, &ctx_db, &ctx_err));
     ASSERT_NE(nullptr, normal_db);
     ASSERT_NE(nullptr, ctx_db);
+    EXPECT_GE(hs_compile_context_observe_checked_count(ctx), 1U);
+    EXPECT_GE(hs_compile_context_observe_hit_count(ctx), 1U);
 
     hs_scratch_t *normal_scratch = nullptr;
     hs_scratch_t *ctx_scratch = nullptr;
@@ -454,6 +460,70 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
                                   ctx_scratch, record_cb, &ctx_matches));
     ASSERT_EQ(normal_matches.matches, ctx_matches.matches);
 
+    hs_database_t *normal_ext_db = nullptr;
+    hs_database_t *ctx_ext_db = nullptr;
+    hs_compile_error_t *normal_ext_err = nullptr;
+    hs_compile_error_t *ctx_ext_err = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_ext_multi(&compile_expr, &compile_flags, &compile_id,
+                                   &extp, 1, HS_MODE_BLOCK, nullptr,
+                                   &normal_ext_db, &normal_ext_err));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_ext_multi_with_context(&compile_expr, &compile_flags,
+                                                &compile_id, &extp, 1,
+                                                HS_MODE_BLOCK, nullptr, ctx,
+                                                &ctx_ext_db, &ctx_ext_err));
+    ASSERT_NE(nullptr, normal_ext_db);
+    ASSERT_NE(nullptr, ctx_ext_db);
+    EXPECT_GE(hs_compile_context_block_checked_count(ctx), 1U);
+    EXPECT_GE(hs_compile_context_blocked_count(ctx), 1U);
+
+    hs_scratch_t *normal_ext_scratch = nullptr;
+    hs_scratch_t *ctx_ext_scratch = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(normal_ext_db, &normal_ext_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(ctx_ext_db, &ctx_ext_scratch));
+
+    const char short_data[] = "foo";
+    CallBackContext normal_ext_short;
+    CallBackContext ctx_ext_short;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan(normal_ext_db, short_data, sizeof(short_data) - 1, 0,
+                      normal_ext_scratch, record_cb, &normal_ext_short));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan(ctx_ext_db, short_data, sizeof(short_data) - 1, 0,
+                      ctx_ext_scratch, record_cb, &ctx_ext_short));
+    ASSERT_EQ(normal_ext_short.matches, ctx_ext_short.matches);
+
+    const char long_data[] = "0123456789foo";
+    CallBackContext normal_ext_long;
+    CallBackContext ctx_ext_long;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan(normal_ext_db, long_data, sizeof(long_data) - 1, 0,
+                      normal_ext_scratch, record_cb, &normal_ext_long));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan(ctx_ext_db, long_data, sizeof(long_data) - 1, 0,
+                      ctx_ext_scratch, record_cb, &ctx_ext_long));
+    ASSERT_EQ(normal_ext_long.matches, ctx_ext_long.matches);
+
+    hs_database_t *bad_db = nullptr;
+    hs_compile_error_t *bad_err = nullptr;
+    EXPECT_EQ(HS_COMPILER_ERROR,
+              hs_compile_multi_with_context(nullptr, nullptr, nullptr, 1,
+                                            HS_MODE_BLOCK, nullptr, ctx,
+                                            &bad_db, &bad_err));
+    EXPECT_EQ(nullptr, bad_db);
+    EXPECT_EQ(0U, hs_compile_context_observe_checked_count(ctx));
+    EXPECT_EQ(0U, hs_compile_context_observe_hit_count(ctx));
+    EXPECT_EQ(0U, hs_compile_context_block_checked_count(ctx));
+    EXPECT_EQ(0U, hs_compile_context_blocked_count(ctx));
+    hs_free_compile_error(bad_err);
+
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(ctx_ext_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(normal_ext_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(ctx_ext_db));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(normal_ext_db));
+    hs_free_compile_error(ctx_ext_err);
+    hs_free_compile_error(normal_ext_err);
     ASSERT_EQ(HS_SUCCESS, hs_free_scratch(ctx_scratch));
     ASSERT_EQ(HS_SUCCESS, hs_free_scratch(normal_scratch));
     ASSERT_EQ(HS_SUCCESS, hs_free_database(ctx_db));
@@ -494,6 +564,10 @@ TEST(FpCollector, CompileExtMultiWithContextMatchesNormalCompile) {
                                                 &ctx_db, &ctx_err));
     ASSERT_NE(nullptr, normal_db);
     ASSERT_NE(nullptr, ctx_db);
+    EXPECT_EQ(0U, hs_compile_context_observe_checked_count(ctx));
+    EXPECT_EQ(0U, hs_compile_context_observe_hit_count(ctx));
+    EXPECT_EQ(0U, hs_compile_context_block_checked_count(ctx));
+    EXPECT_EQ(0U, hs_compile_context_blocked_count(ctx));
 
     hs_scratch_t *normal_scratch = nullptr;
     hs_scratch_t *ctx_scratch = nullptr;

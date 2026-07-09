@@ -70,7 +70,9 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
                                 unsigned elements, unsigned mode,
                                 const hs_platform_info_t *platform,
                                 hs_database_t **db,
-                                hs_compile_error_t **comp_error, const Grey &g);
+                                hs_compile_error_t **comp_error,
+                                const Grey &g,
+                                const hs_compile_context_t *fp_ctx = nullptr);
 
 /** \brief Internal use only: takes a Grey argument so that we can use it in
  * tools. */
