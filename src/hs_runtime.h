@@ -66,6 +66,65 @@ struct hs_scratch;
 typedef struct hs_scratch hs_scratch_t;
 
 /**
+ * Create a false-positive feedback collector for a compiled database.
+ *
+ * The collector is intended to be passed to the explicit *_with_collector()
+ * scan APIs. It is not safe for concurrent writes by multiple scanning
+ * threads; use one collector per scanning thread and merge them afterwards.
+ *
+ * @param db
+ *      A compiled pattern database.
+ *
+ * @param collector
+ *      On success, a pointer to a newly allocated collector will be returned.
+ *
+ * @return
+ *      @ref HS_SUCCESS on success, other values on failure.
+ */
+hs_error_t HS_CDECL hs_fp_collector_create(const hs_database_t *db,
+                                           hs_fp_collector_t **collector);
+
+/**
+ * Reset a false-positive feedback collector, clearing accumulated runtime
+ * counters while preserving its database binding.
+ */
+hs_error_t HS_CDECL hs_fp_collector_reset(hs_fp_collector_t *collector);
+
+/**
+ * Merge counters from one collector into another collector for the same
+ * database.
+ */
+hs_error_t HS_CDECL hs_fp_collector_merge(hs_fp_collector_t *dst,
+                                          const hs_fp_collector_t *src);
+
+/**
+ * Export a report object from a false-positive feedback collector.
+ */
+hs_error_t HS_CDECL hs_fp_collector_report(const hs_fp_collector_t *collector,
+                                           hs_fp_report_t **report);
+
+/**
+ * Free a false-positive feedback collector. NULL may also be safely provided.
+ */
+hs_error_t HS_CDECL hs_fp_collector_free(hs_fp_collector_t *collector);
+
+/**
+ * Free a false-positive feedback report. NULL may also be safely provided.
+ */
+hs_error_t HS_CDECL hs_fp_report_free(hs_fp_report_t *report);
+
+/**
+ * Build compile-time false-positive feedback from a report.
+ */
+hs_error_t HS_CDECL hs_fp_feedback_build(const hs_fp_report_t *report,
+                                         hs_fp_feedback_t **feedback);
+
+/**
+ * Free false-positive feedback. NULL may also be safely provided.
+ */
+hs_error_t HS_CDECL hs_fp_feedback_free(hs_fp_feedback_t *feedback);
+
+/**
  * Definition of the match event callback function type.
  *
  * A callback function matching the defined type must be provided by the
@@ -191,6 +250,18 @@ hs_error_t HS_CDECL hs_scan_stream(hs_stream_t *id, const char *data,
                                    match_event_handler onEvent, void *ctxt);
 
 /**
+ * The streaming regular expression scanner with false-positive feedback
+ * collection.
+ *
+ * This call has the same matching semantics and callback behaviour as
+ * @ref hs_scan_stream(), but additionally records data in @p collector.
+ */
+hs_error_t HS_CDECL hs_scan_stream_with_collector(
+    hs_stream_t *id, const char *data, unsigned int length, unsigned int flags,
+    hs_scratch_t *scratch, match_event_handler onEvent, void *ctxt,
+    hs_fp_collector_t *collector);
+
+/**
  * Close a stream.
  *
  * This function completes matching on the given stream and frees the memory
@@ -233,6 +304,16 @@ hs_error_t HS_CDECL hs_close_stream(hs_stream_t *id, hs_scratch_t *scratch,
                                     match_event_handler onEvent, void *ctxt);
 
 /**
+ * Close a stream with false-positive feedback collection.
+ *
+ * This call has the same semantics as @ref hs_close_stream(), including EOD
+ * match reporting, but additionally records data in @p collector.
+ */
+hs_error_t HS_CDECL hs_close_stream_with_collector(
+    hs_stream_t *id, hs_scratch_t *scratch, match_event_handler onEvent,
+    void *ctxt, hs_fp_collector_t *collector);
+
+/**
  * Reset a stream to an initial state.
  *
  * Conceptually, this is equivalent to performing @ref hs_close_stream() on the
@@ -273,6 +354,13 @@ hs_error_t HS_CDECL hs_close_stream(hs_stream_t *id, hs_scratch_t *scratch,
 hs_error_t HS_CDECL hs_reset_stream(hs_stream_t *id, unsigned int flags,
                                     hs_scratch_t *scratch,
                                     match_event_handler onEvent, void *context);
+
+/**
+ * Reset a stream with false-positive feedback collection.
+ */
+hs_error_t HS_CDECL hs_reset_stream_with_collector(
+    hs_stream_t *id, unsigned int flags, hs_scratch_t *scratch,
+    match_event_handler onEvent, void *context, hs_fp_collector_t *collector);
 
 /**
  * Duplicate the given stream. The new stream will have the same state as the
@@ -326,6 +414,13 @@ hs_error_t HS_CDECL hs_reset_and_copy_stream(hs_stream_t *to_id,
                                              hs_scratch_t *scratch,
                                              match_event_handler onEvent,
                                              void *context);
+
+/**
+ * Reset and copy a stream with false-positive feedback collection.
+ */
+hs_error_t HS_CDECL hs_reset_and_copy_stream_with_collector(
+    hs_stream_t *to_id, const hs_stream_t *from_id, hs_scratch_t *scratch,
+    match_event_handler onEvent, void *context, hs_fp_collector_t *collector);
 
 /**
  * Creates a compressed representation of the provided stream in the buffer
@@ -442,6 +537,14 @@ hs_error_t HS_CDECL hs_reset_and_expand_stream(hs_stream_t *to_stream,
                                                void *context);
 
 /**
+ * Reset and expand a stream with false-positive feedback collection.
+ */
+hs_error_t HS_CDECL hs_reset_and_expand_stream_with_collector(
+    hs_stream_t *to_stream, const char *buf, size_t buf_size,
+    hs_scratch_t *scratch, match_event_handler onEvent, void *context,
+    hs_fp_collector_t *collector);
+
+/**
  * The block (non-streaming) regular expression scanner.
  *
  * This is the function call in which the actual pattern matching takes place
@@ -480,6 +583,18 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
                             unsigned int length, unsigned int flags,
                             hs_scratch_t *scratch, match_event_handler onEvent,
                             void *context);
+
+/**
+ * The block regular expression scanner with false-positive feedback
+ * collection.
+ *
+ * This call has the same matching semantics and callback behaviour as
+ * @ref hs_scan(), but additionally records data in @p collector.
+ */
+hs_error_t HS_CDECL hs_scan_with_collector(
+    const hs_database_t *db, const char *data, unsigned int length,
+    unsigned int flags, hs_scratch_t *scratch, match_event_handler onEvent,
+    void *context, hs_fp_collector_t *collector);
 
 /**
  * The vectored regular expression scanner.
@@ -525,6 +640,19 @@ hs_error_t HS_CDECL hs_scan_vector(const hs_database_t *db,
                                    unsigned int count, unsigned int flags,
                                    hs_scratch_t *scratch,
                                    match_event_handler onEvent, void *context);
+
+/**
+ * The vectored regular expression scanner with false-positive feedback
+ * collection.
+ *
+ * This call has the same matching semantics and callback behaviour as
+ * @ref hs_scan_vector(), but additionally records data in @p collector.
+ */
+hs_error_t HS_CDECL hs_scan_vector_with_collector(
+    const hs_database_t *db, const char *const *data,
+    const unsigned int *length, unsigned int count, unsigned int flags,
+    hs_scratch_t *scratch, match_event_handler onEvent, void *context,
+    hs_fp_collector_t *collector);
 
 /**
  * Allocate a "scratch" space for use by Hyperscan.

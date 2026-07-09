@@ -52,6 +52,32 @@ typedef u64a rose_group;
 // 最大支持的lily匹配数限制
 #define LILY_ITEMS_COUNT            4096
 
+#define ROSE_FP_FRAGMENT_BYTES_MAX  8
+
+#define ROSE_FP_TABLE_UNKNOWN       0
+#define ROSE_FP_TABLE_FLOATING      1
+#define ROSE_FP_TABLE_EOD_ANCHORED  2
+#define ROSE_FP_TABLE_SMALL_BLOCK   3
+#define ROSE_FP_TABLE_DELAY_REBUILD 4
+#define ROSE_FP_TABLE_ANCHORED      5
+
+#define ROSE_FP_FRAGMENT_FLAG_NOCASE 0x01
+#define ROSE_FP_FRAGMENT_FLAG_NORUNS 0x02
+#define ROSE_FP_FRAGMENT_FLAG_MASKED 0x04
+
+struct RoseFpFragmentMeta {
+    u32 programOffset;
+    u32 fragmentId;
+    u32 literalCount;
+    u8 table;
+    u8 flags;
+    u8 length;
+    u8 maskLength;
+    u8 bytes[ROSE_FP_FRAGMENT_BYTES_MAX];
+    u8 mask[ROSE_FP_FRAGMENT_BYTES_MAX];
+    u8 cmp[ROSE_FP_FRAGMENT_BYTES_MAX];
+};
+
 /* Allocation of Rose literal ids
  *
  * The rose literal id space is segmented:
@@ -420,6 +446,8 @@ struct x86_RoseEngine {
     struct RoseStateOffsets stateOffsets;
     struct RoseBoundaryReports boundary;
     u32 totalNumLiterals; /* total number of literals including dr */
+    u32 fpFragmentMetaOffset; /* offset of RoseFpFragmentMeta array */
+    u32 fpFragmentMetaCount;
     u32 asize; /* size of the atable */
     u32 outfixBeginQueue; /* first outfix queue */
     u32 outfixEndQueue; /* one past the last outfix queue */
@@ -576,6 +604,8 @@ struct RoseEngine {
     struct RoseStateOffsets stateOffsets;
     struct RoseBoundaryReports boundary;
     u32 totalNumLiterals; /* total number of literals including dr */
+    u32 fpFragmentMetaOffset; /**< offset of RoseFpFragmentMeta array */
+    u32 fpFragmentMetaCount; /**< number of RoseFpFragmentMeta records */
     u32 asize; /* size of the atable */
     u32 outfixBeginQueue; /* first outfix queue */
     u32 outfixEndQueue; /* one past the last outfix queue */
@@ -697,6 +727,18 @@ const void *getSBLiteralMatcher(const struct RoseEngine *t) {
     const char *matcher = (const char *)t + t->sbmatcherOffset;
     assert(ISALIGNED_N(matcher, 8));
     return matcher;
+}
+
+static really_inline
+const struct RoseFpFragmentMeta *getRoseFpFragmentMeta(
+        const struct RoseEngine *t) {
+    if (!t->fpFragmentMetaOffset || !t->fpFragmentMetaCount) {
+        return NULL;
+    }
+
+    const char *meta = (const char *)t + t->fpFragmentMetaOffset;
+    assert(ISALIGNED_N(meta, 4));
+    return (const struct RoseFpFragmentMeta *)meta;
 }
 
 static really_inline

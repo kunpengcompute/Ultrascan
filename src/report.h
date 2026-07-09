@@ -33,6 +33,7 @@
 #ifndef REPORT_H
 #define REPORT_H
 
+#include "fp_collector.h"
 #include "hs_internal.h"
 #include "hs_runtime.h"
 #include "scratch.h"
@@ -335,6 +336,8 @@ int roseDeliverReport(u64a offset, ReportID onmatch, s32 offset_adjust,
     DEBUG_PRINTF(">> reporting match @[%llu,%llu] for sig %u ctxt %p <<\n",
                  from_offset, to_offset, onmatch, ci->userContext);
 
+    hs_fp_collector_record_final_report(scratch);
+
     int halt = ci->userCallback(onmatch, from_offset, to_offset, flags,
                                 ci->userContext);
     if (halt) {
@@ -383,6 +386,8 @@ int roseDeliverSomReport(u64a from_offset, u64a to_offset, ReportID onmatch,
 
     DEBUG_PRINTF(">> reporting match @[%llu,%llu] for sig %u ctxt %p <<\n",
                  from_offset, to_offset, onmatch, ci->userContext);
+
+    hs_fp_collector_record_final_report(scratch);
 
     int halt = ci->userCallback(onmatch, from_offset, to_offset, flags,
                                 ci->userContext);

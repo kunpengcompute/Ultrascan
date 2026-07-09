@@ -27,6 +27,7 @@
  */
 
 #include "catchup.h"
+#include "fp_collector.h"
 #include "match.h"
 #include "program_runtime.h"
 #include "rose.h"
@@ -212,8 +213,10 @@ int roseAnchoredCallback(u64a start, u64a end, u32 id, void *ctx) {
 
     // Note that the "id" we have been handed is the program offset.
     const u8 flags = ROSE_PROG_FLAG_IN_ANCHORED;
-    if (roseRunProgram(t, scratch, id, start, real_end, flags)
-                       == HWLM_TERMINATE_MATCHING) {
+    hs_fp_collector_begin_trigger(scratch, id);
+    hwlmcb_rv_t rv = roseRunProgram(t, scratch, id, start, real_end, flags);
+    hs_fp_collector_end_trigger(scratch);
+    if (rv == HWLM_TERMINATE_MATCHING) {
         assert(can_stop_matching(scratch));
         DEBUG_PRINTF("caller requested termination\n");
         return MO_HALT_MATCHING;
@@ -509,7 +512,9 @@ hwlmcb_rv_t roseCallback_i(size_t end, u32 id, struct hs_scratch *scratch) {
         return HWLM_TERMINATE_MATCHING;
     }
 
+    hs_fp_collector_begin_trigger(scratch, id);
     rv = roseProcessMatchInline(t, scratch, real_end, id);
+    hs_fp_collector_end_trigger(scratch);
 
     DEBUG_PRINTF("DONE groups=0x%016llx\n", tctx->groups);
 

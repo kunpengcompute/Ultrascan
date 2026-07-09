@@ -853,6 +853,8 @@ set (hs_exec_common_SRCS
     src/util/multibit.c
     src/fat_database.c
     src/fat_database.h
+    src/fp_collector.c
+    src/fp_collector.h
     )
 
 set (hs_exec_SRCS

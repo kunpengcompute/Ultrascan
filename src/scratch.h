@@ -125,6 +125,10 @@ struct core_info {
     const u8 *hbuf; /**< history buffer */
     size_t hlen; /**< length of history buffer in bytes. */
     u64a buf_offset; /**< stream offset, for the base of the buffer */
+    hs_fp_collector_t *fp_collector; /**< optional false-positive collector */
+    u32 fp_current_trigger_key; /**< key for the current direct trigger */
+    u8 fp_current_trigger_active; /**< non-zero while attributing a trigger */
+    u8 fp_current_trigger_reported; /**< true trigger already counted */
     u8 status; /**< stream status bitmask, using STATUS_ flags above */
 };
 

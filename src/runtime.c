@@ -34,6 +34,7 @@
 #include <string.h>
 
 #include "allocator.h"
+#include "fp_collector.h"
 #include "hs_compile.h" /* for HS_MODE_* flags */
 #include "hs_runtime.h"
 #include "hs_internal.h"
@@ -138,6 +139,10 @@ void populateCoreInfo(struct hs_scratch *s, const struct RoseEngine *rose,
     s->core_info.hbuf = history;
     s->core_info.hlen = hlen;
     s->core_info.buf_offset = offset;
+    s->core_info.fp_collector = NULL;
+    s->core_info.fp_current_trigger_key = 0;
+    s->core_info.fp_current_trigger_active = 0;
+    s->core_info.fp_current_trigger_reported = 0;
 
     /* and some stuff not actually in core info */
     s->som_set_now_offset = ~0ULL;
@@ -315,11 +320,11 @@ void runSmallWriteEngine(const struct SmallWriteEngine *smwr,
     }
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
+static
+hs_error_t hs_scan_internal(const hs_database_t *db, const char *data,
                             unsigned length, unsigned flags,
                             hs_scratch_t *scratch, match_event_handler onEvent,
-                            void *userCtx) {
+                            void *userCtx, hs_fp_collector_t *collector) {
 #ifdef HAVE_NEON
     u8 lilyed = 0;
     u8 lilyTeddyed = 0;
@@ -361,6 +366,7 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
     /* populate core info in scratch */
     populateCoreInfo(scratch, rose, scratch->bstate, onEvent, userCtx, data,
                      length, NULL, 0, 0, 0, flags);
+    scratch->core_info.fp_collector = collector;
 
     clearEvec(rose, scratch->core_info.exhaustionVector);
     if (rose->ckeyCount) {
@@ -498,6 +504,33 @@ set_retval:
     hs_error_t rv = told_to_stop_matching(scratch) ? HS_SCAN_TERMINATED
                                                    : HS_SUCCESS;
     unmarkScratchInUse(scratch);
+    return rv;
+}
+
+HS_PUBLIC_API
+hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
+                            unsigned length, unsigned flags,
+                            hs_scratch_t *scratch, match_event_handler onEvent,
+                            void *userCtx) {
+    return hs_scan_internal(db, data, length, flags, scratch, onEvent, userCtx,
+                            NULL);
+}
+
+HS_PUBLIC_API
+hs_error_t HS_CDECL hs_scan_with_collector(
+    const hs_database_t *db, const char *data, unsigned length, unsigned flags,
+    hs_scratch_t *scratch, match_event_handler onEvent, void *userCtx,
+    hs_fp_collector_t *collector) {
+    hs_error_t err = hs_fp_collector_check_db(collector, db);
+    if (unlikely(err != HS_SUCCESS)) {
+        return err;
+    }
+
+    hs_error_t rv = hs_scan_internal(db, data, length, flags, scratch, onEvent,
+                                     userCtx, collector);
+    if (rv == HS_SUCCESS || rv == HS_SCAN_TERMINATED) {
+        hs_fp_collector_record_scan(collector, length);
+    }
     return rv;
 }
 
@@ -805,6 +838,22 @@ hs_error_t HS_CDECL hs_reset_and_copy_stream(hs_stream_t *to_id,
     return HS_SUCCESS;
 }
 
+HS_PUBLIC_API
+hs_error_t HS_CDECL hs_reset_and_copy_stream_with_collector(
+    hs_stream_t *to_id, const hs_stream_t *from_id, hs_scratch_t *scratch,
+    match_event_handler onEvent, void *context, hs_fp_collector_t *collector) {
+    if (unlikely(!to_id)) {
+        return HS_INVALID;
+    }
+
+    hs_error_t err = hs_fp_collector_check_rose(collector, to_id->rose);
+    if (unlikely(err != HS_SUCCESS)) {
+        return err;
+    }
+
+    return hs_reset_and_copy_stream(to_id, from_id, scratch, onEvent, context);
+}
+
 static really_inline
 void rawStreamExec(struct hs_stream *stream_state, struct hs_scratch *scratch) {
     assert(stream_state);
@@ -1070,6 +1119,28 @@ hs_error_t HS_CDECL hs_scan_stream(hs_stream_t *id, const char *data,
 }
 
 HS_PUBLIC_API
+hs_error_t HS_CDECL hs_scan_stream_with_collector(
+    hs_stream_t *id, const char *data, unsigned length, unsigned flags,
+    hs_scratch_t *scratch, match_event_handler onEvent, void *context,
+    hs_fp_collector_t *collector) {
+    if (unlikely(!id)) {
+        return HS_INVALID;
+    }
+
+    hs_error_t err = hs_fp_collector_check_rose(collector, id->rose);
+    if (unlikely(err != HS_SUCCESS)) {
+        return err;
+    }
+
+    hs_error_t rv = hs_scan_stream(id, data, length, flags, scratch, onEvent,
+                                   context);
+    if (rv == HS_SUCCESS || rv == HS_SCAN_TERMINATED) {
+        hs_fp_collector_record_scan(collector, length);
+    }
+    return rv;
+}
+
+HS_PUBLIC_API
 hs_error_t HS_CDECL hs_close_stream(hs_stream_t *id, hs_scratch_t *scratch,
                                     match_event_handler onEvent,
                                     void *context) {
@@ -1096,6 +1167,22 @@ hs_error_t HS_CDECL hs_close_stream(hs_stream_t *id, hs_scratch_t *scratch,
     hs_stream_free(id);
 
     return HS_SUCCESS;
+}
+
+HS_PUBLIC_API
+hs_error_t HS_CDECL hs_close_stream_with_collector(
+    hs_stream_t *id, hs_scratch_t *scratch, match_event_handler onEvent,
+    void *context, hs_fp_collector_t *collector) {
+    if (unlikely(!id)) {
+        return HS_INVALID;
+    }
+
+    hs_error_t err = hs_fp_collector_check_rose(collector, id->rose);
+    if (unlikely(err != HS_SUCCESS)) {
+        return err;
+    }
+
+    return hs_close_stream(id, scratch, onEvent, context);
 }
 
 HS_PUBLIC_API
@@ -1126,6 +1213,22 @@ hs_error_t HS_CDECL hs_reset_stream(hs_stream_t *id, UNUSED unsigned int flags,
     init_stream(id, id->rose, 0);
 
     return HS_SUCCESS;
+}
+
+HS_PUBLIC_API
+hs_error_t HS_CDECL hs_reset_stream_with_collector(
+    hs_stream_t *id, unsigned int flags, hs_scratch_t *scratch,
+    match_event_handler onEvent, void *context, hs_fp_collector_t *collector) {
+    if (unlikely(!id)) {
+        return HS_INVALID;
+    }
+
+    hs_error_t err = hs_fp_collector_check_rose(collector, id->rose);
+    if (unlikely(err != HS_SUCCESS)) {
+        return err;
+    }
+
+    return hs_reset_stream(id, flags, scratch, onEvent, context);
 }
 
 HS_PUBLIC_API
@@ -1248,6 +1351,29 @@ hs_error_t HS_CDECL hs_scan_vector(const hs_database_t *db,
 }
 
 HS_PUBLIC_API
+hs_error_t HS_CDECL hs_scan_vector_with_collector(
+    const hs_database_t *db, const char * const * data,
+    const unsigned int *length, unsigned int count, unsigned int flags,
+    hs_scratch_t *scratch, match_event_handler onEvent, void *context,
+    hs_fp_collector_t *collector) {
+    hs_error_t err = hs_fp_collector_check_db(collector, db);
+    if (unlikely(err != HS_SUCCESS)) {
+        return err;
+    }
+
+    hs_error_t rv = hs_scan_vector(db, data, length, count, flags, scratch,
+                                   onEvent, context);
+    if (rv == HS_SUCCESS || rv == HS_SCAN_TERMINATED) {
+        size_t bytes = 0;
+        for (u32 i = 0; i < count; i++) {
+            bytes += length[i];
+        }
+        hs_fp_collector_record_scan(collector, bytes);
+    }
+    return rv;
+}
+
+HS_PUBLIC_API
 hs_error_t HS_CDECL hs_compress_stream(const hs_stream_t *stream, char *buf,
                                        size_t buf_space, size_t *used_space) {
     if (unlikely(!stream || !used_space)) {
@@ -1346,4 +1472,22 @@ hs_error_t HS_CDECL hs_reset_and_expand_stream(hs_stream_t *to_stream,
     } else {
         return HS_INVALID;
     }
+}
+
+HS_PUBLIC_API
+hs_error_t HS_CDECL hs_reset_and_expand_stream_with_collector(
+    hs_stream_t *to_stream, const char *buf, size_t buf_size,
+    hs_scratch_t *scratch, match_event_handler onEvent, void *context,
+    hs_fp_collector_t *collector) {
+    if (unlikely(!to_stream)) {
+        return HS_INVALID;
+    }
+
+    hs_error_t err = hs_fp_collector_check_rose(collector, to_stream->rose);
+    if (unlikely(err != HS_SUCCESS)) {
+        return err;
+    }
+
+    return hs_reset_and_expand_stream(to_stream, buf, buf_size, scratch,
+                                      onEvent, context);
 }
