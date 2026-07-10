@@ -28,6 +28,7 @@
 
 #include "rose_build_impl.h"
 
+#include "fp_collector.h"
 #include "ue2common.h"
 #include "grey.h"
 #include "rose_build_add_internal.h"
@@ -422,6 +423,95 @@ bool validateTransientMask(const vector<CharReach> &mask, bool anchored,
 }
 
 static
+void buildMatcherLiteralMask(const ue2_literal &lit,
+                             const vector<u8> &literal_msk,
+                             const vector<u8> &literal_cmp,
+                             vector<u8> &msk, vector<u8> &cmp) {
+    msk = literal_msk;
+    cmp = literal_cmp;
+    normaliseLiteralMask(lit, msk, cmp);
+
+    const size_t suffix_len = min(lit.length(), size_t{HWLM_MASKLEN});
+    const bool mixed_suffix = mixed_sensitivity_in(lit.end() - suffix_len,
+                                                   lit.end());
+    if (msk.empty() && !mixed_suffix) {
+        return;
+    }
+
+    while (msk.size() < HWLM_MASKLEN) {
+        msk.insert(msk.begin(), 0);
+        cmp.insert(cmp.begin(), 0);
+    }
+
+    if (mixed_suffix) {
+        auto it = lit.rbegin();
+        for (size_t i = 0; i < suffix_len; i++, ++it) {
+            if (!it->nocase) {
+                const size_t offset = HWLM_MASKLEN - i - 1;
+                make_and_cmp_mask(*it, &msk[offset], &cmp[offset]);
+            }
+        }
+    }
+
+    normaliseLiteralMask(lit, msk, cmp);
+}
+
+static
+bool feedbackBlocksTransientMask(const vector<CharReach> &mask,
+                                 const CompileContext &cc) {
+    if (!cc.fp_feedback) {
+        return false;
+    }
+
+    vector<ue2_literal> lits;
+    u32 lit_min_bound;
+    u32 lit_length;
+    if (!findMaskLiterals(mask, &lits, &lit_min_bound, &lit_length)) {
+        return false;
+    }
+
+    const u32 delay = verify_u32(mask.size()) - lit_length - lit_min_bound;
+    vector<u8> literal_msk, literal_cmp;
+    if (cc.grey.roseHamsterMasks) {
+        buildLiteralMask(mask, literal_msk, literal_cmp, delay);
+    }
+
+    for (const auto &lit : lits) {
+        vector<u8> msk, cmp;
+        buildMatcherLiteralMask(lit, literal_msk, literal_cmp, msk, cmp);
+
+        ue2_literal final_lit(lit);
+        if (final_lit.length() > ROSE_SHORT_LITERAL_LEN_MAX) {
+            final_lit.erase(0, final_lit.length()
+                                  - ROSE_SHORT_LITERAL_LEN_MAX);
+        }
+
+        if (cc.fp_block_checked_count) {
+            (*cc.fp_block_checked_count)++;
+        }
+
+        const string &s = final_lit.get_string();
+        const u8 *mask_ptr = msk.empty() ? nullptr : msk.data();
+        const u8 *cmp_ptr = cmp.empty() ? nullptr : cmp.data();
+        if (!hs_fp_feedback_fragment_is_bad(cc.fp_feedback, s.data(),
+                                            s.size(),
+                                            final_lit.any_nocase(), mask_ptr,
+                                            cmp_ptr, msk.size())) {
+            continue;
+        }
+
+        DEBUG_PRINTF("rejecting transient masked literal due to fp feedback: "
+                     "'%s'\n", escapeString(s).c_str());
+        if (cc.fp_blocked_count) {
+            (*cc.fp_blocked_count)++;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static
 bool maskIsNeeded(const ue2_literal &lit, const NGHolder &g) {
     flat_set<NFAVertex> curr = {g.accept};
     flat_set<NFAVertex> next;
@@ -721,6 +811,9 @@ bool checkAllowMask(const vector<CharReach> &mask, ue2_literal *lit,
 bool RoseBuildImpl::add(bool anchored, const vector<CharReach> &mask,
                         const flat_set<ReportID> &reports) {
     if (validateTransientMask(mask, anchored, false, cc.grey)) {
+        if (feedbackBlocksTransientMask(mask, cc)) {
+            return false;
+        }
         bool eod = false;
         addTransientMask(*this, mask, reports, anchored, eod);
         return true;
@@ -744,7 +837,11 @@ bool RoseBuildImpl::add(bool anchored, const vector<CharReach> &mask,
 bool RoseBuildImpl::validateMask(const vector<CharReach> &mask,
                                  UNUSED const flat_set<ReportID> &reports,
                                  bool anchored, bool eod) const {
-    return validateTransientMask(mask, anchored, eod, cc.grey);
+    if (!validateTransientMask(mask, anchored, eod, cc.grey)) {
+        return false;
+    }
+
+    return !feedbackBlocksTransientMask(mask, cc);
 }
 
 static

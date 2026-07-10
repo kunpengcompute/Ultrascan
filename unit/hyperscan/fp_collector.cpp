@@ -31,6 +31,7 @@
 #include "hs.h"
 #include "test_util.h"
 
+#include <cstring>
 #include <string>
 
 namespace {
@@ -52,6 +53,7 @@ struct FpFeedbackEntry {
     u32 literal_count = 0;
     u8 table = 0;
     u8 flags = 0;
+    size_t mask_length = 0;
     u64a trigger_count = 0;
     u64a true_trigger_count = 0;
     u64a final_report_count = 0;
@@ -94,7 +96,7 @@ bool findFeedbackByBytes(const hs_fp_feedback_t *feedback,
         hs_error_t err = hs_fp_feedback_bad_fragment_info(
             feedback, i, &entry.key, &entry.fragment_id,
             &entry.literal_count, &entry.table, &entry.flags, &bytes, &length,
-            nullptr, nullptr, nullptr, &entry.trigger_count,
+            nullptr, nullptr, &entry.mask_length, &entry.trigger_count,
             &entry.true_trigger_count, &entry.final_report_count,
             &entry.false_positive_count);
         if (err != HS_SUCCESS || !bytes) {
@@ -108,6 +110,29 @@ bool findFeedbackByBytes(const hs_fp_feedback_t *feedback,
             }
             return true;
         }
+    }
+
+    return false;
+}
+
+bool findMaskedFeedback(const hs_fp_feedback_t *feedback,
+                        FpFeedbackEntry *out) {
+    for (u32 i = 0; i < hs_fp_feedback_bad_fragment_count(feedback); i++) {
+        FpFeedbackEntry entry;
+        hs_error_t err = hs_fp_feedback_bad_fragment_info(
+            feedback, i, &entry.key, &entry.fragment_id,
+            &entry.literal_count, &entry.table, &entry.flags, nullptr, nullptr,
+            nullptr, nullptr, &entry.mask_length, &entry.trigger_count,
+            &entry.true_trigger_count, &entry.final_report_count,
+            &entry.false_positive_count);
+        if (err != HS_SUCCESS || !entry.mask_length) {
+            continue;
+        }
+
+        if (out) {
+            *out = entry;
+        }
+        return true;
     }
 
     return false;
@@ -588,6 +613,105 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
     hs_free_compile_error(ctx_err);
     hs_free_compile_error(normal_err);
     ASSERT_EQ(HS_SUCCESS, hs_compile_context_free(ctx));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+    hs_free_compile_error(compile_err);
+}
+
+TEST(FpCollector, FeedbackBlocksDecoratedMaskedLiteral) {
+    const char *expr = "[\\x00-\\x1f]foo";
+    unsigned int flags = 0;
+    unsigned int id = 12;
+    hs_expr_ext ext = {};
+    ext.flags = HS_EXT_FLAG_MIN_OFFSET;
+    ext.min_offset = 10;
+    const hs_expr_ext *extp = &ext;
+
+    hs_compile_error_t *compile_err = nullptr;
+    hs_database_t *db = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_ext_multi(&expr, &flags, &id, &extp, 1,
+                                   HS_MODE_BLOCK, nullptr, &db,
+                                   &compile_err));
+    ASSERT_NE(nullptr, db);
+
+    hs_scratch_t *scratch = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(db, &scratch));
+
+    hs_fp_collector_t *collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
+
+    const char collect_data[] = "\x01" "foo";
+    for (u32 i = 0; i < 1000; i++) {
+        CallBackContext matches;
+        ASSERT_EQ(HS_SUCCESS,
+                  hs_scan_with_collector(db, collect_data,
+                                         sizeof(collect_data) - 1, 0, scratch,
+                                         record_cb, &matches, collector));
+        ASSERT_TRUE(matches.matches.empty());
+    }
+
+    hs_fp_report_t *report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+
+    hs_fp_feedback_t *feedback = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_build(report, &feedback));
+    ASSERT_GE(hs_fp_feedback_bad_fragment_count(feedback), 1U);
+
+    FpFeedbackEntry entry;
+    ASSERT_TRUE(findMaskedFeedback(feedback, &entry));
+    EXPECT_GT(entry.mask_length, 0U);
+
+    hs_compile_context_t *ctx = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_compile_context_create(&ctx));
+    ASSERT_EQ(HS_SUCCESS, hs_compile_context_set_fp_feedback(ctx, feedback));
+
+    hs_database_t *normal_db = nullptr;
+    hs_database_t *ctx_db = nullptr;
+    hs_compile_error_t *normal_err = nullptr;
+    hs_compile_error_t *ctx_err = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_multi(&expr, &flags, &id, 1, HS_MODE_BLOCK, nullptr,
+                               &normal_db, &normal_err));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_multi_with_context(&expr, &flags, &id, 1,
+                                            HS_MODE_BLOCK, nullptr, ctx,
+                                            &ctx_db, &ctx_err));
+    ASSERT_NE(nullptr, normal_db);
+    ASSERT_NE(nullptr, ctx_db);
+    EXPECT_GE(hs_compile_context_block_checked_count(ctx), 1U);
+    EXPECT_GE(hs_compile_context_blocked_count(ctx), 1U);
+
+    hs_scratch_t *normal_scratch = nullptr;
+    hs_scratch_t *ctx_scratch = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(normal_db, &normal_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(ctx_db, &ctx_scratch));
+
+    const char *scan_data[] = {"\x01" "foo", "\x1f" "foo", "Afoo",
+                               "xx\x02" "fooyy"};
+    for (const char *data : scan_data) {
+        CallBackContext normal_matches;
+        CallBackContext ctx_matches;
+        const unsigned int length = static_cast<unsigned int>(strlen(data));
+        ASSERT_EQ(HS_SUCCESS,
+                  hs_scan(normal_db, data, length, 0, normal_scratch,
+                          record_cb, &normal_matches));
+        ASSERT_EQ(HS_SUCCESS,
+                  hs_scan(ctx_db, data, length, 0, ctx_scratch, record_cb,
+                          &ctx_matches));
+        EXPECT_EQ(normal_matches.matches, ctx_matches.matches);
+    }
+
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(ctx_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(normal_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(ctx_db));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(normal_db));
+    hs_free_compile_error(ctx_err);
+    hs_free_compile_error(normal_err);
+    ASSERT_EQ(HS_SUCCESS, hs_compile_context_free(ctx));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
     ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
