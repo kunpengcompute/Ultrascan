@@ -67,6 +67,11 @@ char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
                                    const char *bytes, size_t length,
                                    char nocase);
 
+char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
+                                    const char *bytes, size_t length,
+                                    char nocase, const u8 *mask,
+                                    const u8 *cmp, size_t mask_length);
+
 u32 hs_compile_context_observe_checked_count(
         const hs_compile_context_t *ctx);
 

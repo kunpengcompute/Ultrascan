@@ -33,6 +33,7 @@
 
 #include "rose_build_matchers.h"
 
+#include "fp_collector.h"
 #include "rose_build_dump.h"
 #include "rose_build_impl.h"
 #include "rose_build_lit_accel.h"
@@ -699,6 +700,35 @@ struct MatcherProto {
 }
 
 static
+void checkFpFeedbackMatcherFragment(const RoseBuildImpl &build,
+                                    UNUSED const LitFragment &f,
+                                    UNUSED const rose_literal_id &lit,
+                                    const string &s_final, bool nocase,
+                                    const vector<u8> &msk,
+                                    const vector<u8> &cmp) {
+    if (!build.cc.fp_feedback) {
+        return;
+    }
+
+    if (build.cc.fp_block_checked_count) {
+        (*build.cc.fp_block_checked_count)++;
+    }
+
+    const u8 *mask_ptr = msk.empty() ? nullptr : msk.data();
+    const u8 *cmp_ptr = cmp.empty() ? nullptr : cmp.data();
+    if (!hs_fp_feedback_fragment_is_bad(build.cc.fp_feedback, s_final.data(),
+                                        s_final.size(), nocase, mask_ptr,
+                                        cmp_ptr, msk.size())) {
+        return;
+    }
+
+    DEBUG_PRINTF("fp feedback matcher fallback hit: fragment_id=%u, "
+                 "table=%u, lit_ids=%zu, s='%s'\n",
+                 f.fragment_id, (u32)lit.table, f.lit_ids.size(),
+                 escapeString(s_final).c_str());
+}
+
+static
 void addFragmentLiteral(const RoseBuildImpl &build, MatcherProto &mp,
                         const LitFragment &f, u32 id, size_t max_len) {
     const rose_literal_id &lit = build.literals.at(id);
@@ -736,6 +766,8 @@ void addFragmentLiteral(const RoseBuildImpl &build, MatcherProto &mp,
         DEBUG_PRINTF("msk/cmp for literal can't match, skipping\n");
         return;
     }
+
+    checkFpFeedbackMatcherFragment(build, f, lit, s_final, nocase, msk, cmp);
 
     const auto &groups = f.groups;
 

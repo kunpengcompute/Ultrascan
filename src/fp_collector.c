@@ -762,6 +762,47 @@ char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
     return 0;
 }
 
+char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
+                                    const char *bytes, size_t length,
+                                    char nocase, const u8 *mask,
+                                    const u8 *cmp, size_t mask_length) {
+    if (!feedback || !feedback->bad_fragment_count || !bytes || !length) {
+        return 0;
+    }
+    if (mask_length && (!mask || !cmp)) {
+        return 0;
+    }
+
+    const u8 nocase_flag = nocase ? ROSE_FP_FRAGMENT_FLAG_NOCASE : 0;
+
+    for (u32 i = 0; i < feedback->bad_fragment_count; i++) {
+        const struct hs_fp_feedback_entry *entry = feedback->entries + i;
+        if (!entry->length || entry->length > length ||
+            ((entry->flags & ROSE_FP_FRAGMENT_FLAG_NOCASE) != nocase_flag)) {
+            continue;
+        }
+
+        const char *suffix = bytes + length - entry->length;
+        if (memcmp(entry->bytes, suffix, entry->length)) {
+            continue;
+        }
+
+        if (entry->mask_length != mask_length) {
+            continue;
+        }
+
+        if (mask_length &&
+            (memcmp(entry->mask, mask, mask_length) ||
+             memcmp(entry->cmp, cmp, mask_length))) {
+            continue;
+        }
+
+        return 1;
+    }
+
+    return 0;
+}
+
 hs_error_t hs_fp_collector_check_db(const hs_fp_collector_t *collector,
                                     const hs_database_t *db) {
     if (!collector) {

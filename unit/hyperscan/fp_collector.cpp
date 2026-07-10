@@ -453,6 +453,7 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
     ASSERT_NE(nullptr, ctx_db);
     EXPECT_GE(hs_compile_context_observe_checked_count(ctx), 1U);
     EXPECT_GE(hs_compile_context_observe_hit_count(ctx), 1U);
+    EXPECT_GE(hs_compile_context_block_checked_count(ctx), 1U);
 
     hs_scratch_t *normal_scratch = nullptr;
     hs_scratch_t *ctx_scratch = nullptr;
