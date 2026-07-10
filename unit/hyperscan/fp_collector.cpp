@@ -31,6 +31,7 @@
 #include "hs.h"
 #include "test_util.h"
 
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -50,6 +51,68 @@ bool isKnownEngine(unsigned int engine) {
     default:
         return false;
     }
+}
+
+void expectFragmentsEqual(const hs_fp_fragment_info_t &a,
+                          const hs_fp_fragment_info_t &b) {
+    EXPECT_EQ(a.key, b.key);
+    EXPECT_EQ(a.fragment_id, b.fragment_id);
+    EXPECT_EQ(a.literal_count, b.literal_count);
+    EXPECT_EQ(a.table, b.table);
+    EXPECT_EQ(a.engine, b.engine);
+    EXPECT_EQ(a.flags, b.flags);
+    ASSERT_EQ(a.length, b.length);
+    if (a.length) {
+        ASSERT_NE(nullptr, a.bytes);
+        ASSERT_NE(nullptr, b.bytes);
+        EXPECT_EQ(0, memcmp(a.bytes, b.bytes, a.length));
+    }
+    ASSERT_EQ(a.mask_length, b.mask_length);
+    if (a.mask_length) {
+        ASSERT_NE(nullptr, a.mask);
+        ASSERT_NE(nullptr, b.mask);
+        ASSERT_NE(nullptr, a.cmp);
+        ASSERT_NE(nullptr, b.cmp);
+        EXPECT_EQ(0, memcmp(a.mask, b.mask, a.mask_length));
+        EXPECT_EQ(0, memcmp(a.cmp, b.cmp, a.mask_length));
+    } else {
+        EXPECT_EQ(nullptr, b.mask);
+        EXPECT_EQ(nullptr, b.cmp);
+    }
+    EXPECT_EQ(a.trigger_count, b.trigger_count);
+    EXPECT_EQ(a.true_trigger_count, b.true_trigger_count);
+    EXPECT_EQ(a.final_report_count, b.final_report_count);
+    EXPECT_EQ(a.false_positive_count, b.false_positive_count);
+}
+
+void expectReportSummariesEqual(const hs_fp_report_t *a,
+                                const hs_fp_report_t *b) {
+    hs_fp_report_summary_t sa = {};
+    hs_fp_report_summary_t sb = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(a, &sa));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(b, &sb));
+    EXPECT_EQ(sa.fragment_count, sb.fragment_count);
+    EXPECT_EQ(sa.scan_calls, sb.scan_calls);
+    EXPECT_EQ(sa.scan_bytes, sb.scan_bytes);
+    EXPECT_EQ(sa.trigger_count, sb.trigger_count);
+    EXPECT_EQ(sa.true_trigger_count, sb.true_trigger_count);
+    EXPECT_EQ(sa.final_report_count, sb.final_report_count);
+    EXPECT_EQ(sa.false_positive_count, sb.false_positive_count);
+    EXPECT_EQ(sa.unknown_report_count, sb.unknown_report_count);
+    EXPECT_EQ(sa.dropped_trigger_count, sb.dropped_trigger_count);
+}
+
+void expectFeedbackSummariesEqual(const hs_fp_feedback_t *a,
+                                  const hs_fp_feedback_t *b) {
+    hs_fp_feedback_summary_t sa = {};
+    hs_fp_feedback_summary_t sb = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_get_summary(a, &sa));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_get_summary(b, &sb));
+    EXPECT_EQ(sa.bad_fragment_count, sb.bad_fragment_count);
+    EXPECT_EQ(sa.scan_calls, sb.scan_calls);
+    EXPECT_EQ(sa.scan_bytes, sb.scan_bytes);
+    EXPECT_EQ(sa.total_false_positive_count,
+              sb.total_false_positive_count);
 }
 
 bool findEntryByBytes(const hs_fp_report_t *report, const std::string &needle,
@@ -138,6 +201,8 @@ TEST(FpCollector, NullArguments) {
     hs_fp_report_summary_t report_summary = {};
     hs_fp_feedback_summary_t feedback_summary = {};
     hs_fp_fragment_info_t fragment = {};
+    char *serialized = nullptr;
+    size_t serialized_len = 0;
 
     ASSERT_EQ(HS_INVALID, hs_fp_collector_create(nullptr, nullptr));
     ASSERT_EQ(HS_INVALID, hs_fp_collector_create(nullptr, &collector));
@@ -159,6 +224,27 @@ TEST(FpCollector, NullArguments) {
     EXPECT_EQ(HS_INVALID,
               hs_fp_feedback_get_fragment(nullptr, 0, &fragment));
     EXPECT_EQ(HS_INVALID, hs_fp_feedback_get_fragment(feedback, 0, nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_report_serialize(nullptr, &serialized, &serialized_len));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_report_serialize(report, nullptr, &serialized_len));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_report_serialize(report, &serialized, nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_report_deserialize(nullptr, 0, &report));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_report_deserialize("x", 1, nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_serialize(nullptr, &serialized,
+                                       &serialized_len));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_serialize(feedback, nullptr, &serialized_len));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_serialize(feedback, &serialized, nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_deserialize(nullptr, 0, &feedback));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_deserialize("x", 1, nullptr));
     EXPECT_EQ(0U, hs_compile_context_observe_checked_count(nullptr));
     EXPECT_EQ(0U, hs_compile_context_observe_hit_count(nullptr));
     EXPECT_EQ(0U, hs_compile_context_block_checked_count(nullptr));
@@ -501,6 +587,143 @@ TEST(FpCollector, CollectorDatabaseMismatchRejected) {
     ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
     ASSERT_EQ(HS_SUCCESS, hs_free_database(db2));
     ASSERT_EQ(HS_SUCCESS, hs_free_database(db1));
+}
+
+TEST(FpCollector, SerializeReportAndFeedbackRoundTrip) {
+    const char *expr = "foo";
+    unsigned int flags = 0;
+    unsigned int id = 1;
+    hs_expr_ext ext = {};
+    ext.flags = HS_EXT_FLAG_MIN_OFFSET;
+    ext.min_offset = 10;
+    const hs_expr_ext *extp = &ext;
+
+    hs_compile_error_t *compile_err = nullptr;
+    hs_database_t *db = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_compile_ext_multi(&expr, &flags, &id, &extp, 1,
+                                               HS_MODE_BLOCK, nullptr, &db,
+                                               &compile_err));
+    ASSERT_NE(nullptr, db);
+
+    hs_scratch_t *scratch = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(db, &scratch));
+
+    hs_fp_collector_t *collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
+
+    const char data[] = "foo";
+    for (u32 i = 0; i < 1000; i++) {
+        CallBackContext c;
+        ASSERT_EQ(HS_SUCCESS,
+                  hs_scan_with_collector(db, data, sizeof(data) - 1, 0,
+                                         scratch, record_cb, &c, collector));
+        ASSERT_TRUE(c.matches.empty());
+    }
+
+    hs_fp_report_t *report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+    ASSERT_NE(nullptr, report);
+
+    char *report_bytes = nullptr;
+    size_t report_len = 0;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_report_serialize(report, &report_bytes, &report_len));
+    ASSERT_NE(nullptr, report_bytes);
+    ASSERT_GT(report_len, 0U);
+
+    hs_fp_report_t *report_copy = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_report_deserialize(report_bytes, report_len,
+                                       &report_copy));
+    ASSERT_NE(nullptr, report_copy);
+    expectReportSummariesEqual(report, report_copy);
+
+    FpReportEntry report_entry = {};
+    FpReportEntry report_copy_entry = {};
+    ASSERT_TRUE(findEntryByBytes(report, "foo", &report_entry));
+    ASSERT_TRUE(findEntryByBytes(report_copy, "foo", &report_copy_entry));
+    expectFragmentsEqual(report_entry, report_copy_entry);
+
+    hs_fp_feedback_t *feedback = nullptr;
+    hs_fp_feedback_t *feedback_from_copy = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_build(report, &feedback));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_build(report_copy, &feedback_from_copy));
+    ASSERT_NE(nullptr, feedback);
+    ASSERT_NE(nullptr, feedback_from_copy);
+    expectFeedbackSummariesEqual(feedback, feedback_from_copy);
+
+    char *feedback_bytes = nullptr;
+    size_t feedback_len = 0;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_serialize(feedback, &feedback_bytes,
+                                       &feedback_len));
+    ASSERT_NE(nullptr, feedback_bytes);
+    ASSERT_GT(feedback_len, 0U);
+
+    hs_fp_feedback_t *feedback_copy = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_deserialize(feedback_bytes, feedback_len,
+                                         &feedback_copy));
+    ASSERT_NE(nullptr, feedback_copy);
+    expectFeedbackSummariesEqual(feedback, feedback_copy);
+
+    FpFeedbackEntry feedback_entry = {};
+    FpFeedbackEntry feedback_copy_entry = {};
+    ASSERT_TRUE(findFeedbackByBytes(feedback, "foo", &feedback_entry));
+    ASSERT_TRUE(findFeedbackByBytes(feedback_copy, "foo",
+                                    &feedback_copy_entry));
+    expectFragmentsEqual(feedback_entry, feedback_copy_entry);
+
+    hs_fp_report_t *bad_report = nullptr;
+    hs_fp_feedback_t *bad_feedback = nullptr;
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_report_deserialize(report_bytes, report_len - 1,
+                                       &bad_report));
+    EXPECT_EQ(nullptr, bad_report);
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_deserialize(feedback_bytes, feedback_len - 1,
+                                         &bad_feedback));
+    EXPECT_EQ(nullptr, bad_feedback);
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_deserialize(report_bytes, report_len,
+                                         &bad_feedback));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_report_deserialize(feedback_bytes, feedback_len,
+                                       &bad_report));
+
+    char saved = report_bytes[0];
+    report_bytes[0] ^= 0x7f;
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_report_deserialize(report_bytes, report_len,
+                                       &bad_report));
+    report_bytes[0] = saved;
+
+    saved = report_bytes[4];
+    report_bytes[4] ^= 0x7f;
+    EXPECT_EQ(HS_DB_VERSION_ERROR,
+              hs_fp_report_deserialize(report_bytes, report_len,
+                                       &bad_report));
+    report_bytes[4] = saved;
+
+    saved = feedback_bytes[4];
+    feedback_bytes[4] ^= 0x7f;
+    EXPECT_EQ(HS_DB_VERSION_ERROR,
+              hs_fp_feedback_deserialize(feedback_bytes, feedback_len,
+                                         &bad_feedback));
+    feedback_bytes[4] = saved;
+
+    std::free(feedback_bytes);
+    std::free(report_bytes);
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback_copy));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback_from_copy));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report_copy));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+    hs_free_compile_error(compile_err);
 }
 
 TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {

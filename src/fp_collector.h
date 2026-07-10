@@ -72,14 +72,16 @@ char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
                                     char nocase, const u8 *mask,
                                     const u8 *cmp, size_t mask_length);
 
-u32 hs_compile_context_observe_checked_count(
+unsigned int hs_compile_context_observe_checked_count(
         const hs_compile_context_t *ctx);
 
-u32 hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx);
+unsigned int hs_compile_context_observe_hit_count(
+        const hs_compile_context_t *ctx);
 
-u32 hs_compile_context_block_checked_count(const hs_compile_context_t *ctx);
+unsigned int hs_compile_context_block_checked_count(
+        const hs_compile_context_t *ctx);
 
-u32 hs_compile_context_blocked_count(const hs_compile_context_t *ctx);
+unsigned int hs_compile_context_blocked_count(const hs_compile_context_t *ctx);
 
 #ifdef __cplusplus
 } /* extern C */

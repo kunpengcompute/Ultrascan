@@ -143,6 +143,34 @@ hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
 hs_error_t HS_CDECL hs_compile_context_free(hs_compile_context_t *ctx);
 
 /**
+ * Return the number of bad fragments checked during compile-time observe.
+ * NULL returns zero.
+ */
+unsigned int HS_CDECL hs_compile_context_observe_checked_count(
+    const hs_compile_context_t *ctx);
+
+/**
+ * Return the number of feedback bad fragments found in the newly compiled
+ * database during compile-time observe. NULL returns zero.
+ */
+unsigned int HS_CDECL hs_compile_context_observe_hit_count(
+    const hs_compile_context_t *ctx);
+
+/**
+ * Return the number of compile-time split/matcher candidates checked against
+ * false-positive feedback. NULL returns zero.
+ */
+unsigned int HS_CDECL hs_compile_context_block_checked_count(
+    const hs_compile_context_t *ctx);
+
+/**
+ * Return the number of compile-time candidates rejected by false-positive
+ * feedback. NULL returns zero.
+ */
+unsigned int HS_CDECL hs_compile_context_blocked_count(
+    const hs_compile_context_t *ctx);
+
+/**
  * A type containing information on the target platform which may optionally be
  * provided to the compile calls (@ref hs_compile(), @ref hs_compile_multi(),
  * @ref hs_compile_ext_multi()).

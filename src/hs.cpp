@@ -960,24 +960,27 @@ hs_error_t HS_CDECL hs_compile_context_free(hs_compile_context_t *ctx) {
     return HS_SUCCESS;
 }
 
-extern "C"
-u32 hs_compile_context_observe_checked_count(
+extern "C" HS_PUBLIC_API
+unsigned int HS_CDECL hs_compile_context_observe_checked_count(
         const hs_compile_context_t *ctx) {
     return ctx ? ctx->fp_observe_checked_count : 0;
 }
 
-extern "C"
-u32 hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx) {
+extern "C" HS_PUBLIC_API
+unsigned int HS_CDECL hs_compile_context_observe_hit_count(
+        const hs_compile_context_t *ctx) {
     return ctx ? ctx->fp_observe_hit_count : 0;
 }
 
-extern "C"
-u32 hs_compile_context_block_checked_count(const hs_compile_context_t *ctx) {
+extern "C" HS_PUBLIC_API
+unsigned int HS_CDECL hs_compile_context_block_checked_count(
+        const hs_compile_context_t *ctx) {
     return ctx ? ctx->fp_block_checked_count : 0;
 }
 
-extern "C"
-u32 hs_compile_context_blocked_count(const hs_compile_context_t *ctx) {
+extern "C" HS_PUBLIC_API
+unsigned int HS_CDECL hs_compile_context_blocked_count(
+        const hs_compile_context_t *ctx) {
     return ctx ? ctx->fp_blocked_count : 0;
 }
 

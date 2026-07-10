@@ -10,6 +10,10 @@ EXPORTS
    hs_compile
    hs_compile_context_create
    hs_compile_context_free
+   hs_compile_context_block_checked_count
+   hs_compile_context_blocked_count
+   hs_compile_context_observe_checked_count
+   hs_compile_context_observe_hit_count
    hs_compile_context_set_fp_feedback
    hs_compile_ext_multi
    hs_compile_ext_multi_with_context
@@ -30,12 +34,16 @@ EXPORTS
    hs_fp_collector_report
    hs_fp_collector_reset
    hs_fp_feedback_build
+   hs_fp_feedback_deserialize
    hs_fp_feedback_free
    hs_fp_feedback_get_fragment
    hs_fp_feedback_get_summary
+   hs_fp_feedback_serialize
+   hs_fp_report_deserialize
    hs_fp_report_free
    hs_fp_report_get_fragment
    hs_fp_report_get_summary
+   hs_fp_report_serialize
    hs_free_compile_error
    hs_free_database
    hs_free_scratch
