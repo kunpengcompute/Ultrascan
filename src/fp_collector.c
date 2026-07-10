@@ -68,7 +68,7 @@ struct hs_fp_collector {
 };
 
 struct hs_fp_report_entry {
-    u32 key;
+    u64a key;
     u32 fragment_id;
     u32 literal_count;
     u8 table;
@@ -98,7 +98,7 @@ struct hs_fp_report {
 };
 
 struct hs_fp_feedback_entry {
-    u32 key;
+    u64a key;
     u32 fragment_id;
     u32 literal_count;
     u8 table;
@@ -237,7 +237,6 @@ static
 void fill_report_entry(struct hs_fp_report_entry *entry,
                        const hs_fp_collector_t *collector,
                        const struct hs_fp_counter *counter) {
-    entry->key = counter->key;
     entry->fragment_id = ROSE_OFFSET_INVALID;
     entry->trigger_count = counter->trigger_count;
     entry->true_trigger_count = counter->true_trigger_count;
@@ -249,6 +248,7 @@ void fill_report_entry(struct hs_fp_report_entry *entry,
         return;
     }
 
+    entry->key = meta->stableKey;
     entry->fragment_id = meta->fragmentId;
     entry->literal_count = meta->literalCount;
     entry->table = meta->table;
@@ -771,7 +771,8 @@ hs_error_t hs_fp_feedback_clone(const hs_fp_feedback_t *src,
 static
 char feedback_entry_matches_meta(const struct hs_fp_feedback_entry *entry,
                                  const struct RoseFpFragmentMeta *meta) {
-    if (entry->table != meta->table ||
+    if (entry->key != meta->stableKey ||
+        entry->table != meta->table ||
         entry->flags != meta->flags ||
         entry->length != meta->length ||
         entry->mask_length != meta->maskLength) {
@@ -1004,165 +1005,4 @@ void hs_fp_collector_record_final_report(struct hs_scratch *scratch) {
         counter->true_trigger_count =
             sat_add_u64a(counter->true_trigger_count, 1);
     }
-}
-
-u64a hs_fp_report_scan_calls(const hs_fp_report_t *report) {
-    return report ? report->scan_calls : 0;
-}
-
-u64a hs_fp_report_scan_bytes(const hs_fp_report_t *report) {
-    return report ? report->scan_bytes : 0;
-}
-
-u64a hs_fp_report_trigger_count(const hs_fp_report_t *report) {
-    return report ? report->trigger_count : 0;
-}
-
-u64a hs_fp_report_true_trigger_count(const hs_fp_report_t *report) {
-    return report ? report->true_trigger_count : 0;
-}
-
-u64a hs_fp_report_final_report_count(const hs_fp_report_t *report) {
-    return report ? report->final_report_count : 0;
-}
-
-u64a hs_fp_report_unknown_report_count(const hs_fp_report_t *report) {
-    return report ? report->unknown_report_count : 0;
-}
-
-u64a hs_fp_report_dropped_trigger_count(const hs_fp_report_t *report) {
-    return report ? report->dropped_trigger_count : 0;
-}
-
-u32 hs_fp_report_entry_count(const hs_fp_report_t *report) {
-    return report ? report->entry_count : 0;
-}
-
-hs_error_t hs_fp_report_entry_info(const hs_fp_report_t *report, u32 index,
-                                   u32 *key, u32 *fragment_id,
-                                   u32 *literal_count, u8 *table,
-                                   u8 *flags, const u8 **bytes,
-                                   size_t *length, const u8 **mask,
-                                   const u8 **cmp, size_t *mask_length,
-                                   u64a *trigger_count,
-                                   u64a *true_trigger_count,
-                                   u64a *final_report_count) {
-    if (!report || index >= report->entry_count) {
-        return HS_INVALID;
-    }
-
-    const struct hs_fp_report_entry *entry = report->entries + index;
-    if (key) {
-        *key = entry->key;
-    }
-    if (fragment_id) {
-        *fragment_id = entry->fragment_id;
-    }
-    if (literal_count) {
-        *literal_count = entry->literal_count;
-    }
-    if (table) {
-        *table = entry->table;
-    }
-    if (flags) {
-        *flags = entry->flags;
-    }
-    if (bytes) {
-        *bytes = entry->bytes;
-    }
-    if (length) {
-        *length = entry->length;
-    }
-    if (mask) {
-        *mask = entry->mask;
-    }
-    if (cmp) {
-        *cmp = entry->cmp;
-    }
-    if (mask_length) {
-        *mask_length = entry->mask_length;
-    }
-    if (trigger_count) {
-        *trigger_count = entry->trigger_count;
-    }
-    if (true_trigger_count) {
-        *true_trigger_count = entry->true_trigger_count;
-    }
-    if (final_report_count) {
-        *final_report_count = entry->final_report_count;
-    }
-
-    return HS_SUCCESS;
-}
-
-u32 hs_fp_feedback_bad_fragment_count(const hs_fp_feedback_t *feedback) {
-    return feedback ? feedback->bad_fragment_count : 0;
-}
-
-u64a hs_fp_feedback_total_false_positive_trigger_count(
-        const hs_fp_feedback_t *feedback) {
-    return feedback ? feedback->total_false_positive_trigger_count : 0;
-}
-
-hs_error_t hs_fp_feedback_bad_fragment_info(const hs_fp_feedback_t *feedback,
-                                            u32 index, u32 *key,
-                                            u32 *fragment_id,
-                                            u32 *literal_count, u8 *table,
-                                            u8 *flags, const u8 **bytes,
-                                            size_t *length, const u8 **mask,
-                                            const u8 **cmp,
-                                            size_t *mask_length,
-                                            u64a *trigger_count,
-                                            u64a *true_trigger_count,
-                                            u64a *final_report_count,
-                                            u64a *false_positive_count) {
-    if (!feedback || index >= feedback->bad_fragment_count) {
-        return HS_INVALID;
-    }
-
-    const struct hs_fp_feedback_entry *entry = feedback->entries + index;
-    if (key) {
-        *key = entry->key;
-    }
-    if (fragment_id) {
-        *fragment_id = entry->fragment_id;
-    }
-    if (literal_count) {
-        *literal_count = entry->literal_count;
-    }
-    if (table) {
-        *table = entry->table;
-    }
-    if (flags) {
-        *flags = entry->flags;
-    }
-    if (bytes) {
-        *bytes = entry->bytes;
-    }
-    if (length) {
-        *length = entry->length;
-    }
-    if (mask) {
-        *mask = entry->mask;
-    }
-    if (cmp) {
-        *cmp = entry->cmp;
-    }
-    if (mask_length) {
-        *mask_length = entry->mask_length;
-    }
-    if (trigger_count) {
-        *trigger_count = entry->trigger_count;
-    }
-    if (true_trigger_count) {
-        *true_trigger_count = entry->true_trigger_count;
-    }
-    if (final_report_count) {
-        *final_report_count = entry->final_report_count;
-    }
-    if (false_positive_count) {
-        *false_positive_count = entry->false_positive_trigger_count;
-    }
-
-    return HS_SUCCESS;
 }

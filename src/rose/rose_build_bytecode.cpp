@@ -3091,6 +3091,40 @@ FpFragmentIdMap makeFpFragmentIdMap(const vector<LitFragment> &fragments,
 }
 
 static
+u64a hashFpFragmentByte(u64a hash, u8 value) {
+    static constexpr u64a FNV_PRIME = 1099511628211ULL;
+    return (hash ^ value) * FNV_PRIME;
+}
+
+static
+u64a makeFpFragmentStableKey(const RoseFpFragmentMeta &meta) {
+    static constexpr u64a FNV_OFFSET = 14695981039346656037ULL;
+    static constexpr u8 KEY_FORMAT[] = {'H', 'S', 'F', 'P', 1};
+
+    u64a hash = FNV_OFFSET;
+    for (u8 value : KEY_FORMAT) {
+        hash = hashFpFragmentByte(hash, value);
+    }
+
+    hash = hashFpFragmentByte(hash, meta.table);
+    hash = hashFpFragmentByte(
+        hash, meta.flags & (ROSE_FP_FRAGMENT_FLAG_NOCASE |
+                            ROSE_FP_FRAGMENT_FLAG_MASKED));
+    hash = hashFpFragmentByte(hash, meta.length);
+    for (u8 i = 0; i < meta.length; i++) {
+        hash = hashFpFragmentByte(hash, meta.bytes[i]);
+    }
+
+    hash = hashFpFragmentByte(hash, meta.maskLength);
+    for (u8 i = 0; i < meta.maskLength; i++) {
+        hash = hashFpFragmentByte(hash, meta.mask[i]);
+        hash = hashFpFragmentByte(hash, meta.cmp[i]);
+    }
+
+    return hash ? hash : 1;
+}
+
+static
 void addFpFragmentMeta(vector<RoseFpFragmentMeta> &out, set<u32> &seen,
                        const FpFragmentIdMap &id_by_program,
                        const LitProto *litProto, u8 table) {
@@ -3138,6 +3172,8 @@ void addFpFragmentMeta(vector<RoseFpFragmentMeta> &out, set<u32> &seen,
             memcpy(meta.mask, lit.msk.data(), mask_len);
             memcpy(meta.cmp, lit.cmp.data(), mask_len);
         }
+
+        meta.stableKey = makeFpFragmentStableKey(meta);
 
         out.push_back(meta);
     }

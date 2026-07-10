@@ -248,6 +248,98 @@ TEST(FpCollector, BlockScanMatchesNormalScan) {
     ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
 }
 
+TEST(FpCollector, StableFragmentKeyAcrossCompiles) {
+    hs_scratch_t *scratch1 = nullptr;
+    hs_database_t *db1 = buildDBAndScratch("foo", 0, 0, HS_MODE_BLOCK,
+                                           &scratch1);
+    ASSERT_NE(nullptr, db1);
+
+    const char *expressions[] = {"barbarbar", "foo"};
+    const unsigned int flags[] = {0, 0};
+    const unsigned int ids[] = {1, 2};
+    hs_compile_error_t *compile_err = nullptr;
+    hs_database_t *db2 = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_multi(expressions, flags, ids, 2, HS_MODE_BLOCK,
+                               nullptr, &db2, &compile_err));
+    ASSERT_NE(nullptr, db2);
+
+    hs_scratch_t *scratch2 = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(db2, &scratch2));
+
+    hs_scratch_t *nocase_scratch = nullptr;
+    hs_database_t *nocase_db = buildDBAndScratch(
+        "foo", HS_FLAG_CASELESS, 0, HS_MODE_BLOCK, &nocase_scratch);
+    ASSERT_NE(nullptr, nocase_db);
+
+    hs_fp_collector_t *collector1 = nullptr;
+    hs_fp_collector_t *collector2 = nullptr;
+    hs_fp_collector_t *nocase_collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db1, &collector1));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db2, &collector2));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_collector_create(nocase_db, &nocase_collector));
+
+    const char data[] = "foo";
+    CallBackContext matches1;
+    CallBackContext matches2;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan_with_collector(db1, data, sizeof(data) - 1, 0,
+                                     scratch1, record_cb, &matches1,
+                                     collector1));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan_with_collector(db2, data, sizeof(data) - 1, 0,
+                                     scratch2, record_cb, &matches2,
+                                     collector2));
+
+    const char nocase_data[] = "FOO";
+    CallBackContext nocase_matches;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan_with_collector(nocase_db, nocase_data,
+                                     sizeof(nocase_data) - 1, 0,
+                                     nocase_scratch, record_cb,
+                                     &nocase_matches, nocase_collector));
+
+    hs_fp_report_t *report1 = nullptr;
+    hs_fp_report_t *report2 = nullptr;
+    hs_fp_report_t *nocase_report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector1, &report1));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector2, &report2));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_collector_report(nocase_collector, &nocase_report));
+
+    FpReportEntry entry1 = {};
+    FpReportEntry entry2 = {};
+    ASSERT_TRUE(findEntryByBytes(report1, "foo", &entry1));
+    ASSERT_TRUE(findEntryByBytes(report2, "foo", &entry2));
+    EXPECT_NE(0U, entry1.key);
+    EXPECT_EQ(entry1.key, entry2.key);
+
+    hs_fp_report_summary_t nocase_summary = {};
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_report_get_summary(nocase_report, &nocase_summary));
+    ASSERT_EQ(1U, nocase_summary.fragment_count);
+    FpReportEntry nocase_entry = {};
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_report_get_fragment(nocase_report, 0, &nocase_entry));
+    EXPECT_NE(0U, nocase_entry.flags & HS_FP_FRAGMENT_FLAG_NOCASE);
+    EXPECT_NE(entry1.key, nocase_entry.key);
+
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(nocase_report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report2));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report1));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(nocase_collector));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector2));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector1));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(nocase_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch2));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch1));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(nocase_db));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db2));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db1));
+    hs_free_compile_error(compile_err);
+}
+
 TEST(FpCollector, BlockScanRecordsFalsePositiveTrigger) {
     const char *expr = "foo|bar";
     unsigned int flags = 0;

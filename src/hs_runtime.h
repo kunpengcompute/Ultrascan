@@ -121,7 +121,7 @@ typedef struct hs_fp_feedback_summary {
  */
 typedef struct hs_fp_fragment_info {
     /** Stable fragment key used to correlate report and feedback entries. */
-    unsigned int key;
+    unsigned long long key;
     /** Database-local fragment identifier. */
     unsigned int fragment_id;
     /** Number of Rose literals represented by this fragment. */

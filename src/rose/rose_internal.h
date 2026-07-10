@@ -69,6 +69,7 @@ struct RoseFpFragmentMeta {
     u32 programOffset;
     u32 fragmentId;
     u32 literalCount;
+    u64a stableKey;
     u8 table;
     u8 flags;
     u8 length;

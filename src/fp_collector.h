@@ -81,50 +81,6 @@ u32 hs_compile_context_block_checked_count(const hs_compile_context_t *ctx);
 
 u32 hs_compile_context_blocked_count(const hs_compile_context_t *ctx);
 
-u64a hs_fp_report_scan_calls(const hs_fp_report_t *report);
-
-u64a hs_fp_report_scan_bytes(const hs_fp_report_t *report);
-
-u64a hs_fp_report_trigger_count(const hs_fp_report_t *report);
-
-u64a hs_fp_report_true_trigger_count(const hs_fp_report_t *report);
-
-u64a hs_fp_report_final_report_count(const hs_fp_report_t *report);
-
-u64a hs_fp_report_unknown_report_count(const hs_fp_report_t *report);
-
-u64a hs_fp_report_dropped_trigger_count(const hs_fp_report_t *report);
-
-u32 hs_fp_report_entry_count(const hs_fp_report_t *report);
-
-hs_error_t hs_fp_report_entry_info(const hs_fp_report_t *report, u32 index,
-                                   u32 *key, u32 *fragment_id,
-                                   u32 *literal_count, u8 *table,
-                                   u8 *flags, const u8 **bytes,
-                                   size_t *length, const u8 **mask,
-                                   const u8 **cmp, size_t *mask_length,
-                                   u64a *trigger_count,
-                                   u64a *true_trigger_count,
-                                   u64a *final_report_count);
-
-u32 hs_fp_feedback_bad_fragment_count(const hs_fp_feedback_t *feedback);
-
-u64a hs_fp_feedback_total_false_positive_trigger_count(
-        const hs_fp_feedback_t *feedback);
-
-hs_error_t hs_fp_feedback_bad_fragment_info(const hs_fp_feedback_t *feedback,
-                                            u32 index, u32 *key,
-                                            u32 *fragment_id,
-                                            u32 *literal_count, u8 *table,
-                                            u8 *flags, const u8 **bytes,
-                                            size_t *length, const u8 **mask,
-                                            const u8 **cmp,
-                                            size_t *mask_length,
-                                            u64a *trigger_count,
-                                            u64a *true_trigger_count,
-                                            u64a *final_report_count,
-                                            u64a *false_positive_count);
-
 #ifdef __cplusplus
 } /* extern C */
 #endif
