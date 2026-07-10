@@ -36,46 +36,25 @@
 
 namespace {
 
-struct FpReportEntry {
-    u32 key = 0;
-    u32 fragment_id = 0;
-    u32 literal_count = 0;
-    u8 table = 0;
-    u8 flags = 0;
-    u64a trigger_count = 0;
-    u64a true_trigger_count = 0;
-    u64a final_report_count = 0;
-};
-
-struct FpFeedbackEntry {
-    u32 key = 0;
-    u32 fragment_id = 0;
-    u32 literal_count = 0;
-    u8 table = 0;
-    u8 flags = 0;
-    size_t mask_length = 0;
-    u64a trigger_count = 0;
-    u64a true_trigger_count = 0;
-    u64a final_report_count = 0;
-    u64a false_positive_count = 0;
-};
+using FpReportEntry = hs_fp_fragment_info_t;
+using FpFeedbackEntry = hs_fp_fragment_info_t;
 
 bool findEntryByBytes(const hs_fp_report_t *report, const std::string &needle,
                       FpReportEntry *out) {
-    for (u32 i = 0; i < hs_fp_report_entry_count(report); i++) {
-        const u8 *bytes = nullptr;
-        size_t length = 0;
-        FpReportEntry entry;
-        hs_error_t err = hs_fp_report_entry_info(
-            report, i, &entry.key, &entry.fragment_id, &entry.literal_count,
-            &entry.table, &entry.flags, &bytes, &length, nullptr, nullptr,
-            nullptr, &entry.trigger_count, &entry.true_trigger_count,
-            &entry.final_report_count);
-        if (err != HS_SUCCESS || !bytes) {
+    hs_fp_report_summary_t summary = {};
+    if (hs_fp_report_get_summary(report, &summary) != HS_SUCCESS) {
+        return false;
+    }
+
+    for (u32 i = 0; i < summary.fragment_count; i++) {
+        FpReportEntry entry = {};
+        hs_error_t err = hs_fp_report_get_fragment(report, i, &entry);
+        if (err != HS_SUCCESS || !entry.bytes) {
             continue;
         }
 
-        std::string fragment(reinterpret_cast<const char *>(bytes), length);
+        std::string fragment(reinterpret_cast<const char *>(entry.bytes),
+                             entry.length);
         if (fragment == needle) {
             if (out) {
                 *out = entry;
@@ -89,21 +68,20 @@ bool findEntryByBytes(const hs_fp_report_t *report, const std::string &needle,
 
 bool findFeedbackByBytes(const hs_fp_feedback_t *feedback,
                          const std::string &needle, FpFeedbackEntry *out) {
-    for (u32 i = 0; i < hs_fp_feedback_bad_fragment_count(feedback); i++) {
-        const u8 *bytes = nullptr;
-        size_t length = 0;
-        FpFeedbackEntry entry;
-        hs_error_t err = hs_fp_feedback_bad_fragment_info(
-            feedback, i, &entry.key, &entry.fragment_id,
-            &entry.literal_count, &entry.table, &entry.flags, &bytes, &length,
-            nullptr, nullptr, &entry.mask_length, &entry.trigger_count,
-            &entry.true_trigger_count, &entry.final_report_count,
-            &entry.false_positive_count);
-        if (err != HS_SUCCESS || !bytes) {
+    hs_fp_feedback_summary_t summary = {};
+    if (hs_fp_feedback_get_summary(feedback, &summary) != HS_SUCCESS) {
+        return false;
+    }
+
+    for (u32 i = 0; i < summary.bad_fragment_count; i++) {
+        FpFeedbackEntry entry = {};
+        hs_error_t err = hs_fp_feedback_get_fragment(feedback, i, &entry);
+        if (err != HS_SUCCESS || !entry.bytes) {
             continue;
         }
 
-        std::string fragment(reinterpret_cast<const char *>(bytes), length);
+        std::string fragment(reinterpret_cast<const char *>(entry.bytes),
+                             entry.length);
         if (fragment == needle) {
             if (out) {
                 *out = entry;
@@ -117,14 +95,14 @@ bool findFeedbackByBytes(const hs_fp_feedback_t *feedback,
 
 bool findMaskedFeedback(const hs_fp_feedback_t *feedback,
                         FpFeedbackEntry *out) {
-    for (u32 i = 0; i < hs_fp_feedback_bad_fragment_count(feedback); i++) {
-        FpFeedbackEntry entry;
-        hs_error_t err = hs_fp_feedback_bad_fragment_info(
-            feedback, i, &entry.key, &entry.fragment_id,
-            &entry.literal_count, &entry.table, &entry.flags, nullptr, nullptr,
-            nullptr, nullptr, &entry.mask_length, &entry.trigger_count,
-            &entry.true_trigger_count, &entry.final_report_count,
-            &entry.false_positive_count);
+    hs_fp_feedback_summary_t summary = {};
+    if (hs_fp_feedback_get_summary(feedback, &summary) != HS_SUCCESS) {
+        return false;
+    }
+
+    for (u32 i = 0; i < summary.bad_fragment_count; i++) {
+        FpFeedbackEntry entry = {};
+        hs_error_t err = hs_fp_feedback_get_fragment(feedback, i, &entry);
         if (err != HS_SUCCESS || !entry.mask_length) {
             continue;
         }
@@ -144,6 +122,9 @@ TEST(FpCollector, NullArguments) {
     hs_fp_collector_t *collector = nullptr;
     hs_fp_report_t *report = nullptr;
     hs_fp_feedback_t *feedback = nullptr;
+    hs_fp_report_summary_t report_summary = {};
+    hs_fp_feedback_summary_t feedback_summary = {};
+    hs_fp_fragment_info_t fragment = {};
 
     ASSERT_EQ(HS_INVALID, hs_fp_collector_create(nullptr, nullptr));
     ASSERT_EQ(HS_INVALID, hs_fp_collector_create(nullptr, &collector));
@@ -153,16 +134,18 @@ TEST(FpCollector, NullArguments) {
     ASSERT_EQ(HS_INVALID, hs_fp_collector_report(collector, nullptr));
     ASSERT_EQ(HS_INVALID, hs_fp_feedback_build(nullptr, &feedback));
     ASSERT_EQ(HS_INVALID, hs_fp_feedback_build(report, nullptr));
-    ASSERT_EQ(HS_INVALID,
-              hs_fp_report_entry_info(nullptr, 0, nullptr, nullptr, nullptr,
-                                      nullptr, nullptr, nullptr, nullptr,
-                                      nullptr, nullptr, nullptr, nullptr,
-                                      nullptr, nullptr));
-    ASSERT_EQ(HS_INVALID,
-              hs_fp_feedback_bad_fragment_info(
-                  nullptr, 0, nullptr, nullptr, nullptr, nullptr, nullptr,
-                  nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-                  nullptr, nullptr, nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_report_get_summary(nullptr, &report_summary));
+    EXPECT_EQ(HS_INVALID, hs_fp_report_get_summary(report, nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_report_get_fragment(nullptr, 0, &fragment));
+    EXPECT_EQ(HS_INVALID, hs_fp_report_get_fragment(report, 0, nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_get_summary(nullptr, &feedback_summary));
+    EXPECT_EQ(HS_INVALID, hs_fp_feedback_get_summary(feedback, nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_get_fragment(nullptr, 0, &fragment));
+    EXPECT_EQ(HS_INVALID, hs_fp_feedback_get_fragment(feedback, 0, nullptr));
     EXPECT_EQ(0U, hs_compile_context_observe_checked_count(nullptr));
     EXPECT_EQ(0U, hs_compile_context_observe_hit_count(nullptr));
     EXPECT_EQ(0U, hs_compile_context_block_checked_count(nullptr));
@@ -192,18 +175,23 @@ TEST(FpCollector, LifecycleEmptyReportAndFeedback) {
     hs_fp_report_t *report = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
     ASSERT_NE(nullptr, report);
-    EXPECT_EQ(0U, hs_fp_report_entry_count(report));
-    EXPECT_EQ(HS_INVALID,
-              hs_fp_report_entry_info(report, 0, nullptr, nullptr, nullptr,
-                                      nullptr, nullptr, nullptr, nullptr,
-                                      nullptr, nullptr, nullptr, nullptr,
-                                      nullptr, nullptr));
+    hs_fp_report_summary_t report_summary = {};
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_report_get_summary(report, &report_summary));
+    EXPECT_EQ(0U, report_summary.fragment_count);
+    hs_fp_fragment_info_t fragment = {};
+    EXPECT_EQ(HS_INVALID, hs_fp_report_get_fragment(report, 0, &fragment));
 
     hs_fp_feedback_t *feedback = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_build(report, &feedback));
     ASSERT_NE(nullptr, feedback);
-    EXPECT_EQ(0U, hs_fp_feedback_bad_fragment_count(feedback));
-    EXPECT_EQ(0U, hs_fp_feedback_total_false_positive_trigger_count(feedback));
+    hs_fp_feedback_summary_t feedback_summary = {};
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_get_summary(feedback, &feedback_summary));
+    EXPECT_EQ(0U, feedback_summary.bad_fragment_count);
+    EXPECT_EQ(0U, feedback_summary.total_false_positive_count);
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_get_fragment(feedback, 0, &fragment));
 
     ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
@@ -236,12 +224,15 @@ TEST(FpCollector, BlockScanMatchesNormalScan) {
     hs_fp_report_t *report = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
     ASSERT_NE(nullptr, report);
-    EXPECT_EQ(1U, hs_fp_report_scan_calls(report));
-    EXPECT_EQ(sizeof(data) - 1, hs_fp_report_scan_bytes(report));
-    EXPECT_GE(hs_fp_report_trigger_count(report), 1U);
-    EXPECT_EQ(1U, hs_fp_report_true_trigger_count(report));
-    EXPECT_EQ(1U, hs_fp_report_final_report_count(report));
-    EXPECT_EQ(0U, hs_fp_report_dropped_trigger_count(report));
+    hs_fp_report_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
+    EXPECT_EQ(1U, summary.scan_calls);
+    EXPECT_EQ(sizeof(data) - 1, summary.scan_bytes);
+    EXPECT_GE(summary.trigger_count, 1U);
+    EXPECT_EQ(1U, summary.true_trigger_count);
+    EXPECT_EQ(1U, summary.final_report_count);
+    EXPECT_EQ(0U, summary.false_positive_count);
+    EXPECT_EQ(0U, summary.dropped_trigger_count);
 
     FpReportEntry entry;
     ASSERT_TRUE(findEntryByBytes(report, "foo", &entry));
@@ -289,11 +280,14 @@ TEST(FpCollector, BlockScanRecordsFalsePositiveTrigger) {
     hs_fp_report_t *report = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
     ASSERT_NE(nullptr, report);
-    EXPECT_EQ(1U, hs_fp_report_scan_calls(report));
-    EXPECT_GE(hs_fp_report_trigger_count(report), 1U);
-    EXPECT_EQ(0U, hs_fp_report_true_trigger_count(report));
-    EXPECT_EQ(0U, hs_fp_report_final_report_count(report));
-    EXPECT_EQ(0U, hs_fp_report_dropped_trigger_count(report));
+    hs_fp_report_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
+    EXPECT_EQ(1U, summary.scan_calls);
+    EXPECT_GE(summary.trigger_count, 1U);
+    EXPECT_EQ(0U, summary.true_trigger_count);
+    EXPECT_EQ(0U, summary.final_report_count);
+    EXPECT_GE(summary.false_positive_count, 1U);
+    EXPECT_EQ(0U, summary.dropped_trigger_count);
 
     FpReportEntry entry;
     ASSERT_TRUE(findEntryByBytes(report, "foo", &entry));
@@ -306,8 +300,11 @@ TEST(FpCollector, BlockScanRecordsFalsePositiveTrigger) {
     hs_fp_feedback_t *feedback = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_build(report, &feedback));
     ASSERT_NE(nullptr, feedback);
-    EXPECT_EQ(0U, hs_fp_feedback_bad_fragment_count(feedback));
-    EXPECT_GE(hs_fp_feedback_total_false_positive_trigger_count(feedback), 1U);
+    hs_fp_feedback_summary_t feedback_summary = {};
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_get_summary(feedback, &feedback_summary));
+    EXPECT_EQ(0U, feedback_summary.bad_fragment_count);
+    EXPECT_GE(feedback_summary.total_false_positive_count, 1U);
 
     ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
@@ -346,10 +343,13 @@ TEST(FpCollector, MergeAggregatesTriggerSummary) {
     hs_fp_report_t *report = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector1, &report));
     ASSERT_NE(nullptr, report);
-    EXPECT_EQ(2U, hs_fp_report_scan_calls(report));
-    EXPECT_EQ(2U, hs_fp_report_true_trigger_count(report));
-    EXPECT_EQ(2U, hs_fp_report_final_report_count(report));
-    EXPECT_EQ(0U, hs_fp_report_dropped_trigger_count(report));
+    hs_fp_report_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
+    EXPECT_EQ(2U, summary.scan_calls);
+    EXPECT_EQ(2U, summary.true_trigger_count);
+    EXPECT_EQ(2U, summary.final_report_count);
+    EXPECT_EQ(0U, summary.false_positive_count);
+    EXPECT_EQ(0U, summary.dropped_trigger_count);
 
     FpReportEntry entry;
     ASSERT_TRUE(findEntryByBytes(report, "foo", &entry));
@@ -440,9 +440,11 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
     hs_fp_feedback_t *feedback = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_build(report, &feedback));
     ASSERT_NE(nullptr, feedback);
-    EXPECT_GE(hs_fp_feedback_total_false_positive_trigger_count(feedback),
-              1000U);
-    ASSERT_GE(hs_fp_feedback_bad_fragment_count(feedback), 1U);
+    hs_fp_feedback_summary_t feedback_summary = {};
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_get_summary(feedback, &feedback_summary));
+    EXPECT_GE(feedback_summary.total_false_positive_count, 1000U);
+    ASSERT_GE(feedback_summary.bad_fragment_count, 1U);
 
     FpFeedbackEntry entry;
     ASSERT_TRUE(findFeedbackByBytes(feedback, "foo", &entry));
@@ -658,7 +660,10 @@ TEST(FpCollector, FeedbackBlocksDecoratedMaskedLiteral) {
 
     hs_fp_feedback_t *feedback = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_build(report, &feedback));
-    ASSERT_GE(hs_fp_feedback_bad_fragment_count(feedback), 1U);
+    hs_fp_feedback_summary_t feedback_summary = {};
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_get_summary(feedback, &feedback_summary));
+    ASSERT_GE(feedback_summary.bad_fragment_count, 1U);
 
     FpFeedbackEntry entry;
     ASSERT_TRUE(findMaskedFeedback(feedback, &entry));

@@ -65,6 +65,91 @@ struct hs_scratch;
  */
 typedef struct hs_scratch hs_scratch_t;
 
+/** Values reported in @ref hs_fp_fragment_info_t::table. */
+#define HS_FP_TABLE_UNKNOWN       0U
+#define HS_FP_TABLE_FLOATING      1U
+#define HS_FP_TABLE_EOD_ANCHORED  2U
+#define HS_FP_TABLE_SMALL_BLOCK   3U
+#define HS_FP_TABLE_DELAY_REBUILD 4U
+#define HS_FP_TABLE_ANCHORED      5U
+
+/** Flags reported in @ref hs_fp_fragment_info_t::flags. */
+#define HS_FP_FRAGMENT_FLAG_NOCASE 0x01U
+#define HS_FP_FRAGMENT_FLAG_NORUNS 0x02U
+#define HS_FP_FRAGMENT_FLAG_MASKED 0x04U
+
+/** Summary counters exported from a false-positive feedback report. */
+typedef struct hs_fp_report_summary {
+    /** Number of fragments available through hs_fp_report_get_fragment(). */
+    unsigned int fragment_count;
+    /** Number of scan calls accumulated by the collector. */
+    unsigned long long scan_calls;
+    /** Number of input bytes accumulated by the collector. */
+    unsigned long long scan_bytes;
+    /** Number of front-end fragment triggers. */
+    unsigned long long trigger_count;
+    /** Number of triggers that directly produced at least one final report. */
+    unsigned long long true_trigger_count;
+    /** Number of final reports produced by attributed triggers. */
+    unsigned long long final_report_count;
+    /** Number of triggers that did not directly produce a final report. */
+    unsigned long long false_positive_count;
+    /** Number of final reports that could not be attributed to a fragment. */
+    unsigned long long unknown_report_count;
+    /** Number of triggers not recorded due to unavailable counter capacity. */
+    unsigned long long dropped_trigger_count;
+} hs_fp_report_summary_t;
+
+/** Summary counters exported from false-positive feedback. */
+typedef struct hs_fp_feedback_summary {
+    /** Number of bad fragments available through hs_fp_feedback_get_fragment(). */
+    unsigned int bad_fragment_count;
+    /** Number of scan calls represented by the source report. */
+    unsigned long long scan_calls;
+    /** Number of input bytes represented by the source report. */
+    unsigned long long scan_bytes;
+    /** Total false-positive triggers in the source report. */
+    unsigned long long total_false_positive_count;
+} hs_fp_feedback_summary_t;
+
+/**
+ * Read-only information for one report or feedback fragment.
+ *
+ * The bytes, mask and cmp pointers remain valid only while the owning report
+ * or feedback object remains alive. They must not be modified or freed by the
+ * caller.
+ */
+typedef struct hs_fp_fragment_info {
+    /** Stable fragment key used to correlate report and feedback entries. */
+    unsigned int key;
+    /** Database-local fragment identifier. */
+    unsigned int fragment_id;
+    /** Number of Rose literals represented by this fragment. */
+    unsigned int literal_count;
+    /** One of the HS_FP_TABLE_* values. */
+    unsigned int table;
+    /** Bitmask of HS_FP_FRAGMENT_FLAG_* values. */
+    unsigned int flags;
+    /** Literal fragment bytes. */
+    const unsigned char *bytes;
+    /** Number of bytes in bytes. */
+    size_t length;
+    /** Optional HWLM mask bytes, or NULL when mask_length is zero. */
+    const unsigned char *mask;
+    /** Optional HWLM comparison bytes, or NULL when mask_length is zero. */
+    const unsigned char *cmp;
+    /** Number of bytes in mask and cmp. */
+    size_t mask_length;
+    /** Number of front-end triggers attributed to this fragment. */
+    unsigned long long trigger_count;
+    /** Number of triggers that directly produced at least one final report. */
+    unsigned long long true_trigger_count;
+    /** Number of final reports attributed to this fragment. */
+    unsigned long long final_report_count;
+    /** Number of triggers that did not directly produce a final report. */
+    unsigned long long false_positive_count;
+} hs_fp_fragment_info_t;
+
 /**
  * Create a false-positive feedback collector for a compiled database.
  *
@@ -114,6 +199,36 @@ hs_error_t HS_CDECL hs_fp_collector_free(hs_fp_collector_t *collector);
 hs_error_t HS_CDECL hs_fp_report_free(hs_fp_report_t *report);
 
 /**
+ * Export summary counters from a false-positive feedback report.
+ *
+ * @param report
+ *      A valid report returned by @ref hs_fp_collector_report().
+ * @param summary
+ *      On success, the report summary will be written here.
+ * @return
+ *      @ref HS_SUCCESS on success, @ref HS_INVALID for invalid arguments.
+ */
+hs_error_t HS_CDECL hs_fp_report_get_summary(
+    const hs_fp_report_t *report, hs_fp_report_summary_t *summary);
+
+/**
+ * Export one fragment from a false-positive feedback report.
+ *
+ * @param report
+ *      A valid report returned by @ref hs_fp_collector_report().
+ * @param index
+ *      A zero-based index less than summary.fragment_count.
+ * @param fragment
+ *      On success, the fragment view will be written here.
+ * @return
+ *      @ref HS_SUCCESS on success, @ref HS_INVALID for invalid arguments or
+ *      an out-of-range index.
+ */
+hs_error_t HS_CDECL hs_fp_report_get_fragment(
+    const hs_fp_report_t *report, unsigned int index,
+    hs_fp_fragment_info_t *fragment);
+
+/**
  * Build compile-time false-positive feedback from a report.
  */
 hs_error_t HS_CDECL hs_fp_feedback_build(const hs_fp_report_t *report,
@@ -123,6 +238,36 @@ hs_error_t HS_CDECL hs_fp_feedback_build(const hs_fp_report_t *report,
  * Free false-positive feedback. NULL may also be safely provided.
  */
 hs_error_t HS_CDECL hs_fp_feedback_free(hs_fp_feedback_t *feedback);
+
+/**
+ * Export summary counters from false-positive feedback.
+ *
+ * @param feedback
+ *      A valid feedback object returned by @ref hs_fp_feedback_build().
+ * @param summary
+ *      On success, the feedback summary will be written here.
+ * @return
+ *      @ref HS_SUCCESS on success, @ref HS_INVALID for invalid arguments.
+ */
+hs_error_t HS_CDECL hs_fp_feedback_get_summary(
+    const hs_fp_feedback_t *feedback, hs_fp_feedback_summary_t *summary);
+
+/**
+ * Export one bad fragment from false-positive feedback.
+ *
+ * @param feedback
+ *      A valid feedback object returned by @ref hs_fp_feedback_build().
+ * @param index
+ *      A zero-based index less than summary.bad_fragment_count.
+ * @param fragment
+ *      On success, the bad fragment view will be written here.
+ * @return
+ *      @ref HS_SUCCESS on success, @ref HS_INVALID for invalid arguments or
+ *      an out-of-range index.
+ */
+hs_error_t HS_CDECL hs_fp_feedback_get_fragment(
+    const hs_fp_feedback_t *feedback, unsigned int index,
+    hs_fp_fragment_info_t *fragment);
 
 /**
  * Definition of the match event callback function type.

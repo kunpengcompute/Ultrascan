@@ -31,7 +31,11 @@ EXPORTS
    hs_fp_collector_reset
    hs_fp_feedback_build
    hs_fp_feedback_free
+   hs_fp_feedback_get_fragment
+   hs_fp_feedback_get_summary
    hs_fp_report_free
+   hs_fp_report_get_fragment
+   hs_fp_report_get_summary
    hs_free_compile_error
    hs_free_database
    hs_free_scratch

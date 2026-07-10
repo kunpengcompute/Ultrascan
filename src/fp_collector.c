@@ -606,6 +606,53 @@ hs_error_t HS_CDECL hs_fp_report_free(hs_fp_report_t *report) {
     return HS_SUCCESS;
 }
 
+hs_error_t HS_CDECL hs_fp_report_get_summary(
+        const hs_fp_report_t *report, hs_fp_report_summary_t *summary) {
+    if (!report || !summary) {
+        return HS_INVALID;
+    }
+
+    memset(summary, 0, sizeof(*summary));
+    summary->fragment_count = report->entry_count;
+    summary->scan_calls = report->scan_calls;
+    summary->scan_bytes = report->scan_bytes;
+    summary->trigger_count = report->trigger_count;
+    summary->true_trigger_count = report->true_trigger_count;
+    summary->final_report_count = report->final_report_count;
+    summary->false_positive_count =
+        count_total_false_positive_triggers(report);
+    summary->unknown_report_count = report->unknown_report_count;
+    summary->dropped_trigger_count = report->dropped_trigger_count;
+    return HS_SUCCESS;
+}
+
+hs_error_t HS_CDECL hs_fp_report_get_fragment(
+        const hs_fp_report_t *report, unsigned int index,
+        hs_fp_fragment_info_t *fragment) {
+    if (!report || !fragment || index >= report->entry_count) {
+        return HS_INVALID;
+    }
+
+    const struct hs_fp_report_entry *entry = report->entries + index;
+    memset(fragment, 0, sizeof(*fragment));
+    fragment->key = entry->key;
+    fragment->fragment_id = entry->fragment_id;
+    fragment->literal_count = entry->literal_count;
+    fragment->table = entry->table;
+    fragment->flags = entry->flags;
+    fragment->bytes = entry->bytes;
+    fragment->length = entry->length;
+    fragment->mask = entry->mask_length ? entry->mask : NULL;
+    fragment->cmp = entry->mask_length ? entry->cmp : NULL;
+    fragment->mask_length = entry->mask_length;
+    fragment->trigger_count = entry->trigger_count;
+    fragment->true_trigger_count = entry->true_trigger_count;
+    fragment->final_report_count = entry->final_report_count;
+    fragment->false_positive_count =
+        sub_or_zero_u64a(entry->trigger_count, entry->true_trigger_count);
+    return HS_SUCCESS;
+}
+
 HS_PUBLIC_API
 hs_error_t HS_CDECL hs_fp_feedback_build(const hs_fp_report_t *report,
                                          hs_fp_feedback_t **feedback) {
@@ -643,6 +690,47 @@ hs_error_t HS_CDECL hs_fp_feedback_free(hs_fp_feedback_t *feedback) {
         hs_misc_free(feedback->entries);
         hs_misc_free(feedback);
     }
+    return HS_SUCCESS;
+}
+
+hs_error_t HS_CDECL hs_fp_feedback_get_summary(
+        const hs_fp_feedback_t *feedback, hs_fp_feedback_summary_t *summary) {
+    if (!feedback || !summary) {
+        return HS_INVALID;
+    }
+
+    memset(summary, 0, sizeof(*summary));
+    summary->bad_fragment_count = feedback->bad_fragment_count;
+    summary->scan_calls = feedback->scan_calls;
+    summary->scan_bytes = feedback->scan_bytes;
+    summary->total_false_positive_count =
+        feedback->total_false_positive_trigger_count;
+    return HS_SUCCESS;
+}
+
+hs_error_t HS_CDECL hs_fp_feedback_get_fragment(
+        const hs_fp_feedback_t *feedback, unsigned int index,
+        hs_fp_fragment_info_t *fragment) {
+    if (!feedback || !fragment || index >= feedback->bad_fragment_count) {
+        return HS_INVALID;
+    }
+
+    const struct hs_fp_feedback_entry *entry = feedback->entries + index;
+    memset(fragment, 0, sizeof(*fragment));
+    fragment->key = entry->key;
+    fragment->fragment_id = entry->fragment_id;
+    fragment->literal_count = entry->literal_count;
+    fragment->table = entry->table;
+    fragment->flags = entry->flags;
+    fragment->bytes = entry->bytes;
+    fragment->length = entry->length;
+    fragment->mask = entry->mask_length ? entry->mask : NULL;
+    fragment->cmp = entry->mask_length ? entry->cmp : NULL;
+    fragment->mask_length = entry->mask_length;
+    fragment->trigger_count = entry->trigger_count;
+    fragment->true_trigger_count = entry->true_trigger_count;
+    fragment->final_report_count = entry->final_report_count;
+    fragment->false_positive_count = entry->false_positive_trigger_count;
     return HS_SUCCESS;
 }
 
