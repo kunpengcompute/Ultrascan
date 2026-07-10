@@ -72,6 +72,7 @@ struct hs_fp_report_entry {
     u32 fragment_id;
     u32 literal_count;
     u8 table;
+    u8 engine;
     u8 flags;
     u8 length;
     u8 mask_length;
@@ -102,6 +103,7 @@ struct hs_fp_feedback_entry {
     u32 fragment_id;
     u32 literal_count;
     u8 table;
+    u8 engine;
     u8 flags;
     u8 length;
     u8 mask_length;
@@ -252,6 +254,7 @@ void fill_report_entry(struct hs_fp_report_entry *entry,
     entry->fragment_id = meta->fragmentId;
     entry->literal_count = meta->literalCount;
     entry->table = meta->table;
+    entry->engine = meta->engine;
     entry->flags = meta->flags;
     entry->length = meta->length;
     entry->mask_length = meta->maskLength;
@@ -318,6 +321,7 @@ void fill_feedback_entry(struct hs_fp_feedback_entry *dst,
     dst->fragment_id = src->fragment_id;
     dst->literal_count = src->literal_count;
     dst->table = src->table;
+    dst->engine = src->engine;
     dst->flags = src->flags;
     dst->length = src->length;
     dst->mask_length = src->mask_length;
@@ -639,6 +643,7 @@ hs_error_t HS_CDECL hs_fp_report_get_fragment(
     fragment->fragment_id = entry->fragment_id;
     fragment->literal_count = entry->literal_count;
     fragment->table = entry->table;
+    fragment->engine = entry->engine;
     fragment->flags = entry->flags;
     fragment->bytes = entry->bytes;
     fragment->length = entry->length;
@@ -721,6 +726,7 @@ hs_error_t HS_CDECL hs_fp_feedback_get_fragment(
     fragment->fragment_id = entry->fragment_id;
     fragment->literal_count = entry->literal_count;
     fragment->table = entry->table;
+    fragment->engine = entry->engine;
     fragment->flags = entry->flags;
     fragment->bytes = entry->bytes;
     fragment->length = entry->length;

@@ -73,6 +73,14 @@ typedef struct hs_scratch hs_scratch_t;
 #define HS_FP_TABLE_DELAY_REBUILD 4U
 #define HS_FP_TABLE_ANCHORED      5U
 
+/** Values reported in @ref hs_fp_fragment_info_t::engine. */
+#define HS_FP_ENGINE_UNKNOWN 0U
+#define HS_FP_ENGINE_NOODLE  1U
+#define HS_FP_ENGINE_FDR     2U
+#define HS_FP_ENGINE_NEO_FDR 3U
+#define HS_FP_ENGINE_HAO     4U
+#define HS_FP_ENGINE_TEDDY   5U
+
 /** Flags reported in @ref hs_fp_fragment_info_t::flags. */
 #define HS_FP_FRAGMENT_FLAG_NOCASE 0x01U
 #define HS_FP_FRAGMENT_FLAG_NORUNS 0x02U
@@ -128,6 +136,8 @@ typedef struct hs_fp_fragment_info {
     unsigned int literal_count;
     /** One of the HS_FP_TABLE_* values. */
     unsigned int table;
+    /** One of the HS_FP_ENGINE_* values. */
+    unsigned int engine;
     /** Bitmask of HS_FP_FRAGMENT_FLAG_* values. */
     unsigned int flags;
     /** Literal fragment bytes. */

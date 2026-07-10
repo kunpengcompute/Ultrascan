@@ -39,6 +39,19 @@ namespace {
 using FpReportEntry = hs_fp_fragment_info_t;
 using FpFeedbackEntry = hs_fp_fragment_info_t;
 
+bool isKnownEngine(unsigned int engine) {
+    switch (engine) {
+    case HS_FP_ENGINE_NOODLE:
+    case HS_FP_ENGINE_FDR:
+    case HS_FP_ENGINE_NEO_FDR:
+    case HS_FP_ENGINE_HAO:
+    case HS_FP_ENGINE_TEDDY:
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool findEntryByBytes(const hs_fp_report_t *report, const std::string &needle,
                       FpReportEntry *out) {
     hs_fp_report_summary_t summary = {};
@@ -237,6 +250,7 @@ TEST(FpCollector, BlockScanMatchesNormalScan) {
     FpReportEntry entry;
     ASSERT_TRUE(findEntryByBytes(report, "foo", &entry));
     EXPECT_NE(0U, entry.table);
+    EXPECT_TRUE(isKnownEngine(entry.engine));
     EXPECT_GE(entry.literal_count, 1U);
     EXPECT_GE(entry.trigger_count, 1U);
     EXPECT_EQ(1U, entry.true_trigger_count);
@@ -313,6 +327,8 @@ TEST(FpCollector, StableFragmentKeyAcrossCompiles) {
     ASSERT_TRUE(findEntryByBytes(report1, "foo", &entry1));
     ASSERT_TRUE(findEntryByBytes(report2, "foo", &entry2));
     EXPECT_NE(0U, entry1.key);
+    EXPECT_TRUE(isKnownEngine(entry1.engine));
+    EXPECT_TRUE(isKnownEngine(entry2.engine));
     EXPECT_EQ(entry1.key, entry2.key);
 
     hs_fp_report_summary_t nocase_summary = {};
@@ -323,6 +339,7 @@ TEST(FpCollector, StableFragmentKeyAcrossCompiles) {
     ASSERT_EQ(HS_SUCCESS,
               hs_fp_report_get_fragment(nocase_report, 0, &nocase_entry));
     EXPECT_NE(0U, nocase_entry.flags & HS_FP_FRAGMENT_FLAG_NOCASE);
+    EXPECT_TRUE(isKnownEngine(nocase_entry.engine));
     EXPECT_NE(entry1.key, nocase_entry.key);
 
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(nocase_report));
@@ -384,6 +401,7 @@ TEST(FpCollector, BlockScanRecordsFalsePositiveTrigger) {
     FpReportEntry entry;
     ASSERT_TRUE(findEntryByBytes(report, "foo", &entry));
     EXPECT_NE(0U, entry.table);
+    EXPECT_TRUE(isKnownEngine(entry.engine));
     EXPECT_GE(entry.literal_count, 1U);
     EXPECT_GE(entry.trigger_count, 1U);
     EXPECT_EQ(0U, entry.true_trigger_count);
@@ -541,6 +559,7 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
     FpFeedbackEntry entry;
     ASSERT_TRUE(findFeedbackByBytes(feedback, "foo", &entry));
     EXPECT_NE(0U, entry.table);
+    EXPECT_TRUE(isKnownEngine(entry.engine));
     EXPECT_GE(entry.literal_count, 1U);
     EXPECT_GE(entry.trigger_count, 1000U);
     EXPECT_EQ(0U, entry.true_trigger_count);
@@ -760,6 +779,7 @@ TEST(FpCollector, FeedbackBlocksDecoratedMaskedLiteral) {
     FpFeedbackEntry entry;
     ASSERT_TRUE(findMaskedFeedback(feedback, &entry));
     EXPECT_GT(entry.mask_length, 0U);
+    EXPECT_TRUE(isKnownEngine(entry.engine));
 
     hs_compile_context_t *ctx = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_compile_context_create(&ctx));

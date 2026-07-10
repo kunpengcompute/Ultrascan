@@ -61,6 +61,13 @@ typedef u64a rose_group;
 #define ROSE_FP_TABLE_DELAY_REBUILD 4
 #define ROSE_FP_TABLE_ANCHORED      5
 
+#define ROSE_FP_ENGINE_UNKNOWN 0
+#define ROSE_FP_ENGINE_NOODLE  1
+#define ROSE_FP_ENGINE_FDR     2
+#define ROSE_FP_ENGINE_NEO_FDR 3
+#define ROSE_FP_ENGINE_HAO     4
+#define ROSE_FP_ENGINE_TEDDY   5
+
 #define ROSE_FP_FRAGMENT_FLAG_NOCASE 0x01
 #define ROSE_FP_FRAGMENT_FLAG_NORUNS 0x02
 #define ROSE_FP_FRAGMENT_FLAG_MASKED 0x04
@@ -71,6 +78,7 @@ struct RoseFpFragmentMeta {
     u32 literalCount;
     u64a stableKey;
     u8 table;
+    u8 engine;
     u8 flags;
     u8 length;
     u8 maskLength;

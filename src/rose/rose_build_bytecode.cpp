@@ -52,6 +52,8 @@
 #include "hwlm/hwlm.h" /* engine types */
 #include "hwlm/hwlm_build.h"
 #include "hwlm/hwlm_literal.h"
+#include "fdr/fdr_compile_internal.h"
+#include "fdr/fdr_engine_description.h"
 #include "nfa/castlecompile.h"
 #include "nfa/goughcompile.h"
 #include "nfa/mcclellancompile.h"
@@ -3124,6 +3126,38 @@ u64a makeFpFragmentStableKey(const RoseFpFragmentMeta &meta) {
     return hash ? hash : 1;
 }
 
+static constexpr u32 FP_NEO_FDR_ENGINE_ID = 1;
+static constexpr u32 FP_HAO_ENGINE_ID = 2;
+
+static
+u8 getFpFragmentEngine(const LitProto *litProto) {
+    if (!litProto || !litProto->hwlmProto) {
+        return ROSE_FP_ENGINE_UNKNOWN;
+    }
+
+    const HWLMProto &proto = *litProto->hwlmProto;
+    if (proto.teddyEng) {
+        return ROSE_FP_ENGINE_TEDDY;
+    }
+
+    if (proto.haoArtifacts) {
+        return ROSE_FP_ENGINE_HAO;
+    }
+
+    if (proto.fdrEng) {
+        switch (proto.fdrEng->getID()) {
+        case FP_NEO_FDR_ENGINE_ID:
+            return ROSE_FP_ENGINE_NEO_FDR;
+        case FP_HAO_ENGINE_ID:
+            return ROSE_FP_ENGINE_HAO;
+        default:
+            return ROSE_FP_ENGINE_FDR;
+        }
+    }
+
+    return ROSE_FP_ENGINE_NOODLE;
+}
+
 static
 void addFpFragmentMeta(vector<RoseFpFragmentMeta> &out, set<u32> &seen,
                        const FpFragmentIdMap &id_by_program,
@@ -3150,6 +3184,7 @@ void addFpFragmentMeta(vector<RoseFpFragmentMeta> &out, set<u32> &seen,
         }
 
         meta.table = table;
+        meta.engine = getFpFragmentEngine(litProto);
         if (lit.nocase) {
             meta.flags |= ROSE_FP_FRAGMENT_FLAG_NOCASE;
         }
