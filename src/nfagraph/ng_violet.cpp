@@ -209,18 +209,15 @@ bool fpFeedbackLiteralIsBad(const CompileContext &cc, const ue2_literal &lit) {
         return false;
     }
 
-    if (cc.fp_block_checked_count) {
-        (*cc.fp_block_checked_count)++;
-    }
+    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
 
     if (!hs_fp_feedback_literal_is_bad(cc.fp_feedback, lit.c_str(),
                                        lit.length(), lit.any_nocase())) {
         return false;
     }
 
-    if (cc.fp_blocked_count) {
-        (*cc.fp_blocked_count)++;
-    }
+    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
+    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
     return true;
 }
 

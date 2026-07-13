@@ -42,6 +42,7 @@
 #include "compiler/compiler.h"
 #include "rose/rose_build.h"
 #include "util/container.h"
+#include "util/compile_context.h"
 #include "util/graph.h"
 #include "util/graph_range.h"
 #include "util/ue2string.h"
@@ -189,17 +190,15 @@ bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v, const bool anchored,
 
     ue2_literal rose_literal(literal, nocase);
     if (ng.cc.fp_feedback) {
-        if (ng.cc.fp_block_checked_count) {
-            (*ng.cc.fp_block_checked_count)++;
-        }
+        fpCompileRecordCheck(ng.cc, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT);
         if (hs_fp_feedback_literal_is_bad(ng.cc.fp_feedback,
                                           rose_literal.c_str(),
                                           rose_literal.length(),
                                           rose_literal.any_nocase())) {
             DEBUG_PRINTF("skipping literal split due to fp feedback\n");
-            if (ng.cc.fp_blocked_count) {
-                (*ng.cc.fp_blocked_count)++;
-            }
+            fpCompileRecordHit(ng.cc, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT);
+            fpCompileRecordBlocked(ng.cc,
+                                   HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT);
             return false;
         }
     }

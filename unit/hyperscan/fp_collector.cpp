@@ -53,6 +53,14 @@ bool isKnownEngine(unsigned int engine) {
     }
 }
 
+hs_compile_context_checkpoint_info_t getCheckpointInfo(
+        const hs_compile_context_t *ctx, unsigned int checkpoint) {
+    hs_compile_context_checkpoint_info_t info = {};
+    EXPECT_EQ(HS_SUCCESS,
+              hs_compile_context_get_checkpoint_info(ctx, checkpoint, &info));
+    return info;
+}
+
 void expectFragmentsEqual(const hs_fp_fragment_info_t &a,
                           const hs_fp_fragment_info_t &b) {
     EXPECT_EQ(a.key, b.key);
@@ -249,8 +257,29 @@ TEST(FpCollector, NullArguments) {
     EXPECT_EQ(0U, hs_compile_context_observe_hit_count(nullptr));
     EXPECT_EQ(0U, hs_compile_context_block_checked_count(nullptr));
     EXPECT_EQ(0U, hs_compile_context_blocked_count(nullptr));
+    hs_compile_context_checkpoint_info_t checkpoint_info = {};
+    EXPECT_EQ(HS_INVALID, hs_compile_context_get_checkpoint_info(
+                              nullptr, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT,
+                              &checkpoint_info));
     ASSERT_EQ(HS_INVALID, hs_compile_context_create(nullptr));
     ASSERT_EQ(HS_INVALID, hs_compile_context_set_fp_feedback(nullptr, nullptr));
+
+    hs_compile_context_t *ctx = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_compile_context_create(&ctx));
+    EXPECT_EQ(HS_SUCCESS, hs_compile_context_get_checkpoint_info(
+                              ctx, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT,
+                              &checkpoint_info));
+    EXPECT_EQ(0U, checkpoint_info.checked_count);
+    EXPECT_EQ(0U, checkpoint_info.hit_count);
+    EXPECT_EQ(0U, checkpoint_info.blocked_count);
+    EXPECT_EQ(0U, checkpoint_info.passed_count);
+    EXPECT_EQ(HS_INVALID, hs_compile_context_get_checkpoint_info(
+                              ctx, HS_FP_COMPILE_CHECKPOINT_COUNT,
+                              &checkpoint_info));
+    EXPECT_EQ(HS_INVALID, hs_compile_context_get_checkpoint_info(
+                              ctx, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT,
+                              nullptr));
+    ASSERT_EQ(HS_SUCCESS, hs_compile_context_free(ctx));
 
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(nullptr));
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(nullptr));
@@ -815,6 +844,11 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
     EXPECT_GE(hs_compile_context_observe_checked_count(ctx), 1U);
     EXPECT_GE(hs_compile_context_observe_hit_count(ctx), 1U);
     EXPECT_GE(hs_compile_context_block_checked_count(ctx), 1U);
+    hs_compile_context_checkpoint_info_t matcher_info =
+        getCheckpointInfo(ctx, HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD);
+    EXPECT_GE(matcher_info.checked_count, 1U);
+    EXPECT_GE(matcher_info.hit_count, 1U);
+    EXPECT_GE(matcher_info.passed_count, 1U);
 
     hs_scratch_t *normal_scratch = nullptr;
     hs_scratch_t *ctx_scratch = nullptr;
@@ -848,6 +882,11 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
     ASSERT_NE(nullptr, ctx_ext_db);
     EXPECT_GE(hs_compile_context_block_checked_count(ctx), 1U);
     EXPECT_GE(hs_compile_context_blocked_count(ctx), 1U);
+    hs_compile_context_checkpoint_info_t literal_info =
+        getCheckpointInfo(ctx, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT);
+    EXPECT_GE(literal_info.checked_count, 1U);
+    EXPECT_GE(literal_info.hit_count, 1U);
+    EXPECT_GE(literal_info.blocked_count, 1U);
 
     hs_scratch_t *normal_ext_scratch = nullptr;
     hs_scratch_t *ctx_ext_scratch = nullptr;
@@ -887,6 +926,11 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
     EXPECT_EQ(0U, hs_compile_context_observe_hit_count(ctx));
     EXPECT_EQ(0U, hs_compile_context_block_checked_count(ctx));
     EXPECT_EQ(0U, hs_compile_context_blocked_count(ctx));
+    literal_info = getCheckpointInfo(ctx, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT);
+    EXPECT_EQ(0U, literal_info.checked_count);
+    EXPECT_EQ(0U, literal_info.hit_count);
+    EXPECT_EQ(0U, literal_info.blocked_count);
+    EXPECT_EQ(0U, literal_info.passed_count);
     hs_free_compile_error(bad_err);
 
     ASSERT_EQ(HS_SUCCESS, hs_free_scratch(ctx_ext_scratch));
@@ -915,6 +959,9 @@ TEST(FpCollector, FeedbackBuildClassifiesBadFragment) {
     ASSERT_NE(nullptr, normal_violet_db);
     ASSERT_NE(nullptr, ctx_violet_db);
     EXPECT_GE(hs_compile_context_block_checked_count(ctx), 1U);
+    hs_compile_context_checkpoint_info_t violet_info =
+        getCheckpointInfo(ctx, HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
+    EXPECT_GE(violet_info.checked_count, 1U);
 
     hs_scratch_t *normal_violet_scratch = nullptr;
     hs_scratch_t *ctx_violet_scratch = nullptr;
@@ -1023,6 +1070,11 @@ TEST(FpCollector, FeedbackBlocksDecoratedMaskedLiteral) {
     ASSERT_NE(nullptr, ctx_db);
     EXPECT_GE(hs_compile_context_block_checked_count(ctx), 1U);
     EXPECT_GE(hs_compile_context_blocked_count(ctx), 1U);
+    hs_compile_context_checkpoint_info_t masked_info =
+        getCheckpointInfo(ctx, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
+    EXPECT_GE(masked_info.checked_count, 1U);
+    EXPECT_GE(masked_info.hit_count, 1U);
+    EXPECT_GE(masked_info.blocked_count, 1U);
 
     hs_scratch_t *normal_scratch = nullptr;
     hs_scratch_t *ctx_scratch = nullptr;

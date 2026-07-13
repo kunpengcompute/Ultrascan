@@ -486,9 +486,7 @@ bool feedbackBlocksTransientMask(const vector<CharReach> &mask,
                                   - ROSE_SHORT_LITERAL_LEN_MAX);
         }
 
-        if (cc.fp_block_checked_count) {
-            (*cc.fp_block_checked_count)++;
-        }
+        fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
 
         const string &s = final_lit.get_string();
         const u8 *mask_ptr = msk.empty() ? nullptr : msk.data();
@@ -502,9 +500,8 @@ bool feedbackBlocksTransientMask(const vector<CharReach> &mask,
 
         DEBUG_PRINTF("rejecting transient masked literal due to fp feedback: "
                      "'%s'\n", escapeString(s).c_str());
-        if (cc.fp_blocked_count) {
-            (*cc.fp_blocked_count)++;
-        }
+        fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
+        fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
         return true;
     }
 

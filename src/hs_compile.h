@@ -171,6 +171,39 @@ unsigned int HS_CDECL hs_compile_context_blocked_count(
     const hs_compile_context_t *ctx);
 
 /**
+ * Compile-time false-positive feedback checkpoint identifiers.
+ */
+#define HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT 0U
+#define HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT 1U
+#define HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL 2U
+#define HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD 3U
+#define HS_FP_COMPILE_CHECKPOINT_COUNT 4U
+
+/**
+ * Compile-time false-positive feedback diagnostics for one checkpoint.
+ */
+typedef struct hs_compile_context_checkpoint_info {
+    /** Number of candidates checked at this checkpoint. */
+    unsigned int checked_count;
+
+    /** Number of checked candidates matching feedback bad fragments. */
+    unsigned int hit_count;
+
+    /** Number of hit candidates rejected at this checkpoint. */
+    unsigned int blocked_count;
+
+    /** Number of hit candidates allowed to continue at this checkpoint. */
+    unsigned int passed_count;
+} hs_compile_context_checkpoint_info_t;
+
+/**
+ * Return diagnostics for a compile-time false-positive feedback checkpoint.
+ */
+hs_error_t HS_CDECL hs_compile_context_get_checkpoint_info(
+    const hs_compile_context_t *ctx, unsigned int checkpoint,
+    hs_compile_context_checkpoint_info_t *info);
+
+/**
  * A type containing information on the target platform which may optionally be
  * provided to the compile calls (@ref hs_compile(), @ref hs_compile_multi(),
  * @ref hs_compile_ext_multi()).

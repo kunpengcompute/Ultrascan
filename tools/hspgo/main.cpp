@@ -1335,6 +1335,37 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
     printField("Observe hit:", hs_compile_context_observe_hit_count(ctx));
     printField("Block checked:", hs_compile_context_block_checked_count(ctx));
     printField("Blocked:", hs_compile_context_blocked_count(ctx));
+
+    struct CheckpointName {
+        unsigned int id;
+        const char *name;
+    };
+    const CheckpointName checkpoints[] = {
+        {HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT, "literal_split"},
+        {HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT, "violet_split"},
+        {HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL, "masked_literal"},
+        {HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD, "matcher_build"},
+    };
+
+    cout << "\nCompile feedback checkpoints:\n";
+    cout << left << setw(18) << "checkpoint"
+         << right << setw(12) << "checked"
+         << setw(12) << "hit"
+         << setw(12) << "blocked"
+         << setw(12) << "passed" << "\n";
+    for (const auto &checkpoint : checkpoints) {
+        hs_compile_context_checkpoint_info_t info = {};
+        hs_error_t err = hs_compile_context_get_checkpoint_info(
+            ctx, checkpoint.id, &info);
+        if (err != HS_SUCCESS) {
+            continue;
+        }
+        cout << left << setw(18) << checkpoint.name
+             << right << setw(12) << formatCount(info.checked_count)
+             << setw(12) << formatCount(info.hit_count)
+             << setw(12) << formatCount(info.blocked_count)
+             << setw(12) << formatCount(info.passed_count) << "\n";
+    }
 }
 
 double secondsSince(const std::chrono::steady_clock::time_point &start,

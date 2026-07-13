@@ -12,6 +12,7 @@ EXPORTS
    hs_compile_context_free
    hs_compile_context_block_checked_count
    hs_compile_context_blocked_count
+   hs_compile_context_get_checkpoint_info
    hs_compile_context_observe_checked_count
    hs_compile_context_observe_hit_count
    hs_compile_context_set_fp_feedback

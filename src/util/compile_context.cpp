@@ -39,14 +39,17 @@ CompileContext::CompileContext(bool in_isStreaming, bool in_isVectored,
                                const Grey &in_grey,
                                const hs_fp_feedback_t *in_fp_feedback,
                                u32 *in_fp_block_checked_count,
-                               u32 *in_fp_blocked_count)
+                               u32 *in_fp_blocked_count,
+                               hs_compile_context_checkpoint_info_t *
+                                   in_fp_checkpoint_info)
     : streaming(in_isStreaming || in_isVectored),
       vectored(in_isVectored),
       target_info(in_target_info),
       grey(in_grey),
       fp_feedback(in_fp_feedback),
       fp_block_checked_count(in_fp_block_checked_count),
-      fp_blocked_count(in_fp_blocked_count) {
+      fp_blocked_count(in_fp_blocked_count),
+      fp_checkpoint_info(in_fp_checkpoint_info) {
 }
 
 } // namespace ue2

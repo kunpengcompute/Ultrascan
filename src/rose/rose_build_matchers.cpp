@@ -710,9 +710,7 @@ void checkFpFeedbackMatcherFragment(const RoseBuildImpl &build,
         return;
     }
 
-    if (build.cc.fp_block_checked_count) {
-        (*build.cc.fp_block_checked_count)++;
-    }
+    fpCompileRecordCheck(build.cc, HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD);
 
     const u8 *mask_ptr = msk.empty() ? nullptr : msk.data();
     const u8 *cmp_ptr = cmp.empty() ? nullptr : cmp.data();
@@ -722,6 +720,8 @@ void checkFpFeedbackMatcherFragment(const RoseBuildImpl &build,
         return;
     }
 
+    fpCompileRecordHit(build.cc, HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD);
+    fpCompileRecordPassed(build.cc, HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD);
     DEBUG_PRINTF("fp feedback matcher fallback hit: fragment_id=%u, "
                  "table=%u, lit_ids=%zu, s='%s'\n",
                  f.fragment_id, (u32)lit.table, f.lit_ids.size(),
