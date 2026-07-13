@@ -237,6 +237,144 @@ bool parsePositiveUnsigned(const char *text, unsigned *out) {
     return true;
 }
 
+bool parseUnsigned(const char *text, unsigned *out) {
+    if (!text || !*text || !out || text[0] == '+' || text[0] == '-') {
+        return false;
+    }
+
+    errno = 0;
+    char *end = nullptr;
+    unsigned long value = std::strtoul(text, &end, 10);
+    if (errno || !end || *end != '\0' ||
+        value > std::numeric_limits<unsigned>::max()) {
+        return false;
+    }
+
+    *out = static_cast<unsigned>(value);
+    return true;
+}
+
+bool appendCpu(unsigned cpu, vector<unsigned> *out, string *error) {
+    if (out->size() >= MAX_HSPGO_WORKERS) {
+        if (error) {
+            *error = "thread CPU list has too many entries";
+        }
+        return false;
+    }
+
+    for (unsigned existing : *out) {
+        if (existing == cpu) {
+            if (error) {
+                std::ostringstream oss;
+                oss << "CPU " << cpu << " appears more than once";
+                *error = oss.str();
+            }
+            return false;
+        }
+    }
+
+#if defined(__linux__)
+    if (cpu >= CPU_SETSIZE) {
+        if (error) {
+            std::ostringstream oss;
+            oss << "CPU " << cpu << " is outside CPU_SETSIZE";
+            *error = oss.str();
+        }
+        return false;
+    }
+#endif
+
+    out->push_back(cpu);
+    return true;
+}
+
+bool parseCpuList(const char *text, vector<unsigned> *out, string *error) {
+    if (!text || !*text || !out) {
+        if (error) {
+            *error = "thread CPU list must not be empty";
+        }
+        return false;
+    }
+
+    out->clear();
+    string spec(text);
+    size_t pos = 0;
+    while (pos < spec.size()) {
+        const size_t comma = spec.find(',', pos);
+        const size_t end = comma == string::npos ? spec.size() : comma;
+        if (end == pos) {
+            if (error) {
+                *error = "thread CPU list contains an empty item";
+            }
+            return false;
+        }
+
+        string token = spec.substr(pos, end - pos);
+        const size_t dash = token.find('-');
+        if (dash == string::npos) {
+            unsigned cpu = 0;
+            if (!parseUnsigned(token.c_str(), &cpu)) {
+                if (error) {
+                    *error = "thread CPU list contains an invalid CPU id";
+                }
+                return false;
+            }
+            if (!appendCpu(cpu, out, error)) {
+                return false;
+            }
+        } else {
+            if (dash == 0 || dash + 1 >= token.size() ||
+                token.find('-', dash + 1) != string::npos) {
+                if (error) {
+                    *error = "thread CPU range must be FIRST-LAST";
+                }
+                return false;
+            }
+            unsigned first = 0;
+            unsigned last = 0;
+            if (!parseUnsigned(token.substr(0, dash).c_str(), &first) ||
+                !parseUnsigned(token.substr(dash + 1).c_str(), &last) ||
+                first > last) {
+                if (error) {
+                    *error = "thread CPU range is invalid";
+                }
+                return false;
+            }
+            const unsigned long long rangeCount =
+                static_cast<unsigned long long>(last) -
+                static_cast<unsigned long long>(first) + 1;
+            if (rangeCount > MAX_HSPGO_WORKERS ||
+                out->size() > MAX_HSPGO_WORKERS - rangeCount) {
+                if (error) {
+                    *error = "thread CPU range has too many entries";
+                }
+                return false;
+            }
+            for (unsigned cpu = first;; cpu++) {
+                if (!appendCpu(cpu, out, error)) {
+                    return false;
+                }
+                if (cpu == last) {
+                    break;
+                }
+            }
+        }
+
+        if (out->empty() || out->size() > MAX_HSPGO_WORKERS) {
+            if (error && error->empty()) {
+                *error = "thread CPU list must not be empty";
+            }
+            return false;
+        }
+
+        if (comma == string::npos) {
+            break;
+        }
+        pos = comma + 1;
+    }
+
+    return !out->empty();
+}
 
 bool processArgs(int argc, char **argv, Options *opts) {
     static const struct option longopts[] = {
@@ -674,6 +812,177 @@ bool scanBlocks(const hs_database_t *db, hs_scratch_t *scratch,
     return true;
 }
 
+void addRunStats(RunStats *dst, const RunStats &src) {
+    dst->scanCalls += src.scanCalls;
+    dst->bytes += src.bytes;
+    dst->matches += src.matches;
+}
+
+double secondsSince(const std::chrono::steady_clock::time_point &start,
+                    const std::chrono::steady_clock::time_point &end);
+
+bool allocScratches(const hs_database_t *db, unsigned count,
+                    vector<ScratchPtr> *scratches) {
+    scratches->clear();
+    scratches->resize(count);
+    for (unsigned i = 0; i < count; i++) {
+        if (!allocScratch(db, &(*scratches)[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool createCollectors(const hs_database_t *db, unsigned count,
+                      vector<CollectorPtr> *collectors) {
+    collectors->clear();
+    collectors->resize(count);
+    for (unsigned i = 0; i < count; i++) {
+        hs_fp_collector_t *rawCollector = nullptr;
+        hs_error_t err = hs_fp_collector_create(db, &rawCollector);
+        if (err != HS_SUCCESS) {
+            cerr << "hs_fp_collector_create failed with error " << err
+                 << "\n";
+            return false;
+        }
+        (*collectors)[i].reset(rawCollector);
+    }
+    return true;
+}
+
+bool mergeCollectors(const hs_database_t *db,
+                     const vector<CollectorPtr> &collectors,
+                     CollectorPtr *merged) {
+    hs_fp_collector_t *rawCollector = nullptr;
+    hs_error_t err = hs_fp_collector_create(db, &rawCollector);
+    if (err != HS_SUCCESS) {
+        cerr << "hs_fp_collector_create failed with error " << err << "\n";
+        return false;
+    }
+    merged->reset(rawCollector);
+
+    for (const auto &collector : collectors) {
+        err = hs_fp_collector_merge(merged->get(), collector.get());
+        if (err != HS_SUCCESS) {
+            cerr << "hs_fp_collector_merge failed with error " << err << "\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool bindCurrentThread(unsigned cpu, string *error) {
+#if defined(__linux__)
+    if (cpu >= CPU_SETSIZE) {
+        if (error) {
+            std::ostringstream oss;
+            oss << "CPU " << cpu << " is outside CPU_SETSIZE";
+            *error = oss.str();
+        }
+        return false;
+    }
+
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(cpu, &cpuset);
+    int rv = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+    if (rv != 0) {
+        if (error) {
+            std::ostringstream oss;
+            oss << "pthread_setaffinity_np failed for CPU " << cpu
+                << " with error " << rv;
+            *error = oss.str();
+        }
+        return false;
+    }
+    return true;
+#else
+    (void)cpu;
+    if (error) {
+        *error = "thread affinity is not available on this platform";
+    }
+    return false;
+#endif
+}
+
+bool runParallelScan(const hs_database_t *db,
+                     const vector<ScratchPtr> &scratches,
+                     const vector<DataBlock> &blocks, unsigned rounds,
+                     const vector<CollectorPtr> *collectors,
+                     const vector<unsigned> *cpuList,
+                     ParallelRunResult *result) {
+    const size_t threadCount = scratches.size();
+    if (!threadCount) {
+        cerr << "no worker scratch allocated\n";
+        return false;
+    }
+    if (collectors && collectors->size() != threadCount) {
+        cerr << "collector count does not match worker count\n";
+        return false;
+    }
+    if (cpuList && cpuList->size() != threadCount) {
+        cerr << "CPU list does not match worker count\n";
+        return false;
+    }
+
+    vector<ThreadScanResult> results(threadCount);
+    vector<std::thread> threads;
+    threads.reserve(threadCount);
+
+    const auto wallStart = std::chrono::steady_clock::now();
+    try {
+        for (size_t i = 0; i < threadCount; i++) {
+            hs_fp_collector_t *collector =
+                collectors ? (*collectors)[i].get() : nullptr;
+            threads.emplace_back([&, i, collector]() {
+                if (cpuList &&
+                    !bindCurrentThread((*cpuList)[i], &results[i].error)) {
+                    results[i].ok = false;
+                    return;
+                }
+                const auto workerStart = std::chrono::steady_clock::now();
+                results[i].ok = scanBlocks(db, scratches[i].get(), blocks,
+                                           rounds, collector,
+                                           &results[i].stats,
+                                           &results[i].error);
+                const auto workerEnd = std::chrono::steady_clock::now();
+                results[i].seconds = secondsSince(workerStart, workerEnd);
+            });
+        }
+    } catch (const std::exception &e) {
+        for (auto &thread : threads) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+        cerr << "failed to launch worker thread: " << e.what() << "\n";
+        return false;
+    }
+
+    for (auto &thread : threads) {
+        thread.join();
+    }
+    const auto wallEnd = std::chrono::steady_clock::now();
+
+    result->stats = RunStats();
+    result->seconds = secondsSince(wallStart, wallEnd);
+    result->fastestWorkerSeconds = 0.0;
+    for (size_t i = 0; i < threadCount; i++) {
+        if (!results[i].ok) {
+            cerr << "worker " << i << " failed: " << results[i].error
+                 << "\n";
+            return false;
+        }
+        addRunStats(&result->stats, results[i].stats);
+        if (results[i].seconds > 0.0 &&
+            (!result->fastestWorkerSeconds ||
+             results[i].seconds < result->fastestWorkerSeconds)) {
+            result->fastestWorkerSeconds = results[i].seconds;
+        }
+    }
+
+    return true;
+}
 
 const char *tableName(unsigned int table) {
     switch (table) {
