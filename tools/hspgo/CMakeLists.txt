@@ -11,6 +11,8 @@ set(hspgo_SOURCES
     main.cpp
     ../hsbench/data_corpus.cpp
     ../hsbench/data_corpus.h
+    ../hsbench/heapstats.cpp
+    ../hsbench/heapstats.h
 )
 
 set(hspgo_INTERNAL_OBJECTS)

@@ -26,11 +26,17 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "config.h"
 
 #include "ExpressionParser.h"
 #include "data_corpus.h"
+#include "database.h"
 #include "expressions.h"
+#include "heapstats.h"
 #include "hs.h"
 
 #include <algorithm>
@@ -40,17 +46,26 @@
 #include <clocale>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
+#include <exception>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <stdint.h>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <getopt.h>
+
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#endif
 
 using std::cerr;
 using std::cout;
@@ -66,27 +81,23 @@ using std::vector;
 
 namespace {
 
-enum {
-    OPT_COLLECT_ROUNDS = 256,
-    OPT_MEASURE_ROUNDS,
-    OPT_TEXT,
-    OPT_TOP,
-    OPT_DUMP_REPORT,
-    OPT_DUMP_FEEDBACK,
-    OPT_THREADS
-};
+const size_t MAX_HSPGO_WORKERS = 1024;
 
 struct Options {
     string exprPath;
-    string pattern;
     string corpusPath;
-    string text;
-    string dumpReportPath;
-    string dumpFeedbackPath;
+    string reportCsvPath;
+    string feedbackCsvPath;
     string threadSpec;
+    string greyOverrides;
+    vector<unsigned> cpuList;
+    unsigned baselineRounds = 1;
     unsigned collectRounds = 3;
     unsigned measureRounds = 5;
-    unsigned top = 10;
+    unsigned threadCount = 1;
+    unsigned top = 0;
+    bool showSummaries = false;
+    bool showDiagnostics = false;
 };
 
 struct PatternSet {
@@ -100,6 +111,30 @@ struct RunStats {
     unsigned long long scanCalls = 0;
     unsigned long long bytes = 0;
     unsigned long long matches = 0;
+};
+
+struct ParallelRunResult {
+    RunStats stats;
+    double seconds = 0.0;
+    double fastestWorkerSeconds = 0.0;
+};
+
+struct ThreadScanResult {
+    RunStats stats;
+    string error;
+    double seconds = 0.0;
+    bool ok = true;
+};
+
+struct DatabaseStats {
+    string signatures;
+    string info;
+    size_t expressionCount = 0;
+    size_t bytecodeSize = 0;
+    uint32_t crc32 = 0;
+    size_t scratchSize = 0;
+    double compileSeconds = 0.0;
+    size_t peakHeap = 0;
 };
 
 struct DatabaseDeleter {
@@ -150,29 +185,43 @@ void usage(const char *error) {
     cout << "Usage: hspgo [OPTIONS...]\n\n"
          << "Options:\n\n"
          << "  -h, --help              Display help and exit.\n"
+         << "  -G OVERRIDES            Overrides for the grey box.\n"
          << "  -e PATH                 Load hsbench expression file/directory.\n"
-         << "  -s FILE                 Load one hsbench signature file.\n"
-         << "  -p PATTERN              Add one quick pattern. Plain text and /re/flags are accepted.\n"
-         << "  -c FILE                 Load hsbench sqlite corpus; fallback to one raw file block.\n"
-         << "      --text TEXT         Add one inline corpus block.\n"
-         << "      --collect-rounds N  Scan N rounds with hs_scan_with_collector() (default 3).\n"
-         << "  -n N, --measure-rounds N\n"
-         << "                           Scan N rounds after feedback recompile and DB switch (default 5).\n"
+         << "  -c FILE                 Load hsbench sqlite corpus.\n"
+         << "  -B N                    Run N normal hs_scan() baseline rounds (default 1).\n"
+         << "  -R N                    Run N collection rounds with collector (default 3).\n"
+         << "  -n N                    Run N measurement rounds after DB switch (default 5).\n"
          << "  -N                      Block mode marker, accepted for hsbench familiarity.\n"
-         << "  -T LIST, --threads LIST Accepted for hsbench familiarity; first version runs one thread.\n"
-         << "      --top N             Print top N report/feedback fragments (default 10).\n"
-         << "      --dump-report FILE  Serialize collected report to FILE.\n"
-         << "      --dump-feedback FILE\n"
-         << "                           Serialize generated feedback to FILE.\n\n"
-         << "Throughput is measured only after the feedback-optimized DB is active.\n";
+         << "  -T CPU,CPU... or CPU-CPU\n"
+         << "                           Run one worker per CPU and bind affinity.\n"
+         << "  -r                      Print collection/feedback summaries.\n"
+         << "  -f N                    Print top N report and feedback fragments.\n"
+         << "  -d                      Print compile feedback diagnostics.\n"
+         << "  -v                      Verbose feedback view (-r -d -f 10 if -f omitted).\n"
+         << "  -o FILE                 Dump report fragments as CSV.\n"
+         << "  -O FILE                 Dump feedback fragments as CSV.\n\n"
+         << "Optimized throughput is measured only after the feedback-compiled DB is active.\n";
 
     if (error) {
         cerr << "Error: " << error << "\n";
     }
 }
 
+void usage(const string &error) {
+    usage(error.c_str());
+}
+
+string optionName(int c) {
+    if (c > 0 && std::isprint(c)) {
+        string name("-");
+        name.push_back(static_cast<char>(c));
+        return name;
+    }
+    return "option";
+}
+
 bool parsePositiveUnsigned(const char *text, unsigned *out) {
-    if (!text || !*text || !out) {
+    if (!text || !*text || !out || text[0] == '+' || text[0] == '-') {
         return false;
     }
 
@@ -188,22 +237,18 @@ bool parsePositiveUnsigned(const char *text, unsigned *out) {
     return true;
 }
 
+
 bool processArgs(int argc, char **argv, Options *opts) {
     static const struct option longopts[] = {
         {"help", no_argument, nullptr, 'h'},
-        {"text", required_argument, nullptr, OPT_TEXT},
-        {"collect-rounds", required_argument, nullptr, OPT_COLLECT_ROUNDS},
-        {"measure-rounds", required_argument, nullptr, OPT_MEASURE_ROUNDS},
-        {"top", required_argument, nullptr, OPT_TOP},
-        {"dump-report", required_argument, nullptr, OPT_DUMP_REPORT},
-        {"dump-feedback", required_argument, nullptr, OPT_DUMP_FEEDBACK},
-        {"threads", required_argument, nullptr, OPT_THREADS},
         {nullptr, 0, nullptr, 0}
     };
 
+    opterr = 0;
     int optionIndex = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, "hc:e:s:p:n:NT:V", longopts,
+        int c = getopt_long(argc, argv, ":B:c:de:f:G:hNn:o:O:rR:T:vV",
+                            longopts,
                             &optionIndex);
         if (c < 0) {
             break;
@@ -214,18 +259,45 @@ bool processArgs(int argc, char **argv, Options *opts) {
         case 'h':
             usage(nullptr);
             std::exit(0);
+        case 'G':
+            opts->greyOverrides.assign(optarg);
+            if (hs_set_grey_overrides(optarg) != HS_SUCCESS) {
+                usage("Invalid grey overrides");
+                return false;
+            }
+            break;
+        case 'B':
+            if (!parseUnsigned(optarg, &value)) {
+                usage("baseline rounds must be a non-negative integer");
+                return false;
+            }
+            opts->baselineRounds = value;
+            break;
         case 'c':
+            if (!optarg || !*optarg) {
+                usage("corpus path must not be empty");
+                return false;
+            }
             opts->corpusPath.assign(optarg);
             break;
+        case 'd':
+            opts->showDiagnostics = true;
+            break;
         case 'e':
-        case 's':
+            if (!optarg || !*optarg) {
+                usage("expression path must not be empty");
+                return false;
+            }
             opts->exprPath.assign(optarg);
             break;
-        case 'p':
-            opts->pattern.assign(optarg);
+        case 'f':
+            if (!parsePositiveUnsigned(optarg, &value)) {
+                usage("top fragment count must be a positive integer");
+                return false;
+            }
+            opts->top = value;
             break;
         case 'n':
-        case OPT_MEASURE_ROUNDS:
             if (!parsePositiveUnsigned(optarg, &value)) {
                 usage("measure rounds must be a positive integer");
                 return false;
@@ -234,40 +306,69 @@ bool processArgs(int argc, char **argv, Options *opts) {
             break;
         case 'N':
             break;
-        case 'T':
-        case OPT_THREADS:
+        case 'o':
+            if (!optarg || !*optarg) {
+                usage("report CSV path must not be empty");
+                return false;
+            }
+            opts->reportCsvPath.assign(optarg);
+            break;
+        case 'O':
+            if (!optarg || !*optarg) {
+                usage("feedback CSV path must not be empty");
+                return false;
+            }
+            opts->feedbackCsvPath.assign(optarg);
+            break;
+        case 'r':
+            opts->showSummaries = true;
+            break;
+        case 'R':
+            if (!parsePositiveUnsigned(optarg, &value)) {
+                usage("collection rounds must be a positive integer");
+                return false;
+            }
+            opts->collectRounds = value;
+            break;
+        case 'T': {
             if (!optarg || !*optarg) {
                 usage("thread list must not be empty");
                 return false;
             }
             opts->threadSpec.assign(optarg);
+            string cpuError;
+            if (!parseCpuList(optarg, &opts->cpuList, &cpuError)) {
+                if (cpuError.empty()) {
+                    cpuError = "thread CPU list must be CPU,CPU... or CPU-CPU";
+                }
+                usage(cpuError);
+                return false;
+            }
+            opts->threadCount = static_cast<unsigned>(opts->cpuList.size());
+            break;
+        }
+        case 'v':
+            opts->showSummaries = true;
+            opts->showDiagnostics = true;
+            if (!opts->top) {
+                opts->top = 10;
+            }
             break;
         case 'V':
             usage("hspgo first version supports block mode only");
             return false;
-        case OPT_TEXT:
-            opts->text.assign(optarg);
-            break;
-        case OPT_COLLECT_ROUNDS:
-            if (!parsePositiveUnsigned(optarg, &value)) {
-                usage("collect rounds must be a positive integer");
-                return false;
+        case ':':
+            usage(optionName(optopt) + " requires an argument");
+            return false;
+        case '?':
+            if (optopt) {
+                usage("unknown option " + optionName(optopt));
+            } else if (optind > 0 && optind <= argc) {
+                usage(string("unknown option ") + argv[optind - 1]);
+            } else {
+                usage("unknown option");
             }
-            opts->collectRounds = value;
-            break;
-        case OPT_TOP:
-            if (!parsePositiveUnsigned(optarg, &value)) {
-                usage("top must be a positive integer");
-                return false;
-            }
-            opts->top = value;
-            break;
-        case OPT_DUMP_REPORT:
-            opts->dumpReportPath.assign(optarg);
-            break;
-        case OPT_DUMP_FEEDBACK:
-            opts->dumpFeedbackPath.assign(optarg);
-            break;
+            return false;
         default:
             usage("unknown argument");
             return false;
@@ -278,12 +379,12 @@ bool processArgs(int argc, char **argv, Options *opts) {
         usage("unexpected positional argument");
         return false;
     }
-    if (opts->exprPath.empty() && opts->pattern.empty()) {
-        usage("provide -e/-s or -p");
+    if (opts->exprPath.empty()) {
+        usage("provide -e");
         return false;
     }
-    if (opts->corpusPath.empty() && opts->text.empty()) {
-        usage("provide -c or --text");
+    if (opts->corpusPath.empty()) {
+        usage("provide -c");
         return false;
     }
 
@@ -323,27 +424,10 @@ bool addExpression(unsigned int id, const string &input, bool allowPlain,
 
 bool loadPatternSet(const Options &opts, PatternSet *patterns) {
     ExpressionMap exprMap;
-    if (!opts.exprPath.empty()) {
-        loadExpressions(opts.exprPath, exprMap);
-    }
+    loadExpressions(opts.exprPath, exprMap);
 
     for (const auto &m : exprMap) {
         if (!addExpression(m.first, m.second, false, patterns)) {
-            return false;
-        }
-    }
-
-    if (!opts.pattern.empty()) {
-        unsigned int id = 1;
-        if (!patterns->ids.empty()) {
-            id = *std::max_element(patterns->ids.begin(), patterns->ids.end());
-            if (id == std::numeric_limits<unsigned int>::max()) {
-                cerr << "Cannot allocate id for -p pattern\n";
-                return false;
-            }
-            id++;
-        }
-        if (!addExpression(id, opts.pattern, true, patterns)) {
             return false;
         }
     }
@@ -361,41 +445,13 @@ bool loadPatternSet(const Options &opts, PatternSet *patterns) {
     return true;
 }
 
-bool readPlainFileBlock(const string &path, vector<DataBlock> *blocks) {
-    std::ifstream in(path.c_str(), std::ios::binary);
-    if (!in.good()) {
-        cerr << "Unable to open corpus file: " << path << "\n";
-        return false;
-    }
-
-    string payload((std::istreambuf_iterator<char>(in)),
-                   std::istreambuf_iterator<char>());
-    if (payload.empty()) {
-        cerr << "Corpus file is empty: " << path << "\n";
-        return false;
-    }
-
-    blocks->emplace_back(0, 0, 0, move(payload));
-    return true;
-}
-
 bool loadCorpus(const Options &opts, vector<DataBlock> *blocks) {
-    if (!opts.corpusPath.empty()) {
-        try {
-            vector<DataBlock> dbBlocks = readCorpus(opts.corpusPath);
-            blocks->insert(blocks->end(), dbBlocks.begin(), dbBlocks.end());
-        } catch (const DataCorpusError &e) {
-            cerr << "Corpus sqlite read failed: " << e.msg
-                 << "; treating file as one raw block.\n";
-            if (!readPlainFileBlock(opts.corpusPath, blocks)) {
-                return false;
-            }
-        }
-    }
-
-    if (!opts.text.empty()) {
-        blocks->emplace_back(static_cast<unsigned int>(blocks->size()), 0, 0,
-                             opts.text);
+    try {
+        vector<DataBlock> dbBlocks = readCorpus(opts.corpusPath);
+        blocks->insert(blocks->end(), dbBlocks.begin(), dbBlocks.end());
+    } catch (const DataCorpusError &e) {
+        cerr << "Corpus sqlite read failed: " << e.msg << "\n";
+        return false;
     }
 
     if (blocks->empty()) {
@@ -412,6 +468,68 @@ unsigned long long corpusBytes(const vector<DataBlock> &blocks) {
         total += block.payload.size();
     }
     return total;
+}
+
+string formatCount(unsigned long long value) {
+    string s = std::to_string(value);
+    string out;
+    out.reserve(s.size() + s.size() / 3);
+    for (size_t i = 0; i < s.size(); i++) {
+        if (i && (s.size() - i) % 3 == 0) {
+            out.push_back(',');
+        }
+        out.push_back(s[i]);
+    }
+    return out;
+}
+
+string formatFixed(double value, int precision) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(precision) << value;
+    return oss.str();
+}
+
+string formatFixedWithCommas(double value, int precision) {
+    string s = formatFixed(value, precision);
+    const size_t dot = s.find('.');
+    string integer = dot == string::npos ? s : s.substr(0, dot);
+    string suffix = dot == string::npos ? string() : s.substr(dot);
+    string sign;
+    if (!integer.empty() && integer[0] == '-') {
+        sign = "-";
+        integer.erase(integer.begin());
+    }
+
+    string out;
+    out.reserve(integer.size() + integer.size() / 3 + suffix.size() +
+                sign.size());
+    out += sign;
+    for (size_t i = 0; i < integer.size(); i++) {
+        if (i && (integer.size() - i) % 3 == 0) {
+            out.push_back(',');
+        }
+        out.push_back(integer[i]);
+    }
+    out += suffix;
+    return out;
+}
+
+string formatHex32(uint32_t value) {
+    std::ostringstream oss;
+    oss << "0x" << hex << value << dec;
+    return oss.str();
+}
+
+string signatureName(const Options &opts) {
+    return opts.exprPath;
+}
+
+void printField(const char *label, const string &value) {
+    cout << left << setw(28) << label << value << "\n";
+}
+
+void printField(const char *label, unsigned long long value) {
+    printField(label, formatCount(value));
 }
 
 bool compileDatabase(const PatternSet &patterns,
@@ -470,6 +588,39 @@ bool allocScratch(const hs_database_t *db, ScratchPtr *scratch) {
     return true;
 }
 
+bool queryDatabaseStats(const hs_database_t *db, const hs_scratch_t *scratch,
+                        const string &signatures, size_t expressionCount,
+                        double compileSeconds, DatabaseStats *stats) {
+    char *info = nullptr;
+    hs_error_t err = hs_database_info(db, &info);
+    if (err != HS_SUCCESS || !info) {
+        cerr << "hs_database_info failed with error " << err << "\n";
+        return false;
+    }
+
+    stats->signatures = signatures;
+    stats->info.assign(info);
+    std::free(info);
+    stats->expressionCount = expressionCount;
+    stats->crc32 = db->crc32;
+    stats->compileSeconds = compileSeconds;
+    stats->peakHeap = getPeakHeap();
+
+    err = hs_database_size(db, &stats->bytecodeSize);
+    if (err != HS_SUCCESS) {
+        cerr << "hs_database_size failed with error " << err << "\n";
+        return false;
+    }
+
+    err = hs_scratch_size(scratch, &stats->scratchSize);
+    if (err != HS_SUCCESS) {
+        cerr << "hs_scratch_size failed with error " << err << "\n";
+        return false;
+    }
+
+    return true;
+}
+
 int onMatch(unsigned int, unsigned long long, unsigned long long,
             unsigned int, void *ctx) {
     if (ctx) {
@@ -481,13 +632,18 @@ int onMatch(unsigned int, unsigned long long, unsigned long long,
 
 bool scanBlocks(const hs_database_t *db, hs_scratch_t *scratch,
                 const vector<DataBlock> &blocks, unsigned rounds,
-                hs_fp_collector_t *collector, RunStats *stats) {
+                hs_fp_collector_t *collector, RunStats *stats,
+                string *error) {
     for (unsigned round = 0; round < rounds; round++) {
         for (const auto &block : blocks) {
             if (block.payload.size() >
                 std::numeric_limits<unsigned int>::max()) {
-                cerr << "Corpus block " << block.id
-                     << " is too large for block scan\n";
+                std::ostringstream oss;
+                oss << "Corpus block " << block.id
+                    << " is too large for block scan";
+                if (error) {
+                    *error = oss.str();
+                }
                 return false;
             }
 
@@ -502,7 +658,11 @@ bool scanBlocks(const hs_database_t *db, hs_scratch_t *scratch,
                 err = hs_scan(db, data, len, 0, scratch, onMatch, stats);
             }
             if (err != HS_SUCCESS) {
-                cerr << "scan failed with error " << err << "\n";
+                std::ostringstream oss;
+                oss << "scan failed with error " << err;
+                if (error) {
+                    *error = oss.str();
+                }
                 return false;
             }
 
@@ -513,6 +673,7 @@ bool scanBlocks(const hs_database_t *db, hs_scratch_t *scratch,
 
     return true;
 }
+
 
 const char *tableName(unsigned int table) {
     switch (table) {
@@ -633,28 +794,31 @@ void sortFragments(vector<hs_fp_fragment_info_t> *fragments) {
 
 void printFragmentHeader() {
     cout << left << setw(4) << "#"
-         << setw(18) << "key"
-         << setw(9) << "table"
-         << setw(9) << "engine"
-         << right << setw(10) << "trigger"
-         << setw(10) << "true"
-         << setw(10) << "false"
+         << setw(20) << "key"
+         << setw(10) << "table"
+         << setw(10) << "engine"
+         << right << setw(12) << "trigger"
+         << setw(12) << "true"
+         << setw(12) << "false"
          << setw(9) << "fp_rate"
          << "  fragment\n";
 }
 
-void printFragmentRow(size_t index, const hs_fp_fragment_info_t &fragment) {
+string fragmentKeyString(const hs_fp_fragment_info_t &fragment) {
     std::ostringstream key;
     key << "0x" << hex << setw(16) << setfill('0') << fragment.key << dec
         << setfill(' ');
+    return key.str();
+}
 
+void printFragmentRow(size_t index, const hs_fp_fragment_info_t &fragment) {
     cout << left << setw(4) << index
-         << setw(18) << key.str()
-         << setw(9) << tableName(fragment.table)
-         << setw(9) << engineName(fragment.engine)
-         << right << setw(10) << fragment.trigger_count
-         << setw(10) << fragment.true_trigger_count
-         << setw(10) << fragment.false_positive_count
+         << setw(20) << fragmentKeyString(fragment)
+         << setw(10) << tableName(fragment.table)
+         << setw(10) << engineName(fragment.engine)
+         << right << setw(12) << fragment.trigger_count
+         << setw(12) << fragment.true_trigger_count
+         << setw(12) << fragment.false_positive_count
          << setw(8) << std::fixed << std::setprecision(2)
          << (falsePositiveRate(fragment) * 100.0) << "%"
          << "  \"" << escapedBytes(fragment.bytes, fragment.length) << "\"\n";
@@ -701,13 +865,53 @@ void printFeedbackFragments(const hs_fp_feedback_t *feedback, unsigned top) {
     }
 }
 
-bool writeBlob(const string &path, const char *bytes, size_t length) {
+string csvEscape(const string &value) {
+    bool needsQuotes = false;
+    for (char c : value) {
+        if (c == '"' || c == ',' || c == '\n' || c == '\r') {
+            needsQuotes = true;
+            break;
+        }
+    }
+    if (!needsQuotes) {
+        return value;
+    }
+
+    string out = "\"";
+    for (char c : value) {
+        if (c == '"') {
+            out += "\"\"";
+        } else {
+            out.push_back(c);
+        }
+    }
+    out.push_back('"');
+    return out;
+}
+
+bool writeFragmentCsv(const string &path,
+                      vector<hs_fp_fragment_info_t> fragments) {
     std::ofstream out(path.c_str(), std::ios::binary);
     if (!out.good()) {
         cerr << "Unable to open output file: " << path << "\n";
         return false;
     }
-    out.write(bytes, static_cast<std::streamsize>(length));
+
+    sortFragments(&fragments);
+    out << "key,table,engine,trigger_count,true_trigger_count,"
+           "false_positive_count,fp_rate,fragment\n";
+    for (const auto &fragment : fragments) {
+        const string bytes = escapedBytes(fragment.bytes, fragment.length);
+        out << fragmentKeyString(fragment) << ','
+            << tableName(fragment.table) << ','
+            << engineName(fragment.engine) << ','
+            << fragment.trigger_count << ','
+            << fragment.true_trigger_count << ','
+            << fragment.false_positive_count << ','
+            << formatFixed(falsePositiveRate(fragment), 6) << ','
+            << csvEscape(bytes) << "\n";
+    }
+
     if (!out.good()) {
         cerr << "Unable to write output file: " << path << "\n";
         return false;
@@ -715,38 +919,26 @@ bool writeBlob(const string &path, const char *bytes, size_t length) {
     return true;
 }
 
-bool dumpReport(const hs_fp_report_t *report, const string &path) {
+bool dumpReportCsv(const hs_fp_report_t *report, const string &path) {
     if (path.empty()) {
         return true;
     }
-    char *bytes = nullptr;
-    size_t length = 0;
-    hs_error_t err = hs_fp_report_serialize(report, &bytes, &length);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_report_serialize failed with error " << err << "\n";
+    vector<hs_fp_fragment_info_t> fragments;
+    if (!loadReportFragments(report, &fragments)) {
         return false;
     }
-
-    bool ok = writeBlob(path, bytes, length);
-    std::free(bytes);
-    return ok;
+    return writeFragmentCsv(path, move(fragments));
 }
 
-bool dumpFeedback(const hs_fp_feedback_t *feedback, const string &path) {
+bool dumpFeedbackCsv(const hs_fp_feedback_t *feedback, const string &path) {
     if (path.empty()) {
         return true;
     }
-    char *bytes = nullptr;
-    size_t length = 0;
-    hs_error_t err = hs_fp_feedback_serialize(feedback, &bytes, &length);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_feedback_serialize failed with error " << err << "\n";
+    vector<hs_fp_fragment_info_t> fragments;
+    if (!loadFeedbackFragments(feedback, &fragments)) {
         return false;
     }
-
-    bool ok = writeBlob(path, bytes, length);
-    std::free(bytes);
-    return ok;
+    return writeFragmentCsv(path, move(fragments));
 }
 
 void printReportSummary(const hs_fp_report_t *report) {
@@ -757,16 +949,17 @@ void printReportSummary(const hs_fp_report_t *report) {
         return;
     }
 
-    cout << "\nCollection report:\n"
-         << "  fragments:       " << summary.fragment_count << "\n"
-         << "  scan calls:      " << summary.scan_calls << "\n"
-         << "  scan bytes:      " << summary.scan_bytes << "\n"
-         << "  triggers:        " << summary.trigger_count << "\n"
-         << "  true triggers:   " << summary.true_trigger_count << "\n"
-         << "  final reports:   " << summary.final_report_count << "\n"
-         << "  false positives: " << summary.false_positive_count << "\n"
-         << "  unknown reports: " << summary.unknown_report_count << "\n"
-         << "  dropped:         " << summary.dropped_trigger_count << "\n";
+    cout << "\nCollection report:\n";
+    printField("Fragments:", static_cast<unsigned long long>(
+                                  summary.fragment_count));
+    printField("Scan calls:", summary.scan_calls);
+    printField("Scan bytes:", summary.scan_bytes);
+    printField("Triggers:", summary.trigger_count);
+    printField("True triggers:", summary.true_trigger_count);
+    printField("Final reports:", summary.final_report_count);
+    printField("False positives:", summary.false_positive_count);
+    printField("Unknown reports:", summary.unknown_report_count);
+    printField("Dropped:", summary.dropped_trigger_count);
 }
 
 void printFeedbackSummary(const hs_fp_feedback_t *feedback) {
@@ -777,12 +970,13 @@ void printFeedbackSummary(const hs_fp_feedback_t *feedback) {
         return;
     }
 
-    cout << "\nFeedback summary:\n"
-         << "  bad fragments:          " << summary.bad_fragment_count << "\n"
-         << "  source scan calls:      " << summary.scan_calls << "\n"
-         << "  source scan bytes:      " << summary.scan_bytes << "\n"
-         << "  source false positives: "
-         << summary.total_false_positive_count << "\n";
+    cout << "\nFeedback summary:\n";
+    printField("Bad fragments:",
+               static_cast<unsigned long long>(summary.bad_fragment_count));
+    printField("Source scan calls:", summary.scan_calls);
+    printField("Source scan bytes:", summary.scan_bytes);
+    printField("Source false positives:",
+               summary.total_false_positive_count);
 }
 
 bool buildReportAndFeedback(const hs_fp_collector_t *collector,
@@ -826,15 +1020,12 @@ bool createCompileContext(const hs_fp_feedback_t *feedback,
 }
 
 void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
-    cout << "\nCompile feedback diagnostics:\n"
-         << "  observe checked: " << hs_compile_context_observe_checked_count(ctx)
-         << "\n"
-         << "  observe hit:     " << hs_compile_context_observe_hit_count(ctx)
-         << "\n"
-         << "  block checked:   " << hs_compile_context_block_checked_count(ctx)
-         << "\n"
-         << "  blocked:         " << hs_compile_context_blocked_count(ctx)
-         << "\n";
+    cout << "\nCompile feedback diagnostics:\n";
+    printField("Observe checked:",
+               hs_compile_context_observe_checked_count(ctx));
+    printField("Observe hit:", hs_compile_context_observe_hit_count(ctx));
+    printField("Block checked:", hs_compile_context_block_checked_count(ctx));
+    printField("Blocked:", hs_compile_context_blocked_count(ctx));
 }
 
 double secondsSince(const std::chrono::steady_clock::time_point &start,
@@ -843,6 +1034,97 @@ double secondsSince(const std::chrono::steady_clock::time_point &start,
     return elapsed.count();
 }
 
+double throughputMbit(const RunStats &stats, double seconds) {
+    if (seconds <= 0.0) {
+        return 0.0;
+    }
+    return static_cast<double>(stats.bytes) * 8.0 / seconds / 1000000.0;
+}
+
+double throughputMbit(unsigned long long bytes, double seconds) {
+    if (seconds <= 0.0) {
+        return 0.0;
+    }
+    return static_cast<double>(bytes) * 8.0 / seconds / 1000000.0;
+}
+
+void printDatabaseStats(const char *title, const DatabaseStats &stats) {
+    cout << "\n" << title << ":\n";
+    printField("Signatures:", stats.signatures);
+    printField("Hyperscan info:", stats.info);
+    printField("Expression count:",
+               static_cast<unsigned long long>(stats.expressionCount));
+    printField("Bytecode size:",
+               formatCount(static_cast<unsigned long long>(stats.bytecodeSize)) +
+                   " bytes");
+    printField("Database CRC:", formatHex32(stats.crc32));
+    printField("Scratch size:",
+               formatCount(static_cast<unsigned long long>(stats.scratchSize)) +
+                   " bytes");
+    printField("Compile time:", formatFixed(stats.compileSeconds, 3) +
+                                    " seconds");
+    printField("Peak heap usage:",
+               formatCount(static_cast<unsigned long long>(stats.peakHeap)) +
+                   " bytes");
+}
+
+void printHspgoConfig(const Options &opts) {
+    cout << "\nHSPGO feedback configuration:\n";
+    string workers = formatCount(opts.threadCount);
+    if (!opts.threadSpec.empty()) {
+        workers += " (-T " + opts.threadSpec + ")";
+    }
+    printField("Threads:", workers);
+    printField("Baseline rounds:",
+               static_cast<unsigned long long>(opts.baselineRounds));
+    printField("Collection rounds:",
+               static_cast<unsigned long long>(opts.collectRounds));
+    printField("Measurement rounds:",
+               static_cast<unsigned long long>(opts.measureRounds));
+    if (!opts.greyOverrides.empty()) {
+        printField("Grey overrides:", opts.greyOverrides);
+    }
+}
+
+void printScanSummary(const char *title, const vector<DataBlock> &blocks,
+                      const ParallelRunResult &result, unsigned rounds,
+                      unsigned threads) {
+    const unsigned long long bytesPerRun = corpusBytes(blocks);
+    const unsigned long long blockCount =
+        static_cast<unsigned long long>(blocks.size());
+    const unsigned long long iterations =
+        static_cast<unsigned long long>(rounds) * threads;
+    const double matchesPerIteration =
+        iterations ? static_cast<double>(result.stats.matches) / iterations
+                   : 0.0;
+    const double matchRate =
+        bytesPerRun ? matchesPerIteration * 1024.0 / bytesPerRun : 0.0;
+    const double blockRate =
+        result.seconds > 0.0
+            ? static_cast<double>(result.stats.scanCalls) / result.seconds
+            : 0.0;
+    const unsigned long long workerBytes = bytesPerRun * rounds;
+
+    cout << "\n" << title << ":\n";
+    printField("Time spent scanning:", formatFixed(result.seconds, 3) +
+                                           " seconds");
+    printField("Corpus size:",
+               formatCount(bytesPerRun) + " bytes (" +
+                   formatCount(blockCount) + " blocks)");
+    printField("Matches per iteration:",
+               formatFixed(matchesPerIteration, 0) + " (" +
+                   formatFixed(matchRate, 3) + " matches/kilobyte)");
+    printField("Overall block rate:",
+               formatFixedWithCommas(blockRate, 2) + " blocks/sec");
+    printField("Mean throughput (overall):",
+               formatFixedWithCommas(throughputMbit(result.stats,
+                                                    result.seconds),
+                                     2) + " Mbit/sec");
+    printField("Max throughput (per core):",
+               formatFixedWithCommas(throughputMbit(workerBytes,
+                                                    result.fastestWorkerSeconds),
+                                     2) + " Mbit/sec");
+}
 } // namespace
 
 int HS_CDECL main(int argc, char **argv) {
@@ -851,11 +1133,6 @@ int HS_CDECL main(int argc, char **argv) {
     Options opts;
     if (!processArgs(argc, argv, &opts)) {
         return 1;
-    }
-
-    if (!opts.threadSpec.empty()) {
-        cout << "hspgo first version runs one scanning thread; requested -T "
-             << opts.threadSpec << " is accepted but not used yet.\n";
     }
 
     PatternSet patterns;
@@ -868,46 +1145,63 @@ int HS_CDECL main(int argc, char **argv) {
         return 1;
     }
 
-    cout << "hspgo block feedback demo\n"
-         << "  expressions:     " << patterns.exprs.size() << "\n"
-         << "  corpus blocks:   " << blocks.size() << "\n"
-         << "  corpus bytes:    " << corpusBytes(blocks) << "\n"
-         << "  collect rounds:  " << opts.collectRounds << "\n"
-         << "  measure rounds:  " << opts.measureRounds << "\n";
-
     DatabasePtr baselineDb;
+    const auto baselineCompileStart = std::chrono::steady_clock::now();
     if (!compileDatabase(patterns, nullptr, &baselineDb)) {
         return 1;
     }
-    ScratchPtr baselineScratch;
-    if (!allocScratch(baselineDb.get(), &baselineScratch)) {
+    const auto baselineCompileEnd = std::chrono::steady_clock::now();
+    vector<ScratchPtr> baselineScratches;
+    if (!allocScratches(baselineDb.get(), opts.threadCount,
+                        &baselineScratches)) {
         return 1;
     }
 
-    hs_fp_collector_t *rawCollector = nullptr;
-    hs_error_t err = hs_fp_collector_create(baselineDb.get(), &rawCollector);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_collector_create failed with error " << err << "\n";
+    DatabaseStats baselineDbStats;
+    if (!queryDatabaseStats(baselineDb.get(), baselineScratches[0].get(),
+                            signatureName(opts), patterns.exprs.size(),
+                            secondsSince(baselineCompileStart,
+                                         baselineCompileEnd),
+                            &baselineDbStats)) {
         return 1;
     }
-    CollectorPtr collector(rawCollector);
 
-    RunStats collectStats;
-    auto collectStart = std::chrono::steady_clock::now();
-    if (!scanBlocks(baselineDb.get(), baselineScratch.get(), blocks,
-                    opts.collectRounds, collector.get(), &collectStats)) {
+    cout << "hspgo block feedback demo\n";
+    printDatabaseStats("Baseline database", baselineDbStats);
+    printHspgoConfig(opts);
+
+    if (opts.baselineRounds) {
+        ParallelRunResult baselineResult;
+        if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
+                             opts.baselineRounds, nullptr,
+                             opts.cpuList.empty() ? nullptr : &opts.cpuList,
+                             &baselineResult)) {
+            return 1;
+        }
+        printScanSummary("Baseline scan", blocks, baselineResult,
+                         opts.baselineRounds, opts.threadCount);
+    }
+
+    vector<CollectorPtr> workerCollectors;
+    if (!createCollectors(baselineDb.get(), opts.threadCount,
+                          &workerCollectors)) {
         return 1;
     }
-    auto collectEnd = std::chrono::steady_clock::now();
-    const double collectSeconds = secondsSince(collectStart, collectEnd);
 
-    cout << "\nCollection scan:\n"
-         << "  scan calls:      " << collectStats.scanCalls << "\n"
-         << "  bytes:           " << collectStats.bytes << "\n"
-         << "  matches:         " << collectStats.matches << "\n"
-         << "  seconds:         " << std::fixed << std::setprecision(6)
-         << collectSeconds << "\n";
-    cout.unsetf(std::ios::floatfield);
+    ParallelRunResult collectResult;
+    if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
+                         opts.collectRounds, &workerCollectors,
+                         opts.cpuList.empty() ? nullptr : &opts.cpuList,
+                         &collectResult)) {
+        return 1;
+    }
+    printScanSummary("Collection scan", blocks, collectResult,
+                     opts.collectRounds, opts.threadCount);
+
+    CollectorPtr collector;
+    if (!mergeCollectors(baselineDb.get(), workerCollectors, &collector)) {
+        return 1;
+    }
 
     ReportPtr report;
     FeedbackPtr feedback;
@@ -915,13 +1209,17 @@ int HS_CDECL main(int argc, char **argv) {
         return 1;
     }
 
-    printReportSummary(report.get());
-    printTopReportFragments(report.get(), opts.top);
-    printFeedbackSummary(feedback.get());
-    printFeedbackFragments(feedback.get(), opts.top);
+    if (opts.showSummaries) {
+        printReportSummary(report.get());
+        printFeedbackSummary(feedback.get());
+    }
+    if (opts.top) {
+        printTopReportFragments(report.get(), opts.top);
+        printFeedbackFragments(feedback.get(), opts.top);
+    }
 
-    if (!dumpReport(report.get(), opts.dumpReportPath) ||
-        !dumpFeedback(feedback.get(), opts.dumpFeedbackPath)) {
+    if (!dumpReportCsv(report.get(), opts.reportCsvPath) ||
+        !dumpFeedbackCsv(feedback.get(), opts.feedbackCsvPath)) {
         return 1;
     }
 
@@ -931,41 +1229,46 @@ int HS_CDECL main(int argc, char **argv) {
     }
 
     DatabasePtr optimizedDb;
+    const auto optimizedCompileStart = std::chrono::steady_clock::now();
     if (!compileDatabase(patterns, compileCtx.get(), &optimizedDb)) {
         return 1;
     }
-    printCompileContextDiagnostics(compileCtx.get());
+    const auto optimizedCompileEnd = std::chrono::steady_clock::now();
+    if (opts.showDiagnostics) {
+        printCompileContextDiagnostics(compileCtx.get());
+    }
 
-    ScratchPtr optimizedScratch;
-    if (!allocScratch(optimizedDb.get(), &optimizedScratch)) {
+    vector<ScratchPtr> optimizedScratches;
+    if (!allocScratches(optimizedDb.get(), opts.threadCount,
+                        &optimizedScratches)) {
         return 1;
     }
 
-    baselineScratch.reset();
+    DatabaseStats optimizedDbStats;
+    if (!queryDatabaseStats(optimizedDb.get(), optimizedScratches[0].get(),
+                            signatureName(opts), patterns.exprs.size(),
+                            secondsSince(optimizedCompileStart,
+                                         optimizedCompileEnd),
+                            &optimizedDbStats)) {
+        return 1;
+    }
+    printDatabaseStats("Feedback database", optimizedDbStats);
+
+    workerCollectors.clear();
+    collector.reset();
+    baselineScratches.clear();
     baselineDb.reset();
     cout << "\nHot switch: active database replaced by feedback-compiled DB.\n";
 
-    RunStats measureStats;
-    auto measureStart = std::chrono::steady_clock::now();
-    if (!scanBlocks(optimizedDb.get(), optimizedScratch.get(), blocks,
-                    opts.measureRounds, nullptr, &measureStats)) {
+    ParallelRunResult measureResult;
+    if (!runParallelScan(optimizedDb.get(), optimizedScratches, blocks,
+                         opts.measureRounds, nullptr,
+                         opts.cpuList.empty() ? nullptr : &opts.cpuList,
+                         &measureResult)) {
         return 1;
     }
-    auto measureEnd = std::chrono::steady_clock::now();
-    const double measureSeconds = secondsSince(measureStart, measureEnd);
-    const double mbps = measureSeconds > 0.0
-                            ? (static_cast<double>(measureStats.bytes) * 8.0 /
-                               measureSeconds / 1000000.0)
-                            : 0.0;
-
-    cout << "\nOptimized measurement:\n"
-         << "  scan calls:      " << measureStats.scanCalls << "\n"
-         << "  bytes:           " << measureStats.bytes << "\n"
-         << "  matches:         " << measureStats.matches << "\n"
-         << "  seconds:         " << std::fixed << std::setprecision(6)
-         << measureSeconds << "\n"
-         << "  throughput:      " << std::fixed << std::setprecision(2)
-         << mbps << " Mbit/sec\n";
+    printScanSummary("Optimized measurement", blocks, measureResult,
+                     opts.measureRounds, opts.threadCount);
 
     return 0;
 }
