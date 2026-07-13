@@ -509,6 +509,34 @@ bool feedbackBlocksTransientMask(const vector<CharReach> &mask,
 }
 
 static
+bool feedbackBlocksUnmaskedMaskLiteral(const ue2_literal &lit,
+                                       const CompileContext &cc) {
+    if (!cc.fp_feedback) {
+        return false;
+    }
+
+    ue2_literal final_lit(lit);
+    if (final_lit.length() > ROSE_SHORT_LITERAL_LEN_MAX) {
+        final_lit.erase(0, final_lit.length() - ROSE_SHORT_LITERAL_LEN_MAX);
+    }
+
+    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
+
+    const string &s = final_lit.get_string();
+    if (!hs_fp_feedback_fragment_is_bad(cc.fp_feedback, s.data(), s.size(),
+                                        final_lit.any_nocase(), nullptr,
+                                        nullptr, 0)) {
+        return false;
+    }
+
+    DEBUG_PRINTF("rejecting fixed-width mask literal due to fp feedback: "
+                 "'%s'\n", escapeString(s).c_str());
+    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
+    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
+    return true;
+}
+
+static
 bool maskIsNeeded(const ue2_literal &lit, const NGHolder &g) {
     flat_set<NFAVertex> curr = {g.accept};
     flat_set<NFAVertex> next;
@@ -705,7 +733,8 @@ void doAddMask(RoseBuildImpl &tbi, bool anchored, const vector<CharReach> &mask,
             findMaskLiteral(mask2, tbi.cc.streaming, &lit2, &lit2_offset,
                             tbi.cc.grey);
 
-            if (lit2.length() >= MIN_MASK_LIT_LEN) {
+            if (lit2.length() >= MIN_MASK_LIT_LEN &&
+                !feedbackBlocksUnmaskedMaskLiteral(lit2, tbi.cc)) {
                 u32 prefix2_len = lit2_offset + lit2.length();
                 assert(prefix2_len < minBound);
                 RoseInVertex u
@@ -776,6 +805,10 @@ bool checkAllowMask(const vector<CharReach> &mask, ue2_literal *lit,
 
     if (lit->length() < MIN_MASK_LIT_LEN && lit->length() != mask.size()) {
         DEBUG_PRINTF("need more literal - bad mask\n");
+        return false;
+    }
+
+    if (feedbackBlocksUnmaskedMaskLiteral(*lit, cc)) {
         return false;
     }
 

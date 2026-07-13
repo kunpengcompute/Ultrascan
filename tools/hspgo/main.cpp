@@ -1344,6 +1344,8 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
         {HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT, "literal_split"},
         {HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT, "violet_split"},
         {HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL, "masked_literal"},
+        {HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL, "shortcut_literal"},
+        {HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET, "small_literal_set"},
         {HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD, "matcher_build"},
     };
 

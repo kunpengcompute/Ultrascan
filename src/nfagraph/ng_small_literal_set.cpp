@@ -32,6 +32,7 @@
  */
 #include "ng_small_literal_set.h"
 
+#include "fp_collector.h"
 #include "grey.h"
 #include "ng_holder.h"
 #include "ng_util.h"
@@ -97,6 +98,39 @@ bool operator<(const sls_literal &a, const sls_literal &b) {
 }
 
 } // namespace
+
+static
+bool fpFeedbackLiteralIsBad(const CompileContext &cc, const ue2_literal &lit) {
+    if (!cc.fp_feedback) {
+        return false;
+    }
+
+    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
+
+    if (!hs_fp_feedback_literal_is_bad(cc.fp_feedback, lit.c_str(),
+                                       lit.length(), lit.any_nocase())) {
+        return false;
+    }
+
+    DEBUG_PRINTF("rejecting small literal set due to fp feedback: '%s'\n",
+                 dumpString(lit).c_str());
+    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
+    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
+    return true;
+}
+
+static
+bool fpFeedbackLiteralSetHasBad(
+        const CompileContext &cc,
+        const map<sls_literal, flat_set<ReportID>> &literals) {
+    for (const auto &m : literals) {
+        if (fpFeedbackLiteralIsBad(cc, m.first.s)) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 static
 bool checkLongMixedSensitivityLiterals(
@@ -252,6 +286,10 @@ bool handleSmallLiteralSets(RoseBuild &rose, const NGHolder &g,
 
     if (!checkLongMixedSensitivityLiterals(literals)) {
         DEBUG_PRINTF("long mixed\n");
+        return false;
+    }
+
+    if (fpFeedbackLiteralSetHasBad(cc, literals)) {
         return false;
     }
 

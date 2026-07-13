@@ -31,6 +31,7 @@
  */
 #include "ng.h"
 
+#include "fp_collector.h"
 #include "grey.h"
 #include "ng_anchored_acyclic.h"
 #include "ng_anchored_dots.h"
@@ -66,8 +67,10 @@
 #include "compiler/compiler.h"
 #include "nfa/goughcompile.h"
 #include "rose/rose_build.h"
+#include "rose/rose_build_impl.h"
 #include "smallwrite/smallwrite_build.h"
 #include "util/compile_error.h"
+#include "util/compile_context.h"
 #include "util/container.h"
 #include "util/depth.h"
 #include "util/graph_range.h"
@@ -577,6 +580,34 @@ bool NG::addHolder(NGHolder &g) {
     return false;
 }
 
+static
+bool feedbackBlocksShortcutLiteral(const CompileContext &cc,
+                                   const ue2_literal &literal) {
+    if (!cc.fp_feedback) {
+        return false;
+    }
+
+    ue2_literal final_lit(literal);
+    if (final_lit.length() > ROSE_SHORT_LITERAL_LEN_MAX) {
+        final_lit.erase(0, final_lit.length() - ROSE_SHORT_LITERAL_LEN_MAX);
+    }
+
+    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
+
+    const string &s = final_lit.get_string();
+    if (!hs_fp_feedback_fragment_is_bad(cc.fp_feedback, s.data(), s.size(),
+                                        final_lit.any_nocase(), nullptr,
+                                        nullptr, 0)) {
+        return false;
+    }
+
+    DEBUG_PRINTF("skipping shortcut literal due to fp feedback: '%s'\n",
+                 escapeString(s).c_str());
+    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
+    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
+    return true;
+}
+
 bool NG::addLiteral(const ue2_literal &literal, u32 expr_index,
                     u32 external_report, bool highlander, som_type som,
                     bool quiet) {
@@ -597,6 +628,10 @@ bool NG::addLiteral(const ue2_literal &literal, u32 expr_index,
     // length limits etc. Better to let those go through full graph processing.
     if (mixed_sensitivity(literal)) {
         DEBUG_PRINTF("mixed sensitivity\n");
+        return false;
+    }
+
+    if (feedbackBlocksShortcutLiteral(cc, literal)) {
         return false;
     }
 

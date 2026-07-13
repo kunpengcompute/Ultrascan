@@ -232,6 +232,29 @@ bool fpFeedbackLiteralSetHasBad(const CompileContext &cc,
     return false;
 }
 
+static
+void fpFeedbackDropBadVertLitInfos(const CompileContext &cc,
+                                   vector<unique_ptr<VertLitInfo>> *lits) {
+    if (!cc.fp_feedback) {
+        return;
+    }
+
+    for (auto it = lits->begin(); it != lits->end();) {
+        if (!*it) {
+            ++it;
+            continue;
+        }
+
+        if (fpFeedbackLiteralSetHasBad(cc, (*it)->lit)) {
+            DEBUG_PRINTF("dropping Violet literal candidate due to fp "
+                         "feedback\n");
+            it = lits->erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 /**
  * \brief Comparator class for comparing different literal cuts.
  */
@@ -765,6 +788,9 @@ unique_ptr<VertLitInfo> findBestSplit(const NGHolder &g,
             }
         }
     }
+
+    fpFeedbackDropBadVertLitInfos(cc, &lits);
+
     if (lits.empty()) {
         DEBUG_PRINTF("no literals found\n");
         return nullptr;
@@ -1020,6 +1046,12 @@ unique_ptr<VertLitInfo> findSimplePrefixSplit(const NGHolder &g,
     }
 
     if (best_lit.length() < cc.grey.minRoseLiteralLength) {
+        return nullptr;
+    }
+
+    if (fpFeedbackLiteralIsBad(cc, best_lit)) {
+        DEBUG_PRINTF("rejecting prefix literal due to fp feedback: '%s'\n",
+                     dumpString(best_lit).c_str());
         return nullptr;
     }
 
@@ -2515,6 +2547,10 @@ bool replaceSuffixWithInfix(const NGHolder &h, RoseInGraph &vg,
 
     for (NFAVertex v : inv_adjacent_vertices_range(h.accept, h)) {
         set<ue2_literal> ss = getLiteralSet(h, v, false);
+        if (fpFeedbackLiteralSetHasBad(cc, ss)) {
+            DEBUG_PRINTF("skipping suffix split due to fp feedback\n");
+            return false;
+        }
         if (cc.grey.allowNeoFdr) {
             for (auto it = ss.begin(); it != ss.end(); ) {
                 size_t len = it->length();
@@ -2559,6 +2595,10 @@ bool replaceSuffixWithInfix(const NGHolder &h, RoseInGraph &vg,
         }
 
         set<ue2_literal> ss = getLiteralSet(h, v, false);
+        if (fpFeedbackLiteralSetHasBad(cc, ss)) {
+            DEBUG_PRINTF("skipping suffix split due to fp feedback\n");
+            return false;
+        }
         if (cc.grey.allowNeoFdr) {
             for (auto it = ss.begin(); it != ss.end(); ) {
                 size_t len = it->length();
@@ -2655,7 +2695,10 @@ void avoidSuffixes(RoseInGraph &vg, const CompileContext &cc) {
 }
 
 static
-bool leadingDotStartLiteral(const NGHolder &h, VertLitInfo *out, const Grey &grey) {
+bool leadingDotStartLiteral(const NGHolder &h, VertLitInfo *out,
+                            const CompileContext &cc) {
+    const Grey &grey = cc.grey;
+
     if (out_degree(h.start, h) != 3) {
         return false;
     }
@@ -2712,6 +2755,12 @@ bool leadingDotStartLiteral(const NGHolder &h, VertLitInfo *out, const Grey &gre
 
     DEBUG_PRINTF("%zu found %s\n", h[v].index, dumpString(lit).c_str());
 
+    if (fpFeedbackLiteralIsBad(cc, lit)) {
+        DEBUG_PRINTF("rejecting leading dot-start literal due to fp feedback: "
+                     "'%s'\n", dumpString(lit).c_str());
+        return false;
+    }
+
     if (grey.allowNeoFdr){
         size_t lit_len = lit.length();
         
@@ -2740,7 +2789,7 @@ static
 bool lookForDoubleCut(const NGHolder &h, const vector<RoseInEdge> &ee,
                       RoseInGraph &vg, const CompileContext &cc) {
     VertLitInfo info;
-    if (!leadingDotStartLiteral(h, &info, cc.grey)
+    if (!leadingDotStartLiteral(h, &info, cc)
         || min_len(info.lit) < cc.grey.violetDoubleCutLiteralLen) {
         return false;
     }
