@@ -12,6 +12,8 @@
 #include "util/simd_utils.h"
 
 #include <stdint.h>
+
+#if defined(__ARM_FEATURE_SVE)
 #include <arm_sve.h>
 
 #if defined(__ARM_FEATURE_SVE2)
@@ -1613,3 +1615,16 @@ hwlm_error_t HaoEngineExec(const struct FDR *fdr,
                            hwlm_group_t control) {
     return haoExec(fdr, a, control);
 }
+
+#else
+
+hwlm_error_t HaoEngineExec(const struct FDR *fdr,
+                           const struct FDR_Runtime_Args *a,
+                           hwlm_group_t control) {
+    (void)fdr;
+    (void)a;
+    (void)control;
+    return HWLM_SUCCESS;
+}
+
+#endif
