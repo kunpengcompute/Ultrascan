@@ -39,6 +39,7 @@
 #include "nfagraph/ng_depth.h"
 #include "nfagraph/ng_dump.h"
 #include "nfagraph/ng_holder.h"
+#include "nfagraph/ng_literal_quality.h"
 #include "nfagraph/ng_limex.h"
 #include "nfagraph/ng_mcclellan.h"
 #include "nfagraph/ng_prefilter.h"
@@ -1639,7 +1640,11 @@ bool roseCheckRose(const RoseInGraph &ig, bool prefilter,
 void RoseBuildImpl::add(bool anchored, bool eod, const ue2_literal &lit,
                         const flat_set<ReportID> &reports) {
     assert(!reports.empty());
-
+    if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
+        DEBUG_PRINTF("rejecting low-quality NeoFDR literal '%s'\n",
+                     escapeString(lit).c_str());
+        return;
+    }
     if (cc.grey.floodAsPuffette && !anchored && !eod && is_flood(lit) &&
         lit.length() > 3) {
         DEBUG_PRINTF("adding as puffette\n");

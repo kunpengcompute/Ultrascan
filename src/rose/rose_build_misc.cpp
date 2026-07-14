@@ -38,6 +38,7 @@
 #include "nfa/rdfa.h"
 #include "nfa/tamaramacompile.h"
 #include "nfagraph/ng_holder.h"
+#include "nfagraph/ng_literal_quality.h"
 #include "nfagraph/ng_limex.h"
 #include "nfagraph/ng_reports.h"
 #include "nfagraph/ng_repeat.h"
@@ -372,6 +373,7 @@ u32 RoseBuildImpl::getLiteralId(const ue2_literal &s, u32 delay,
     DEBUG_PRINTF("getting id for %s in table %d\n", dumpString(s).c_str(),
                  table);
     assert(table != ROSE_ANCHORED);
+    assert(!(cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(s)));
     rose_literal_id key(s, table, delay);
 
     auto m = literals.insert(key);
@@ -459,6 +461,7 @@ u32 RoseBuildImpl::getLiteralId(const ue2_literal &s, const vector<u8> &msk,
     DEBUG_PRINTF("getting id for %s in table %d\n", dumpString(s).c_str(),
                  table);
     assert(table != ROSE_ANCHORED);
+    assert(!(cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(s)));
     rose_literal_id key(s, msk, cmp, table, delay);
 
     /* ue2_literals are always uppercased if nocase and must have an

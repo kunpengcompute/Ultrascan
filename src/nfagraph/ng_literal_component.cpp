@@ -35,6 +35,7 @@
 
 #include "grey.h"
 #include "ng.h"
+#include "ng_literal_quality.h"
 #include "ng_prune.h"
 #include "ng_util.h"
 #include "ue2common.h"
@@ -179,11 +180,10 @@ bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v, const bool anchored,
         DEBUG_PRINTF("skipping literal of length 1\n");
         return false;
     }
-    if (ng.cc.grey.allowNeoFdr && literal.length() >= 8) {
-        const std::string &str = literal;
-        if (memcmp(str.c_str() + str.length() - 8, "\0\0\0\0\0\0\0\0", 8) == 0) {
-            return false;
-        }
+    if (ng.cc.grey.allowNeoFdr &&
+        isLowQualityNeoFdrLiteral(ue2_literal(literal, nocase))) {
+        DEBUG_PRINTF("rejecting zero-dense NeoFDR literal\n");
+        return false;
     }
     ng.rose->add(anchored, eod, ue2_literal(literal, nocase), g[u].reports);
 
