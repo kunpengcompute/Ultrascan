@@ -946,7 +946,8 @@ static inline
 hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
                                    unsigned length, UNUSED unsigned flags,
                                    hs_scratch_t *scratch,
-                                   match_event_handler onEvent, void *context) {
+                                   match_event_handler onEvent, void *context,
+                                   hs_fp_collector_t *collector) {
     assert(id);
     assert(scratch);
 
@@ -981,6 +982,7 @@ hs_error_t hs_scan_stream_internal(hs_stream_t *id, const char *data,
     populateCoreInfo(scratch, rose, state, onEvent, context, data, length,
                      getHistory(state, rose, id->offset), historyAmount,
                      id->offset, status, flags);
+    scratch->core_info.fp_collector = collector;
     if (rose->ckeyCount) {
         scratch->core_info.logicalVector = state +
                                            rose->stateOffsets.logicalVec;
@@ -1113,7 +1115,7 @@ hs_error_t HS_CDECL hs_scan_stream(hs_stream_t *id, const char *data,
         return HS_SCRATCH_IN_USE;
     }
     hs_error_t rv = hs_scan_stream_internal(id, data, length, flags, scratch,
-                                            onEvent, context);
+                                            onEvent, context, NULL);
     unmarkScratchInUse(scratch);
     return rv;
 }
@@ -1132,8 +1134,16 @@ hs_error_t HS_CDECL hs_scan_stream_with_collector(
         return err;
     }
 
-    hs_error_t rv = hs_scan_stream(id, data, length, flags, scratch, onEvent,
-                                   context);
+    if (unlikely(!scratch || !data || !validScratch(id->rose, scratch))) {
+        return HS_INVALID;
+    }
+
+    if (unlikely(markScratchInUse(scratch))) {
+        return HS_SCRATCH_IN_USE;
+    }
+    hs_error_t rv = hs_scan_stream_internal(id, data, length, flags, scratch,
+                                            onEvent, context, collector);
+    unmarkScratchInUse(scratch);
     if (rv == HS_SUCCESS || rv == HS_SCAN_TERMINATED) {
         hs_fp_collector_record_scan(collector, length);
     }
@@ -1279,14 +1289,15 @@ void dumpData(const char *data, size_t len) {
 }
 #endif
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_scan_vector(const hs_database_t *db,
-                                   const char * const * data,
+static
+hs_error_t hs_scan_vector_internal(const hs_database_t *db,
+                                   const char * const *data,
                                    const unsigned int *length,
                                    unsigned int count,
                                    UNUSED unsigned int flags,
                                    hs_scratch_t *scratch,
-                                   match_event_handler onEvent, void *context) {
+                                   match_event_handler onEvent, void *context,
+                                   hs_fp_collector_t *collector) {
     if (unlikely(!scratch || !data || !length)) {
         return HS_INVALID;
     }
@@ -1325,7 +1336,7 @@ hs_error_t HS_CDECL hs_scan_vector(const hs_database_t *db,
 #endif
         hs_error_t ret
             = hs_scan_stream_internal(id, data[i], length[i], 0, scratch,
-                                      onEvent, context);
+                                      onEvent, context, collector);
         if (ret != HS_SUCCESS) {
             unmarkScratchInUse(scratch);
             return ret;
@@ -1351,6 +1362,19 @@ hs_error_t HS_CDECL hs_scan_vector(const hs_database_t *db,
 }
 
 HS_PUBLIC_API
+hs_error_t HS_CDECL hs_scan_vector(const hs_database_t *db,
+                                   const char * const * data,
+                                   const unsigned int *length,
+                                   unsigned int count,
+                                   unsigned int flags,
+                                   hs_scratch_t *scratch,
+                                   match_event_handler onEvent,
+                                   void *context) {
+    return hs_scan_vector_internal(db, data, length, count, flags, scratch,
+                                   onEvent, context, NULL);
+}
+
+HS_PUBLIC_API
 hs_error_t HS_CDECL hs_scan_vector_with_collector(
     const hs_database_t *db, const char * const * data,
     const unsigned int *length, unsigned int count, unsigned int flags,
@@ -1361,8 +1385,9 @@ hs_error_t HS_CDECL hs_scan_vector_with_collector(
         return err;
     }
 
-    hs_error_t rv = hs_scan_vector(db, data, length, count, flags, scratch,
-                                   onEvent, context);
+    hs_error_t rv = hs_scan_vector_internal(db, data, length, count, flags,
+                                            scratch, onEvent, context,
+                                            collector);
     if (rv == HS_SUCCESS || rv == HS_SCAN_TERMINATED) {
         size_t bytes = 0;
         for (u32 i = 0; i < count; i++) {

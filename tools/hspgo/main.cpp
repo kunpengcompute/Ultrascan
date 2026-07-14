@@ -44,6 +44,7 @@
 #include <chrono>
 #include <climits>
 #include <clocale>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cctype>
@@ -82,6 +83,7 @@ using std::vector;
 namespace {
 
 const size_t MAX_HSPGO_WORKERS = 1024;
+const int OPT_ECHO_MATCHES = 1000;
 
 struct Options {
     string exprPath;
@@ -98,6 +100,7 @@ struct Options {
     unsigned top = 0;
     bool showSummaries = false;
     bool showDiagnostics = false;
+    bool echoMatches = false;
 };
 
 struct PatternSet {
@@ -111,6 +114,12 @@ struct RunStats {
     unsigned long long scanCalls = 0;
     unsigned long long bytes = 0;
     unsigned long long matches = 0;
+};
+
+struct MatchContext {
+    RunStats *stats = nullptr;
+    unsigned int blockId = 0;
+    bool echoMatches = false;
 };
 
 struct ParallelRunResult {
@@ -198,6 +207,7 @@ void usage(const char *error) {
          << "  -f N                    Print top N report and feedback fragments.\n"
          << "  -d                      Print compile feedback diagnostics.\n"
          << "  -v                      Verbose feedback view (-r -d -f 10 if -f omitted).\n"
+         << "  --echo-matches          Display optimized measurement matches.\n"
          << "  -o FILE                 Dump report fragments as CSV.\n"
          << "  -O FILE                 Dump feedback fragments as CSV.\n\n"
          << "Optimized throughput is measured only after the feedback-compiled DB is active.\n";
@@ -379,6 +389,7 @@ bool parseCpuList(const char *text, vector<unsigned> *out, string *error) {
 bool processArgs(int argc, char **argv, Options *opts) {
     static const struct option longopts[] = {
         {"help", no_argument, nullptr, 'h'},
+        {"echo-matches", no_argument, nullptr, OPT_ECHO_MATCHES},
         {nullptr, 0, nullptr, 0}
     };
 
@@ -495,6 +506,9 @@ bool processArgs(int argc, char **argv, Options *opts) {
         case 'V':
             usage("hspgo first version supports block mode only");
             return false;
+        case OPT_ECHO_MATCHES:
+            opts->echoMatches = true;
+            break;
         case ':':
             usage(optionName(optopt) + " requires an argument");
             return false;
@@ -759,18 +773,24 @@ bool queryDatabaseStats(const hs_database_t *db, const hs_scratch_t *scratch,
     return true;
 }
 
-int onMatch(unsigned int, unsigned long long, unsigned long long,
-            unsigned int, void *ctx) {
+int HS_CDECL onMatch(unsigned int id, unsigned long long,
+                     unsigned long long to, unsigned int, void *ctx) {
     if (ctx) {
-        RunStats *stats = static_cast<RunStats *>(ctx);
-        stats->matches++;
+        MatchContext *matchCtx = static_cast<MatchContext *>(ctx);
+        if (matchCtx->stats) {
+            matchCtx->stats->matches++;
+        }
+        if (matchCtx->echoMatches) {
+            std::printf("Match @%u:%llu for %u\n", matchCtx->blockId, to, id);
+        }
     }
     return 0;
 }
 
 bool scanBlocks(const hs_database_t *db, hs_scratch_t *scratch,
                 const vector<DataBlock> &blocks, unsigned rounds,
-                hs_fp_collector_t *collector, RunStats *stats,
+                hs_fp_collector_t *collector, bool echoMatches,
+                RunStats *stats,
                 string *error) {
     for (unsigned round = 0; round < rounds; round++) {
         for (const auto &block : blocks) {
@@ -788,12 +808,16 @@ bool scanBlocks(const hs_database_t *db, hs_scratch_t *scratch,
             const char *data = block.payload.data();
             const unsigned int len =
                 static_cast<unsigned int>(block.payload.size());
+            MatchContext matchCtx;
+            matchCtx.stats = stats;
+            matchCtx.blockId = block.id;
+            matchCtx.echoMatches = echoMatches;
             hs_error_t err = HS_SUCCESS;
             if (collector) {
                 err = hs_scan_with_collector(db, data, len, 0, scratch, onMatch,
-                                             stats, collector);
+                                             &matchCtx, collector);
             } else {
-                err = hs_scan(db, data, len, 0, scratch, onMatch, stats);
+                err = hs_scan(db, data, len, 0, scratch, onMatch, &matchCtx);
             }
             if (err != HS_SUCCESS) {
                 std::ostringstream oss;
@@ -910,6 +934,7 @@ bool runParallelScan(const hs_database_t *db,
                      const vector<DataBlock> &blocks, unsigned rounds,
                      const vector<CollectorPtr> *collectors,
                      const vector<unsigned> *cpuList,
+                     bool echoMatches,
                      ParallelRunResult *result) {
     const size_t threadCount = scratches.size();
     if (!threadCount) {
@@ -934,7 +959,7 @@ bool runParallelScan(const hs_database_t *db,
         for (size_t i = 0; i < threadCount; i++) {
             hs_fp_collector_t *collector =
                 collectors ? (*collectors)[i].get() : nullptr;
-            threads.emplace_back([&, i, collector]() {
+            threads.emplace_back([&, i, collector, echoMatches]() {
                 if (cpuList &&
                     !bindCurrentThread((*cpuList)[i], &results[i].error)) {
                     results[i].ok = false;
@@ -942,7 +967,7 @@ bool runParallelScan(const hs_database_t *db,
                 }
                 const auto workerStart = std::chrono::steady_clock::now();
                 results[i].ok = scanBlocks(db, scratches[i].get(), blocks,
-                                           rounds, collector,
+                                           rounds, collector, echoMatches,
                                            &results[i].stats,
                                            &results[i].error);
                 const auto workerEnd = std::chrono::steady_clock::now();
@@ -1423,6 +1448,9 @@ void printHspgoConfig(const Options &opts) {
                static_cast<unsigned long long>(opts.collectRounds));
     printField("Measurement rounds:",
                static_cast<unsigned long long>(opts.measureRounds));
+    if (opts.echoMatches) {
+        printField("Echo matches:", "optimized measurement only");
+    }
     if (!opts.greyOverrides.empty()) {
         printField("Grey overrides:", opts.greyOverrides);
     }
@@ -1517,6 +1545,7 @@ int HS_CDECL main(int argc, char **argv) {
         if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
                              opts.baselineRounds, nullptr,
                              opts.cpuList.empty() ? nullptr : &opts.cpuList,
+                             false,
                              &baselineResult)) {
             return 1;
         }
@@ -1534,6 +1563,7 @@ int HS_CDECL main(int argc, char **argv) {
     if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
                          opts.collectRounds, &workerCollectors,
                          opts.cpuList.empty() ? nullptr : &opts.cpuList,
+                         false,
                          &collectResult)) {
         return 1;
     }
@@ -1606,6 +1636,7 @@ int HS_CDECL main(int argc, char **argv) {
     if (!runParallelScan(optimizedDb.get(), optimizedScratches, blocks,
                          opts.measureRounds, nullptr,
                          opts.cpuList.empty() ? nullptr : &opts.cpuList,
+                         opts.echoMatches,
                          &measureResult)) {
         return 1;
     }

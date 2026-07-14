@@ -34,6 +34,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -213,6 +214,82 @@ std::string escapeLiteralBytes(const std::string &bytes) {
     return out;
 }
 
+void collectFalsePositiveSamples(hs_database_t *db, hs_scratch_t *scratch,
+                                 hs_fp_collector_t *collector,
+                                 const char *data, size_t length,
+                                 u32 repeat_count = 1000) {
+    for (u32 i = 0; i < repeat_count; i++) {
+        CallBackContext c;
+        ASSERT_EQ(HS_SUCCESS,
+                  hs_scan_with_collector(db, data,
+                                         static_cast<unsigned int>(length), 0,
+                                         scratch, record_cb, &c, collector));
+        ASSERT_TRUE(c.matches.empty());
+    }
+}
+
+void buildFalsePositiveFeedback(const char *expr, const char *data,
+                                hs_fp_feedback_t **feedback,
+                                u64a min_offset = 10) {
+    ASSERT_NE(nullptr, feedback);
+    *feedback = nullptr;
+
+    unsigned int flags = 0;
+    unsigned int id = 1;
+    hs_expr_ext ext = {};
+    ext.flags = HS_EXT_FLAG_MIN_OFFSET;
+    ext.min_offset = min_offset;
+    const hs_expr_ext *extp = &ext;
+
+    hs_compile_error_t *compile_err = nullptr;
+    hs_database_t *db = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_ext_multi(&expr, &flags, &id, &extp, 1,
+                                   HS_MODE_BLOCK, nullptr, &db,
+                                   &compile_err));
+    ASSERT_NE(nullptr, db);
+
+    hs_scratch_t *scratch = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(db, &scratch));
+
+    hs_fp_collector_t *collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
+
+    collectFalsePositiveSamples(db, scratch, collector, data, strlen(data));
+
+    hs_fp_report_t *report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+    ASSERT_NE(nullptr, report);
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_build(report, feedback));
+    ASSERT_NE(nullptr, *feedback);
+
+    hs_fp_feedback_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_get_summary(*feedback, &summary));
+    ASSERT_GE(summary.bad_fragment_count, 1U);
+
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+    hs_free_compile_error(compile_err);
+}
+
+void expectBlockScansMatch(hs_database_t *normal_db, hs_scratch_t *normal_scratch,
+                           hs_database_t *ctx_db, hs_scratch_t *ctx_scratch,
+                           const std::string &data) {
+    CallBackContext normal_matches;
+    CallBackContext ctx_matches;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan(normal_db, data.data(),
+                      static_cast<unsigned int>(data.size()), 0,
+                      normal_scratch, record_cb, &normal_matches));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan(ctx_db, data.data(),
+                      static_cast<unsigned int>(data.size()), 0, ctx_scratch,
+                      record_cb, &ctx_matches));
+    ASSERT_EQ(normal_matches.matches, ctx_matches.matches);
+}
+
 } // namespace
 
 TEST(FpCollector, NullArguments) {
@@ -356,6 +433,13 @@ TEST(FpCollector, BlockScanMatchesNormalScan) {
     hs_fp_collector_t *collector = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
 
+    EXPECT_EQ(HS_INVALID,
+              hs_scan_with_collector(nullptr, data, sizeof(data) - 1, 0,
+                                     scratch, record_cb, nullptr, collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_scan_with_collector(db, data, sizeof(data) - 1, 0, scratch,
+                                     record_cb, nullptr, nullptr));
+
     CallBackContext with_collector;
     ASSERT_EQ(HS_SUCCESS, hs_scan_with_collector(db, data, sizeof(data) - 1, 0,
                                                  scratch, record_cb,
@@ -385,6 +469,217 @@ TEST(FpCollector, BlockScanMatchesNormalScan) {
     EXPECT_EQ(1U, entry.final_report_count);
 
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+}
+
+TEST(FpCollector, VectorScanWithCollectorMatchesNormalScan) {
+    hs_scratch_t *scratch = nullptr;
+    hs_database_t *db = buildDBAndScratch("^foo.*bar", HS_FLAG_DOTALL, 0,
+                                          HS_MODE_VECTORED, &scratch);
+    ASSERT_NE(nullptr, db);
+    ASSERT_NE(nullptr, scratch);
+
+    const char *data[] = {"foo", "-", "bar"};
+    unsigned int len[] = {3, 1, 3};
+
+    CallBackContext normal;
+    ASSERT_EQ(HS_SUCCESS, hs_scan_vector(db, data, len, 3, 0, scratch,
+                                         record_cb, &normal));
+
+    hs_fp_collector_t *collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
+
+    EXPECT_EQ(HS_INVALID,
+              hs_scan_vector_with_collector(db, data, len, 3, 0, scratch,
+                                            record_cb, nullptr, nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_scan_vector_with_collector(db, nullptr, len, 3, 0, scratch,
+                                            record_cb, nullptr, collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_scan_vector_with_collector(db, data, nullptr, 3, 0, scratch,
+                                            record_cb, nullptr, collector));
+
+    CallBackContext with_collector;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan_vector_with_collector(db, data, len, 3, 0, scratch,
+                                            record_cb, &with_collector,
+                                            collector));
+    ASSERT_EQ(normal.matches, with_collector.matches);
+
+    hs_fp_report_t *report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+    ASSERT_NE(nullptr, report);
+    hs_fp_report_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
+    EXPECT_EQ(1U, summary.scan_calls);
+    EXPECT_EQ(7U, summary.scan_bytes);
+    EXPECT_GE(summary.trigger_count, 1U);
+    EXPECT_GE(summary.true_trigger_count, 1U);
+    EXPECT_GE(summary.final_report_count, 1U);
+
+    hs_scratch_t *block_scratch = nullptr;
+    hs_database_t *block_db =
+        buildDBAndScratch("foo", 0, 0, HS_MODE_BLOCK, &block_scratch);
+    ASSERT_NE(nullptr, block_db);
+    ASSERT_NE(nullptr, block_scratch);
+    hs_fp_collector_t *block_collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(block_db, &block_collector));
+    EXPECT_EQ(HS_DB_MODE_ERROR,
+              hs_scan_vector_with_collector(block_db, data, len, 1, 0,
+                                            block_scratch, dummy_cb, nullptr,
+                                            block_collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_scan_vector_with_collector(block_db, data, len, 1, 0,
+                                            block_scratch, dummy_cb, nullptr,
+                                            collector));
+
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(block_collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(block_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(block_db));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+}
+
+TEST(FpCollector, StreamCollectorApisMatchNormalAndValidateArguments) {
+    hs_scratch_t *scratch = nullptr;
+    hs_database_t *db = buildDBAndScratch("foo.*bar", HS_FLAG_DOTALL, 0,
+                                          HS_MODE_STREAM, &scratch);
+    ASSERT_NE(nullptr, db);
+    ASSERT_NE(nullptr, scratch);
+
+    hs_fp_collector_t *collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
+
+    hs_stream_t *normal_stream = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_open_stream(db, 0, &normal_stream));
+    ASSERT_NE(nullptr, normal_stream);
+    CallBackContext normal;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan_stream(normal_stream, "foo", 3, 0, scratch, record_cb,
+                             &normal));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan_stream(normal_stream, "bar", 3, 0, scratch, record_cb,
+                             &normal));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_close_stream(normal_stream, scratch, record_cb, &normal));
+
+    hs_stream_t *stream = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_open_stream(db, 0, &stream));
+    ASSERT_NE(nullptr, stream);
+
+    EXPECT_EQ(HS_INVALID,
+              hs_scan_stream_with_collector(nullptr, "foo", 3, 0, scratch,
+                                            dummy_cb, nullptr, collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_scan_stream_with_collector(stream, "foo", 3, 0, scratch,
+                                            dummy_cb, nullptr, nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_close_stream_with_collector(nullptr, scratch, dummy_cb,
+                                             nullptr, collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_reset_stream_with_collector(nullptr, 0, scratch, dummy_cb,
+                                             nullptr, collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_reset_and_copy_stream_with_collector(nullptr, stream, scratch,
+                                                      dummy_cb, nullptr,
+                                                      collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_reset_and_copy_stream_with_collector(stream, nullptr, scratch,
+                                                      dummy_cb, nullptr,
+                                                      collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_reset_and_expand_stream_with_collector(nullptr, "x", 1,
+                                                        scratch, dummy_cb,
+                                                        nullptr, collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_reset_and_expand_stream_with_collector(stream, nullptr, 1,
+                                                        scratch, dummy_cb,
+                                                        nullptr, collector));
+
+    CallBackContext with_collector;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan_stream_with_collector(stream, "foo", 3, 0, scratch,
+                                            record_cb, &with_collector,
+                                            collector));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan_stream_with_collector(stream, "bar", 3, 0, scratch,
+                                            record_cb, &with_collector,
+                                            collector));
+    ASSERT_EQ(normal.matches, with_collector.matches);
+
+    hs_stream_t *copy_stream = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_open_stream(db, 0, &copy_stream));
+    ASSERT_NE(nullptr, copy_stream);
+    ASSERT_EQ(HS_SUCCESS,
+              hs_reset_and_copy_stream_with_collector(copy_stream, stream,
+                                                      nullptr, nullptr,
+                                                      nullptr, collector));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_reset_stream_with_collector(stream, 0, nullptr, nullptr,
+                                             nullptr, collector));
+
+    size_t used = 0;
+    ASSERT_EQ(HS_INSUFFICIENT_SPACE,
+              hs_compress_stream(copy_stream, nullptr, 0, &used));
+    ASSERT_GT(used, 0U);
+    std::vector<char> compressed(used);
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compress_stream(copy_stream, compressed.data(),
+                                 compressed.size(), &used));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_reset_and_expand_stream_with_collector(
+                  stream, compressed.data(), used, nullptr, nullptr, nullptr,
+                  collector));
+
+    hs_database_t *other_db = buildDB("bar", 0, 0, HS_MODE_STREAM);
+    ASSERT_NE(nullptr, other_db);
+    hs_fp_collector_t *other_collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(other_db, &other_collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_scan_stream_with_collector(stream, "bar", 3, 0, scratch,
+                                            dummy_cb, nullptr,
+                                            other_collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_close_stream_with_collector(stream, scratch, dummy_cb,
+                                             nullptr, other_collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_reset_stream_with_collector(stream, 0, scratch, dummy_cb,
+                                             nullptr, other_collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_reset_and_copy_stream_with_collector(copy_stream, stream,
+                                                      scratch, dummy_cb,
+                                                      nullptr,
+                                                      other_collector));
+    EXPECT_EQ(HS_INVALID,
+              hs_reset_and_expand_stream_with_collector(
+                  stream, compressed.data(), used, scratch, dummy_cb, nullptr,
+                  other_collector));
+
+    ASSERT_EQ(HS_SUCCESS,
+              hs_close_stream_with_collector(copy_stream, scratch, nullptr,
+                                             nullptr, collector));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_close_stream_with_collector(stream, scratch, nullptr, nullptr,
+                                             collector));
+
+    hs_fp_report_t *report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+    ASSERT_NE(nullptr, report);
+    hs_fp_report_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
+    EXPECT_EQ(2U, summary.scan_calls);
+    EXPECT_EQ(6U, summary.scan_bytes);
+    EXPECT_GE(summary.trigger_count, 1U);
+    EXPECT_GE(summary.true_trigger_count, 1U);
+    EXPECT_GE(summary.final_report_count, 1U);
+
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(other_collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(other_db));
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
     ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
     ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
@@ -614,6 +909,9 @@ TEST(FpCollector, CollectorDatabaseMismatchRejected) {
 
     hs_fp_collector_t *collector = nullptr;
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db1, &collector));
+    hs_fp_collector_t *collector2 = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db2, &collector2));
+    EXPECT_EQ(HS_INVALID, hs_fp_collector_merge(collector, collector2));
 
     const char data[] = "bar";
     ASSERT_EQ(HS_INVALID, hs_scan_with_collector(db2, data, sizeof(data) - 1,
@@ -625,6 +923,7 @@ TEST(FpCollector, CollectorDatabaseMismatchRejected) {
     ASSERT_NE(nullptr, report);
 
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector2));
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
     ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
     ASSERT_EQ(HS_SUCCESS, hs_free_database(db2));
@@ -1247,6 +1546,135 @@ TEST(FpCollector, FeedbackBlocksDecoratedMaskedLiteral) {
     ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
     ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
     hs_free_compile_error(compile_err);
+}
+
+TEST(FpCollector, FeedbackBlocksSmallLiteralSet) {
+    hs_fp_feedback_t *feedback = nullptr;
+    buildFalsePositiveFeedback("foo|bar|baz|qux", "foo", &feedback);
+    ASSERT_NE(nullptr, feedback);
+
+    FpFeedbackEntry entry = {};
+    ASSERT_TRUE(findFeedbackByBytes(feedback, "foo", &entry));
+    EXPECT_TRUE(isKnownEngine(entry.engine));
+    EXPECT_GE(entry.trigger_count, 1000U);
+    EXPECT_EQ(0U, entry.true_trigger_count);
+
+    hs_compile_context_t *ctx = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_compile_context_create(&ctx));
+    ASSERT_EQ(HS_SUCCESS, hs_compile_context_set_fp_feedback(ctx, feedback));
+
+    const char *expr = "foo|bar|baz|qux";
+    unsigned int flags = 0;
+    unsigned int id = 51;
+    hs_database_t *normal_db = nullptr;
+    hs_database_t *ctx_db = nullptr;
+    hs_compile_error_t *normal_err = nullptr;
+    hs_compile_error_t *ctx_err = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_multi(&expr, &flags, &id, 1, HS_MODE_BLOCK, nullptr,
+                               &normal_db, &normal_err));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_multi_with_context(&expr, &flags, &id, 1,
+                                            HS_MODE_BLOCK, nullptr, ctx,
+                                            &ctx_db, &ctx_err));
+    ASSERT_NE(nullptr, normal_db);
+    ASSERT_NE(nullptr, ctx_db);
+
+    hs_compile_context_checkpoint_info_t small_info =
+        getCheckpointInfo(ctx, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
+    EXPECT_GE(small_info.checked_count, 1U);
+    EXPECT_GE(small_info.hit_count, 1U);
+    EXPECT_GE(small_info.blocked_count, 1U);
+    EXPECT_GE(hs_compile_context_blocked_count(ctx), 1U);
+
+    hs_scratch_t *normal_scratch = nullptr;
+    hs_scratch_t *ctx_scratch = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(normal_db, &normal_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(ctx_db, &ctx_scratch));
+
+    expectBlockScansMatch(normal_db, normal_scratch, ctx_db, ctx_scratch,
+                          "xxfooyy");
+    expectBlockScansMatch(normal_db, normal_scratch, ctx_db, ctx_scratch,
+                          "xxbaryy");
+    expectBlockScansMatch(normal_db, normal_scratch, ctx_db, ctx_scratch,
+                          "nomatch");
+
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(ctx_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(normal_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(ctx_db));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(normal_db));
+    hs_free_compile_error(ctx_err);
+    hs_free_compile_error(normal_err);
+    ASSERT_EQ(HS_SUCCESS, hs_compile_context_free(ctx));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
+}
+
+TEST(FpCollector, FeedbackBlocksFixedWidthMaskLiteral) {
+    hs_fp_feedback_t *feedback = nullptr;
+    buildFalsePositiveFeedback("abcdefghijklmnop", "abcdefghijklmnop",
+                               &feedback, 32);
+    ASSERT_NE(nullptr, feedback);
+
+    hs_fp_fragment_info_t bad_fragment = {};
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_get_fragment(feedback, 0, &bad_fragment));
+    ASSERT_NE(nullptr, bad_fragment.bytes);
+    ASSERT_GE(bad_fragment.length, 2U);
+    std::string fragment_bytes(
+        reinterpret_cast<const char *>(bad_fragment.bytes),
+        bad_fragment.length);
+
+    hs_compile_context_t *ctx = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_compile_context_create(&ctx));
+    ASSERT_EQ(HS_SUCCESS, hs_compile_context_set_fp_feedback(ctx, feedback));
+
+    std::string expr_storage = "^.{120}" + escapeLiteralBytes(fragment_bytes);
+    const char *expr = expr_storage.c_str();
+    unsigned int flags = 0;
+    unsigned int id = 52;
+    hs_database_t *normal_db = nullptr;
+    hs_database_t *ctx_db = nullptr;
+    hs_compile_error_t *normal_err = nullptr;
+    hs_compile_error_t *ctx_err = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_multi(&expr, &flags, &id, 1, HS_MODE_BLOCK, nullptr,
+                               &normal_db, &normal_err));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compile_multi_with_context(&expr, &flags, &id, 1,
+                                            HS_MODE_BLOCK, nullptr, ctx,
+                                            &ctx_db, &ctx_err));
+    ASSERT_NE(nullptr, normal_db);
+    ASSERT_NE(nullptr, ctx_db);
+
+    hs_compile_context_checkpoint_info_t masked_info =
+        getCheckpointInfo(ctx, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
+    EXPECT_GE(masked_info.checked_count, 1U);
+    EXPECT_GE(masked_info.hit_count, 1U);
+    EXPECT_GE(masked_info.blocked_count, 1U);
+    EXPECT_GE(hs_compile_context_blocked_count(ctx), 1U);
+
+    hs_scratch_t *normal_scratch = nullptr;
+    hs_scratch_t *ctx_scratch = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(normal_db, &normal_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(ctx_db, &ctx_scratch));
+
+    std::string match_data(120, 'A');
+    match_data += fragment_bytes;
+    expectBlockScansMatch(normal_db, normal_scratch, ctx_db, ctx_scratch,
+                          match_data);
+    std::string short_data(119, 'A');
+    short_data += fragment_bytes;
+    expectBlockScansMatch(normal_db, normal_scratch, ctx_db, ctx_scratch,
+                          short_data);
+
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(ctx_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(normal_scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(ctx_db));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(normal_db));
+    hs_free_compile_error(ctx_err);
+    hs_free_compile_error(normal_err);
+    ASSERT_EQ(HS_SUCCESS, hs_compile_context_free(ctx));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
 }
 
 TEST(FpCollector, CompileExtMultiWithContextMatchesNormalCompile) {
