@@ -239,22 +239,6 @@ hs_error_t HS_CDECL hs_fp_report_get_fragment(
     hs_fp_fragment_info_t *fragment);
 
 /**
- * Serialize a false-positive feedback report into a relocatable byte array.
- *
- * The returned buffer is allocated with the misc allocator and should be freed
- * by the caller using the matching free function.
- */
-hs_error_t HS_CDECL hs_fp_report_serialize(const hs_fp_report_t *report,
-                                           char **bytes, size_t *length);
-
-/**
- * Deserialize a false-positive feedback report previously produced by
- * @ref hs_fp_report_serialize().
- */
-hs_error_t HS_CDECL hs_fp_report_deserialize(const char *bytes, size_t length,
-                                             hs_fp_report_t **report);
-
-/**
  * Build compile-time false-positive feedback from a report.
  */
 hs_error_t HS_CDECL hs_fp_feedback_build(const hs_fp_report_t *report,
@@ -294,22 +278,6 @@ hs_error_t HS_CDECL hs_fp_feedback_get_summary(
 hs_error_t HS_CDECL hs_fp_feedback_get_fragment(
     const hs_fp_feedback_t *feedback, unsigned int index,
     hs_fp_fragment_info_t *fragment);
-
-/**
- * Serialize false-positive feedback into a relocatable byte array.
- *
- * The returned buffer is allocated with the misc allocator and should be freed
- * by the caller using the matching free function.
- */
-hs_error_t HS_CDECL hs_fp_feedback_serialize(const hs_fp_feedback_t *feedback,
-                                             char **bytes, size_t *length);
-
-/**
- * Deserialize false-positive feedback previously produced by
- * @ref hs_fp_feedback_serialize().
- */
-hs_error_t HS_CDECL hs_fp_feedback_deserialize(
-    const char *bytes, size_t length, hs_fp_feedback_t **feedback);
 
 /**
  * Definition of the match event callback function type.

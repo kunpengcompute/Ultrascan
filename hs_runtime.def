@@ -20,16 +20,12 @@ EXPORTS
    hs_fp_collector_report
    hs_fp_collector_reset
    hs_fp_feedback_build
-   hs_fp_feedback_deserialize
    hs_fp_feedback_free
    hs_fp_feedback_get_fragment
    hs_fp_feedback_get_summary
-   hs_fp_feedback_serialize
-   hs_fp_report_deserialize
    hs_fp_report_free
    hs_fp_report_get_fragment
    hs_fp_report_get_summary
-   hs_fp_report_serialize
    hs_free_database
    hs_free_scratch
    hs_open_stream

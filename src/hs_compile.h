@@ -157,20 +157,6 @@ unsigned int HS_CDECL hs_compile_context_observe_hit_count(
     const hs_compile_context_t *ctx);
 
 /**
- * Return the number of compile-time split/matcher candidates checked against
- * false-positive feedback. NULL returns zero.
- */
-unsigned int HS_CDECL hs_compile_context_block_checked_count(
-    const hs_compile_context_t *ctx);
-
-/**
- * Return the number of compile-time candidates rejected by false-positive
- * feedback. NULL returns zero.
- */
-unsigned int HS_CDECL hs_compile_context_blocked_count(
-    const hs_compile_context_t *ctx);
-
-/**
  * Compile-time false-positive feedback checkpoint identifiers.
  */
 #define HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT 0U

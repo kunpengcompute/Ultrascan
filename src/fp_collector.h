@@ -78,11 +78,6 @@ unsigned int hs_compile_context_observe_checked_count(
 unsigned int hs_compile_context_observe_hit_count(
         const hs_compile_context_t *ctx);
 
-unsigned int hs_compile_context_block_checked_count(
-        const hs_compile_context_t *ctx);
-
-unsigned int hs_compile_context_blocked_count(const hs_compile_context_t *ctx);
-
 #ifdef __cplusplus
 } /* extern C */
 #endif

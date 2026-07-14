@@ -48,8 +48,6 @@ struct CompileContext {
     CompileContext(bool isStreaming, bool isVectored,
                    const target_t &target_info, const Grey &grey,
                    const hs_fp_feedback_t *fp_feedback = nullptr,
-                   u32 *fp_block_checked_count = nullptr,
-                   u32 *fp_blocked_count = nullptr,
                    hs_compile_context_checkpoint_info_t *fp_checkpoint_info =
                        nullptr);
 
@@ -65,16 +63,11 @@ struct CompileContext {
     /** \brief Optional false-positive feedback for compile-time decisions. */
     const hs_fp_feedback_t *fp_feedback;
 
-    u32 *fp_block_checked_count;
-    u32 *fp_blocked_count;
     hs_compile_context_checkpoint_info_t *fp_checkpoint_info;
 };
 
 static inline
 void fpCompileRecordCheck(const CompileContext &cc, unsigned int checkpoint) {
-    if (cc.fp_block_checked_count) {
-        (*cc.fp_block_checked_count)++;
-    }
     if (cc.fp_checkpoint_info && checkpoint < HS_FP_COMPILE_CHECKPOINT_COUNT) {
         cc.fp_checkpoint_info[checkpoint].checked_count++;
     }
@@ -90,9 +83,6 @@ void fpCompileRecordHit(const CompileContext &cc, unsigned int checkpoint) {
 static inline
 void fpCompileRecordBlocked(const CompileContext &cc,
                             unsigned int checkpoint) {
-    if (cc.fp_blocked_count) {
-        (*cc.fp_blocked_count)++;
-    }
     if (cc.fp_checkpoint_info && checkpoint < HS_FP_COMPILE_CHECKPOINT_COUNT) {
         cc.fp_checkpoint_info[checkpoint].blocked_count++;
     }

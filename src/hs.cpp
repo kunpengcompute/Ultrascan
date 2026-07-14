@@ -67,8 +67,6 @@ struct hs_compile_context {
     hs_fp_feedback_t *fp_feedback;
     u32 fp_observe_checked_count;
     u32 fp_observe_hit_count;
-    u32 fp_block_checked_count;
-    u32 fp_blocked_count;
     hs_compile_context_checkpoint_info_t
         fp_checkpoint_info[HS_FP_COMPILE_CHECKPOINT_COUNT];
 };
@@ -94,8 +92,6 @@ void resetCompileContextDiagnostics(const hs_compile_context_t *ctx) {
 
     hs_compile_context_t *mutable_ctx =
         const_cast<hs_compile_context_t *>(ctx);
-    mutable_ctx->fp_block_checked_count = 0;
-    mutable_ctx->fp_blocked_count = 0;
     memset(mutable_ctx->fp_checkpoint_info, 0,
            sizeof(mutable_ctx->fp_checkpoint_info));
 }
@@ -676,10 +672,6 @@ hs_compile_multi_int(const char *const *expressions, const unsigned *flags,
         CompileContext cc(isStreaming, isVectored, target_info, g,
                           fp_ctx ? fp_ctx->fp_feedback : nullptr,
                           mutable_fp_ctx ?
-                              &mutable_fp_ctx->fp_block_checked_count : nullptr,
-                          mutable_fp_ctx ?
-                              &mutable_fp_ctx->fp_blocked_count : nullptr,
-                          mutable_fp_ctx ?
                               mutable_fp_ctx->fp_checkpoint_info : nullptr);
         NG ng(cc, elements, somPrecision);
 
@@ -976,18 +968,6 @@ extern "C" HS_PUBLIC_API
 unsigned int HS_CDECL hs_compile_context_observe_hit_count(
         const hs_compile_context_t *ctx) {
     return ctx ? ctx->fp_observe_hit_count : 0;
-}
-
-extern "C" HS_PUBLIC_API
-unsigned int HS_CDECL hs_compile_context_block_checked_count(
-        const hs_compile_context_t *ctx) {
-    return ctx ? ctx->fp_block_checked_count : 0;
-}
-
-extern "C" HS_PUBLIC_API
-unsigned int HS_CDECL hs_compile_context_blocked_count(
-        const hs_compile_context_t *ctx) {
-    return ctx ? ctx->fp_blocked_count : 0;
 }
 
 extern "C" HS_PUBLIC_API

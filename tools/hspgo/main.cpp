@@ -1354,13 +1354,6 @@ bool createCompileContext(const hs_fp_feedback_t *feedback,
 }
 
 void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
-    cout << "\nCompile feedback diagnostics:\n";
-    printField("Observe checked:",
-               hs_compile_context_observe_checked_count(ctx));
-    printField("Observe hit:", hs_compile_context_observe_hit_count(ctx));
-    printField("Block checked:", hs_compile_context_block_checked_count(ctx));
-    printField("Blocked:", hs_compile_context_blocked_count(ctx));
-
     struct CheckpointName {
         unsigned int id;
         const char *name;
@@ -1373,6 +1366,26 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
         {HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET, "small_literal_set"},
         {HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD, "matcher_build"},
     };
+
+    unsigned long long blockChecked = 0;
+    unsigned long long blocked = 0;
+    for (const auto &checkpoint : checkpoints) {
+        hs_compile_context_checkpoint_info_t info = {};
+        hs_error_t err = hs_compile_context_get_checkpoint_info(
+            ctx, checkpoint.id, &info);
+        if (err != HS_SUCCESS) {
+            continue;
+        }
+        blockChecked += info.checked_count;
+        blocked += info.blocked_count;
+    }
+
+    cout << "\nCompile feedback diagnostics:\n";
+    printField("Observe checked:",
+               hs_compile_context_observe_checked_count(ctx));
+    printField("Observe hit:", hs_compile_context_observe_hit_count(ctx));
+    printField("Block checked:", blockChecked);
+    printField("Blocked:", blocked);
 
     cout << "\nCompile feedback checkpoints:\n";
     cout << left << setw(18) << "checkpoint"
@@ -1418,7 +1431,7 @@ double throughputMbit(unsigned long long bytes, double seconds) {
 void printDatabaseStats(const char *title, const DatabaseStats &stats) {
     cout << "\n" << title << ":\n";
     printField("Signatures:", stats.signatures);
-    printField("Hyperscan info:", stats.info);
+    printField("Ultrascan info:", stats.info);
     printField("Expression count:",
                static_cast<unsigned long long>(stats.expressionCount));
     printField("Bytecode size:",
