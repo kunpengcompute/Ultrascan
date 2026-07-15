@@ -85,6 +85,12 @@ namespace {
 const size_t MAX_HSPGO_WORKERS = 1024;
 const int OPT_ECHO_MATCHES = 1000;
 
+enum class ScanMode {
+    STREAMING,
+    BLOCK,
+    VECTORED,
+};
+
 struct Options {
     string exprPath;
     string corpusPath;
@@ -97,8 +103,10 @@ struct Options {
     unsigned collectRounds = 3;
     unsigned measureRounds = 5;
     unsigned verifyRounds = 0;
+    unsigned warmupRounds = 0;
     unsigned threadCount = 1;
     unsigned top = 0;
+    ScanMode scanMode = ScanMode::STREAMING;
     hs_fp_feedback_params_t feedbackParams = {};
     bool showSummaries = false;
     bool showDiagnostics = false;
@@ -121,7 +129,9 @@ struct RunStats {
 struct MatchContext {
     RunStats *stats = nullptr;
     unsigned int blockId = 0;
+    unsigned int streamId = 0;
     bool echoMatches = false;
+    bool streaming = false;
 };
 
 struct ParallelRunResult {
@@ -203,7 +213,9 @@ void usage(const char *error) {
          << "  -B N                    Run N normal hs_scan() baseline rounds (default 1).\n"
          << "  -R N                    Run N collection rounds with collector (default 3).\n"
          << "  -n N                    Run N measurement rounds after DB switch (default 5).\n"
-         << "  -N                      Block mode marker, accepted for hsbench familiarity.\n"
+         << "  -w N                    Run N warmup rounds before measured scans (default 0).\n"
+         << "  -N                      Run in block mode (default: streaming).\n"
+         << "  -V                      Run in vectored mode (default: streaming).\n"
          << "  -m N                    Minimum trigger count for feedback (default 1000).\n"
          << "  -F N                    Minimum false-positive trigger count (default 1000).\n"
          << "  -q PCT                  Minimum false-positive rate percent (default 99.00).\n"
@@ -504,7 +516,7 @@ bool processArgs(int argc, char **argv, Options *opts) {
     opterr = 0;
     int optionIndex = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, ":A:B:c:de:F:f:G:hK:m:Nn:o:O:q:rR:T:vVW:",
+        int c = getopt_long(argc, argv, ":A:B:c:de:F:f:G:hK:m:Nn:o:O:q:rR:T:vVw:W:",
                             longopts,
                             &optionIndex);
         if (c < 0) {
@@ -599,6 +611,7 @@ bool processArgs(int argc, char **argv, Options *opts) {
             opts->measureRounds = value;
             break;
         case 'N':
+            opts->scanMode = ScanMode::BLOCK;
             break;
         case 'o':
             if (!optarg || !*optarg) {
@@ -658,8 +671,15 @@ bool processArgs(int argc, char **argv, Options *opts) {
             }
             break;
         case 'V':
-            usage("hspgo first version supports block mode only");
-            return false;
+            opts->scanMode = ScanMode::VECTORED;
+            break;
+        case 'w':
+            if (!parseUnsigned(optarg, &value)) {
+                usage("warmup rounds must be a non-negative integer");
+                return false;
+            }
+            opts->warmupRounds = value;
+            break;
         case 'W':
             if (!parsePercentScaled(optarg, &value)) {
                 usage("minimum waste share must be a percent from 0 to 100");
@@ -838,6 +858,30 @@ string signatureName(const Options &opts) {
     return opts.exprPath;
 }
 
+const char *scanModeName(ScanMode mode) {
+    switch (mode) {
+    case ScanMode::STREAMING:
+        return "stream";
+    case ScanMode::BLOCK:
+        return "block";
+    case ScanMode::VECTORED:
+        return "vector";
+    }
+    return "unknown";
+}
+
+unsigned int compileModeFlags(ScanMode mode) {
+    switch (mode) {
+    case ScanMode::STREAMING:
+        return HS_MODE_STREAM | HS_MODE_SOM_HORIZON_LARGE;
+    case ScanMode::BLOCK:
+        return HS_MODE_BLOCK;
+    case ScanMode::VECTORED:
+        return HS_MODE_VECTORED;
+    }
+    return HS_MODE_STREAM | HS_MODE_SOM_HORIZON_LARGE;
+}
+
 void printField(const char *label, const string &value) {
     cout << left << setw(28) << label << value << "\n";
 }
@@ -846,7 +890,7 @@ void printField(const char *label, unsigned long long value) {
     printField(label, formatCount(value));
 }
 
-bool compileDatabase(const PatternSet &patterns,
+bool compileDatabase(const PatternSet &patterns, ScanMode mode,
                      const hs_compile_context_t *ctx, DatabasePtr *out) {
     vector<const char *> exprPtrs(patterns.exprs.size());
     vector<const hs_expr_ext *> extPtrs(patterns.ext.size());
@@ -863,12 +907,12 @@ bool compileDatabase(const PatternSet &patterns,
     if (ctx) {
         err = hs_compile_ext_multi_with_context(
             exprPtrs.data(), patterns.flags.data(), patterns.ids.data(),
-            extPtrs.data(), count, HS_MODE_BLOCK, nullptr, ctx, &rawDb,
-            &compileErr);
+            extPtrs.data(), count, compileModeFlags(mode), nullptr, ctx,
+            &rawDb, &compileErr);
     } else {
         err = hs_compile_ext_multi(exprPtrs.data(), patterns.flags.data(),
                                    patterns.ids.data(), extPtrs.data(), count,
-                                   HS_MODE_BLOCK, nullptr, &rawDb,
+                                   compileModeFlags(mode), nullptr, &rawDb,
                                    &compileErr);
     }
 
@@ -943,10 +987,94 @@ int HS_CDECL onMatch(unsigned int id, unsigned long long,
             matchCtx->stats->matches++;
         }
         if (matchCtx->echoMatches) {
-            std::printf("Match @%u:%llu for %u\n", matchCtx->blockId, to, id);
+            if (matchCtx->streaming) {
+                std::printf("Match @%u:%u:%llu for %u\n",
+                            matchCtx->streamId, matchCtx->blockId, to, id);
+            } else {
+                std::printf("Match @%u:%llu for %u\n", matchCtx->blockId, to,
+                            id);
+            }
         }
     }
     return 0;
+}
+
+size_t streamSlotCount(const vector<DataBlock> &blocks) {
+    size_t count = 0;
+    for (const auto &block : blocks) {
+        count = std::max(count,
+                         static_cast<size_t>(block.internal_stream_index) + 1);
+    }
+    return count;
+}
+
+struct StreamInfo {
+    unsigned int streamId = ~0U;
+    unsigned int firstBlockId = ~0U;
+    unsigned int lastBlockId = 0;
+    hs_stream_t *handle = nullptr;
+};
+
+vector<StreamInfo> prepStreamingData(const vector<DataBlock> &blocks) {
+    vector<StreamInfo> streams(streamSlotCount(blocks));
+    for (const auto &block : blocks) {
+        StreamInfo &stream = streams[block.internal_stream_index];
+        if (stream.firstBlockId > stream.lastBlockId) {
+            stream.streamId = block.stream_id;
+            stream.firstBlockId = block.id;
+            stream.lastBlockId = block.id;
+        } else {
+            stream.lastBlockId = block.id;
+        }
+    }
+    return streams;
+}
+
+struct VectoredInfo {
+    vector<const char *> data;
+    vector<unsigned int> length;
+    unsigned int streamId = ~0U;
+    unsigned long long bytes = 0;
+};
+
+bool prepVectorData(const vector<DataBlock> &blocks,
+                    vector<VectoredInfo> *vectors, string *error) {
+    vectors->clear();
+    vectors->resize(streamSlotCount(blocks));
+
+    for (const auto &block : blocks) {
+        if (block.payload.size() >
+            std::numeric_limits<unsigned int>::max()) {
+            std::ostringstream oss;
+            oss << "Corpus block " << block.id
+                << " is too large for vector scan";
+            if (error) {
+                *error = oss.str();
+            }
+            return false;
+        }
+
+        VectoredInfo &vector = (*vectors)[block.internal_stream_index];
+        if (vector.data.size() >=
+            std::numeric_limits<unsigned int>::max()) {
+            std::ostringstream oss;
+            oss << "Corpus stream " << block.stream_id
+                << " has too many blocks for vector scan";
+            if (error) {
+                *error = oss.str();
+            }
+            return false;
+        }
+        if (vector.data.empty()) {
+            vector.streamId = block.stream_id;
+        }
+        vector.data.push_back(block.payload.data());
+        vector.length.push_back(
+            static_cast<unsigned int>(block.payload.size()));
+        vector.bytes += block.payload.size();
+    }
+
+    return true;
 }
 
 bool scanBlocks(const hs_database_t *db, hs_scratch_t *scratch,
@@ -996,6 +1124,180 @@ bool scanBlocks(const hs_database_t *db, hs_scratch_t *scratch,
     }
 
     return true;
+}
+
+bool closeStream(StreamInfo *stream, hs_scratch_t *scratch,
+                 hs_fp_collector_t *collector, bool echoMatches,
+                 RunStats *stats, string *error) {
+    MatchContext matchCtx;
+    matchCtx.stats = stats;
+    matchCtx.blockId = 0;
+    matchCtx.streamId = stream->streamId;
+    matchCtx.echoMatches = echoMatches;
+    matchCtx.streaming = true;
+
+    hs_error_t err = HS_SUCCESS;
+    if (collector) {
+        err = hs_close_stream_with_collector(stream->handle, scratch, onMatch,
+                                             &matchCtx, collector);
+    } else {
+        err = hs_close_stream(stream->handle, scratch, onMatch, &matchCtx);
+    }
+    stream->handle = nullptr;
+
+    if (err != HS_SUCCESS) {
+        std::ostringstream oss;
+        oss << "stream close failed with error " << err;
+        if (error) {
+            *error = oss.str();
+        }
+        return false;
+    }
+    return true;
+}
+
+bool scanStreaming(const hs_database_t *db, hs_scratch_t *scratch,
+                   const vector<DataBlock> &blocks, unsigned rounds,
+                   hs_fp_collector_t *collector, bool echoMatches,
+                   RunStats *stats, string *error) {
+    for (unsigned round = 0; round < rounds; round++) {
+        vector<StreamInfo> streams = prepStreamingData(blocks);
+
+        for (const auto &block : blocks) {
+            if (block.payload.size() >
+                std::numeric_limits<unsigned int>::max()) {
+                std::ostringstream oss;
+                oss << "Corpus block " << block.id
+                    << " is too large for stream scan";
+                if (error) {
+                    *error = oss.str();
+                }
+                return false;
+            }
+
+            StreamInfo &stream = streams[block.internal_stream_index];
+            if (block.id == stream.firstBlockId) {
+                hs_error_t err = hs_open_stream(db, 0, &stream.handle);
+                if (err != HS_SUCCESS || !stream.handle) {
+                    std::ostringstream oss;
+                    oss << "stream open failed with error " << err;
+                    if (error) {
+                        *error = oss.str();
+                    }
+                    return false;
+                }
+            }
+
+            MatchContext matchCtx;
+            matchCtx.stats = stats;
+            matchCtx.blockId = block.id;
+            matchCtx.streamId = stream.streamId;
+            matchCtx.echoMatches = echoMatches;
+            matchCtx.streaming = true;
+
+            const char *data = block.payload.data();
+            const unsigned int len =
+                static_cast<unsigned int>(block.payload.size());
+            hs_error_t err = HS_SUCCESS;
+            if (collector) {
+                err = hs_scan_stream_with_collector(
+                    stream.handle, data, len, 0, scratch, onMatch, &matchCtx,
+                    collector);
+            } else {
+                err = hs_scan_stream(stream.handle, data, len, 0, scratch,
+                                     onMatch, &matchCtx);
+            }
+            if (err != HS_SUCCESS) {
+                std::ostringstream oss;
+                oss << "stream scan failed with error " << err;
+                if (error) {
+                    *error = oss.str();
+                }
+                return false;
+            }
+
+            stats->scanCalls++;
+            stats->bytes += len;
+
+            if (block.id == stream.lastBlockId &&
+                !closeStream(&stream, scratch, collector, echoMatches, stats,
+                             error)) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool scanVectored(const hs_database_t *db, hs_scratch_t *scratch,
+                  const vector<DataBlock> &blocks, unsigned rounds,
+                  hs_fp_collector_t *collector, bool echoMatches,
+                  RunStats *stats, string *error) {
+    vector<VectoredInfo> vectors;
+    if (!prepVectorData(blocks, &vectors, error)) {
+        return false;
+    }
+
+    for (unsigned round = 0; round < rounds; round++) {
+        for (const auto &vector : vectors) {
+            if (vector.data.empty()) {
+                continue;
+            }
+
+            MatchContext matchCtx;
+            matchCtx.stats = stats;
+            matchCtx.blockId = vector.streamId;
+            matchCtx.echoMatches = echoMatches;
+
+            hs_error_t err = HS_SUCCESS;
+            if (collector) {
+                err = hs_scan_vector_with_collector(
+                    db, vector.data.data(), vector.length.data(),
+                    static_cast<unsigned int>(vector.data.size()), 0, scratch,
+                    onMatch, &matchCtx, collector);
+            } else {
+                err = hs_scan_vector(
+                    db, vector.data.data(), vector.length.data(),
+                    static_cast<unsigned int>(vector.data.size()), 0, scratch,
+                    onMatch, &matchCtx);
+            }
+            if (err != HS_SUCCESS) {
+                std::ostringstream oss;
+                oss << "vector scan failed with error " << err;
+                if (error) {
+                    *error = oss.str();
+                }
+                return false;
+            }
+
+            stats->scanCalls += vector.data.size();
+            stats->bytes += vector.bytes;
+        }
+    }
+
+    return true;
+}
+
+bool scanCorpus(const hs_database_t *db, hs_scratch_t *scratch,
+                const vector<DataBlock> &blocks, unsigned rounds,
+                hs_fp_collector_t *collector, bool echoMatches,
+                ScanMode mode, RunStats *stats, string *error) {
+    switch (mode) {
+    case ScanMode::STREAMING:
+        return scanStreaming(db, scratch, blocks, rounds, collector,
+                             echoMatches, stats, error);
+    case ScanMode::BLOCK:
+        return scanBlocks(db, scratch, blocks, rounds, collector, echoMatches,
+                          stats, error);
+    case ScanMode::VECTORED:
+        return scanVectored(db, scratch, blocks, rounds, collector,
+                            echoMatches, stats, error);
+    }
+    if (error) {
+        *error = "unknown scan mode";
+    }
+    return false;
 }
 
 void addRunStats(RunStats *dst, const RunStats &src) {
@@ -1096,7 +1398,7 @@ bool runParallelScan(const hs_database_t *db,
                      const vector<DataBlock> &blocks, unsigned rounds,
                      const vector<CollectorPtr> *collectors,
                      const vector<unsigned> *cpuList,
-                     bool echoMatches,
+                     bool echoMatches, ScanMode mode,
                      ParallelRunResult *result) {
     const size_t threadCount = scratches.size();
     if (!threadCount) {
@@ -1121,15 +1423,15 @@ bool runParallelScan(const hs_database_t *db,
         for (size_t i = 0; i < threadCount; i++) {
             hs_fp_collector_t *collector =
                 collectors ? (*collectors)[i].get() : nullptr;
-            threads.emplace_back([&, i, collector, echoMatches]() {
+            threads.emplace_back([&, i, collector, echoMatches, mode]() {
                 if (cpuList &&
                     !bindCurrentThread((*cpuList)[i], &results[i].error)) {
                     results[i].ok = false;
                     return;
                 }
                 const auto workerStart = std::chrono::steady_clock::now();
-                results[i].ok = scanBlocks(db, scratches[i].get(), blocks,
-                                           rounds, collector, echoMatches,
+                results[i].ok = scanCorpus(db, scratches[i].get(), blocks,
+                                           rounds, collector, echoMatches, mode,
                                            &results[i].stats,
                                            &results[i].error);
                 const auto workerEnd = std::chrono::steady_clock::now();
@@ -1553,16 +1855,28 @@ string formatReduction(double beforeRate, double afterRate) {
 
 bool sameFragmentIdentity(const hs_fp_fragment_info_t &a,
                           const hs_fp_fragment_info_t &b) {
-    if (a.key != b.key || a.length != b.length) {
+    if (a.key != b.key || a.table != b.table || a.flags != b.flags ||
+        a.length != b.length || a.mask_length != b.mask_length) {
         return false;
     }
-    if (!a.length) {
-        return true;
+    if (a.length) {
+        if (!a.bytes || !b.bytes) {
+            return false;
+        }
+        if (std::memcmp(a.bytes, b.bytes, a.length)) {
+            return false;
+        }
     }
-    if (!a.bytes || !b.bytes) {
-        return false;
+    if (a.mask_length) {
+        if (!a.mask || !b.mask || !a.cmp || !b.cmp) {
+            return false;
+        }
+        if (std::memcmp(a.mask, b.mask, a.mask_length) ||
+            std::memcmp(a.cmp, b.cmp, a.mask_length)) {
+            return false;
+        }
     }
-    return std::memcmp(a.bytes, b.bytes, a.length) == 0;
+    return true;
 }
 
 bool containsFragmentIdentity(const vector<hs_fp_fragment_info_t> &fragments,
@@ -1786,7 +2100,9 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
     };
 
     unsigned long long blockChecked = 0;
+    unsigned long long blockHit = 0;
     unsigned long long blocked = 0;
+    unsigned long long passed = 0;
     for (const auto &checkpoint : checkpoints) {
         hs_compile_context_checkpoint_info_t info = {};
         hs_error_t err = hs_compile_context_get_checkpoint_info(
@@ -1795,15 +2111,31 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
             continue;
         }
         blockChecked += info.checked_count;
+        blockHit += info.hit_count;
         blocked += info.blocked_count;
+        passed += info.passed_count;
     }
 
+    const unsigned long long observeChecked =
+        hs_compile_context_observe_checked_count(ctx);
+    const unsigned long long observeHit =
+        hs_compile_context_observe_hit_count(ctx);
+    const unsigned long long observeMissing =
+        observeChecked > observeHit ? observeChecked - observeHit : 0;
+
     cout << "\nCompile feedback diagnostics:\n";
-    printField("Observe checked:",
-               hs_compile_context_observe_checked_count(ctx));
-    printField("Observe hit:", hs_compile_context_observe_hit_count(ctx));
+    printField("Observe checked:", observeChecked);
+    printField("Observe hit:", observeHit);
     printField("Block checked:", blockChecked);
     printField("Blocked:", blocked);
+
+    cout << "\nCompile feedback consumption:\n";
+    printField("Feedback entries:", observeChecked);
+    printField("Observed in new DB:", observeHit);
+    printField("Not found in new DB:", observeMissing);
+    printField("Hit candidates:", blockHit);
+    printField("Blocked candidates:", blocked);
+    printField("Passed candidates:", passed);
 
     cout << "\nCompile feedback checkpoints:\n";
     cout << left << setw(18) << "checkpoint"
@@ -1872,6 +2204,7 @@ void printHspgoConfig(const Options &opts) {
     if (!opts.threadSpec.empty()) {
         workers += " (-T " + opts.threadSpec + ")";
     }
+    printField("Scan mode:", scanModeName(opts.scanMode));
     printField("Threads:", workers);
     printField("Baseline rounds:",
                static_cast<unsigned long long>(opts.baselineRounds));
@@ -1881,6 +2214,8 @@ void printHspgoConfig(const Options &opts) {
                static_cast<unsigned long long>(opts.measureRounds));
     printField("Verification rounds:",
                static_cast<unsigned long long>(opts.verifyRounds));
+    printField("Warmup rounds:",
+               static_cast<unsigned long long>(opts.warmupRounds));
     printField("Feedback thresholds:",
                feedbackThresholdString(opts.feedbackParams));
     if (opts.echoMatches) {
@@ -1891,12 +2226,43 @@ void printHspgoConfig(const Options &opts) {
     }
 }
 
+void printCorpusLayoutNote(ScanMode mode, const vector<DataBlock> &blocks) {
+    if (mode == ScanMode::BLOCK) {
+        return;
+    }
+
+    const size_t groups = streamSlotCount(blocks);
+    if (groups != blocks.size()) {
+        return;
+    }
+
+    if (mode == ScanMode::STREAMING) {
+        printField("Mode note:",
+                   "one block per stream; open/close overhead may dominate");
+    } else if (mode == ScanMode::VECTORED) {
+        printField("Mode note:",
+                   "one block per vector; batching benefit is not amortized");
+    }
+}
+
 void printScanSummary(const char *title, const vector<DataBlock> &blocks,
                       const ParallelRunResult &result, unsigned rounds,
-                      unsigned threads) {
+                      unsigned threads, ScanMode mode) {
     const unsigned long long bytesPerRun = corpusBytes(blocks);
     const unsigned long long blockCount =
         static_cast<unsigned long long>(blocks.size());
+    string corpusShape = formatCount(blockCount) + " blocks";
+    if (mode == ScanMode::STREAMING) {
+        corpusShape += " in " +
+                       formatCount(static_cast<unsigned long long>(
+                           streamSlotCount(blocks))) +
+                       " streams";
+    } else if (mode == ScanMode::VECTORED) {
+        corpusShape += " in " +
+                       formatCount(static_cast<unsigned long long>(
+                           streamSlotCount(blocks))) +
+                       " vectors";
+    }
     const unsigned long long iterations =
         static_cast<unsigned long long>(rounds) * threads;
     const double matchesPerIteration =
@@ -1914,8 +2280,7 @@ void printScanSummary(const char *title, const vector<DataBlock> &blocks,
     printField("Time spent scanning:", formatFixed(result.seconds, 3) +
                                            " seconds");
     printField("Corpus size:",
-               formatCount(bytesPerRun) + " bytes (" +
-                   formatCount(blockCount) + " blocks)");
+               formatCount(bytesPerRun) + " bytes (" + corpusShape + ")");
     printField("Matches per iteration:",
                formatFixed(matchesPerIteration, 0) + " (" +
                    formatFixed(matchRate, 3) + " matches/kilobyte)");
@@ -1941,9 +2306,18 @@ void printOptimizedBaselineRatio(const ParallelRunResult &baseline,
         return;
     }
 
+    const double ratio = optimizedThroughput * 100.0 / baselineThroughput;
     printField("Optimized/Baseline:",
-               formatFixed(optimizedThroughput * 100.0 / baselineThroughput,
-                           2) + "%");
+               formatFixed(ratio, 2) + "%");
+    if (ratio > 100.0) {
+        printField("Feedback result:",
+                   "improved +" + formatFixed(ratio - 100.0, 2) + "%");
+    } else if (ratio < 100.0) {
+        printField("Feedback result:",
+                   "regression -" + formatFixed(100.0 - ratio, 2) + "%");
+    } else {
+        printField("Feedback result:", "neutral");
+    }
 }
 } // namespace
 
@@ -1967,7 +2341,7 @@ int HS_CDECL main(int argc, char **argv) {
 
     DatabasePtr baselineDb;
     const auto baselineCompileStart = std::chrono::steady_clock::now();
-    if (!compileDatabase(patterns, nullptr, &baselineDb)) {
+    if (!compileDatabase(patterns, opts.scanMode, nullptr, &baselineDb)) {
         return 1;
     }
     const auto baselineCompileEnd = std::chrono::steady_clock::now();
@@ -1986,9 +2360,22 @@ int HS_CDECL main(int argc, char **argv) {
         return 1;
     }
 
-    cout << "hspgo block feedback demo\n";
+    cout << "hspgo feedback demo\n";
     printDatabaseStats("Baseline database", baselineDbStats);
     printHspgoConfig(opts);
+    printCorpusLayoutNote(opts.scanMode, blocks);
+
+    if (opts.warmupRounds) {
+        ParallelRunResult warmupResult;
+        if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
+                             opts.warmupRounds, nullptr,
+                             opts.cpuList.empty() ? nullptr : &opts.cpuList,
+                             false, opts.scanMode, &warmupResult)) {
+            return 1;
+        }
+        printScanSummary("Baseline warmup", blocks, warmupResult,
+                         opts.warmupRounds, opts.threadCount, opts.scanMode);
+    }
 
     ParallelRunResult baselineResult;
     bool haveBaselineResult = false;
@@ -1996,12 +2383,13 @@ int HS_CDECL main(int argc, char **argv) {
         if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
                              opts.baselineRounds, nullptr,
                              opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                             false,
+                             false, opts.scanMode,
                              &baselineResult)) {
             return 1;
         }
         printScanSummary("Baseline scan", blocks, baselineResult,
-                         opts.baselineRounds, opts.threadCount);
+                         opts.baselineRounds, opts.threadCount,
+                         opts.scanMode);
         haveBaselineResult = true;
     }
 
@@ -2015,12 +2403,12 @@ int HS_CDECL main(int argc, char **argv) {
     if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
                          opts.collectRounds, &workerCollectors,
                          opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                         false,
+                         false, opts.scanMode,
                          &collectResult)) {
         return 1;
     }
     printScanSummary("Collection scan", blocks, collectResult,
-                     opts.collectRounds, opts.threadCount);
+                     opts.collectRounds, opts.threadCount, opts.scanMode);
 
     CollectorPtr collector;
     if (!mergeCollectors(baselineDb.get(), workerCollectors, &collector)) {
@@ -2055,7 +2443,8 @@ int HS_CDECL main(int argc, char **argv) {
 
     DatabasePtr optimizedDb;
     const auto optimizedCompileStart = std::chrono::steady_clock::now();
-    if (!compileDatabase(patterns, compileCtx.get(), &optimizedDb)) {
+    if (!compileDatabase(patterns, opts.scanMode, compileCtx.get(),
+                         &optimizedDb)) {
         return 1;
     }
     const auto optimizedCompileEnd = std::chrono::steady_clock::now();
@@ -2085,16 +2474,28 @@ int HS_CDECL main(int argc, char **argv) {
     baselineDb.reset();
     cout << "\nHot switch: active database replaced by feedback-compiled DB.\n";
 
+    if (opts.warmupRounds) {
+        ParallelRunResult warmupResult;
+        if (!runParallelScan(optimizedDb.get(), optimizedScratches, blocks,
+                             opts.warmupRounds, nullptr,
+                             opts.cpuList.empty() ? nullptr : &opts.cpuList,
+                             false, opts.scanMode, &warmupResult)) {
+            return 1;
+        }
+        printScanSummary("Optimized warmup", blocks, warmupResult,
+                         opts.warmupRounds, opts.threadCount, opts.scanMode);
+    }
+
     ParallelRunResult measureResult;
     if (!runParallelScan(optimizedDb.get(), optimizedScratches, blocks,
                          opts.measureRounds, nullptr,
                          opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                         opts.echoMatches,
+                         opts.echoMatches, opts.scanMode,
                          &measureResult)) {
         return 1;
     }
     printScanSummary("Optimized measurement", blocks, measureResult,
-                     opts.measureRounds, opts.threadCount);
+                     opts.measureRounds, opts.threadCount, opts.scanMode);
     if (haveBaselineResult) {
         printOptimizedBaselineRatio(baselineResult, measureResult);
     }
@@ -2110,12 +2511,12 @@ int HS_CDECL main(int argc, char **argv) {
         if (!runParallelScan(optimizedDb.get(), optimizedScratches, blocks,
                              opts.verifyRounds, &verifyCollectors,
                              opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                             false,
+                             false, opts.scanMode,
                              &verifyResult)) {
             return 1;
         }
         printScanSummary("Verification scan", blocks, verifyResult,
-                         opts.verifyRounds, opts.threadCount);
+                         opts.verifyRounds, opts.threadCount, opts.scanMode);
 
         CollectorPtr verifyCollector;
         if (!mergeCollectors(optimizedDb.get(), verifyCollectors,
