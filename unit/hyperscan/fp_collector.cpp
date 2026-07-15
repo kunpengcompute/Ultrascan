@@ -263,6 +263,10 @@ TEST(FpCollector, NullArguments) {
     ASSERT_EQ(HS_INVALID, hs_fp_collector_report(collector, nullptr));
     ASSERT_EQ(HS_INVALID, hs_fp_feedback_build(nullptr, &feedback));
     ASSERT_EQ(HS_INVALID, hs_fp_feedback_build(report, nullptr));
+    ASSERT_EQ(HS_INVALID,
+              hs_fp_feedback_build_ext(nullptr, nullptr, &feedback));
+    ASSERT_EQ(HS_INVALID,
+              hs_fp_feedback_build_ext(report, nullptr, nullptr));
     EXPECT_EQ(HS_INVALID,
               hs_fp_report_get_summary(nullptr, &report_summary));
     EXPECT_EQ(HS_INVALID, hs_fp_report_get_summary(report, nullptr));
@@ -346,6 +350,108 @@ TEST(FpCollector, LifecycleEmptyReportAndFeedback) {
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector2));
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
     ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+}
+
+TEST(FpCollector, FeedbackBuildExtThresholdParameters) {
+    const char *exprs[] = {"foo", "bar"};
+    unsigned int flags[] = {0, 0};
+    unsigned int ids[] = {1, 2};
+    hs_expr_ext ext0 = {};
+    hs_expr_ext ext1 = {};
+    ext0.flags = HS_EXT_FLAG_MIN_OFFSET;
+    ext1.flags = HS_EXT_FLAG_MIN_OFFSET;
+    ext0.min_offset = 10;
+    ext1.min_offset = 10;
+    const hs_expr_ext *exts[] = {&ext0, &ext1};
+
+    hs_compile_error_t *compile_err = nullptr;
+    hs_database_t *db = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_compile_ext_multi(exprs, flags, ids, exts, 2,
+                                               HS_MODE_BLOCK, nullptr, &db,
+                                               &compile_err));
+    ASSERT_NE(nullptr, db);
+
+    hs_scratch_t *scratch = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(db, &scratch));
+
+    hs_fp_collector_t *collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
+
+    collectFalsePositiveSamples(db, scratch, collector, "foo", 3, 10);
+    collectFalsePositiveSamples(db, scratch, collector, "bar", 3, 5);
+
+    hs_fp_report_t *report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+    ASSERT_NE(nullptr, report);
+
+    hs_fp_feedback_t *feedback = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_build(report, &feedback));
+    ASSERT_NE(nullptr, feedback);
+    hs_fp_feedback_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_get_summary(feedback, &summary));
+    EXPECT_EQ(0U, summary.bad_fragment_count);
+    EXPECT_GE(summary.total_false_positive_count, 15U);
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
+    feedback = nullptr;
+
+    hs_fp_feedback_params_t params = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_build_ext(report, &params,
+                                                   &feedback));
+    ASSERT_NE(nullptr, feedback);
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_get_summary(feedback, &summary));
+    EXPECT_EQ(0U, summary.bad_fragment_count);
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
+    feedback = nullptr;
+
+    params.flags = HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT |
+                   HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT |
+                   HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE |
+                   HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE;
+    params.min_trigger_count = 1;
+    params.min_false_positive_count = 1;
+    params.min_false_positive_rate = HS_FP_FEEDBACK_RATE_SCALE;
+    params.min_waste_share = 1;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_build_ext(report, &params,
+                                                   &feedback));
+    ASSERT_NE(nullptr, feedback);
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_get_summary(feedback, &summary));
+    EXPECT_GE(summary.bad_fragment_count, 2U);
+    EXPECT_TRUE(findFeedbackByBytes(feedback, "foo", nullptr));
+    EXPECT_TRUE(findFeedbackByBytes(feedback, "bar", nullptr));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
+    feedback = nullptr;
+
+    params.flags |= HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS;
+    params.max_bad_fragments = 1;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_build_ext(report, &params,
+                                                   &feedback));
+    ASSERT_NE(nullptr, feedback);
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_get_summary(feedback, &summary));
+    ASSERT_EQ(1U, summary.bad_fragment_count);
+    EXPECT_TRUE(findFeedbackByBytes(feedback, "foo", nullptr));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
+    feedback = nullptr;
+
+    hs_fp_feedback_params_t invalid = {};
+    invalid.flags = 0x80000000U;
+    EXPECT_EQ(HS_INVALID, hs_fp_feedback_build_ext(report, &invalid,
+                                                   &feedback));
+    invalid = {};
+    invalid.flags = HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE;
+    invalid.min_false_positive_rate = HS_FP_FEEDBACK_RATE_SCALE + 1;
+    EXPECT_EQ(HS_INVALID, hs_fp_feedback_build_ext(report, &invalid,
+                                                   &feedback));
+    invalid = {};
+    invalid.flags = HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS;
+    invalid.max_bad_fragments = 0;
+    EXPECT_EQ(HS_INVALID, hs_fp_feedback_build_ext(report, &invalid,
+                                                   &feedback));
+
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+    hs_free_compile_error(compile_err);
 }
 
 TEST(FpCollector, BlockScanMatchesNormalScan) {

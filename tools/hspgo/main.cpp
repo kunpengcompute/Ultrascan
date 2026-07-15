@@ -98,6 +98,7 @@ struct Options {
     unsigned measureRounds = 5;
     unsigned threadCount = 1;
     unsigned top = 0;
+    hs_fp_feedback_params_t feedbackParams = {};
     bool showSummaries = false;
     bool showDiagnostics = false;
     bool echoMatches = false;
@@ -201,8 +202,13 @@ void usage(const char *error) {
          << "  -R N                    Run N collection rounds with collector (default 3).\n"
          << "  -n N                    Run N measurement rounds after DB switch (default 5).\n"
          << "  -N                      Block mode marker, accepted for hsbench familiarity.\n"
+         << "  -m N                    Minimum trigger count for feedback (default 1000).\n"
+         << "  -F N                    Minimum false-positive trigger count (default 1000).\n"
+         << "  -q PCT                  Minimum false-positive rate percent (default 99.00).\n"
+         << "  -W PCT                  Minimum waste share percent (default 5.00).\n"
+         << "  -K N                    Maximum bad fragments kept for feedback (default all).\n"
          << "  -T CPU,CPU... or CPU-CPU\n"
-         << "                           Run one worker per CPU and bind affinity.\n"
+         << "                          Run one worker per CPU and bind affinity.\n"
          << "  -r                      Print collection/feedback summaries.\n"
          << "  -f N                    Print top N report and feedback fragments.\n"
          << "  -d                      Print compile feedback diagnostics.\n"
@@ -247,6 +253,22 @@ bool parsePositiveUnsigned(const char *text, unsigned *out) {
     return true;
 }
 
+bool parsePositiveU64(const char *text, unsigned long long *out) {
+    if (!text || !*text || !out || text[0] == '+' || text[0] == '-') {
+        return false;
+    }
+
+    errno = 0;
+    char *end = nullptr;
+    unsigned long long value = std::strtoull(text, &end, 10);
+    if (errno || !end || *end != '\0' || value == 0) {
+        return false;
+    }
+
+    *out = value;
+    return true;
+}
+
 bool parseUnsigned(const char *text, unsigned *out) {
     if (!text || !*text || !out || text[0] == '+' || text[0] == '-') {
         return false;
@@ -261,6 +283,60 @@ bool parseUnsigned(const char *text, unsigned *out) {
     }
 
     *out = static_cast<unsigned>(value);
+    return true;
+}
+
+bool parsePercentScaled(const char *text, unsigned *out) {
+    if (!text || !*text || !out || text[0] == '+' || text[0] == '-') {
+        return false;
+    }
+
+    string value(text);
+    if (!value.empty() && value.back() == '%') {
+        value.pop_back();
+    }
+    if (value.empty()) {
+        return false;
+    }
+
+    const size_t dot = value.find('.');
+    if (dot != string::npos && value.find('.', dot + 1) != string::npos) {
+        return false;
+    }
+
+    const string wholeText = dot == string::npos ? value : value.substr(0, dot);
+    const string fracText = dot == string::npos ? string() : value.substr(dot + 1);
+    if (wholeText.empty() || fracText.size() > 2) {
+        return false;
+    }
+    for (char c : wholeText) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) {
+            return false;
+        }
+    }
+    for (char c : fracText) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) {
+            return false;
+        }
+    }
+
+    unsigned whole = 0;
+    if (!parseUnsigned(wholeText.c_str(), &whole) || whole > 100) {
+        return false;
+    }
+
+    unsigned frac = 0;
+    if (!fracText.empty()) {
+        frac = static_cast<unsigned>(fracText[0] - '0') * 10;
+        if (fracText.size() == 2) {
+            frac += static_cast<unsigned>(fracText[1] - '0');
+        }
+    }
+    if (whole == 100 && frac != 0) {
+        return false;
+    }
+
+    *out = whole * 100 + frac;
     return true;
 }
 
@@ -396,7 +472,7 @@ bool processArgs(int argc, char **argv, Options *opts) {
     opterr = 0;
     int optionIndex = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, ":B:c:de:f:G:hNn:o:O:rR:T:vV",
+        int c = getopt_long(argc, argv, ":B:c:de:F:f:G:hK:m:Nn:o:O:q:rR:T:vVW:",
                             longopts,
                             &optionIndex);
         if (c < 0) {
@@ -404,6 +480,7 @@ bool processArgs(int argc, char **argv, Options *opts) {
         }
 
         unsigned value = 0;
+        unsigned long long value64 = 0;
         switch (c) {
         case 'h':
             usage(nullptr);
@@ -439,12 +516,37 @@ bool processArgs(int argc, char **argv, Options *opts) {
             }
             opts->exprPath.assign(optarg);
             break;
+        case 'F':
+            if (!parsePositiveU64(optarg, &value64)) {
+                usage("minimum false-positive count must be a positive integer");
+                return false;
+            }
+            opts->feedbackParams.flags |=
+                HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT;
+            opts->feedbackParams.min_false_positive_count = value64;
+            break;
         case 'f':
             if (!parsePositiveUnsigned(optarg, &value)) {
                 usage("top fragment count must be a positive integer");
                 return false;
             }
             opts->top = value;
+            break;
+        case 'K':
+            if (!parsePositiveUnsigned(optarg, &value)) {
+                usage("feedback TopK must be a positive integer");
+                return false;
+            }
+            opts->feedbackParams.flags |= HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS;
+            opts->feedbackParams.max_bad_fragments = value;
+            break;
+        case 'm':
+            if (!parsePositiveU64(optarg, &value64)) {
+                usage("minimum trigger count must be a positive integer");
+                return false;
+            }
+            opts->feedbackParams.flags |= HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT;
+            opts->feedbackParams.min_trigger_count = value64;
             break;
         case 'n':
             if (!parsePositiveUnsigned(optarg, &value)) {
@@ -468,6 +570,15 @@ bool processArgs(int argc, char **argv, Options *opts) {
                 return false;
             }
             opts->feedbackCsvPath.assign(optarg);
+            break;
+        case 'q':
+            if (!parsePercentScaled(optarg, &value)) {
+                usage("minimum false-positive rate must be a percent from 0 to 100");
+                return false;
+            }
+            opts->feedbackParams.flags |=
+                HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE;
+            opts->feedbackParams.min_false_positive_rate = value;
             break;
         case 'r':
             opts->showSummaries = true;
@@ -506,6 +617,14 @@ bool processArgs(int argc, char **argv, Options *opts) {
         case 'V':
             usage("hspgo first version supports block mode only");
             return false;
+        case 'W':
+            if (!parsePercentScaled(optarg, &value)) {
+                usage("minimum waste share must be a percent from 0 to 100");
+                return false;
+            }
+            opts->feedbackParams.flags |= HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE;
+            opts->feedbackParams.min_waste_share = value;
+            break;
         case OPT_ECHO_MATCHES:
             opts->echoMatches = true;
             break;
@@ -1313,7 +1432,55 @@ void printFeedbackSummary(const hs_fp_feedback_t *feedback) {
                summary.total_false_positive_count);
 }
 
+string formatScaledPercent(unsigned scaled) {
+    return formatFixed(static_cast<double>(scaled) / 100.0, 2) + "%";
+}
+
+string feedbackThresholdString(const hs_fp_feedback_params_t &params) {
+    const unsigned long long minTrigger =
+        (params.flags & HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT)
+            ? params.min_trigger_count
+            : HS_FP_FEEDBACK_DEFAULT_MIN_TRIGGER_COUNT;
+    const unsigned long long minFp =
+        (params.flags & HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT)
+            ? params.min_false_positive_count
+            : HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_COUNT;
+    const unsigned fpRate =
+        (params.flags & HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE)
+            ? params.min_false_positive_rate
+            : HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_RATE;
+    const unsigned wasteShare =
+        (params.flags & HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE)
+            ? params.min_waste_share
+            : HS_FP_FEEDBACK_DEFAULT_MIN_WASTE_SHARE;
+    const unsigned topK =
+        (params.flags & HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS)
+            ? params.max_bad_fragments
+            : HS_FP_FEEDBACK_DEFAULT_MAX_BAD_FRAGMENTS;
+
+    vector<string> parts;
+    parts.push_back("min_trigger=" + formatCount(minTrigger));
+    parts.push_back("min_fp=" + formatCount(minFp));
+    parts.push_back("fp_rate>=" + formatScaledPercent(fpRate));
+    parts.push_back("waste_share>=" + formatScaledPercent(wasteShare));
+    if (topK) {
+        parts.push_back("topk=" + formatCount(topK));
+    } else {
+        parts.push_back("topk=all");
+    }
+
+    std::ostringstream oss;
+    for (size_t i = 0; i < parts.size(); i++) {
+        if (i) {
+            oss << "; ";
+        }
+        oss << parts[i];
+    }
+    return oss.str();
+}
+
 bool buildReportAndFeedback(const hs_fp_collector_t *collector,
+                            const hs_fp_feedback_params_t &params,
                             ReportPtr *report, FeedbackPtr *feedback) {
     hs_fp_report_t *rawReport = nullptr;
     hs_error_t err = hs_fp_collector_report(collector, &rawReport);
@@ -1324,9 +1491,9 @@ bool buildReportAndFeedback(const hs_fp_collector_t *collector,
     report->reset(rawReport);
 
     hs_fp_feedback_t *rawFeedback = nullptr;
-    err = hs_fp_feedback_build(report->get(), &rawFeedback);
+    err = hs_fp_feedback_build_ext(report->get(), &params, &rawFeedback);
     if (err != HS_SUCCESS) {
-        cerr << "hs_fp_feedback_build failed with error " << err << "\n";
+        cerr << "hs_fp_feedback_build_ext failed with error " << err << "\n";
         return false;
     }
     feedback->reset(rawFeedback);
@@ -1461,6 +1628,8 @@ void printHspgoConfig(const Options &opts) {
                static_cast<unsigned long long>(opts.collectRounds));
     printField("Measurement rounds:",
                static_cast<unsigned long long>(opts.measureRounds));
+    printField("Feedback thresholds:",
+               feedbackThresholdString(opts.feedbackParams));
     if (opts.echoMatches) {
         printField("Echo matches:", "optimized measurement only");
     }
@@ -1590,7 +1759,8 @@ int HS_CDECL main(int argc, char **argv) {
 
     ReportPtr report;
     FeedbackPtr feedback;
-    if (!buildReportAndFeedback(collector.get(), &report, &feedback)) {
+    if (!buildReportAndFeedback(collector.get(), opts.feedbackParams, &report,
+                                &feedback)) {
         return 1;
     }
 

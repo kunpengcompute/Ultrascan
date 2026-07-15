@@ -33,6 +33,7 @@ EXPORTS
    hs_fp_collector_report
    hs_fp_collector_reset
    hs_fp_feedback_build
+   hs_fp_feedback_build_ext
    hs_fp_feedback_free
    hs_fp_feedback_get_fragment
    hs_fp_feedback_get_summary

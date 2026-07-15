@@ -86,6 +86,23 @@ typedef struct hs_scratch hs_scratch_t;
 #define HS_FP_FRAGMENT_FLAG_NORUNS 0x02U
 #define HS_FP_FRAGMENT_FLAG_MASKED 0x04U
 
+/** Scale used by false-positive feedback rate parameters. */
+#define HS_FP_FEEDBACK_RATE_SCALE 10000U
+
+/** Default false-positive feedback thresholds. */
+#define HS_FP_FEEDBACK_DEFAULT_MIN_TRIGGER_COUNT         1000ULL
+#define HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_COUNT  1000ULL
+#define HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_RATE   9900U
+#define HS_FP_FEEDBACK_DEFAULT_MIN_WASTE_SHARE           500U
+#define HS_FP_FEEDBACK_DEFAULT_MAX_BAD_FRAGMENTS         0U
+
+/** Flags for hs_fp_feedback_params_t::flags. */
+#define HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT         0x01U
+#define HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT  0x02U
+#define HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE   0x04U
+#define HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE           0x08U
+#define HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS         0x10U
+
 /** Summary counters exported from a false-positive feedback report. */
 typedef struct hs_fp_report_summary {
     /** Number of fragments available through hs_fp_report_get_fragment(). */
@@ -159,6 +176,31 @@ typedef struct hs_fp_fragment_info {
     /** Number of triggers that did not directly produce a final report. */
     unsigned long long false_positive_count;
 } hs_fp_fragment_info_t;
+
+/**
+ * Parameters for @ref hs_fp_feedback_build_ext().
+ *
+ * Fields are only consumed when the corresponding
+ * HS_FP_FEEDBACK_PARAM_* bit is present in @ref flags. A zero-initialised
+ * structure therefore produces the same result as @ref hs_fp_feedback_build().
+ *
+ * Rate fields use @ref HS_FP_FEEDBACK_RATE_SCALE. For example, 9900 means
+ * 99.00% and 500 means 5.00%.
+ */
+typedef struct hs_fp_feedback_params {
+    /** Bitmask of HS_FP_FEEDBACK_PARAM_* values. */
+    unsigned int flags;
+    /** Minimum total trigger count for a fragment to be considered bad. */
+    unsigned long long min_trigger_count;
+    /** Minimum false-positive trigger count for a fragment. */
+    unsigned long long min_false_positive_count;
+    /** Minimum false-positive rate, scaled by HS_FP_FEEDBACK_RATE_SCALE. */
+    unsigned int min_false_positive_rate;
+    /** Minimum share of total false positives, scaled by the same factor. */
+    unsigned int min_waste_share;
+    /** Maximum number of bad fragments to keep. */
+    unsigned int max_bad_fragments;
+} hs_fp_feedback_params_t;
 
 /**
  * Create a false-positive feedback collector for a compiled database.
@@ -243,6 +285,26 @@ hs_error_t HS_CDECL hs_fp_report_get_fragment(
  */
 hs_error_t HS_CDECL hs_fp_feedback_build(const hs_fp_report_t *report,
                                          hs_fp_feedback_t **feedback);
+
+/**
+ * Build compile-time false-positive feedback from a report with explicit
+ * threshold parameters.
+ *
+ * @param report
+ *      A valid report returned by @ref hs_fp_collector_report().
+ * @param params
+ *      Optional threshold parameters. NULL or a zero-initialised structure
+ *      uses the default thresholds from @ref hs_fp_feedback_build().
+ * @param feedback
+ *      On success, a feedback object will be written here. The caller owns it
+ *      and must release it with @ref hs_fp_feedback_free().
+ * @return
+ *      @ref HS_SUCCESS on success, @ref HS_INVALID for invalid arguments or
+ *      invalid parameter values.
+ */
+hs_error_t HS_CDECL hs_fp_feedback_build_ext(
+    const hs_fp_report_t *report, const hs_fp_feedback_params_t *params,
+    hs_fp_feedback_t **feedback);
 
 /**
  * Free false-positive feedback. NULL may also be safely provided.
