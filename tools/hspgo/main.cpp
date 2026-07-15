@@ -96,6 +96,7 @@ struct Options {
     unsigned baselineRounds = 1;
     unsigned collectRounds = 3;
     unsigned measureRounds = 5;
+    unsigned verifyRounds = 0;
     unsigned threadCount = 1;
     unsigned top = 0;
     hs_fp_feedback_params_t feedbackParams = {};
@@ -198,6 +199,7 @@ void usage(const char *error) {
          << "  -G OVERRIDES            Overrides for the grey box.\n"
          << "  -e PATH                 Load hsbench expression file/directory.\n"
          << "  -c FILE                 Load hsbench sqlite corpus.\n"
+         << "  -A N                    Run N verification rounds with collector after DB switch (default 0).\n"
          << "  -B N                    Run N normal hs_scan() baseline rounds (default 1).\n"
          << "  -R N                    Run N collection rounds with collector (default 3).\n"
          << "  -n N                    Run N measurement rounds after DB switch (default 5).\n"
@@ -340,6 +342,36 @@ bool parsePercentScaled(const char *text, unsigned *out) {
     return true;
 }
 
+bool greyOverridesHaveNegativeValue(const char *text) {
+    if (!text) {
+        return false;
+    }
+
+    const char *p = text;
+    while (*p) {
+        const char *colon = std::strchr(p, ':');
+        if (!colon) {
+            return false;
+        }
+
+        const char *value = colon + 1;
+        while (*value == ' ' || *value == '\t') {
+            value++;
+        }
+        if (*value == '-') {
+            return true;
+        }
+
+        const char *semi = std::strchr(value, ';');
+        if (!semi) {
+            return false;
+        }
+        p = semi + 1;
+    }
+
+    return false;
+}
+
 bool appendCpu(unsigned cpu, vector<unsigned> *out, string *error) {
     if (out->size() >= MAX_HSPGO_WORKERS) {
         if (error) {
@@ -472,7 +504,7 @@ bool processArgs(int argc, char **argv, Options *opts) {
     opterr = 0;
     int optionIndex = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, ":B:c:de:F:f:G:hK:m:Nn:o:O:q:rR:T:vVW:",
+        int c = getopt_long(argc, argv, ":A:B:c:de:F:f:G:hK:m:Nn:o:O:q:rR:T:vVW:",
                             longopts,
                             &optionIndex);
         if (c < 0) {
@@ -485,7 +517,18 @@ bool processArgs(int argc, char **argv, Options *opts) {
         case 'h':
             usage(nullptr);
             std::exit(0);
+        case 'A':
+            if (!parseUnsigned(optarg, &value)) {
+                usage("verification rounds must be a non-negative integer");
+                return false;
+            }
+            opts->verifyRounds = value;
+            break;
         case 'G':
+            if (greyOverridesHaveNegativeValue(optarg)) {
+                usage("grey override values must be non-negative");
+                return false;
+            }
             opts->greyOverrides.assign(optarg);
             if (hs_set_grey_overrides(optarg) != HS_SUCCESS) {
                 usage("Invalid grey overrides");
@@ -1189,6 +1232,19 @@ double falsePositiveRate(const hs_fp_fragment_info_t &fragment) {
            static_cast<double>(fragment.trigger_count);
 }
 
+double falsePositiveShare(const hs_fp_fragment_info_t &fragment,
+                          unsigned long long totalFalsePositive) {
+    if (!totalFalsePositive) {
+        return 0.0;
+    }
+    return static_cast<double>(fragment.false_positive_count) /
+           static_cast<double>(totalFalsePositive);
+}
+
+string formatPercent(double ratio) {
+    return formatFixed(ratio * 100.0, 2) + "%";
+}
+
 bool loadReportFragments(const hs_fp_report_t *report,
                          vector<hs_fp_fragment_info_t> *fragments) {
     hs_fp_report_summary_t summary = {};
@@ -1253,7 +1309,8 @@ void printFragmentHeader() {
          << right << setw(12) << "trigger"
          << setw(12) << "true"
          << setw(12) << "false"
-         << setw(9) << "fp_rate"
+         << setw(10) << "fp_rate"
+         << setw(10) << "fp_share"
          << "  fragment\n";
 }
 
@@ -1264,7 +1321,8 @@ string fragmentKeyString(const hs_fp_fragment_info_t &fragment) {
     return key.str();
 }
 
-void printFragmentRow(size_t index, const hs_fp_fragment_info_t &fragment) {
+void printFragmentRow(size_t index, const hs_fp_fragment_info_t &fragment,
+                      unsigned long long totalFalsePositive) {
     cout << left << setw(4) << index
          << setw(20) << fragmentKeyString(fragment)
          << setw(10) << tableName(fragment.table)
@@ -1272,13 +1330,20 @@ void printFragmentRow(size_t index, const hs_fp_fragment_info_t &fragment) {
          << right << setw(12) << fragment.trigger_count
          << setw(12) << fragment.true_trigger_count
          << setw(12) << fragment.false_positive_count
-         << setw(8) << std::fixed << std::setprecision(2)
-         << (falsePositiveRate(fragment) * 100.0) << "%"
+         << setw(10) << formatPercent(falsePositiveRate(fragment))
+         << setw(10)
+         << formatPercent(falsePositiveShare(fragment, totalFalsePositive))
          << "  \"" << escapedBytes(fragment.bytes, fragment.length) << "\"\n";
-    cout.unsetf(std::ios::floatfield);
 }
 
 void printTopReportFragments(const hs_fp_report_t *report, unsigned top) {
+    hs_fp_report_summary_t summary = {};
+    hs_error_t err = hs_fp_report_get_summary(report, &summary);
+    if (err != HS_SUCCESS) {
+        cerr << "hs_fp_report_get_summary failed with error " << err << "\n";
+        return;
+    }
+
     vector<hs_fp_fragment_info_t> fragments;
     if (!loadReportFragments(report, &fragments)) {
         return;
@@ -1294,11 +1359,19 @@ void printTopReportFragments(const hs_fp_report_t *report, unsigned top) {
     printFragmentHeader();
     const size_t limit = std::min<size_t>(top, fragments.size());
     for (size_t i = 0; i < limit; i++) {
-        printFragmentRow(i + 1, fragments[i]);
+        printFragmentRow(i + 1, fragments[i],
+                         summary.false_positive_count);
     }
 }
 
 void printFeedbackFragments(const hs_fp_feedback_t *feedback, unsigned top) {
+    hs_fp_feedback_summary_t summary = {};
+    hs_error_t err = hs_fp_feedback_get_summary(feedback, &summary);
+    if (err != HS_SUCCESS) {
+        cerr << "hs_fp_feedback_get_summary failed with error " << err << "\n";
+        return;
+    }
+
     vector<hs_fp_fragment_info_t> fragments;
     if (!loadFeedbackFragments(feedback, &fragments)) {
         return;
@@ -1314,7 +1387,8 @@ void printFeedbackFragments(const hs_fp_feedback_t *feedback, unsigned top) {
     printFragmentHeader();
     const size_t limit = std::min<size_t>(top, fragments.size());
     for (size_t i = 0; i < limit; i++) {
-        printFragmentRow(i + 1, fragments[i]);
+        printFragmentRow(i + 1, fragments[i],
+                         summary.total_false_positive_count);
     }
 }
 
@@ -1343,7 +1417,8 @@ string csvEscape(const string &value) {
 }
 
 bool writeFragmentCsv(const string &path,
-                      vector<hs_fp_fragment_info_t> fragments) {
+                      vector<hs_fp_fragment_info_t> fragments,
+                      unsigned long long totalFalsePositive) {
     std::ofstream out(path.c_str(), std::ios::binary);
     if (!out.good()) {
         cerr << "Unable to open output file: " << path << "\n";
@@ -1352,7 +1427,7 @@ bool writeFragmentCsv(const string &path,
 
     sortFragments(&fragments);
     out << "key,table,engine,trigger_count,true_trigger_count,"
-           "false_positive_count,fp_rate,fragment\n";
+           "false_positive_count,fp_rate,fp_share,fragment\n";
     for (const auto &fragment : fragments) {
         const string bytes = escapedBytes(fragment.bytes, fragment.length);
         out << fragmentKeyString(fragment) << ','
@@ -1361,7 +1436,10 @@ bool writeFragmentCsv(const string &path,
             << fragment.trigger_count << ','
             << fragment.true_trigger_count << ','
             << fragment.false_positive_count << ','
-            << formatFixed(falsePositiveRate(fragment), 6) << ','
+            << formatFixed(falsePositiveRate(fragment) * 100.0, 2) << ','
+            << formatFixed(falsePositiveShare(fragment, totalFalsePositive) *
+                               100.0,
+                           2) << ','
             << csvEscape(bytes) << "\n";
     }
 
@@ -1376,22 +1454,38 @@ bool dumpReportCsv(const hs_fp_report_t *report, const string &path) {
     if (path.empty()) {
         return true;
     }
+    hs_fp_report_summary_t summary = {};
+    hs_error_t err = hs_fp_report_get_summary(report, &summary);
+    if (err != HS_SUCCESS) {
+        cerr << "hs_fp_report_get_summary failed with error " << err << "\n";
+        return false;
+    }
+
     vector<hs_fp_fragment_info_t> fragments;
     if (!loadReportFragments(report, &fragments)) {
         return false;
     }
-    return writeFragmentCsv(path, move(fragments));
+    return writeFragmentCsv(path, move(fragments),
+                            summary.false_positive_count);
 }
 
 bool dumpFeedbackCsv(const hs_fp_feedback_t *feedback, const string &path) {
     if (path.empty()) {
         return true;
     }
+    hs_fp_feedback_summary_t summary = {};
+    hs_error_t err = hs_fp_feedback_get_summary(feedback, &summary);
+    if (err != HS_SUCCESS) {
+        cerr << "hs_fp_feedback_get_summary failed with error " << err << "\n";
+        return false;
+    }
+
     vector<hs_fp_fragment_info_t> fragments;
     if (!loadFeedbackFragments(feedback, &fragments)) {
         return false;
     }
-    return writeFragmentCsv(path, move(fragments));
+    return writeFragmentCsv(path, move(fragments),
+                            summary.total_false_positive_count);
 }
 
 void printReportSummary(const hs_fp_report_t *report) {
@@ -1430,6 +1524,163 @@ void printFeedbackSummary(const hs_fp_feedback_t *feedback) {
     printField("Source scan bytes:", summary.scan_bytes);
     printField("Source false positives:",
                summary.total_false_positive_count);
+}
+
+struct FragmentTotals {
+    unsigned long long trigger = 0;
+    unsigned long long falsePositive = 0;
+};
+
+double perMiB(unsigned long long count, unsigned long long bytes) {
+    if (!bytes) {
+        return 0.0;
+    }
+    return static_cast<double>(count) * 1024.0 * 1024.0 /
+           static_cast<double>(bytes);
+}
+
+string formatPerMiB(unsigned long long count, unsigned long long bytes) {
+    return formatFixedWithCommas(perMiB(count, bytes), 2) + " / MiB";
+}
+
+string formatReduction(double beforeRate, double afterRate) {
+    if (beforeRate <= 0.0) {
+        return "n/a";
+    }
+    const double reduction = (beforeRate - afterRate) * 100.0 / beforeRate;
+    return formatFixed(reduction, 2) + "%";
+}
+
+bool sameFragmentIdentity(const hs_fp_fragment_info_t &a,
+                          const hs_fp_fragment_info_t &b) {
+    if (a.key != b.key || a.length != b.length) {
+        return false;
+    }
+    if (!a.length) {
+        return true;
+    }
+    if (!a.bytes || !b.bytes) {
+        return false;
+    }
+    return std::memcmp(a.bytes, b.bytes, a.length) == 0;
+}
+
+bool containsFragmentIdentity(const vector<hs_fp_fragment_info_t> &fragments,
+                              const hs_fp_fragment_info_t &fragment) {
+    for (const auto &existing : fragments) {
+        if (sameFragmentIdentity(existing, fragment)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+FragmentTotals sumFragments(const vector<hs_fp_fragment_info_t> &fragments) {
+    FragmentTotals totals;
+    for (const auto &fragment : fragments) {
+        totals.trigger += fragment.trigger_count;
+        totals.falsePositive += fragment.false_positive_count;
+    }
+    return totals;
+}
+
+FragmentTotals sumMatchingFragments(
+        const vector<hs_fp_fragment_info_t> &reportFragments,
+        const vector<hs_fp_fragment_info_t> &needles) {
+    FragmentTotals totals;
+    for (const auto &fragment : reportFragments) {
+        if (!containsFragmentIdentity(needles, fragment)) {
+            continue;
+        }
+        totals.trigger += fragment.trigger_count;
+        totals.falsePositive += fragment.false_positive_count;
+    }
+    return totals;
+}
+
+bool printVerificationComparison(const hs_fp_report_t *beforeReport,
+                                 const hs_fp_feedback_t *feedback,
+                                 const hs_fp_report_t *afterReport) {
+    hs_fp_report_summary_t before = {};
+    hs_fp_report_summary_t after = {};
+    hs_error_t err = hs_fp_report_get_summary(beforeReport, &before);
+    if (err != HS_SUCCESS) {
+        cerr << "hs_fp_report_get_summary failed with error " << err << "\n";
+        return false;
+    }
+    err = hs_fp_report_get_summary(afterReport, &after);
+    if (err != HS_SUCCESS) {
+        cerr << "hs_fp_report_get_summary failed with error " << err << "\n";
+        return false;
+    }
+
+    vector<hs_fp_fragment_info_t> feedbackFragments;
+    vector<hs_fp_fragment_info_t> afterFragments;
+    if (!loadFeedbackFragments(feedback, &feedbackFragments) ||
+        !loadReportFragments(afterReport, &afterFragments)) {
+        return false;
+    }
+
+    vector<hs_fp_fragment_info_t> uniqueFeedbackFragments;
+    for (const auto &fragment : feedbackFragments) {
+        if (!containsFragmentIdentity(uniqueFeedbackFragments, fragment)) {
+            uniqueFeedbackFragments.push_back(fragment);
+        }
+    }
+
+    const FragmentTotals selectedBefore = sumFragments(feedbackFragments);
+    const FragmentTotals selectedAfter =
+        sumMatchingFragments(afterFragments, uniqueFeedbackFragments);
+
+    const double beforeTriggerRate =
+        perMiB(before.trigger_count, before.scan_bytes);
+    const double afterTriggerRate = perMiB(after.trigger_count, after.scan_bytes);
+    const double beforeFpRate =
+        perMiB(before.false_positive_count, before.scan_bytes);
+    const double afterFpRate =
+        perMiB(after.false_positive_count, after.scan_bytes);
+    const double selectedBeforeTriggerRate =
+        perMiB(selectedBefore.trigger, before.scan_bytes);
+    const double selectedAfterTriggerRate =
+        perMiB(selectedAfter.trigger, after.scan_bytes);
+    const double selectedBeforeFpRate =
+        perMiB(selectedBefore.falsePositive, before.scan_bytes);
+    const double selectedAfterFpRate =
+        perMiB(selectedAfter.falsePositive, after.scan_bytes);
+
+    cout << "\nVerification comparison:\n";
+    printField("Trigger rate before:",
+               formatPerMiB(before.trigger_count, before.scan_bytes));
+    printField("Trigger rate after:",
+               formatPerMiB(after.trigger_count, after.scan_bytes));
+    printField("Trigger reduction:",
+               formatReduction(beforeTriggerRate, afterTriggerRate));
+    printField("False-positive before:",
+               formatPerMiB(before.false_positive_count, before.scan_bytes));
+    printField("False-positive after:",
+               formatPerMiB(after.false_positive_count, after.scan_bytes));
+    printField("False-positive reduction:",
+               formatReduction(beforeFpRate, afterFpRate));
+    printField("Bad fragment trigger before:",
+               formatCount(selectedBefore.trigger) + " (" +
+                   formatFixedWithCommas(selectedBeforeTriggerRate, 2) +
+                   " / MiB)");
+    printField("Bad fragment trigger after:",
+               formatCount(selectedAfter.trigger) + " (" +
+                   formatFixedWithCommas(selectedAfterTriggerRate, 2) +
+                   " / MiB)");
+    printField("Bad fragment reduction:",
+               formatReduction(selectedBeforeTriggerRate,
+                               selectedAfterTriggerRate));
+    printField("Bad fragment FP before:",
+               formatCount(selectedBefore.falsePositive) + " (" +
+                   formatFixedWithCommas(selectedBeforeFpRate, 2) + " / MiB)");
+    printField("Bad fragment FP after:",
+               formatCount(selectedAfter.falsePositive) + " (" +
+                   formatFixedWithCommas(selectedAfterFpRate, 2) + " / MiB)");
+    printField("Bad fragment FP reduction:",
+               formatReduction(selectedBeforeFpRate, selectedAfterFpRate));
+    return true;
 }
 
 string formatScaledPercent(unsigned scaled) {
@@ -1628,6 +1879,8 @@ void printHspgoConfig(const Options &opts) {
                static_cast<unsigned long long>(opts.collectRounds));
     printField("Measurement rounds:",
                static_cast<unsigned long long>(opts.measureRounds));
+    printField("Verification rounds:",
+               static_cast<unsigned long long>(opts.verifyRounds));
     printField("Feedback thresholds:",
                feedbackThresholdString(opts.feedbackParams));
     if (opts.echoMatches) {
@@ -1677,6 +1930,21 @@ void printScanSummary(const char *title, const vector<DataBlock> &blocks,
                                                     result.fastestWorkerSeconds),
                                      2) + " Mbit/sec");
 }
+
+void printOptimizedBaselineRatio(const ParallelRunResult &baseline,
+                                 const ParallelRunResult &optimized) {
+    const double baselineThroughput =
+        throughputMbit(baseline.stats, baseline.seconds);
+    const double optimizedThroughput =
+        throughputMbit(optimized.stats, optimized.seconds);
+    if (baselineThroughput <= 0.0) {
+        return;
+    }
+
+    printField("Optimized/Baseline:",
+               formatFixed(optimizedThroughput * 100.0 / baselineThroughput,
+                           2) + "%");
+}
 } // namespace
 
 int HS_CDECL main(int argc, char **argv) {
@@ -1722,8 +1990,9 @@ int HS_CDECL main(int argc, char **argv) {
     printDatabaseStats("Baseline database", baselineDbStats);
     printHspgoConfig(opts);
 
+    ParallelRunResult baselineResult;
+    bool haveBaselineResult = false;
     if (opts.baselineRounds) {
-        ParallelRunResult baselineResult;
         if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
                              opts.baselineRounds, nullptr,
                              opts.cpuList.empty() ? nullptr : &opts.cpuList,
@@ -1733,6 +2002,7 @@ int HS_CDECL main(int argc, char **argv) {
         }
         printScanSummary("Baseline scan", blocks, baselineResult,
                          opts.baselineRounds, opts.threadCount);
+        haveBaselineResult = true;
     }
 
     vector<CollectorPtr> workerCollectors;
@@ -1825,6 +2095,48 @@ int HS_CDECL main(int argc, char **argv) {
     }
     printScanSummary("Optimized measurement", blocks, measureResult,
                      opts.measureRounds, opts.threadCount);
+    if (haveBaselineResult) {
+        printOptimizedBaselineRatio(baselineResult, measureResult);
+    }
+
+    if (opts.verifyRounds) {
+        vector<CollectorPtr> verifyCollectors;
+        if (!createCollectors(optimizedDb.get(), opts.threadCount,
+                              &verifyCollectors)) {
+            return 1;
+        }
+
+        ParallelRunResult verifyResult;
+        if (!runParallelScan(optimizedDb.get(), optimizedScratches, blocks,
+                             opts.verifyRounds, &verifyCollectors,
+                             opts.cpuList.empty() ? nullptr : &opts.cpuList,
+                             false,
+                             &verifyResult)) {
+            return 1;
+        }
+        printScanSummary("Verification scan", blocks, verifyResult,
+                         opts.verifyRounds, opts.threadCount);
+
+        CollectorPtr verifyCollector;
+        if (!mergeCollectors(optimizedDb.get(), verifyCollectors,
+                             &verifyCollector)) {
+            return 1;
+        }
+
+        hs_fp_report_t *rawVerifyReport = nullptr;
+        hs_error_t err =
+            hs_fp_collector_report(verifyCollector.get(), &rawVerifyReport);
+        if (err != HS_SUCCESS) {
+            cerr << "hs_fp_collector_report failed with error " << err << "\n";
+            return 1;
+        }
+        ReportPtr verifyReport(rawVerifyReport);
+
+        if (!printVerificationComparison(report.get(), feedback.get(),
+                                         verifyReport.get())) {
+            return 1;
+        }
+    }
 
     return 0;
 }
