@@ -29,6 +29,7 @@
 #include "gtest/gtest.h"
 #include "fp_collector.h"
 #include "hs.h"
+#include "scratch.h"
 #include "test_util.h"
 
 #include <cstring>
@@ -493,6 +494,15 @@ TEST(FpCollector, BlockScanMatchesNormalScan) {
     EXPECT_EQ(1U, summary.true_trigger_count);
     EXPECT_EQ(1U, summary.final_report_count);
     EXPECT_EQ(0U, summary.false_positive_count);
+    EXPECT_EQ(0U, summary.unknown_report_count);
+    EXPECT_EQ(0U, summary.unknown_no_active_trigger_count);
+    EXPECT_EQ(0U, summary.unknown_delayed_replay_count);
+    EXPECT_EQ(0U, summary.unknown_anchored_replay_count);
+    EXPECT_EQ(0U, summary.unknown_eod_or_boundary_count);
+    EXPECT_EQ(0U, summary.unknown_flush_combination_count);
+    EXPECT_EQ(0U, summary.unknown_mpv_or_nfa_queue_count);
+    EXPECT_EQ(0U, summary.unknown_counter_missing_count);
+    EXPECT_EQ(0U, summary.unknown_fragment_meta_missing_count);
     EXPECT_EQ(0U, summary.dropped_trigger_count);
 
     FpReportEntry entry;
@@ -721,6 +731,185 @@ TEST(FpCollector, StreamCollectorApisMatchNormalAndValidateArguments) {
     ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
 }
 
+TEST(FpCollector, StreamEodCollectorApisRecordCloseAndResetReports) {
+    hs_scratch_t *scratch = nullptr;
+    hs_database_t *db = buildDBAndScratch("foo.*bar$", 0, 0, HS_MODE_STREAM,
+                                          &scratch);
+    ASSERT_NE(nullptr, db);
+    ASSERT_NE(nullptr, scratch);
+
+    hs_fp_collector_t *collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
+
+    const char data[] = "foo        bar";
+    const unsigned int length = strlen(data);
+
+    auto openPendingStream = [&]() -> hs_stream_t * {
+        hs_stream_t *stream = nullptr;
+        hs_error_t err = hs_open_stream(db, 0, &stream);
+        EXPECT_EQ(HS_SUCCESS, err);
+        if (err != HS_SUCCESS || !stream) {
+            return nullptr;
+        }
+
+        CallBackContext c;
+        err = hs_scan_stream_with_collector(stream, data, length, 0, scratch,
+                                            record_cb, &c, collector);
+        EXPECT_EQ(HS_SUCCESS, err);
+        if (err != HS_SUCCESS) {
+            EXPECT_EQ(HS_SUCCESS,
+                      hs_close_stream_with_collector(stream, scratch, nullptr,
+                                                     nullptr, collector));
+            return nullptr;
+        }
+        EXPECT_TRUE(c.matches.empty());
+        return stream;
+    };
+
+    hs_stream_t *close_stream = openPendingStream();
+    ASSERT_NE(nullptr, close_stream);
+    CallBackContext close_matches;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_close_stream_with_collector(close_stream, scratch, record_cb,
+                                             &close_matches, collector));
+    EXPECT_EQ(1U, close_matches.matches.size());
+
+    hs_stream_t *reset_stream = openPendingStream();
+    ASSERT_NE(nullptr, reset_stream);
+    CallBackContext reset_matches;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_reset_stream_with_collector(reset_stream, 0, scratch,
+                                             record_cb, &reset_matches,
+                                             collector));
+    EXPECT_EQ(1U, reset_matches.matches.size());
+
+    hs_stream_t *copy_from = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_open_stream(db, 0, &copy_from));
+    ASSERT_NE(nullptr, copy_from);
+    hs_stream_t *copy_to = openPendingStream();
+    ASSERT_NE(nullptr, copy_to);
+    CallBackContext copy_matches;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_reset_and_copy_stream_with_collector(
+                  copy_to, copy_from, scratch, record_cb, &copy_matches,
+                  collector));
+    EXPECT_EQ(1U, copy_matches.matches.size());
+
+    size_t used = 0;
+    ASSERT_EQ(HS_INSUFFICIENT_SPACE,
+              hs_compress_stream(copy_from, nullptr, 0, &used));
+    ASSERT_GT(used, 0U);
+    std::vector<char> compressed(used);
+    ASSERT_EQ(HS_SUCCESS,
+              hs_compress_stream(copy_from, compressed.data(),
+                                 compressed.size(), &used));
+
+    hs_stream_t *expand_to = openPendingStream();
+    ASSERT_NE(nullptr, expand_to);
+    CallBackContext expand_matches;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_reset_and_expand_stream_with_collector(
+                  expand_to, compressed.data(), used, scratch, record_cb,
+                  &expand_matches, collector));
+    EXPECT_EQ(1U, expand_matches.matches.size());
+
+    ASSERT_EQ(HS_SUCCESS,
+              hs_close_stream_with_collector(reset_stream, scratch, nullptr,
+                                             nullptr, collector));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_close_stream_with_collector(copy_to, scratch, nullptr,
+                                             nullptr, collector));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_close_stream_with_collector(copy_from, scratch, nullptr,
+                                             nullptr, collector));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_close_stream_with_collector(expand_to, scratch, nullptr,
+                                             nullptr, collector));
+
+    hs_fp_report_t *report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+    ASSERT_NE(nullptr, report);
+    hs_fp_report_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
+    EXPECT_EQ(4U, summary.scan_calls);
+    EXPECT_EQ(static_cast<u64a>(length) * 4, summary.scan_bytes);
+    EXPECT_EQ(4U, summary.final_report_count);
+    EXPECT_EQ(4U, summary.unknown_report_count);
+    EXPECT_EQ(4U, summary.unknown_no_active_trigger_count);
+    EXPECT_EQ(0U, summary.unknown_delayed_replay_count);
+    EXPECT_EQ(0U, summary.unknown_anchored_replay_count);
+    EXPECT_EQ(4U, summary.unknown_eod_or_boundary_count);
+    EXPECT_EQ(0U, summary.unknown_flush_combination_count);
+    EXPECT_EQ(0U, summary.unknown_mpv_or_nfa_queue_count);
+    EXPECT_EQ(0U, summary.unknown_counter_missing_count);
+    EXPECT_EQ(0U, summary.unknown_fragment_meta_missing_count);
+
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+}
+
+TEST(FpCollector, UnknownSourceBucketsAreReportedAndReset) {
+    hs_scratch_t *scratch = nullptr;
+    hs_database_t *db = buildDBAndScratch("foo", 0, 0, HS_MODE_BLOCK,
+                                          &scratch);
+    ASSERT_NE(nullptr, db);
+    ASSERT_NE(nullptr, scratch);
+
+    hs_fp_collector_t *collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
+
+    const u8 sources[] = {
+        HS_FP_UNKNOWN_SOURCE_DELAYED_REPLAY,
+        HS_FP_UNKNOWN_SOURCE_ANCHORED_REPLAY,
+        HS_FP_UNKNOWN_SOURCE_EOD_OR_BOUNDARY,
+        HS_FP_UNKNOWN_SOURCE_FLUSH_COMBINATION,
+        HS_FP_UNKNOWN_SOURCE_MPV_OR_NFA_QUEUE,
+    };
+
+    scratch->core_info.fp_collector = collector;
+    for (u8 source : sources) {
+        scratch->core_info.fp_unknown_source = source;
+        hs_fp_collector_record_final_report(scratch);
+    }
+    scratch->core_info.fp_unknown_source = HS_FP_UNKNOWN_SOURCE_NONE;
+    scratch->core_info.fp_collector = nullptr;
+
+    hs_fp_report_t *report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+    ASSERT_NE(nullptr, report);
+    hs_fp_report_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
+    EXPECT_EQ(5U, summary.final_report_count);
+    EXPECT_EQ(5U, summary.unknown_report_count);
+    EXPECT_EQ(5U, summary.unknown_no_active_trigger_count);
+    EXPECT_EQ(1U, summary.unknown_delayed_replay_count);
+    EXPECT_EQ(1U, summary.unknown_anchored_replay_count);
+    EXPECT_EQ(1U, summary.unknown_eod_or_boundary_count);
+    EXPECT_EQ(1U, summary.unknown_flush_combination_count);
+    EXPECT_EQ(1U, summary.unknown_mpv_or_nfa_queue_count);
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_reset(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+    ASSERT_NE(nullptr, report);
+    memset(&summary, 0, sizeof(summary));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
+    EXPECT_EQ(0U, summary.unknown_report_count);
+    EXPECT_EQ(0U, summary.unknown_no_active_trigger_count);
+    EXPECT_EQ(0U, summary.unknown_delayed_replay_count);
+    EXPECT_EQ(0U, summary.unknown_anchored_replay_count);
+    EXPECT_EQ(0U, summary.unknown_eod_or_boundary_count);
+    EXPECT_EQ(0U, summary.unknown_flush_combination_count);
+    EXPECT_EQ(0U, summary.unknown_mpv_or_nfa_queue_count);
+
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+}
+
 TEST(FpCollector, StableFragmentKeyAcrossCompiles) {
     hs_scratch_t *scratch1 = nullptr;
     hs_database_t *db1 = buildDBAndScratch("foo", 0, 0, HS_MODE_BLOCK,
@@ -855,6 +1044,15 @@ TEST(FpCollector, BlockScanRecordsFalsePositiveTrigger) {
     EXPECT_EQ(0U, summary.true_trigger_count);
     EXPECT_EQ(0U, summary.final_report_count);
     EXPECT_GE(summary.false_positive_count, 1U);
+    EXPECT_EQ(0U, summary.unknown_report_count);
+    EXPECT_EQ(0U, summary.unknown_no_active_trigger_count);
+    EXPECT_EQ(0U, summary.unknown_delayed_replay_count);
+    EXPECT_EQ(0U, summary.unknown_anchored_replay_count);
+    EXPECT_EQ(0U, summary.unknown_eod_or_boundary_count);
+    EXPECT_EQ(0U, summary.unknown_flush_combination_count);
+    EXPECT_EQ(0U, summary.unknown_mpv_or_nfa_queue_count);
+    EXPECT_EQ(0U, summary.unknown_counter_missing_count);
+    EXPECT_EQ(0U, summary.unknown_fragment_meta_missing_count);
     EXPECT_EQ(0U, summary.dropped_trigger_count);
 
     FpReportEntry entry;
@@ -881,6 +1079,125 @@ TEST(FpCollector, BlockScanRecordsFalsePositiveTrigger) {
     ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
     ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
     hs_free_compile_error(compile_err);
+}
+
+TEST(FpCollector, TriggerHistogramFlushesBatchedTriggers) {
+    const char *expr = "foo";
+    unsigned int flags = 0;
+    unsigned int id = 1;
+    hs_expr_ext ext = {};
+    ext.flags = HS_EXT_FLAG_MIN_OFFSET;
+    ext.min_offset = 20;
+    const hs_expr_ext *extp = &ext;
+
+    hs_compile_error_t *compile_err = nullptr;
+    hs_database_t *db = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_compile_ext_multi(&expr, &flags, &id, &extp, 1,
+                                               HS_MODE_BLOCK, nullptr, &db,
+                                               &compile_err));
+    ASSERT_NE(nullptr, db);
+
+    hs_scratch_t *scratch = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(db, &scratch));
+
+    hs_fp_collector_t *collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
+
+    const std::string data = "foofoofoofoofoofoofoofoo";
+    CallBackContext c;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_scan_with_collector(db, data.data(),
+                                     static_cast<unsigned int>(data.size()), 0,
+                                     scratch, record_cb, &c, collector));
+    ASSERT_EQ(2U, c.matches.size());
+
+    hs_fp_report_t *report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+    ASSERT_NE(nullptr, report);
+
+    hs_fp_report_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
+    EXPECT_EQ(1U, summary.scan_calls);
+    EXPECT_EQ(data.size(), summary.scan_bytes);
+    EXPECT_GE(summary.trigger_count, 8U);
+    EXPECT_EQ(2U, summary.true_trigger_count);
+    EXPECT_EQ(2U, summary.final_report_count);
+    EXPECT_GE(summary.false_positive_count, 6U);
+    EXPECT_EQ(0U, summary.unknown_report_count);
+    EXPECT_EQ(0U, summary.dropped_trigger_count);
+
+    FpReportEntry entry;
+    ASSERT_TRUE(findEntryByBytes(report, "foo", &entry));
+    EXPECT_GE(entry.trigger_count, 8U);
+    EXPECT_EQ(2U, entry.true_trigger_count);
+    EXPECT_EQ(2U, entry.final_report_count);
+    EXPECT_GE(entry.false_positive_count, 6U);
+
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+    hs_free_compile_error(compile_err);
+}
+
+TEST(FpCollector, FeedbackBuildSkipsUnknownFragments) {
+    hs_scratch_t *scratch = nullptr;
+    hs_database_t *db = buildDBAndScratch("foo", 0, 0, HS_MODE_BLOCK,
+                                          &scratch);
+    ASSERT_NE(nullptr, db);
+    ASSERT_NE(nullptr, scratch);
+
+    hs_fp_collector_t *collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
+
+    scratch->core_info.fp_collector = collector;
+    hs_fp_collector_begin_trigger(scratch, 0xffffffffU);
+    hs_fp_collector_end_trigger(scratch);
+    hs_fp_collector_flush(collector);
+    scratch->core_info.fp_collector = nullptr;
+
+    hs_fp_report_t *report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+    ASSERT_NE(nullptr, report);
+
+    hs_fp_report_summary_t report_summary = {};
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_report_get_summary(report, &report_summary));
+    EXPECT_EQ(1U, report_summary.fragment_count);
+    EXPECT_EQ(1U, report_summary.trigger_count);
+    EXPECT_EQ(1U, report_summary.false_positive_count);
+    EXPECT_EQ(1U, report_summary.unknown_fragment_meta_missing_count);
+
+    hs_fp_fragment_info_t fragment = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_fragment(report, 0, &fragment));
+    EXPECT_EQ(HS_FP_TABLE_UNKNOWN, fragment.table);
+    EXPECT_EQ(HS_FP_ENGINE_UNKNOWN, fragment.engine);
+    EXPECT_EQ(0U, fragment.length);
+
+    hs_fp_feedback_params_t params = {};
+    params.flags = HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT |
+                   HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT |
+                   HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE |
+                   HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE;
+    params.min_trigger_count = 1;
+    params.min_false_positive_count = 1;
+    params.min_false_positive_rate = HS_FP_FEEDBACK_RATE_SCALE;
+    params.min_waste_share = 1;
+
+    hs_fp_feedback_t *feedback = nullptr;
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_build_ext(report, &params, &feedback));
+    ASSERT_NE(nullptr, feedback);
+    hs_fp_feedback_summary_t feedback_summary = {};
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_get_summary(feedback, &feedback_summary));
+    EXPECT_EQ(0U, feedback_summary.bad_fragment_count);
+
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
 }
 
 TEST(FpCollector, MergeAggregatesTriggerSummary) {

@@ -143,6 +143,7 @@ void populateCoreInfo(struct hs_scratch *s, const struct RoseEngine *rose,
     s->core_info.fp_current_trigger_key = 0;
     s->core_info.fp_current_trigger_active = 0;
     s->core_info.fp_current_trigger_reported = 0;
+    s->core_info.fp_unknown_source = HS_FP_UNKNOWN_SOURCE_NONE;
 
     /* and some stuff not actually in core info */
     s->som_set_now_offset = ~0ULL;
@@ -690,7 +691,8 @@ void soleOutfixEodExec(hs_stream_t *id, hs_scratch_t *scratch) {
 
 static really_inline
 void report_eod_matches(hs_stream_t *id, hs_scratch_t *scratch,
-                        match_event_handler onEvent, void *context) {
+                        match_event_handler onEvent, void *context,
+                        hs_fp_collector_t *collector) {
     DEBUG_PRINTF("--- report eod matches at offset %llu\n", id->offset);
     assert(onEvent);
 
@@ -706,6 +708,12 @@ void report_eod_matches(hs_stream_t *id, hs_scratch_t *scratch,
     populateCoreInfo(scratch, rose, state, onEvent, context, NULL, 0,
                      getHistory(state, rose, id->offset),
                      getHistoryAmount(rose, id->offset), id->offset, status, 0);
+    scratch->core_info.fp_collector = collector;
+    u8 old_unknown_source = scratch->core_info.fp_unknown_source;
+    if (collector) {
+        scratch->core_info.fp_unknown_source =
+            HS_FP_UNKNOWN_SOURCE_EOD_OR_BOUNDARY;
+    }
 
     if (rose->ckeyCount) {
         scratch->core_info.logicalVector = state +
@@ -725,7 +733,7 @@ void report_eod_matches(hs_stream_t *id, hs_scratch_t *scratch,
             int rv = roseRunBoundaryProgram(
                 rose, rose->boundary.reportZeroEodOffset, 0, scratch);
             if (rv == MO_HALT_MATCHING) {
-                return;
+                goto done;
             }
         }
     } else {
@@ -733,7 +741,7 @@ void report_eod_matches(hs_stream_t *id, hs_scratch_t *scratch,
             int rv = roseRunBoundaryProgram(
                 rose, rose->boundary.reportEodOffset, id->offset, scratch);
             if (rv == MO_HALT_MATCHING) {
-                return;
+                goto done;
             }
         }
 
@@ -767,6 +775,37 @@ void report_eod_matches(hs_stream_t *id, hs_scratch_t *scratch,
             scratch->core_info.status |= STATUS_TERMINATED;
         }
     }
+
+done:
+    if (collector) {
+        scratch->core_info.fp_unknown_source = old_unknown_source;
+    }
+}
+
+static really_inline
+hs_error_t report_eod_matches_if_needed(hs_stream_t *id, hs_scratch_t *scratch,
+                                        match_event_handler onEvent,
+                                        void *context,
+                                        hs_fp_collector_t *collector) {
+    if (!onEvent) {
+        return HS_SUCCESS;
+    }
+
+    if (!scratch || !validScratch(id->rose, scratch)) {
+        return HS_INVALID;
+    }
+    if (unlikely(markScratchInUse(scratch))) {
+        return HS_SCRATCH_IN_USE;
+    }
+
+    report_eod_matches(id, scratch, onEvent, context, collector);
+    hs_fp_collector_flush(collector);
+    if (unlikely(internal_matching_error(scratch))) {
+        unmarkScratchInUse(scratch);
+        return HS_UNKNOWN_ERROR;
+    }
+    unmarkScratchInUse(scratch);
+    return HS_SUCCESS;
 }
 
 HS_PUBLIC_API
@@ -797,12 +836,13 @@ hs_error_t HS_CDECL hs_copy_stream(hs_stream_t **to_id,
     return HS_SUCCESS;
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_reset_and_copy_stream(hs_stream_t *to_id,
+static really_inline
+hs_error_t hs_reset_and_copy_stream_internal(hs_stream_t *to_id,
                                              const hs_stream_t *from_id,
                                              hs_scratch_t *scratch,
                                              match_event_handler onEvent,
-                                             void *context) {
+                                             void *context,
+                                             hs_fp_collector_t *collector) {
     if (!from_id || !from_id->rose) {
         return HS_INVALID;
     }
@@ -815,19 +855,10 @@ hs_error_t HS_CDECL hs_reset_and_copy_stream(hs_stream_t *to_id,
         return HS_INVALID;
     }
 
-    if (onEvent) {
-        if (!scratch || !validScratch(to_id->rose, scratch)) {
-            return HS_INVALID;
-        }
-        if (unlikely(markScratchInUse(scratch))) {
-            return HS_SCRATCH_IN_USE;
-        }
-        report_eod_matches(to_id, scratch, onEvent, context);
-        if (unlikely(internal_matching_error(scratch))) {
-            unmarkScratchInUse(scratch);
-            return HS_UNKNOWN_ERROR;
-        }
-        unmarkScratchInUse(scratch);
+    hs_error_t rv = report_eod_matches_if_needed(to_id, scratch, onEvent,
+                                                 context, collector);
+    if (rv != HS_SUCCESS) {
+        return rv;
     }
 
     size_t stateSize
@@ -836,6 +867,16 @@ hs_error_t HS_CDECL hs_reset_and_copy_stream(hs_stream_t *to_id,
     memcpy(to_id, from_id, stateSize);
 
     return HS_SUCCESS;
+}
+
+HS_PUBLIC_API
+hs_error_t HS_CDECL hs_reset_and_copy_stream(hs_stream_t *to_id,
+                                             const hs_stream_t *from_id,
+                                             hs_scratch_t *scratch,
+                                             match_event_handler onEvent,
+                                             void *context) {
+    return hs_reset_and_copy_stream_internal(to_id, from_id, scratch, onEvent,
+                                             context, NULL);
 }
 
 HS_PUBLIC_API
@@ -851,7 +892,8 @@ hs_error_t HS_CDECL hs_reset_and_copy_stream_with_collector(
         return err;
     }
 
-    return hs_reset_and_copy_stream(to_id, from_id, scratch, onEvent, context);
+    return hs_reset_and_copy_stream_internal(to_id, from_id, scratch, onEvent,
+                                             context, collector);
 }
 
 static really_inline
@@ -1150,33 +1192,34 @@ hs_error_t HS_CDECL hs_scan_stream_with_collector(
     return rv;
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_close_stream(hs_stream_t *id, hs_scratch_t *scratch,
+static really_inline
+hs_error_t hs_close_stream_internal(hs_stream_t *id, hs_scratch_t *scratch,
                                     match_event_handler onEvent,
-                                    void *context) {
+                                    void *context,
+                                    hs_fp_collector_t *collector) {
     if (!id) {
         return HS_INVALID;
     }
 
-    if (onEvent) {
-        if (!scratch || !validScratch(id->rose, scratch)) {
-            return HS_INVALID;
-        }
-        if (unlikely(markScratchInUse(scratch))) {
-            return HS_SCRATCH_IN_USE;
-        }
-        report_eod_matches(id, scratch, onEvent, context);
-        if (unlikely(internal_matching_error(scratch))) {
-            unmarkScratchInUse(scratch);
+    hs_error_t rv = report_eod_matches_if_needed(id, scratch, onEvent,
+                                                 context, collector);
+    if (rv != HS_SUCCESS) {
+        if (rv == HS_UNKNOWN_ERROR) {
             hs_stream_free(id);
-            return HS_UNKNOWN_ERROR;
         }
-        unmarkScratchInUse(scratch);
+        return rv;
     }
 
     hs_stream_free(id);
 
     return HS_SUCCESS;
+}
+
+HS_PUBLIC_API
+hs_error_t HS_CDECL hs_close_stream(hs_stream_t *id, hs_scratch_t *scratch,
+                                    match_event_handler onEvent,
+                                    void *context) {
+    return hs_close_stream_internal(id, scratch, onEvent, context, NULL);
 }
 
 HS_PUBLIC_API
@@ -1192,37 +1235,37 @@ hs_error_t HS_CDECL hs_close_stream_with_collector(
         return err;
     }
 
-    return hs_close_stream(id, scratch, onEvent, context);
+    return hs_close_stream_internal(id, scratch, onEvent, context, collector);
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_reset_stream(hs_stream_t *id, UNUSED unsigned int flags,
+static really_inline
+hs_error_t hs_reset_stream_internal(hs_stream_t *id, UNUSED unsigned int flags,
                                     hs_scratch_t *scratch,
                                     match_event_handler onEvent,
-                                    void *context) {
+                                    void *context,
+                                    hs_fp_collector_t *collector) {
     if (!id) {
         return HS_INVALID;
     }
 
-    if (onEvent) {
-        if (!scratch || !validScratch(id->rose, scratch)) {
-            return HS_INVALID;
-        }
-        if (unlikely(markScratchInUse(scratch))) {
-            return HS_SCRATCH_IN_USE;
-        }
-        report_eod_matches(id, scratch, onEvent, context);
-        if (unlikely(internal_matching_error(scratch))) {
-            unmarkScratchInUse(scratch);
-            return HS_UNKNOWN_ERROR;
-        }
-        unmarkScratchInUse(scratch);
+    hs_error_t rv = report_eod_matches_if_needed(id, scratch, onEvent,
+                                                 context, collector);
+    if (rv != HS_SUCCESS) {
+        return rv;
     }
 
     // history already initialised
     init_stream(id, id->rose, 0);
 
     return HS_SUCCESS;
+}
+
+HS_PUBLIC_API
+hs_error_t HS_CDECL hs_reset_stream(hs_stream_t *id, unsigned int flags,
+                                    hs_scratch_t *scratch,
+                                    match_event_handler onEvent,
+                                    void *context) {
+    return hs_reset_stream_internal(id, flags, scratch, onEvent, context, NULL);
 }
 
 HS_PUBLIC_API
@@ -1238,7 +1281,8 @@ hs_error_t HS_CDECL hs_reset_stream_with_collector(
         return err;
     }
 
-    return hs_reset_stream(id, flags, scratch, onEvent, context);
+    return hs_reset_stream_internal(id, flags, scratch, onEvent, context,
+                                    collector);
 }
 
 HS_PUBLIC_API
@@ -1345,7 +1389,7 @@ hs_error_t hs_scan_vector_internal(const hs_database_t *db,
 
     /* close stream */
     if (onEvent) {
-        report_eod_matches(id, scratch, onEvent, context);
+        report_eod_matches(id, scratch, onEvent, context, collector);
 
         if (unlikely(internal_matching_error(scratch))) {
             unmarkScratchInUse(scratch);
@@ -1465,31 +1509,23 @@ hs_error_t HS_CDECL hs_expand_stream(const hs_database_t *db,
     return HS_SUCCESS;
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_reset_and_expand_stream(hs_stream_t *to_stream,
+static really_inline
+hs_error_t hs_reset_and_expand_stream_internal(hs_stream_t *to_stream,
                                                const char *buf, size_t buf_size,
                                                hs_scratch_t *scratch,
                                                match_event_handler onEvent,
-                                               void *context) {
+                                               void *context,
+                                               hs_fp_collector_t *collector) {
     if (unlikely(!to_stream || !buf)) {
         return HS_INVALID;
     }
 
     const struct RoseEngine *rose = to_stream->rose;
 
-    if (onEvent) {
-        if (!scratch || !validScratch(to_stream->rose, scratch)) {
-            return HS_INVALID;
-        }
-        if (unlikely(markScratchInUse(scratch))) {
-            return HS_SCRATCH_IN_USE;
-        }
-        report_eod_matches(to_stream, scratch, onEvent, context);
-        if (unlikely(internal_matching_error(scratch))) {
-            unmarkScratchInUse(scratch);
-            return HS_UNKNOWN_ERROR;
-        }
-        unmarkScratchInUse(scratch);
+    hs_error_t rv = report_eod_matches_if_needed(to_stream, scratch, onEvent,
+                                                 context, collector);
+    if (rv != HS_SUCCESS) {
+        return rv;
     }
 
     if (expand_stream(to_stream, rose, buf, buf_size)) {
@@ -1497,6 +1533,17 @@ hs_error_t HS_CDECL hs_reset_and_expand_stream(hs_stream_t *to_stream,
     } else {
         return HS_INVALID;
     }
+}
+
+HS_PUBLIC_API
+hs_error_t HS_CDECL hs_reset_and_expand_stream(hs_stream_t *to_stream,
+                                               const char *buf, size_t buf_size,
+                                               hs_scratch_t *scratch,
+                                               match_event_handler onEvent,
+                                               void *context) {
+    return hs_reset_and_expand_stream_internal(to_stream, buf, buf_size,
+                                               scratch, onEvent, context,
+                                               NULL);
 }
 
 HS_PUBLIC_API
@@ -1513,6 +1560,7 @@ hs_error_t HS_CDECL hs_reset_and_expand_stream_with_collector(
         return err;
     }
 
-    return hs_reset_and_expand_stream(to_stream, buf, buf_size, scratch,
-                                      onEvent, context);
+    return hs_reset_and_expand_stream_internal(to_stream, buf, buf_size,
+                                               scratch, onEvent, context,
+                                               collector);
 }

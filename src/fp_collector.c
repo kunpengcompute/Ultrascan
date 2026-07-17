@@ -40,6 +40,8 @@
 #include "scratch.h"
 #include "ue2common.h"
 
+#define HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE 64U
+
 struct hs_fp_counter {
     u32 key;
     u8 used;
@@ -59,7 +61,16 @@ struct hs_fp_collector {
     u64a true_trigger_count;
     u64a final_report_count;
     u64a unknown_report_count;
+    u64a unknown_no_active_trigger_count;
+    u64a unknown_delayed_replay_count;
+    u64a unknown_anchored_replay_count;
+    u64a unknown_eod_or_boundary_count;
+    u64a unknown_flush_combination_count;
+    u64a unknown_mpv_or_nfa_queue_count;
+    u64a unknown_counter_missing_count;
     u64a dropped_trigger_count;
+    u32 pending_trigger_count;
+    u32 pending_trigger_keys[HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE];
 };
 
 struct hs_fp_report_entry {
@@ -90,6 +101,14 @@ struct hs_fp_report {
     u64a true_trigger_count;
     u64a final_report_count;
     u64a unknown_report_count;
+    u64a unknown_no_active_trigger_count;
+    u64a unknown_delayed_replay_count;
+    u64a unknown_anchored_replay_count;
+    u64a unknown_eod_or_boundary_count;
+    u64a unknown_flush_combination_count;
+    u64a unknown_mpv_or_nfa_queue_count;
+    u64a unknown_counter_missing_count;
+    u64a unknown_fragment_meta_missing_count;
     u64a dropped_trigger_count;
 };
 
@@ -126,6 +145,8 @@ struct hs_fp_feedback_build_options {
     u32 min_waste_share;
     u32 max_bad_fragments;
 };
+
+typedef void (*hs_fp_histogram_emit_fn)(void *ctx, u32 key, u64a count);
 
 static
 u64a sat_add_u64a(u64a a, u64a b) {
@@ -339,7 +360,7 @@ u32 count_used_counters(const hs_fp_collector_t *collector) {
 }
 
 static
-void fill_report_entry(struct hs_fp_report_entry *entry,
+char fill_report_entry(struct hs_fp_report_entry *entry,
                        const hs_fp_collector_t *collector,
                        const struct hs_fp_counter *counter) {
     entry->fragment_id = ROSE_OFFSET_INVALID;
@@ -350,7 +371,7 @@ void fill_report_entry(struct hs_fp_report_entry *entry,
     const struct RoseFpFragmentMeta *meta =
         find_fragment_meta(collector->rose, counter->key);
     if (!meta) {
-        return;
+        return 0;
     }
 
     entry->key = meta->stableKey;
@@ -364,6 +385,7 @@ void fill_report_entry(struct hs_fp_report_entry *entry,
     memcpy(entry->bytes, meta->bytes, sizeof(entry->bytes));
     memcpy(entry->mask, meta->mask, sizeof(entry->mask));
     memcpy(entry->cmp, meta->cmp, sizeof(entry->cmp));
+    return 1;
 }
 
 static
@@ -383,6 +405,12 @@ char report_entry_is_bad_fragment(const struct hs_fp_report_entry *entry,
                                   u64a total_false_positive,
                                   const struct hs_fp_feedback_build_options
                                       *options) {
+    if (entry->fragment_id == ROSE_OFFSET_INVALID ||
+        entry->table == HS_FP_TABLE_UNKNOWN ||
+        entry->engine == HS_FP_ENGINE_UNKNOWN || !entry->length) {
+        return 0;
+    }
+
     u64a fp = sub_or_zero_u64a(entry->trigger_count,
                                entry->true_trigger_count);
 
@@ -507,7 +535,10 @@ hs_error_t build_report_entries(const hs_fp_collector_t *collector,
             continue;
         }
 
-        fill_report_entry(report->entries + entry, collector, counter);
+        if (!fill_report_entry(report->entries + entry, collector, counter)) {
+            report->unknown_fragment_meta_missing_count =
+                sat_add_u64a(report->unknown_fragment_meta_missing_count, 1);
+        }
         entry++;
     }
     assert(entry == entry_count);
@@ -525,7 +556,15 @@ void clear_collector_counts(hs_fp_collector_t *collector) {
     collector->true_trigger_count = 0;
     collector->final_report_count = 0;
     collector->unknown_report_count = 0;
+    collector->unknown_no_active_trigger_count = 0;
+    collector->unknown_delayed_replay_count = 0;
+    collector->unknown_anchored_replay_count = 0;
+    collector->unknown_eod_or_boundary_count = 0;
+    collector->unknown_flush_combination_count = 0;
+    collector->unknown_mpv_or_nfa_queue_count = 0;
+    collector->unknown_counter_missing_count = 0;
     collector->dropped_trigger_count = 0;
+    collector->pending_trigger_count = 0;
 
     if (collector->counters) {
         memset(collector->counters, 0,
@@ -578,6 +617,77 @@ void merge_counter(hs_fp_collector_t *dst, const struct hs_fp_counter *src) {
     dst_counter->final_report_count =
         sat_add_u64a(dst_counter->final_report_count,
                      src->final_report_count);
+}
+
+static
+void add_counter_trigger_count(void *ctx, u32 key, u64a count) {
+    hs_fp_collector_t *collector = ctx;
+    struct hs_fp_counter *counter = get_counter(collector, key, 1);
+    if (!counter) {
+        collector->dropped_trigger_count =
+            sat_add_u64a(collector->dropped_trigger_count, count);
+        return;
+    }
+
+    counter->trigger_count = sat_add_u64a(counter->trigger_count, count);
+}
+
+static
+void histogram_count_batch_scalar(const u32 *keys, u32 count,
+                                  hs_fp_histogram_emit_fn emit, void *ctx) {
+    for (u32 i = 0; i < count; i++) {
+        const u32 key = keys[i];
+        u64a key_count = 1;
+        char first = 1;
+
+        for (u32 j = 0; j < i; j++) {
+            if (keys[j] == key) {
+                first = 0;
+                break;
+            }
+        }
+
+        if (!first) {
+            continue;
+        }
+
+        for (u32 j = i + 1; j < count; j++) {
+            if (keys[j] == key) {
+                key_count++;
+            }
+        }
+
+        emit(ctx, key, key_count);
+    }
+}
+
+static
+void histogram_count_batch(const u32 *keys, u32 count,
+                           hs_fp_histogram_emit_fn emit, void *ctx) {
+    histogram_count_batch_scalar(keys, count, emit, ctx);
+}
+
+void hs_fp_collector_flush(hs_fp_collector_t *collector) {
+    if (!collector || !collector->pending_trigger_count) {
+        return;
+    }
+
+    const u32 count = collector->pending_trigger_count;
+    collector->pending_trigger_count = 0;
+    histogram_count_batch(collector->pending_trigger_keys, count,
+                          add_counter_trigger_count, collector);
+}
+
+static
+void queue_trigger_key(hs_fp_collector_t *collector, u32 key) {
+    if (collector->pending_trigger_count ==
+        HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE) {
+        hs_fp_collector_flush(collector);
+    }
+
+    assert(collector->pending_trigger_count <
+           HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE);
+    collector->pending_trigger_keys[collector->pending_trigger_count++] = key;
 }
 
 static
@@ -653,6 +763,8 @@ hs_error_t HS_CDECL hs_fp_collector_merge(hs_fp_collector_t *dst,
         return HS_INVALID;
     }
 
+    hs_fp_collector_flush(dst);
+
     dst->scan_bytes = sat_add_u64a(dst->scan_bytes, src->scan_bytes);
     dst->scan_calls = sat_add_u64a(dst->scan_calls, src->scan_calls);
     dst->trigger_count = sat_add_u64a(dst->trigger_count, src->trigger_count);
@@ -662,6 +774,27 @@ hs_error_t HS_CDECL hs_fp_collector_merge(hs_fp_collector_t *dst,
         sat_add_u64a(dst->final_report_count, src->final_report_count);
     dst->unknown_report_count =
         sat_add_u64a(dst->unknown_report_count, src->unknown_report_count);
+    dst->unknown_no_active_trigger_count =
+        sat_add_u64a(dst->unknown_no_active_trigger_count,
+                     src->unknown_no_active_trigger_count);
+    dst->unknown_delayed_replay_count =
+        sat_add_u64a(dst->unknown_delayed_replay_count,
+                     src->unknown_delayed_replay_count);
+    dst->unknown_anchored_replay_count =
+        sat_add_u64a(dst->unknown_anchored_replay_count,
+                     src->unknown_anchored_replay_count);
+    dst->unknown_eod_or_boundary_count =
+        sat_add_u64a(dst->unknown_eod_or_boundary_count,
+                     src->unknown_eod_or_boundary_count);
+    dst->unknown_flush_combination_count =
+        sat_add_u64a(dst->unknown_flush_combination_count,
+                     src->unknown_flush_combination_count);
+    dst->unknown_mpv_or_nfa_queue_count =
+        sat_add_u64a(dst->unknown_mpv_or_nfa_queue_count,
+                     src->unknown_mpv_or_nfa_queue_count);
+    dst->unknown_counter_missing_count =
+        sat_add_u64a(dst->unknown_counter_missing_count,
+                     src->unknown_counter_missing_count);
     dst->dropped_trigger_count =
         sat_add_u64a(dst->dropped_trigger_count, src->dropped_trigger_count);
 
@@ -697,6 +830,20 @@ hs_error_t HS_CDECL hs_fp_collector_report(const hs_fp_collector_t *collector,
     r->true_trigger_count = collector->true_trigger_count;
     r->final_report_count = collector->final_report_count;
     r->unknown_report_count = collector->unknown_report_count;
+    r->unknown_no_active_trigger_count =
+        collector->unknown_no_active_trigger_count;
+    r->unknown_delayed_replay_count =
+        collector->unknown_delayed_replay_count;
+    r->unknown_anchored_replay_count =
+        collector->unknown_anchored_replay_count;
+    r->unknown_eod_or_boundary_count =
+        collector->unknown_eod_or_boundary_count;
+    r->unknown_flush_combination_count =
+        collector->unknown_flush_combination_count;
+    r->unknown_mpv_or_nfa_queue_count =
+        collector->unknown_mpv_or_nfa_queue_count;
+    r->unknown_counter_missing_count =
+        collector->unknown_counter_missing_count;
     r->dropped_trigger_count = collector->dropped_trigger_count;
 
     hs_error_t err = build_report_entries(collector, r);
@@ -743,6 +890,22 @@ hs_error_t HS_CDECL hs_fp_report_get_summary(
     summary->false_positive_count =
         count_total_false_positive_triggers(report);
     summary->unknown_report_count = report->unknown_report_count;
+    summary->unknown_no_active_trigger_count =
+        report->unknown_no_active_trigger_count;
+    summary->unknown_delayed_replay_count =
+        report->unknown_delayed_replay_count;
+    summary->unknown_anchored_replay_count =
+        report->unknown_anchored_replay_count;
+    summary->unknown_eod_or_boundary_count =
+        report->unknown_eod_or_boundary_count;
+    summary->unknown_flush_combination_count =
+        report->unknown_flush_combination_count;
+    summary->unknown_mpv_or_nfa_queue_count =
+        report->unknown_mpv_or_nfa_queue_count;
+    summary->unknown_counter_missing_count =
+        report->unknown_counter_missing_count;
+    summary->unknown_fragment_meta_missing_count =
+        report->unknown_fragment_meta_missing_count;
     summary->dropped_trigger_count = report->dropped_trigger_count;
     return HS_SUCCESS;
 }
@@ -1063,6 +1226,7 @@ void hs_fp_collector_record_scan(hs_fp_collector_t *collector, size_t bytes) {
 
     collector->scan_bytes = sat_add_u64a(collector->scan_bytes, (u64a)bytes);
     collector->scan_calls = sat_add_u64a(collector->scan_calls, 1);
+    hs_fp_collector_flush(collector);
 }
 
 void hs_fp_collector_begin_trigger(struct hs_scratch *scratch, u32 key) {
@@ -1081,15 +1245,7 @@ void hs_fp_collector_begin_trigger(struct hs_scratch *scratch, u32 key) {
     }
 
     collector->trigger_count = sat_add_u64a(collector->trigger_count, 1);
-
-    struct hs_fp_counter *counter = get_counter(collector, key, 1);
-    if (!counter) {
-        collector->dropped_trigger_count =
-            sat_add_u64a(collector->dropped_trigger_count, 1);
-        return;
-    }
-
-    counter->trigger_count = sat_add_u64a(counter->trigger_count, 1);
+    queue_trigger_key(collector, key);
     ci->fp_current_trigger_active = 1;
     ci->fp_current_trigger_key = key;
 }
@@ -1102,6 +1258,35 @@ void hs_fp_collector_end_trigger(struct hs_scratch *scratch) {
     scratch->core_info.fp_current_trigger_active = 0;
     scratch->core_info.fp_current_trigger_reported = 0;
     scratch->core_info.fp_current_trigger_key = 0;
+}
+
+static
+void record_unknown_no_active_source(hs_fp_collector_t *collector,
+                                     u8 source) {
+    switch (source) {
+    case HS_FP_UNKNOWN_SOURCE_DELAYED_REPLAY:
+        collector->unknown_delayed_replay_count =
+            sat_add_u64a(collector->unknown_delayed_replay_count, 1);
+        break;
+    case HS_FP_UNKNOWN_SOURCE_ANCHORED_REPLAY:
+        collector->unknown_anchored_replay_count =
+            sat_add_u64a(collector->unknown_anchored_replay_count, 1);
+        break;
+    case HS_FP_UNKNOWN_SOURCE_EOD_OR_BOUNDARY:
+        collector->unknown_eod_or_boundary_count =
+            sat_add_u64a(collector->unknown_eod_or_boundary_count, 1);
+        break;
+    case HS_FP_UNKNOWN_SOURCE_FLUSH_COMBINATION:
+        collector->unknown_flush_combination_count =
+            sat_add_u64a(collector->unknown_flush_combination_count, 1);
+        break;
+    case HS_FP_UNKNOWN_SOURCE_MPV_OR_NFA_QUEUE:
+        collector->unknown_mpv_or_nfa_queue_count =
+            sat_add_u64a(collector->unknown_mpv_or_nfa_queue_count, 1);
+        break;
+    default:
+        break;
+    }
 }
 
 void hs_fp_collector_record_final_report(struct hs_scratch *scratch) {
@@ -1121,14 +1306,21 @@ void hs_fp_collector_record_final_report(struct hs_scratch *scratch) {
     if (!ci->fp_current_trigger_active) {
         collector->unknown_report_count =
             sat_add_u64a(collector->unknown_report_count, 1);
+        collector->unknown_no_active_trigger_count =
+            sat_add_u64a(collector->unknown_no_active_trigger_count, 1);
+        record_unknown_no_active_source(collector, ci->fp_unknown_source);
         return;
     }
+
+    hs_fp_collector_flush(collector);
 
     struct hs_fp_counter *counter =
         get_counter(collector, ci->fp_current_trigger_key, 0);
     if (!counter) {
         collector->unknown_report_count =
             sat_add_u64a(collector->unknown_report_count, 1);
+        collector->unknown_counter_missing_count =
+            sat_add_u64a(collector->unknown_counter_missing_count, 1);
         return;
     }
 

@@ -42,6 +42,13 @@ extern "C"
 struct RoseEngine;
 struct hs_scratch;
 
+#define HS_FP_UNKNOWN_SOURCE_NONE              0U
+#define HS_FP_UNKNOWN_SOURCE_DELAYED_REPLAY    1U
+#define HS_FP_UNKNOWN_SOURCE_ANCHORED_REPLAY   2U
+#define HS_FP_UNKNOWN_SOURCE_EOD_OR_BOUNDARY   3U
+#define HS_FP_UNKNOWN_SOURCE_FLUSH_COMBINATION 4U
+#define HS_FP_UNKNOWN_SOURCE_MPV_OR_NFA_QUEUE  5U
+
 hs_error_t hs_fp_collector_check_db(const hs_fp_collector_t *collector,
                                     const hs_database_t *db);
 
@@ -49,6 +56,8 @@ hs_error_t hs_fp_collector_check_rose(const hs_fp_collector_t *collector,
                                       const struct RoseEngine *rose);
 
 void hs_fp_collector_record_scan(hs_fp_collector_t *collector, size_t bytes);
+
+void hs_fp_collector_flush(hs_fp_collector_t *collector);
 
 void hs_fp_collector_begin_trigger(struct hs_scratch *scratch, u32 key);
 

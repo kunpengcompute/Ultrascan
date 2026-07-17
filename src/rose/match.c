@@ -67,6 +67,24 @@ void printMatch(const struct core_info *ci, u64a start, u64a end) {
 }
 #endif
 
+static really_inline
+u8 setFpUnknownSource(struct hs_scratch *scratch, u8 source) {
+    struct core_info *ci = &scratch->core_info;
+    u8 old_source = ci->fp_unknown_source;
+    if (ci->fp_collector) {
+        ci->fp_unknown_source = source;
+    }
+    return old_source;
+}
+
+static really_inline
+void restoreFpUnknownSource(struct hs_scratch *scratch, u8 old_source) {
+    struct core_info *ci = &scratch->core_info;
+    if (ci->fp_collector) {
+        ci->fp_unknown_source = old_source;
+    }
+}
+
 hwlmcb_rv_t roseDelayRebuildCallback(size_t end, u32 id,
                                      struct hs_scratch *scratch) {
     struct RoseContext *tctx = &scratch->tctxt;
@@ -88,8 +106,11 @@ hwlmcb_rv_t roseDelayRebuildCallback(size_t end, u32 id,
     assert(id && id < t->size); // id is a program offset
     const u64a som = 0;
     const u8 flags = 0;
+    u8 old_source =
+        setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_DELAYED_REPLAY);
     UNUSED hwlmcb_rv_t rv =
         roseRunProgram(t, scratch, id, som, real_end, flags);
+    restoreFpUnknownSource(scratch, old_source);
     assert(rv != HWLM_TERMINATE_MATCHING);
 
     /* we are just repopulating the delay queue, groups should be
@@ -276,8 +297,11 @@ hwlmcb_rv_t playDelaySlot(const struct RoseEngine *t,
         DEBUG_PRINTF("DELAYED MATCH id=%u offset=%llu\n", it, offset);
         const u64a som = 0;
         const u8 flags = 0;
+        u8 old_source =
+            setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_DELAYED_REPLAY);
         hwlmcb_rv_t rv = roseRunProgram(t, scratch, programs[it], som, offset,
                                         flags);
+        restoreFpUnknownSource(scratch, old_source);
         DEBUG_PRINTF("DONE groups=0x%016llx\n", tctxt->groups);
 
         /* delayed literals can't safely set groups.
@@ -313,8 +337,11 @@ hwlmcb_rv_t flushAnchoredLiteralAtLoc(const struct RoseEngine *t,
         DEBUG_PRINTF("ANCH REPLAY MATCH id=%u offset=%u\n", it, curr_loc);
         const u64a som = 0;
         const u8 flags = 0;
+        u8 old_source =
+            setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_ANCHORED_REPLAY);
         hwlmcb_rv_t rv = roseRunProgram(t, scratch, programs[it], som, curr_loc,
                                         flags);
+        restoreFpUnknownSource(scratch, old_source);
         DEBUG_PRINTF("DONE groups=0x%016llx\n", tctxt->groups);
 
         /* anchored literals can't safely set groups.
@@ -571,8 +598,11 @@ int roseRunBoundaryProgram(const struct RoseEngine *rose, u32 program,
 
     const u64a som = 0;
     const u8 flags = 0;
+    u8 old_source =
+        setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_EOD_OR_BOUNDARY);
     hwlmcb_rv_t rv = roseRunProgram(rose, scratch, program, som, stream_offset,
                                     flags);
+    restoreFpUnknownSource(scratch, old_source);
     if (rv == HWLM_TERMINATE_MATCHING) {
         return MO_HALT_MATCHING;
     }
@@ -588,8 +618,11 @@ int roseRunBoundaryProgram(const struct RoseEngine *rose, u32 program,
  */
 int roseRunFlushCombProgram(const struct RoseEngine *rose,
                             struct hs_scratch *scratch, u64a end) {
+    u8 old_source =
+        setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_FLUSH_COMBINATION);
     hwlmcb_rv_t rv = roseRunProgram(rose, scratch, rose->flushCombProgramOffset,
                                     0, end, 0);
+    restoreFpUnknownSource(scratch, old_source);
     if (rv == HWLM_TERMINATE_MATCHING) {
         return MO_HALT_MATCHING;
     }
@@ -604,9 +637,12 @@ int roseRunFlushCombProgram(const struct RoseEngine *rose,
  */
 int roseRunLastFlushCombProgram(const struct RoseEngine *rose,
                                 struct hs_scratch *scratch, u64a end) {
+    u8 old_source =
+        setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_FLUSH_COMBINATION);
     hwlmcb_rv_t rv = roseRunProgram(rose, scratch,
                                     rose->lastFlushCombProgramOffset,
                                     0, end, 0);
+    restoreFpUnknownSource(scratch, old_source);
     if (rv == HWLM_TERMINATE_MATCHING) {
         return MO_HALT_MATCHING;
     }
@@ -625,11 +661,14 @@ int roseReportAdaptor(u64a start, u64a end, ReportID id, void *context) {
     const u32 program = id;
     const u8 flags = ROSE_PROG_FLAG_SKIP_MPV_CATCHUP;
     hwlmcb_rv_t rv;
+    u8 old_source =
+        setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_MPV_OR_NFA_QUEUE);
     if (rose->pureLiteral) {
         rv = roseRunProgram_l(rose, scratch, program, start, end, flags);
     } else {
         rv = roseRunProgram(rose, scratch, program, start, end, flags);
     }
+    restoreFpUnknownSource(scratch, old_source);
     if (rv == HWLM_TERMINATE_MATCHING) {
         return MO_HALT_MATCHING;
     }

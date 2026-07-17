@@ -1808,6 +1808,37 @@ void printReportSummary(const hs_fp_report_t *report) {
     printField("Final reports:", summary.final_report_count);
     printField("False positives:", summary.false_positive_count);
     printField("Unknown reports:", summary.unknown_report_count);
+    if (summary.unknown_report_count ||
+        summary.unknown_fragment_meta_missing_count) {
+        unsigned long long classifiedUnknown =
+            summary.unknown_delayed_replay_count +
+            summary.unknown_anchored_replay_count +
+            summary.unknown_eod_or_boundary_count +
+            summary.unknown_flush_combination_count +
+            summary.unknown_mpv_or_nfa_queue_count;
+        unsigned long long unclassifiedUnknown =
+            summary.unknown_no_active_trigger_count > classifiedUnknown
+                ? summary.unknown_no_active_trigger_count - classifiedUnknown
+                : 0;
+
+        printField("Unknown breakdown:", "");
+        printField("  no active trigger:",
+                   summary.unknown_no_active_trigger_count);
+        printField("  delayed replay:",
+                   summary.unknown_delayed_replay_count);
+        printField("  anchored replay:",
+                   summary.unknown_anchored_replay_count);
+        printField("  EOD/boundary:",
+                   summary.unknown_eod_or_boundary_count);
+        printField("  flush combination:",
+                   summary.unknown_flush_combination_count);
+        printField("  MPV/NFA queue:",
+                   summary.unknown_mpv_or_nfa_queue_count);
+        printField("  unclassified:", unclassifiedUnknown);
+        printField("  counter missing:", summary.unknown_counter_missing_count);
+        printField("  meta missing:",
+                   summary.unknown_fragment_meta_missing_count);
+    }
     printField("Dropped:", summary.dropped_trigger_count);
 }
 

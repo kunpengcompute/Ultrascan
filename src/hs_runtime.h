@@ -115,12 +115,28 @@ typedef struct hs_fp_report_summary {
     unsigned long long trigger_count;
     /** Number of triggers that directly produced at least one final report. */
     unsigned long long true_trigger_count;
-    /** Number of final reports produced by attributed triggers. */
+    /** Number of final reports observed while the collector was active. */
     unsigned long long final_report_count;
     /** Number of triggers that did not directly produce a final report. */
     unsigned long long false_positive_count;
     /** Number of final reports that could not be attributed to a fragment. */
     unsigned long long unknown_report_count;
+    /** Unknown final reports raised outside an active direct trigger. */
+    unsigned long long unknown_no_active_trigger_count;
+    /** Unknown reports raised by delayed literal replay. */
+    unsigned long long unknown_delayed_replay_count;
+    /** Unknown reports raised by anchored literal replay. */
+    unsigned long long unknown_anchored_replay_count;
+    /** Unknown reports raised by EOD or boundary programs. */
+    unsigned long long unknown_eod_or_boundary_count;
+    /** Unknown reports raised by flush combination programs. */
+    unsigned long long unknown_flush_combination_count;
+    /** Unknown reports raised by MPV or NFA queue report adapters. */
+    unsigned long long unknown_mpv_or_nfa_queue_count;
+    /** Unknown final reports whose active trigger counter was unavailable. */
+    unsigned long long unknown_counter_missing_count;
+    /** Fragment counters that could not be mapped to Rose fragment metadata. */
+    unsigned long long unknown_fragment_meta_missing_count;
     /** Number of triggers not recorded due to unavailable counter capacity. */
     unsigned long long dropped_trigger_count;
 } hs_fp_report_summary_t;
