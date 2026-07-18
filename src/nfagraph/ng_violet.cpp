@@ -38,6 +38,7 @@
 #include "ng_holder.h"
 #include "ng_is_equal.h"
 #include "ng_literal_analysis.h"
+#include "ng_literal_quality.h"
 #include "ng_limex.h"
 #include "ng_mcclellan.h"
 #include "ng_netflow.h"
@@ -682,52 +683,22 @@ unique_ptr<VertLitInfo> findBestSplit(const NGHolder &g,
     getRegionRoseLiterals(g, seeking_anchored, depths, cand_raw, allowed_cand,
                           &lits, min_len, desperation, last_chance, cc);
 
-    if(cc.grey.allowNeoFdr) {
-        int removed_count = 0;
-        int total_lits_before = 0;
-        int total_lits_after = 0;
-        
+    if (cc.grey.allowNeoFdr) {
         for (auto it = lits.begin(); it != lits.end(); ) {
             if (!*it) {
                 ++it;
                 continue;
             }
-            
-            set<ue2_literal>& lit_set = (*it)->lit;
-            total_lits_before += lit_set.size();
-            
+
+            set<ue2_literal> &lit_set = (*it)->lit;
             for (auto lit_it = lit_set.begin(); lit_it != lit_set.end(); ) {
-                const ue2_literal& literal = *lit_it;
-                size_t len = literal.length();
-                
-                bool should_remove = false;
-                
-                if (len >= 8) {
-                    const std::string& s = literal.get_string();
-                    bool all_zero = true;
-                    
-                    for (size_t j = len - 8; j < len; j++) {
-                        if (s[j] != 0) {
-                            all_zero = false;
-                            break;
-                        }
-                    }
-                    
-                    if (all_zero) {
-                        should_remove = true;
-                        removed_count++;
-                    }
-                }
-                
-                if (should_remove) {
+                if (isLowQualityNeoFdrLiteral(*lit_it)) {
                     lit_it = lit_set.erase(lit_it);
                 } else {
                     ++lit_it;
                 }
             }
-            
-            total_lits_after += lit_set.size();
-            
+
             if (lit_set.empty()) {
                 it = lits.erase(it);
             } else {
@@ -993,24 +964,10 @@ unique_ptr<VertLitInfo> findSimplePrefixSplit(const NGHolder &g,
         return nullptr;
     }
 
-    if(cc.grey.allowNeoFdr){
-        size_t len = best_lit.length();
-        if (len >= 8) {
-            const std::string& s = best_lit.get_string();
-            bool zero_tail = true;
-            
-            for (size_t i = len - 8; i < len; i++) {
-                if (s[i] != 0) {
-                    zero_tail = false;
-                    break;
-                }
-            }
-            
-            if (zero_tail) {
-                DEBUG_PRINTF("Rejecting best_lit with zero tail: len=%zu\n", len);
-                return nullptr;
-            }
-        }
+    if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(best_lit)) {
+        DEBUG_PRINTF("rejecting zero-dense best literal: len=%zu\n",
+                     best_lit.length());
+        return nullptr;
     }
     set<ue2_literal> best_lit_set({best_lit});
     if (bad_mixed_sensitivity(best_lit)) {
@@ -1468,22 +1425,7 @@ bool doNetflowCut(NGHolder &h,
 
         if (grey.allowNeoFdr) {
             for (const auto &lit : lits) {
-                if (lit.empty()) {
-                    continue;
-                }
-                
-                size_t check_len = std::min(lit.length(), size_t(8));
-                bool has_nonzero = false;
-                
-                const std::string &str = lit.get_string();
-                for (size_t i = str.length() - check_len; i < str.length(); ++i) {
-                    if (str[i] != '\0') {
-                        has_nonzero = true;
-                        break;
-                    }
-                }
-                
-                if (!has_nonzero) {
+                if (isLowQualityNeoFdrLiteral(lit)) {
                     cut_lits.clear();
                     return false;
                 }
@@ -2474,24 +2416,7 @@ bool replaceSuffixWithInfix(const NGHolder &h, RoseInGraph &vg,
         set<ue2_literal> ss = getLiteralSet(h, v, false);
         if (cc.grey.allowNeoFdr) {
             for (auto it = ss.begin(); it != ss.end(); ) {
-                size_t len = it->length();
-                bool should_remove = false;
-                
-                if (len >= 8) {
-                    const std::string& s = it->get_string();
-                    bool zero_tail = true;
-                    
-                    for (size_t i = len - 8; i < len; i++) {
-                        if (s[i] != 0) {
-                            zero_tail = false;
-                            break;
-                        }
-                    }
-                    
-                    should_remove = zero_tail;
-                }
-                
-                if (should_remove) {
+                if (isLowQualityNeoFdrLiteral(*it)) {
                     it = ss.erase(it);
                 } else {
                     ++it;
@@ -2518,24 +2443,7 @@ bool replaceSuffixWithInfix(const NGHolder &h, RoseInGraph &vg,
         set<ue2_literal> ss = getLiteralSet(h, v, false);
         if (cc.grey.allowNeoFdr) {
             for (auto it = ss.begin(); it != ss.end(); ) {
-                size_t len = it->length();
-                bool should_remove = false;
-                
-                if (len >= 8) {
-                    const std::string& s = it->get_string();
-                    bool zero_tail = true;
-                    
-                    for (size_t i = len - 8; i < len; i++) {
-                        if (s[i] != 0) {
-                            zero_tail = false;
-                            break;
-                        }
-                    }
-                    
-                    should_remove = zero_tail;
-                }
-                
-                if (should_remove) {
+                if (isLowQualityNeoFdrLiteral(*it)) {
                     it = ss.erase(it);
                 } else {
                     ++it;
@@ -2669,24 +2577,8 @@ bool leadingDotStartLiteral(const NGHolder &h, VertLitInfo *out, const Grey &gre
 
     DEBUG_PRINTF("%zu found %s\n", h[v].index, dumpString(lit).c_str());
 
-    if (grey.allowNeoFdr){
-        size_t lit_len = lit.length();
-        
-        if (lit_len >= 8) {
-            const std::string& s = lit.get_string();
-            bool all_zero = true;
-            
-            for (size_t i = lit_len - 8; i < lit_len; i++) {
-                if (s[i] != 0) {
-                    all_zero = false;
-                    break;
-                }
-            }
-            if(all_zero){
-                return false;
-            }
-
-        }
+    if (grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
+        return false;
     }
     out->vv = {v};
     out->lit = {lit};

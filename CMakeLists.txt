@@ -1167,6 +1167,8 @@ SET (hs_compile_SRCS
     src/nfagraph/ng_literal_component.h
     src/nfagraph/ng_literal_decorated.cpp
     src/nfagraph/ng_literal_decorated.h
+    src/nfagraph/ng_literal_quality.cpp
+    src/nfagraph/ng_literal_quality.h
     src/nfagraph/ng_mcclellan.cpp
     src/nfagraph/ng_mcclellan.h
     src/nfagraph/ng_mcclellan_internal.h
