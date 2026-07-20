@@ -353,6 +353,72 @@ TEST(FpCollector, LifecycleEmptyReportAndFeedback) {
     ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
 }
 
+TEST(FpCollector, FeedbackCreateFromFragmentsCopiesAndValidates) {
+    unsigned char bytes[] = {'f', 'o', 'o'};
+    hs_fp_feedback_import_fragment import = {};
+    import.key = 0x12345678ULL;
+    import.fragment_id = 7;
+    import.literal_count = 1;
+    import.table = HS_FP_TABLE_FLOATING;
+    import.engine = HS_FP_ENGINE_FDR;
+    import.bytes = bytes;
+    import.length = sizeof(bytes);
+    import.trigger_count = 100;
+    import.true_trigger_count = 1;
+    import.final_report_count = 1;
+    import.false_positive_count = 99;
+
+    hs_fp_feedback_t *feedback = nullptr;
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_create_from_fragments(&import, 1, 1, 2, 99,
+                                                   nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_create_from_fragments(nullptr, 1, 1, 2, 99,
+                                                   &feedback));
+
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_create_from_fragments(&import, 1, 3, 9, 99,
+                                                   &feedback));
+    ASSERT_NE(nullptr, feedback);
+
+    bytes[0] = 'x';
+    hs_fp_feedback_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_get_summary(feedback, &summary));
+    EXPECT_EQ(1U, summary.bad_fragment_count);
+    EXPECT_EQ(3U, summary.scan_calls);
+    EXPECT_EQ(9U, summary.scan_bytes);
+    EXPECT_EQ(99U, summary.total_false_positive_count);
+
+    hs_fp_fragment_info_t fragment = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_get_fragment(feedback, 0, &fragment));
+    ASSERT_NE(nullptr, fragment.bytes);
+    EXPECT_EQ(0, std::memcmp(fragment.bytes, "foo", 3));
+    EXPECT_EQ(0x12345678ULL, fragment.key);
+    EXPECT_EQ(7U, fragment.fragment_id);
+    EXPECT_EQ(HS_FP_TABLE_FLOATING, fragment.table);
+    EXPECT_EQ(HS_FP_ENGINE_FDR, fragment.engine);
+    EXPECT_EQ(100U, fragment.trigger_count);
+    EXPECT_EQ(1U, fragment.true_trigger_count);
+    EXPECT_EQ(1U, fragment.final_report_count);
+    EXPECT_EQ(99U, fragment.false_positive_count);
+    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
+
+    import.table = HS_FP_TABLE_UNKNOWN;
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_create_from_fragments(&import, 1, 3, 9, 99,
+                                                   &feedback));
+    import.table = HS_FP_TABLE_FLOATING;
+    import.engine = HS_FP_ENGINE_UNKNOWN;
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_create_from_fragments(&import, 1, 3, 9, 99,
+                                                   &feedback));
+    import.engine = HS_FP_ENGINE_FDR;
+    import.length = 0;
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_create_from_fragments(&import, 1, 3, 9, 99,
+                                                   &feedback));
+}
+
 TEST(FpCollector, FeedbackBuildExtThresholdParameters) {
     const char *exprs[] = {"foo", "bar"};
     unsigned int flags[] = {0, 0};

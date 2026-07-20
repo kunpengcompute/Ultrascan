@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2026, Intel Corporation
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -9,7 +9,7 @@
  *  * Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- *  * Neither the name of Intel Corporation nor the names of its contributors
+ *  * Neither the name of Huawei Corporation nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -1030,6 +1030,82 @@ hs_error_t hs_fp_feedback_clone(const hs_fp_feedback_t *src,
     }
 
     *dst = copy;
+    return HS_SUCCESS;
+}
+
+static
+char import_fragment_is_valid(
+        const struct hs_fp_feedback_import_fragment *fragment) {
+    if (!fragment || fragment->fragment_id == ROSE_OFFSET_INVALID ||
+        fragment->table == HS_FP_TABLE_UNKNOWN ||
+        fragment->engine == HS_FP_ENGINE_UNKNOWN || !fragment->bytes ||
+        !fragment->length || fragment->length > ROSE_FP_FRAGMENT_BYTES_MAX ||
+        fragment->mask_length > ROSE_FP_FRAGMENT_BYTES_MAX) {
+        return 0;
+    }
+    if (fragment->mask_length && (!fragment->mask || !fragment->cmp)) {
+        return 0;
+    }
+    return 1;
+}
+
+hs_error_t hs_fp_feedback_create_from_fragments(
+        const struct hs_fp_feedback_import_fragment *fragments,
+        u32 fragment_count, u64a scan_calls, u64a scan_bytes,
+        u64a total_false_positive_count, hs_fp_feedback_t **feedback) {
+    if (!feedback || (fragment_count && !fragments)) {
+        return HS_INVALID;
+    }
+    *feedback = NULL;
+
+    hs_fp_feedback_t *f = hs_misc_alloc(sizeof(*f));
+    if (!f) {
+        return HS_NOMEM;
+    }
+    memset(f, 0, sizeof(*f));
+
+    f->bad_fragment_count = fragment_count;
+    f->scan_calls = scan_calls;
+    f->scan_bytes = scan_bytes;
+    f->total_false_positive_trigger_count = total_false_positive_count;
+
+    if (fragment_count) {
+        f->entries = hs_misc_alloc(sizeof(*f->entries) * fragment_count);
+        if (!f->entries) {
+            hs_misc_free(f);
+            return HS_NOMEM;
+        }
+        memset(f->entries, 0, sizeof(*f->entries) * fragment_count);
+    }
+
+    for (u32 i = 0; i < fragment_count; i++) {
+        const struct hs_fp_feedback_import_fragment *src = fragments + i;
+        if (!import_fragment_is_valid(src)) {
+            hs_fp_feedback_free(f);
+            return HS_INVALID;
+        }
+
+        struct hs_fp_feedback_entry *dst = f->entries + i;
+        dst->key = src->key;
+        dst->fragment_id = src->fragment_id;
+        dst->literal_count = src->literal_count;
+        dst->table = (u8)src->table;
+        dst->engine = (u8)src->engine;
+        dst->flags = (u8)src->flags;
+        dst->length = (u8)src->length;
+        dst->mask_length = (u8)src->mask_length;
+        memcpy(dst->bytes, src->bytes, src->length);
+        if (src->mask_length) {
+            memcpy(dst->mask, src->mask, src->mask_length);
+            memcpy(dst->cmp, src->cmp, src->mask_length);
+        }
+        dst->trigger_count = src->trigger_count;
+        dst->true_trigger_count = src->true_trigger_count;
+        dst->final_report_count = src->final_report_count;
+        dst->false_positive_trigger_count = src->false_positive_count;
+    }
+
+    *feedback = f;
     return HS_SUCCESS;
 }
 

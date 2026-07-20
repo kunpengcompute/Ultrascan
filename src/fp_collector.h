@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2026, Intel Corporation
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -9,7 +9,7 @@
  *  * Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- *  * Neither the name of Intel Corporation nor the names of its contributors
+ *  * Neither the name of Huawei Corporation nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -67,6 +67,29 @@ void hs_fp_collector_record_final_report(struct hs_scratch *scratch);
 
 hs_error_t hs_fp_feedback_clone(const hs_fp_feedback_t *src,
                                 hs_fp_feedback_t **dst);
+
+struct hs_fp_feedback_import_fragment {
+    u64a key;
+    u32 fragment_id;
+    u32 literal_count;
+    u32 table;
+    u32 engine;
+    u32 flags;
+    const u8 *bytes;
+    size_t length;
+    const u8 *mask;
+    const u8 *cmp;
+    size_t mask_length;
+    u64a trigger_count;
+    u64a true_trigger_count;
+    u64a final_report_count;
+    u64a false_positive_count;
+};
+
+hs_error_t hs_fp_feedback_create_from_fragments(
+        const struct hs_fp_feedback_import_fragment *fragments,
+        u32 fragment_count, u64a scan_calls, u64a scan_bytes,
+        u64a total_false_positive_count, hs_fp_feedback_t **feedback);
 
 u32 hs_fp_feedback_count_matches_in_rose(const hs_fp_feedback_t *feedback,
                                          const struct RoseEngine *rose,

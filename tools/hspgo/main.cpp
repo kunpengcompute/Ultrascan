@@ -36,6 +36,7 @@
 #include "data_corpus.h"
 #include "database.h"
 #include "expressions.h"
+#include "fp_collector.h"
 #include "heapstats.h"
 #include "hs.h"
 
@@ -62,6 +63,12 @@
 #include <vector>
 
 #include <getopt.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+#if defined(_WIN32)
+#include <direct.h>
+#endif
 
 #if defined(__linux__)
 #include <pthread.h>
@@ -84,6 +91,9 @@ namespace {
 
 const size_t MAX_HSPGO_WORKERS = 1024;
 const int OPT_ECHO_MATCHES = 1000;
+const char *HSPGO_REPORT_CSV_NAME = "report.csv";
+const char *HSPGO_FEEDBACK_CSV_NAME = "feedback.csv";
+const char *HSPGO_FEEDBACK_BIN_NAME = "feedback.bin";
 
 enum class ScanMode {
     STREAMING,
@@ -95,7 +105,8 @@ struct Options {
     string exprPath;
     string corpusPath;
     string reportCsvPath;
-    string feedbackCsvPath;
+    string feedbackBinPath;
+    string feedbackImportPath;
     string threadSpec;
     string greyOverrides;
     vector<unsigned> cpuList;
@@ -111,6 +122,7 @@ struct Options {
     bool showSummaries = false;
     bool showDiagnostics = false;
     bool echoMatches = false;
+    bool collectRoundsSet = false;
 };
 
 struct PatternSet {
@@ -209,27 +221,23 @@ void usage(const char *error) {
          << "  -G OVERRIDES            Overrides for the grey box.\n"
          << "  -e PATH                 Load hsbench expression file/directory.\n"
          << "  -c FILE                 Load hsbench sqlite corpus.\n"
-         << "  -A N                    Run N verification rounds with collector after DB switch (default 0).\n"
-         << "  -B N                    Run N normal hs_scan() baseline rounds (default 1).\n"
-         << "  -R N                    Run N collection rounds with collector (default 3).\n"
+         << "  -b N                    Run N normal hs_scan() baseline rounds (default 1).\n"
+         << "  -r N                    Run N collection rounds with collector (default 3).\n"
          << "  -n N                    Run N measurement rounds after DB switch (default 5).\n"
-         << "  -w N                    Run N warmup rounds before measured scans (default 0).\n"
          << "  -N                      Run in block mode (default: streaming).\n"
          << "  -V                      Run in vectored mode (default: streaming).\n"
          << "  -m N                    Minimum trigger count for feedback (default 1000).\n"
-         << "  -F N                    Minimum false-positive trigger count (default 1000).\n"
-         << "  -q PCT                  Minimum false-positive rate percent (default 99.00).\n"
-         << "  -W PCT                  Minimum waste share percent (default 5.00).\n"
-         << "  -K N                    Maximum bad fragments kept for feedback (default all).\n"
+         << "  -p N                    Minimum false-positive trigger count (default 1000).\n"
+         << "  -q PCT                  Minimum false-positive rate percent, up to 2 decimals (default 99.00).\n"
+         << "  -s PCT                  Minimum waste share percent, up to 2 decimals (default 5.00).\n"
+         << "  -k N                    Maximum bad fragments kept for feedback (default all).\n"
          << "  -T CPU,CPU... or CPU-CPU\n"
          << "                          Run one worker per CPU and bind affinity.\n"
-         << "  -r                      Print collection/feedback summaries.\n"
-         << "  -f N                    Print top N report and feedback fragments.\n"
-         << "  -d                      Print compile feedback diagnostics.\n"
-         << "  -v                      Verbose feedback view (-r -d -f 10 if -f omitted).\n"
+         << "  -v                      Verbose feedback view with summaries, diagnostics and top 10 fragments.\n"
          << "  --echo-matches          Display optimized measurement matches.\n"
-         << "  -o FILE                 Dump report fragments as CSV.\n"
-         << "  -O FILE                 Dump feedback fragments as CSV.\n\n"
+         << "  -o DIR                  Dump report/feedback CSV files into DIR.\n"
+         << "  -O DIR                  Dump reusable feedback binary into DIR.\n"
+         << "  -I DIR                  Load reusable feedback binary from DIR and skip collection.\n\n"
          << "Optimized throughput is measured only after the feedback-compiled DB is active.\n";
 
     if (error) {
@@ -239,6 +247,103 @@ void usage(const char *error) {
 
 void usage(const string &error) {
     usage(error.c_str());
+}
+
+bool isPathSeparator(char c) {
+    return c == '/' || c == '\\';
+}
+
+string trimTrailingSeparators(const string &path) {
+    if (path.empty()) {
+        return path;
+    }
+
+    size_t end = path.size();
+    while (end > 1 && isPathSeparator(path[end - 1])) {
+        if (end == 3 && path[1] == ':') {
+            break;
+        }
+        end--;
+    }
+    return path.substr(0, end);
+}
+
+string parentDirectory(const string &path) {
+    const string trimmed = trimTrailingSeparators(path);
+    const size_t pos = trimmed.find_last_of("/\\");
+    if (pos == string::npos) {
+        return "";
+    }
+    if (pos == 0) {
+        return trimmed.substr(0, 1);
+    }
+    if (pos == 2 && trimmed[1] == ':') {
+        return trimmed.substr(0, 3);
+    }
+    return trimmed.substr(0, pos);
+}
+
+bool directoryExists(const string &path) {
+    struct stat st = {};
+    if (stat(path.c_str(), &st) != 0) {
+        return false;
+    }
+#if defined(_WIN32)
+    return (st.st_mode & _S_IFDIR) != 0;
+#else
+    return S_ISDIR(st.st_mode);
+#endif
+}
+
+bool pathExists(const string &path) {
+    struct stat st = {};
+    return stat(path.c_str(), &st) == 0;
+}
+
+bool makeDirectory(const string &path) {
+#if defined(_WIN32)
+    return _mkdir(path.c_str()) == 0 || errno == EEXIST;
+#else
+    return mkdir(path.c_str(), 0777) == 0 || errno == EEXIST;
+#endif
+}
+
+bool ensureDirectory(const string &path, const char *purpose) {
+    const string dir = trimTrailingSeparators(path);
+    if (dir.empty()) {
+        cerr << purpose << " directory path must not be empty\n";
+        return false;
+    }
+    if (directoryExists(dir)) {
+        return true;
+    }
+    if (pathExists(dir)) {
+        cerr << purpose << " path exists but is not a directory: " << dir
+             << "\n";
+        return false;
+    }
+
+    const string parent = parentDirectory(dir);
+    if (!parent.empty() && parent != dir && !directoryExists(parent) &&
+        !ensureDirectory(parent, purpose)) {
+        return false;
+    }
+
+    if (!makeDirectory(dir) || !directoryExists(dir)) {
+        cerr << "Unable to create " << purpose << " directory: " << dir
+             << "\n";
+        return false;
+    }
+    return true;
+}
+
+string joinPath(const string &dir, const char *name) {
+    string out = trimTrailingSeparators(dir);
+    if (!out.empty() && !isPathSeparator(out.back())) {
+        out.push_back('/');
+    }
+    out += name;
+    return out;
 }
 
 string optionName(int c) {
@@ -516,7 +621,7 @@ bool processArgs(int argc, char **argv, Options *opts) {
     opterr = 0;
     int optionIndex = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, ":A:B:c:de:F:f:G:hK:m:Nn:o:O:q:rR:T:vVw:W:",
+        int c = getopt_long(argc, argv, ":b:c:e:G:hI:k:m:Nn:o:O:p:q:r:s:T:vV",
                             longopts,
                             &optionIndex);
         if (c < 0) {
@@ -529,13 +634,6 @@ bool processArgs(int argc, char **argv, Options *opts) {
         case 'h':
             usage(nullptr);
             std::exit(0);
-        case 'A':
-            if (!parseUnsigned(optarg, &value)) {
-                usage("verification rounds must be a non-negative integer");
-                return false;
-            }
-            opts->verifyRounds = value;
-            break;
         case 'G':
             if (greyOverridesHaveNegativeValue(optarg)) {
                 usage("grey override values must be non-negative");
@@ -547,7 +645,7 @@ bool processArgs(int argc, char **argv, Options *opts) {
                 return false;
             }
             break;
-        case 'B':
+        case 'b':
             if (!parseUnsigned(optarg, &value)) {
                 usage("baseline rounds must be a non-negative integer");
                 return false;
@@ -561,9 +659,6 @@ bool processArgs(int argc, char **argv, Options *opts) {
             }
             opts->corpusPath.assign(optarg);
             break;
-        case 'd':
-            opts->showDiagnostics = true;
-            break;
         case 'e':
             if (!optarg || !*optarg) {
                 usage("expression path must not be empty");
@@ -571,7 +666,7 @@ bool processArgs(int argc, char **argv, Options *opts) {
             }
             opts->exprPath.assign(optarg);
             break;
-        case 'F':
+        case 'p':
             if (!parsePositiveU64(optarg, &value64)) {
                 usage("minimum false-positive count must be a positive integer");
                 return false;
@@ -580,20 +675,20 @@ bool processArgs(int argc, char **argv, Options *opts) {
                 HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT;
             opts->feedbackParams.min_false_positive_count = value64;
             break;
-        case 'f':
-            if (!parsePositiveUnsigned(optarg, &value)) {
-                usage("top fragment count must be a positive integer");
-                return false;
-            }
-            opts->top = value;
-            break;
-        case 'K':
+        case 'k':
             if (!parsePositiveUnsigned(optarg, &value)) {
                 usage("feedback TopK must be a positive integer");
                 return false;
             }
             opts->feedbackParams.flags |= HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS;
             opts->feedbackParams.max_bad_fragments = value;
+            break;
+        case 'I':
+            if (!optarg || !*optarg) {
+                usage("feedback binary input directory must not be empty");
+                return false;
+            }
+            opts->feedbackImportPath.assign(optarg);
             break;
         case 'm':
             if (!parsePositiveU64(optarg, &value64)) {
@@ -615,21 +710,21 @@ bool processArgs(int argc, char **argv, Options *opts) {
             break;
         case 'o':
             if (!optarg || !*optarg) {
-                usage("report CSV path must not be empty");
+                usage("CSV output directory must not be empty");
                 return false;
             }
             opts->reportCsvPath.assign(optarg);
             break;
         case 'O':
             if (!optarg || !*optarg) {
-                usage("feedback CSV path must not be empty");
+                usage("feedback binary output directory must not be empty");
                 return false;
             }
-            opts->feedbackCsvPath.assign(optarg);
+            opts->feedbackBinPath.assign(optarg);
             break;
         case 'q':
             if (!parsePercentScaled(optarg, &value)) {
-                usage("minimum false-positive rate must be a percent from 0 to 100");
+                usage("minimum false-positive rate must be a percent from 0 to 100 with at most two decimal places");
                 return false;
             }
             opts->feedbackParams.flags |=
@@ -637,14 +732,12 @@ bool processArgs(int argc, char **argv, Options *opts) {
             opts->feedbackParams.min_false_positive_rate = value;
             break;
         case 'r':
-            opts->showSummaries = true;
-            break;
-        case 'R':
-            if (!parsePositiveUnsigned(optarg, &value)) {
-                usage("collection rounds must be a positive integer");
+            if (!parseUnsigned(optarg, &value)) {
+                usage("collection rounds must be a non-negative integer");
                 return false;
             }
             opts->collectRounds = value;
+            opts->collectRoundsSet = true;
             break;
         case 'T': {
             if (!optarg || !*optarg) {
@@ -673,16 +766,9 @@ bool processArgs(int argc, char **argv, Options *opts) {
         case 'V':
             opts->scanMode = ScanMode::VECTORED;
             break;
-        case 'w':
-            if (!parseUnsigned(optarg, &value)) {
-                usage("warmup rounds must be a non-negative integer");
-                return false;
-            }
-            opts->warmupRounds = value;
-            break;
-        case 'W':
+        case 's':
             if (!parsePercentScaled(optarg, &value)) {
-                usage("minimum waste share must be a percent from 0 to 100");
+                usage("minimum waste share must be a percent from 0 to 100 with at most two decimal places");
                 return false;
             }
             opts->feedbackParams.flags |= HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE;
@@ -719,6 +805,17 @@ bool processArgs(int argc, char **argv, Options *opts) {
     }
     if (opts->corpusPath.empty()) {
         usage("provide -c");
+        return false;
+    }
+    if (!opts->feedbackImportPath.empty()) {
+        if (!opts->collectRoundsSet) {
+            opts->collectRounds = 0;
+        } else if (opts->collectRounds != 0) {
+            usage("-I requires -r 0 because collection is skipped");
+            return false;
+        }
+    } else if (!opts->collectRounds) {
+        usage("collection rounds must be positive unless -I is used");
         return false;
     }
 
@@ -849,6 +946,12 @@ string formatFixedWithCommas(double value, int precision) {
 }
 
 string formatHex32(uint32_t value) {
+    std::ostringstream oss;
+    oss << "0x" << hex << value << dec;
+    return oss.str();
+}
+
+string formatHex64(uint64_t value) {
     std::ostringstream oss;
     oss << "0x" << hex << value << dec;
     return oss.str();
@@ -1752,7 +1855,7 @@ bool writeFragmentCsv(const string &path,
     return true;
 }
 
-bool dumpReportCsv(const hs_fp_report_t *report, const string &path) {
+bool dumpReportCsvFile(const hs_fp_report_t *report, const string &path) {
     if (path.empty()) {
         return true;
     }
@@ -1771,7 +1874,8 @@ bool dumpReportCsv(const hs_fp_report_t *report, const string &path) {
                             summary.false_positive_count);
 }
 
-bool dumpFeedbackCsv(const hs_fp_feedback_t *feedback, const string &path) {
+bool dumpFeedbackCsvFile(const hs_fp_feedback_t *feedback,
+                         const string &path) {
     if (path.empty()) {
         return true;
     }
@@ -1790,7 +1894,465 @@ bool dumpFeedbackCsv(const hs_fp_feedback_t *feedback, const string &path) {
                             summary.total_false_positive_count);
 }
 
-void printReportSummary(const hs_fp_report_t *report) {
+bool dumpCsvOutputs(const hs_fp_report_t *report,
+                    const hs_fp_feedback_t *feedback, const string &dir) {
+    if (dir.empty()) {
+        return true;
+    }
+    if (!ensureDirectory(dir, "CSV output")) {
+        return false;
+    }
+    if (report && !dumpReportCsvFile(report,
+                                     joinPath(dir, HSPGO_REPORT_CSV_NAME))) {
+        return false;
+    }
+    if (feedback &&
+        !dumpFeedbackCsvFile(feedback, joinPath(dir, HSPGO_FEEDBACK_CSV_NAME))) {
+        return false;
+    }
+    return true;
+}
+
+const uint8_t HSPGO_FEEDBACK_BIN_MAGIC[8] = {
+    'H', 'S', 'P', 'G', 'O', 'F', 'B', '1'
+};
+const uint32_t HSPGO_FEEDBACK_BIN_VERSION = 2;
+const uint64_t MAX_FEEDBACK_BIN_SIZE = 128ULL * 1024ULL * 1024ULL;
+const uint32_t MAX_SERIALIZED_FRAGMENT_BYTES = 4096;
+const uint64_t FNV1A64_OFFSET = 14695981039346656037ULL;
+const uint64_t FNV1A64_PRIME = 1099511628211ULL;
+
+uint32_t scanModeCode(ScanMode mode) {
+    switch (mode) {
+    case ScanMode::STREAMING:
+        return 1;
+    case ScanMode::BLOCK:
+        return 2;
+    case ScanMode::VECTORED:
+        return 3;
+    }
+    return 0;
+}
+
+uint64_t fnv1a64(const vector<uint8_t> &bytes) {
+    uint64_t hash = FNV1A64_OFFSET;
+    for (uint8_t byte : bytes) {
+        hash ^= byte;
+        hash *= FNV1A64_PRIME;
+    }
+    return hash;
+}
+
+void appendBytes(vector<uint8_t> *out, const void *bytes, size_t length) {
+    if (!length) {
+        return;
+    }
+    const uint8_t *p = static_cast<const uint8_t *>(bytes);
+    out->insert(out->end(), p, p + length);
+}
+
+void appendU32(vector<uint8_t> *out, uint32_t value) {
+    for (unsigned i = 0; i < 4; i++) {
+        out->push_back(static_cast<uint8_t>((value >> (i * 8)) & 0xffU));
+    }
+}
+
+void appendU64(vector<uint8_t> *out, uint64_t value) {
+    for (unsigned i = 0; i < 8; i++) {
+        out->push_back(static_cast<uint8_t>((value >> (i * 8)) & 0xffU));
+    }
+}
+
+void appendString(vector<uint8_t> *out, const string &value) {
+    appendU64(out, static_cast<uint64_t>(value.size()));
+    appendBytes(out, value.data(), value.size());
+}
+
+uint64_t computeSourceFingerprint(const PatternSet &patterns, ScanMode mode,
+                                  const string &greyOverrides) {
+    vector<uint8_t> payload;
+    appendString(&payload, "hspgo-source-v1");
+    appendU32(&payload, scanModeCode(mode));
+    appendString(&payload, greyOverrides);
+    appendU64(&payload, static_cast<uint64_t>(patterns.exprs.size()));
+    for (size_t i = 0; i < patterns.exprs.size(); i++) {
+        appendU32(&payload, patterns.ids[i]);
+        appendU32(&payload, patterns.flags[i]);
+        const hs_expr_ext &ext = patterns.ext[i];
+        appendU64(&payload, ext.flags);
+        appendU64(&payload, ext.min_offset);
+        appendU64(&payload, ext.max_offset);
+        appendU64(&payload, ext.min_length);
+        appendU32(&payload, ext.edit_distance);
+        appendU32(&payload, ext.hamming_distance);
+        appendString(&payload, patterns.exprs[i]);
+    }
+    return fnv1a64(payload);
+}
+
+bool readU32(const vector<uint8_t> &bytes, size_t *offset, uint32_t *out) {
+    if (!offset || !out || *offset > bytes.size() ||
+        bytes.size() - *offset < 4) {
+        return false;
+    }
+    uint32_t value = 0;
+    for (unsigned i = 0; i < 4; i++) {
+        value |= static_cast<uint32_t>(bytes[*offset + i]) << (i * 8);
+    }
+    *offset += 4;
+    *out = value;
+    return true;
+}
+
+bool readU64(const vector<uint8_t> &bytes, size_t *offset, uint64_t *out) {
+    if (!offset || !out || *offset > bytes.size() ||
+        bytes.size() - *offset < 8) {
+        return false;
+    }
+    uint64_t value = 0;
+    for (unsigned i = 0; i < 8; i++) {
+        value |= static_cast<uint64_t>(bytes[*offset + i]) << (i * 8);
+    }
+    *offset += 8;
+    *out = value;
+    return true;
+}
+
+bool readBytes(const vector<uint8_t> &bytes, size_t *offset, size_t length,
+               vector<u8> *out) {
+    if (!offset || !out || *offset > bytes.size() ||
+        bytes.size() - *offset < length) {
+        return false;
+    }
+    out->assign(bytes.begin() + *offset, bytes.begin() + *offset + length);
+    *offset += length;
+    return true;
+}
+
+bool readBinaryFile(const string &path, vector<uint8_t> *bytes) {
+    std::ifstream in(path.c_str(), std::ios::binary);
+    if (!in.good()) {
+        cerr << "Unable to open feedback binary: " << path << "\n";
+        return false;
+    }
+
+    in.seekg(0, std::ios::end);
+    const std::streamoff end = in.tellg();
+    if (end < 0 || static_cast<uint64_t>(end) > MAX_FEEDBACK_BIN_SIZE) {
+        cerr << "Feedback binary is too large or unreadable: " << path << "\n";
+        return false;
+    }
+    in.seekg(0, std::ios::beg);
+
+    bytes->resize(static_cast<size_t>(end));
+    if (!bytes->empty()) {
+        in.read(reinterpret_cast<char *>(bytes->data()),
+                static_cast<std::streamsize>(bytes->size()));
+    }
+    if (!in.good() && !in.eof()) {
+        cerr << "Unable to read feedback binary: " << path << "\n";
+        return false;
+    }
+    return true;
+}
+
+bool writeBinaryFile(const string &path, const vector<uint8_t> &bytes) {
+    std::ofstream out(path.c_str(), std::ios::binary);
+    if (!out.good()) {
+        cerr << "Unable to open feedback binary output: " << path << "\n";
+        return false;
+    }
+    if (!bytes.empty()) {
+        out.write(reinterpret_cast<const char *>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
+    }
+    if (!out.good()) {
+        cerr << "Unable to write feedback binary output: " << path << "\n";
+        return false;
+    }
+    return true;
+}
+
+bool appendSerializedFragment(vector<uint8_t> *payload,
+                              const hs_fp_fragment_info_t &fragment) {
+    if (!fragment.bytes || !fragment.length ||
+        fragment.length > MAX_SERIALIZED_FRAGMENT_BYTES ||
+        fragment.mask_length > MAX_SERIALIZED_FRAGMENT_BYTES ||
+        (fragment.mask_length && (!fragment.mask || !fragment.cmp))) {
+        cerr << "Invalid feedback fragment cannot be serialized\n";
+        return false;
+    }
+
+    appendU64(payload, fragment.key);
+    appendU32(payload, fragment.fragment_id);
+    appendU32(payload, fragment.literal_count);
+    appendU32(payload, fragment.table);
+    appendU32(payload, fragment.engine);
+    appendU32(payload, fragment.flags);
+    appendU32(payload, static_cast<uint32_t>(fragment.length));
+    appendU32(payload, static_cast<uint32_t>(fragment.mask_length));
+    appendU64(payload, fragment.trigger_count);
+    appendU64(payload, fragment.true_trigger_count);
+    appendU64(payload, fragment.final_report_count);
+    appendU64(payload, fragment.false_positive_count);
+    appendBytes(payload, fragment.bytes, fragment.length);
+    appendBytes(payload, fragment.mask, fragment.mask_length);
+    appendBytes(payload, fragment.cmp, fragment.mask_length);
+    return true;
+}
+
+bool dumpFeedbackBin(const hs_fp_feedback_t *feedback, const string &path,
+                     ScanMode mode, uint64_t sourceFingerprint) {
+    if (path.empty()) {
+        return true;
+    }
+
+    hs_fp_feedback_summary_t summary = {};
+    hs_error_t err = hs_fp_feedback_get_summary(feedback, &summary);
+    if (err != HS_SUCCESS) {
+        cerr << "hs_fp_feedback_get_summary failed with error " << err << "\n";
+        return false;
+    }
+
+    vector<hs_fp_fragment_info_t> fragments;
+    if (!loadFeedbackFragments(feedback, &fragments)) {
+        return false;
+    }
+
+    vector<uint8_t> payload;
+    appendU32(&payload, scanModeCode(mode));
+    appendU32(&payload, 0);
+    appendU64(&payload, sourceFingerprint);
+    appendU64(&payload, summary.scan_calls);
+    appendU64(&payload, summary.scan_bytes);
+    appendU64(&payload, summary.total_false_positive_count);
+    appendU32(&payload, summary.bad_fragment_count);
+    appendU32(&payload, 0);
+    for (const auto &fragment : fragments) {
+        if (!appendSerializedFragment(&payload, fragment)) {
+            return false;
+        }
+    }
+
+    vector<uint8_t> file;
+    appendBytes(&file, HSPGO_FEEDBACK_BIN_MAGIC,
+                sizeof(HSPGO_FEEDBACK_BIN_MAGIC));
+    appendU32(&file, HSPGO_FEEDBACK_BIN_VERSION);
+    appendU64(&file, static_cast<uint64_t>(payload.size()));
+    appendU64(&file, fnv1a64(payload));
+    appendBytes(&file, payload.data(), payload.size());
+    return writeBinaryFile(path, file);
+}
+
+bool dumpFeedbackBinToDir(const hs_fp_feedback_t *feedback, const string &dir,
+                          ScanMode mode, uint64_t sourceFingerprint) {
+    if (dir.empty()) {
+        return true;
+    }
+    if (!ensureDirectory(dir, "feedback binary output")) {
+        return false;
+    }
+    return dumpFeedbackBin(feedback, joinPath(dir, HSPGO_FEEDBACK_BIN_NAME),
+                           mode, sourceFingerprint);
+}
+
+struct OwnedImportFragment {
+    hs_fp_feedback_import_fragment fragment = {};
+    vector<u8> bytes;
+    vector<u8> mask;
+    vector<u8> cmp;
+};
+
+bool readSerializedFragment(const vector<uint8_t> &payload, size_t *offset,
+                            OwnedImportFragment *out) {
+    uint64_t value64 = 0;
+    uint32_t value32 = 0;
+    if (!readU64(payload, offset, &value64)) {
+        return false;
+    }
+    out->fragment.key = value64;
+    if (!readU32(payload, offset, &out->fragment.fragment_id) ||
+        !readU32(payload, offset, &out->fragment.literal_count) ||
+        !readU32(payload, offset, &out->fragment.table) ||
+        !readU32(payload, offset, &out->fragment.engine) ||
+        !readU32(payload, offset, &out->fragment.flags) ||
+        !readU32(payload, offset, &value32)) {
+        return false;
+    }
+    out->fragment.length = value32;
+    if (!readU32(payload, offset, &value32)) {
+        return false;
+    }
+    out->fragment.mask_length = value32;
+    if (out->fragment.length > MAX_SERIALIZED_FRAGMENT_BYTES ||
+        out->fragment.mask_length > MAX_SERIALIZED_FRAGMENT_BYTES) {
+        return false;
+    }
+
+    uint64_t triggerCount = 0;
+    uint64_t trueTriggerCount = 0;
+    uint64_t finalReportCount = 0;
+    uint64_t falsePositiveCount = 0;
+    if (!readU64(payload, offset, &triggerCount) ||
+        !readU64(payload, offset, &trueTriggerCount) ||
+        !readU64(payload, offset, &finalReportCount) ||
+        !readU64(payload, offset, &falsePositiveCount)) {
+        return false;
+    }
+    out->fragment.trigger_count = triggerCount;
+    out->fragment.true_trigger_count = trueTriggerCount;
+    out->fragment.final_report_count = finalReportCount;
+    out->fragment.false_positive_count = falsePositiveCount;
+
+    if (!readBytes(payload, offset, out->fragment.length, &out->bytes) ||
+        !readBytes(payload, offset, out->fragment.mask_length, &out->mask) ||
+        !readBytes(payload, offset, out->fragment.mask_length, &out->cmp)) {
+        return false;
+    }
+
+    out->fragment.bytes = out->bytes.empty() ? nullptr : out->bytes.data();
+    out->fragment.mask = out->mask.empty() ? nullptr : out->mask.data();
+    out->fragment.cmp = out->cmp.empty() ? nullptr : out->cmp.data();
+    return true;
+}
+
+bool loadFeedbackBin(const string &path, ScanMode mode,
+                     uint64_t sourceFingerprint,
+                     FeedbackPtr *feedback) {
+    vector<uint8_t> file;
+    if (!readBinaryFile(path, &file)) {
+        return false;
+    }
+
+    const size_t headerSize = sizeof(HSPGO_FEEDBACK_BIN_MAGIC) + 4 + 8 + 8;
+    if (file.size() < headerSize ||
+        !std::equal(HSPGO_FEEDBACK_BIN_MAGIC,
+                    HSPGO_FEEDBACK_BIN_MAGIC + sizeof(HSPGO_FEEDBACK_BIN_MAGIC),
+                    file.begin())) {
+        cerr << "Feedback binary has invalid magic: " << path << "\n";
+        return false;
+    }
+
+    size_t offset = sizeof(HSPGO_FEEDBACK_BIN_MAGIC);
+    uint32_t version = 0;
+    uint64_t payloadSize = 0;
+    uint64_t checksum = 0;
+    if (!readU32(file, &offset, &version) ||
+        !readU64(file, &offset, &payloadSize) ||
+        !readU64(file, &offset, &checksum)) {
+        cerr << "Feedback binary header is truncated: " << path << "\n";
+        return false;
+    }
+    if (version != HSPGO_FEEDBACK_BIN_VERSION) {
+        cerr << "Feedback binary version " << version
+             << " is unsupported; regenerate feedback.bin with this hspgo\n";
+        return false;
+    }
+    if (payloadSize != file.size() - offset) {
+        cerr << "Feedback binary header is invalid: " << path << "\n";
+        return false;
+    }
+
+    vector<uint8_t> payload(file.begin() + offset, file.end());
+    if (fnv1a64(payload) != checksum) {
+        cerr << "Feedback binary checksum mismatch: " << path << "\n";
+        return false;
+    }
+
+    offset = 0;
+    uint32_t storedMode = 0;
+    uint32_t reservedHeader = 0;
+    uint64_t storedSourceFingerprint = 0;
+    uint64_t scanCalls = 0;
+    uint64_t scanBytes = 0;
+    uint64_t totalFalsePositive = 0;
+    uint32_t fragmentCount = 0;
+    uint32_t reserved = 0;
+    if (!readU32(payload, &offset, &storedMode) ||
+        !readU32(payload, &offset, &reservedHeader) ||
+        !readU64(payload, &offset, &storedSourceFingerprint) ||
+        !readU64(payload, &offset, &scanCalls) ||
+        !readU64(payload, &offset, &scanBytes) ||
+        !readU64(payload, &offset, &totalFalsePositive) ||
+        !readU32(payload, &offset, &fragmentCount) ||
+        !readU32(payload, &offset, &reserved)) {
+        cerr << "Feedback binary payload is truncated: " << path << "\n";
+        return false;
+    }
+    if (reservedHeader != 0) {
+        cerr << "Feedback binary reserved header field is not zero: " << path
+             << "\n";
+        return false;
+    }
+    if (reserved != 0) {
+        cerr << "Feedback binary reserved field is not zero: " << path << "\n";
+        return false;
+    }
+    if (storedMode != scanModeCode(mode)) {
+        cerr << "Feedback binary scan mode does not match current hspgo mode\n";
+        return false;
+    }
+    if (storedSourceFingerprint != sourceFingerprint) {
+        cerr << "Feedback binary source fingerprint "
+             << formatHex64(storedSourceFingerprint)
+             << " does not match current source fingerprint "
+             << formatHex64(sourceFingerprint) << "\n";
+        return false;
+    }
+    const size_t minFragmentPayloadSize = 69;
+    if (fragmentCount &&
+        fragmentCount > (payload.size() - offset) / minFragmentPayloadSize) {
+        cerr << "Feedback binary fragment count exceeds payload capacity: "
+             << path << "\n";
+        return false;
+    }
+
+    vector<OwnedImportFragment> owned(fragmentCount);
+    vector<hs_fp_feedback_import_fragment> imports(fragmentCount);
+    for (uint32_t i = 0; i < fragmentCount; i++) {
+        if (!readSerializedFragment(payload, &offset, &owned[i])) {
+            cerr << "Feedback binary fragment " << i << " is invalid\n";
+            return false;
+        }
+        imports[i] = owned[i].fragment;
+    }
+    if (offset != payload.size()) {
+        cerr << "Feedback binary has trailing payload bytes: " << path << "\n";
+        return false;
+    }
+
+    hs_fp_feedback_t *rawFeedback = nullptr;
+    hs_error_t err = hs_fp_feedback_create_from_fragments(
+        imports.empty() ? nullptr : imports.data(), fragmentCount, scanCalls,
+        scanBytes, totalFalsePositive, &rawFeedback);
+    if (err != HS_SUCCESS) {
+        cerr << "hs_fp_feedback_create_from_fragments failed with error "
+             << err << "\n";
+        return false;
+    }
+    feedback->reset(rawFeedback);
+    return true;
+}
+
+bool loadFeedbackBinFromDir(const string &dir, ScanMode mode,
+                            uint64_t sourceFingerprint,
+                            FeedbackPtr *feedback) {
+    const string trimmed = trimTrailingSeparators(dir);
+    if (trimmed.empty()) {
+        cerr << "feedback binary input directory must not be empty\n";
+        return false;
+    }
+    if (!directoryExists(trimmed)) {
+        cerr << "feedback binary input directory does not exist: " << trimmed
+             << "\n";
+        return false;
+    }
+    return loadFeedbackBin(joinPath(trimmed, HSPGO_FEEDBACK_BIN_NAME), mode,
+                           sourceFingerprint, feedback);
+}
+
+void printReportSummaryWithTitle(const char *title,
+                                 const hs_fp_report_t *report) {
     hs_fp_report_summary_t summary = {};
     hs_error_t err = hs_fp_report_get_summary(report, &summary);
     if (err != HS_SUCCESS) {
@@ -1798,7 +2360,7 @@ void printReportSummary(const hs_fp_report_t *report) {
         return;
     }
 
-    cout << "\nCollection report:\n";
+    cout << "\n" << title << ":\n";
     printField("Fragments:", static_cast<unsigned long long>(
                                   summary.fragment_count));
     printField("Scan calls:", summary.scan_calls);
@@ -1840,6 +2402,10 @@ void printReportSummary(const hs_fp_report_t *report) {
                    summary.unknown_fragment_meta_missing_count);
     }
     printField("Dropped:", summary.dropped_trigger_count);
+}
+
+void printReportSummary(const hs_fp_report_t *report) {
+    printReportSummaryWithTitle("Collection report", report);
 }
 
 void printFeedbackSummary(const hs_fp_feedback_t *feedback) {
@@ -2229,7 +2795,7 @@ void printDatabaseStats(const char *title, const DatabaseStats &stats) {
                    " bytes");
 }
 
-void printHspgoConfig(const Options &opts) {
+void printHspgoConfig(const Options &opts, uint64_t sourceFingerprint) {
     cout << "\nHSPGO feedback configuration:\n";
     string workers = formatCount(opts.threadCount);
     if (!opts.threadSpec.empty()) {
@@ -2243,12 +2809,22 @@ void printHspgoConfig(const Options &opts) {
                static_cast<unsigned long long>(opts.collectRounds));
     printField("Measurement rounds:",
                static_cast<unsigned long long>(opts.measureRounds));
-    printField("Verification rounds:",
-               static_cast<unsigned long long>(opts.verifyRounds));
-    printField("Warmup rounds:",
-               static_cast<unsigned long long>(opts.warmupRounds));
-    printField("Feedback thresholds:",
-               feedbackThresholdString(opts.feedbackParams));
+    printField("Source fingerprint:", formatHex64(sourceFingerprint));
+    if (!opts.feedbackImportPath.empty()) {
+        printField("Feedback source:", "binary import");
+        printField("Feedback input dir:", opts.feedbackImportPath);
+        printField("Feedback thresholds:", "not used for imported feedback");
+    } else {
+        printField("Feedback source:", "collector");
+        printField("Feedback thresholds:",
+                   feedbackThresholdString(opts.feedbackParams));
+    }
+    if (!opts.reportCsvPath.empty()) {
+        printField("CSV output dir:", opts.reportCsvPath);
+    }
+    if (!opts.feedbackBinPath.empty()) {
+        printField("Feedback output dir:", opts.feedbackBinPath);
+    }
     if (opts.echoMatches) {
         printField("Echo matches:", "optimized measurement only");
     }
@@ -2370,33 +2946,43 @@ int HS_CDECL main(int argc, char **argv) {
         return 1;
     }
 
+    const uint64_t sourceFingerprint =
+        computeSourceFingerprint(patterns, opts.scanMode, opts.greyOverrides);
+    const bool needBaselineDb = opts.feedbackImportPath.empty() ||
+                                opts.baselineRounds || opts.warmupRounds;
     DatabasePtr baselineDb;
-    const auto baselineCompileStart = std::chrono::steady_clock::now();
-    if (!compileDatabase(patterns, opts.scanMode, nullptr, &baselineDb)) {
-        return 1;
-    }
-    const auto baselineCompileEnd = std::chrono::steady_clock::now();
     vector<ScratchPtr> baselineScratches;
-    if (!allocScratches(baselineDb.get(), opts.threadCount,
-                        &baselineScratches)) {
-        return 1;
-    }
-
     DatabaseStats baselineDbStats;
-    if (!queryDatabaseStats(baselineDb.get(), baselineScratches[0].get(),
-                            signatureName(opts), patterns.exprs.size(),
-                            secondsSince(baselineCompileStart,
-                                         baselineCompileEnd),
-                            &baselineDbStats)) {
-        return 1;
+    if (needBaselineDb) {
+        const auto baselineCompileStart = std::chrono::steady_clock::now();
+        if (!compileDatabase(patterns, opts.scanMode, nullptr, &baselineDb)) {
+            return 1;
+        }
+        const auto baselineCompileEnd = std::chrono::steady_clock::now();
+        if (!allocScratches(baselineDb.get(), opts.threadCount,
+                            &baselineScratches)) {
+            return 1;
+        }
+
+        if (!queryDatabaseStats(baselineDb.get(), baselineScratches[0].get(),
+                                signatureName(opts), patterns.exprs.size(),
+                                secondsSince(baselineCompileStart,
+                                             baselineCompileEnd),
+                                &baselineDbStats)) {
+            return 1;
+        }
     }
 
     cout << "hspgo feedback demo\n";
-    printDatabaseStats("Baseline database", baselineDbStats);
-    printHspgoConfig(opts);
+    if (needBaselineDb) {
+        printDatabaseStats("Baseline database", baselineDbStats);
+    } else {
+        cout << "\nBaseline database: skipped (binary feedback import).\n";
+    }
+    printHspgoConfig(opts, sourceFingerprint);
     printCorpusLayoutNote(opts.scanMode, blocks);
 
-    if (opts.warmupRounds) {
+    if (opts.warmupRounds && baselineDb) {
         ParallelRunResult warmupResult;
         if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
                              opts.warmupRounds, nullptr,
@@ -2410,7 +2996,7 @@ int HS_CDECL main(int argc, char **argv) {
 
     ParallelRunResult baselineResult;
     bool haveBaselineResult = false;
-    if (opts.baselineRounds) {
+    if (opts.baselineRounds && baselineDb) {
         if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
                              opts.baselineRounds, nullptr,
                              opts.cpuList.empty() ? nullptr : &opts.cpuList,
@@ -2424,46 +3010,63 @@ int HS_CDECL main(int argc, char **argv) {
         haveBaselineResult = true;
     }
 
-    vector<CollectorPtr> workerCollectors;
-    if (!createCollectors(baselineDb.get(), opts.threadCount,
-                          &workerCollectors)) {
-        return 1;
-    }
-
-    ParallelRunResult collectResult;
-    if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
-                         opts.collectRounds, &workerCollectors,
-                         opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                         false, opts.scanMode,
-                         &collectResult)) {
-        return 1;
-    }
-    printScanSummary("Collection scan", blocks, collectResult,
-                     opts.collectRounds, opts.threadCount, opts.scanMode);
-
-    CollectorPtr collector;
-    if (!mergeCollectors(baselineDb.get(), workerCollectors, &collector)) {
-        return 1;
-    }
-
     ReportPtr report;
     FeedbackPtr feedback;
-    if (!buildReportAndFeedback(collector.get(), opts.feedbackParams, &report,
-                                &feedback)) {
+    vector<CollectorPtr> workerCollectors;
+    CollectorPtr collector;
+    if (!opts.feedbackImportPath.empty()) {
+        if (!loadFeedbackBinFromDir(opts.feedbackImportPath, opts.scanMode,
+                                    sourceFingerprint, &feedback)) {
+            return 1;
+        }
+        cout << "\nFeedback import: loaded reusable feedback binary.\n";
+        if (opts.showSummaries) {
+            printFeedbackSummary(feedback.get());
+        }
+        if (opts.top) {
+            printFeedbackFragments(feedback.get(), opts.top);
+        }
+    } else {
+        if (!createCollectors(baselineDb.get(), opts.threadCount,
+                              &workerCollectors)) {
+            return 1;
+        }
+
+        ParallelRunResult collectResult;
+        if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
+                             opts.collectRounds, &workerCollectors,
+                             opts.cpuList.empty() ? nullptr : &opts.cpuList,
+                             false, opts.scanMode,
+                             &collectResult)) {
+            return 1;
+        }
+        printScanSummary("Collection scan", blocks, collectResult,
+                         opts.collectRounds, opts.threadCount, opts.scanMode);
+
+        if (!mergeCollectors(baselineDb.get(), workerCollectors, &collector)) {
+            return 1;
+        }
+
+        if (!buildReportAndFeedback(collector.get(), opts.feedbackParams,
+                                    &report, &feedback)) {
+            return 1;
+        }
+
+        if (opts.showSummaries) {
+            printReportSummary(report.get());
+            printFeedbackSummary(feedback.get());
+        }
+        if (opts.top) {
+            printTopReportFragments(report.get(), opts.top);
+            printFeedbackFragments(feedback.get(), opts.top);
+        }
+    }
+
+    if (!dumpCsvOutputs(report.get(), feedback.get(), opts.reportCsvPath)) {
         return 1;
     }
-
-    if (opts.showSummaries) {
-        printReportSummary(report.get());
-        printFeedbackSummary(feedback.get());
-    }
-    if (opts.top) {
-        printTopReportFragments(report.get(), opts.top);
-        printFeedbackFragments(feedback.get(), opts.top);
-    }
-
-    if (!dumpReportCsv(report.get(), opts.reportCsvPath) ||
-        !dumpFeedbackCsv(feedback.get(), opts.feedbackCsvPath)) {
+    if (!dumpFeedbackBinToDir(feedback.get(), opts.feedbackBinPath,
+                              opts.scanMode, sourceFingerprint)) {
         return 1;
     }
 
@@ -2564,9 +3167,14 @@ int HS_CDECL main(int argc, char **argv) {
         }
         ReportPtr verifyReport(rawVerifyReport);
 
-        if (!printVerificationComparison(report.get(), feedback.get(),
-                                         verifyReport.get())) {
-            return 1;
+        if (report) {
+            if (!printVerificationComparison(report.get(), feedback.get(),
+                                             verifyReport.get())) {
+                return 1;
+            }
+        } else if (opts.showSummaries) {
+            printReportSummaryWithTitle("Verification report",
+                                        verifyReport.get());
         }
     }
 
