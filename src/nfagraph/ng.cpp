@@ -47,6 +47,7 @@
 #include "ng_haig.h"
 #include "ng_literal_component.h"
 #include "ng_literal_decorated.h"
+#include "ng_literal_quality.h"
 #include "ng_misc_opt.h"
 #include "ng_puff.h"
 #include "ng_prefilter.h"
@@ -612,12 +613,10 @@ bool NG::addLiteral(const ue2_literal &literal, u32 expr_index,
                     u32 external_report, bool highlander, som_type som,
                     bool quiet) {
     assert(!literal.empty());
-    
-    if (cc.grey.allowNeoFdr && literal.length() >= 8) {
-        const std::string &str = literal.get_string();
-        if (memcmp(str.c_str() + str.length() - 8, "\0\0\0\0\0\0\0\0", 8) == 0) {
-            return false;
-        }
+
+    if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(literal)) {
+        DEBUG_PRINTF("rejecting zero-dense NeoFDR literal\n");
+        return false;
     }
     if (!cc.grey.shortcutLiterals) {
         return false;

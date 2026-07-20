@@ -38,6 +38,7 @@
 #include "nfagraph/ng_depth.h"
 #include "nfagraph/ng_dump.h"
 #include "nfagraph/ng_holder.h"
+#include "nfagraph/ng_literal_quality.h"
 #include "nfagraph/ng_limex.h"
 #include "nfagraph/ng_reports.h"
 #include "nfagraph/ng_util.h"
@@ -377,6 +378,12 @@ bool validateTransientMask(const vector<CharReach> &mask, bool anchored,
         return false;
     }
 
+    if (grey.allowNeoFdr &&
+        any_of(begin(lits), end(lits), isLowQualityNeoFdrLiteral)) {
+        DEBUG_PRINTF("rejecting low-quality NeoFDR transient mask literal\n");
+        return false;
+    }
+
     const u32 delay = mask.size() - lit_length - lit_minBound;
     if (delay > MAX_DELAY) {
         DEBUG_PRINTF("delay %u is too much\n", delay);
@@ -643,6 +650,11 @@ void addTransientMask(RoseBuildImpl &build, const vector<CharReach> &mask,
     const flat_set<ReportID> no_reports;
 
     for (const auto &lit : lits) {
+        if (build.cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
+            DEBUG_PRINTF("skipping low-quality NeoFDR transient mask literal "
+                         "'%s'\n", escapeString(lit).c_str());
+            continue;
+        }
         u32 lit_id = build.getLiteralId(lit, msk, cmp, delay, table);
         const RoseVertex parent = anchored ? build.anchored_root : build.root;
         bool use_mask = delay || maskIsNeeded(lit, *mask_graph);
@@ -802,6 +814,11 @@ bool checkAllowMask(const vector<CharReach> &mask, ue2_literal *lit,
     assert(!mask.empty());
     u32 lit_offset;
     findMaskLiteral(mask, cc.streaming, lit, &lit_offset, cc.grey);
+
+    if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(*lit)) {
+        DEBUG_PRINTF("rejecting low-quality NeoFDR mask literal\n");
+        return false;
+    }
 
     if (lit->length() < MIN_MASK_LIT_LEN && lit->length() != mask.size()) {
         DEBUG_PRINTF("need more literal - bad mask\n");
