@@ -1640,11 +1640,12 @@ bool roseCheckRose(const RoseInGraph &ig, bool prefilter,
 void RoseBuildImpl::add(bool anchored, bool eod, const ue2_literal &lit,
                         const flat_set<ReportID> &reports) {
     assert(!reports.empty());
-    if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
-        DEBUG_PRINTF("rejecting low-quality NeoFDR literal '%s'\n",
+    if (cc.grey.allowNeoFdr && hasLongAllZeroNeoFdrTail(lit)) {
+        DEBUG_PRINTF("rejecting legacy zero-tail NeoFDR literal '%s'\n",
                      escapeString(lit).c_str());
         return;
     }
+
     if (cc.grey.floodAsPuffette && !anchored && !eod && is_flood(lit) &&
         lit.length() > 3) {
         DEBUG_PRINTF("adding as puffette\n");

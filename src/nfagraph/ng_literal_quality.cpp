@@ -32,6 +32,15 @@ bool hasAllZeroNeoFdrTail(const ue2_literal &literal) {
     return window && zero_count == window;
 }
 
+bool hasLongAllZeroNeoFdrTail(const ue2_literal &literal) {
+    static const size_t MAX_WINDOW = 8;
+
+    size_t window = 0;
+    const size_t zero_count = neoFdrZeroCount(literal, &window);
+    return literal.length() >= MAX_WINDOW && window == MAX_WINDOW &&
+           zero_count == window;
+}
+
 bool isZeroDenseNeoFdrLiteral(const ue2_literal &literal) {
     static const size_t MIN_WINDOW = 4;
 

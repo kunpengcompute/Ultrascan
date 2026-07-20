@@ -17,6 +17,8 @@ size_t neoFdrZeroCount(const ue2_literal &literal, size_t *window_out);
 
 bool hasAllZeroNeoFdrTail(const ue2_literal &literal);
 
+bool hasLongAllZeroNeoFdrTail(const ue2_literal &literal);
+
 /**
  * Returns true if the final bytes of a literal are likely to create excessive
  * NeoFDR candidates in zero-padded input.

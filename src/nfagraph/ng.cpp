@@ -614,10 +614,11 @@ bool NG::addLiteral(const ue2_literal &literal, u32 expr_index,
                     bool quiet) {
     assert(!literal.empty());
 
-    if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(literal)) {
-        DEBUG_PRINTF("rejecting zero-dense NeoFDR literal\n");
+    if (cc.grey.allowNeoFdr && hasLongAllZeroNeoFdrTail(literal)) {
+        DEBUG_PRINTF("rejecting legacy zero-tail NeoFDR literal\n");
         return false;
     }
+
     if (!cc.grey.shortcutLiterals) {
         return false;
     }

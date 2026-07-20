@@ -45,6 +45,7 @@
 #include "parse_error.h"
 #include "shortcut_literal.h"
 #include "grey.h"
+#include "nfagraph/ng_literal_quality.h"
 #include "nfagraph/ng.h"
 #include "compiler/compiler.h"
 #include "util/ue2string.h"
@@ -194,6 +195,11 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const C
         return false;
     }
 
+    if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
+        DEBUG_PRINTF("not shortcutting low-quality NeoFDR literal\n");
+        return false;
+    }
+
     // Check if this expression is referenced by any logical combination rules
     bool is_referenced_by_combination = false;
     if (ng.rm.pl.getLkeyMap().find(expr.report) != ng.rm.pl.getLkeyMap().end()) {
@@ -256,6 +262,11 @@ bool x86_shortcutLiteral(NG &ng, const ParsedExpression &pe) {
 
     if (lit.empty()) {
         DEBUG_PRINTF("empty literal\n");
+        return false;
+    }
+
+    if (ng.cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
+        DEBUG_PRINTF("not shortcutting low-quality NeoFDR literal\n");
         return false;
     }
 
