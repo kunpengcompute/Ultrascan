@@ -565,9 +565,11 @@ int main(void) {
 
     set(HS_BUILD_HAVE_SVE FALSE)
     set(HS_BUILD_HAVE_SVE2 FALSE)
+    set(HS_BUILD_HAVE_SVE2_HISTCNT FALSE)
     set(HS_BUILD_HAVE_SVEBITPERM FALSE)
     set(HS_SVE_C_FLAGS "")
     set(HS_SVE2_C_FLAGS "")
+    set(HS_SVE2_HISTCNT_C_FLAGS "")
     set(HS_SVEBITPERM_C_FLAGS "")
 
     set(_HS_ARM_REQUIRED_FLAGS_SAVED "${CMAKE_REQUIRED_FLAGS}")
@@ -601,6 +603,18 @@ int main(void) {
 #endif
 int main(void) {
     return 0;
+}")
+
+    set(_HS_SVE2_HISTCNT_TEST_SOURCE
+"#include <arm_sve.h>
+#if !defined(__ARM_FEATURE_SVE2)
+#error no sve2
+#endif
+int main(void) {
+    svbool_t pg = svptrue_b32();
+    svuint32_t data = svdup_n_u32(1);
+    svuint32_t out = svhistcnt_u32_z(pg, data, data);
+    return (int)svlastb_u32(pg, out);
 }")
 
     set(_HS_SVEBITPERM_TEST_SOURCE
@@ -684,6 +698,18 @@ int main(void) {
         endforeach()
     endif()
 
+    if (HS_ARM_TARGET_HAVE_SVE2 AND HS_BUILD_HAVE_SVE2)
+        set(CMAKE_REQUIRED_FLAGS
+            "${_HS_ARM_REQUIRED_BASE_FLAGS} ${HS_SVE2_C_FLAGS}")
+        unset(HS_TOOLCHAIN_SVE2_HISTCNT_TEST CACHE)
+        CHECK_C_SOURCE_COMPILES("${_HS_SVE2_HISTCNT_TEST_SOURCE}"
+                                HS_TOOLCHAIN_SVE2_HISTCNT_TEST)
+        if (HS_TOOLCHAIN_SVE2_HISTCNT_TEST)
+            set(HS_BUILD_HAVE_SVE2_HISTCNT TRUE)
+            set(HS_SVE2_HISTCNT_C_FLAGS "${HS_SVE2_C_FLAGS}")
+        endif()
+    endif()
+
     set(CMAKE_REQUIRED_FLAGS "${_HS_ARM_REQUIRED_FLAGS_SAVED}")
 
     if (HS_BUILD_HAVE_SVE)
@@ -696,6 +722,24 @@ int main(void) {
         message(STATUS "ARM toolchain can compile SVE2 code paths (${HS_SVE2_C_FLAGS})")
     else()
         message(STATUS "ARM toolchain cannot compile SVE2 code paths")
+    endif()
+
+    if (HS_BUILD_HAVE_SVE2_HISTCNT)
+        message(STATUS
+            "ARM SVE2 HISTCNT code paths enabled "
+            "(${HS_SVE2_HISTCNT_C_FLAGS})")
+    elseif (NOT HS_ARM_TARGET_HAVE_SVE2)
+        message(STATUS
+            "ARM SVE2 HISTCNT code paths disabled for selected target "
+            "(target lacks SVE2)")
+    elseif (NOT HS_BUILD_HAVE_SVE2)
+        message(STATUS
+            "ARM SVE2 HISTCNT code paths disabled; toolchain cannot compile "
+            "SVE2 code paths")
+    else()
+        message(STATUS
+            "ARM SVE2 HISTCNT code paths disabled; toolchain cannot compile "
+            "svhistcnt")
     endif()
 
     if (HS_BUILD_HAVE_SVEBITPERM)
@@ -976,7 +1020,16 @@ set (hs_exec_common_SRCS
     src/fat_database.h
     src/fp_collector.c
     src/fp_collector.h
+    src/fp_collector_hist.c
+    src/fp_collector_hist.h
     )
+
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64" AND
+        HS_BUILD_HAVE_SVE2_HISTCNT)
+    list(APPEND hs_exec_common_SRCS src/fp_collector_hist_sve2.c)
+    set_source_files_properties(src/fp_collector_hist_sve2.c PROPERTIES
+        COMPILE_FLAGS "${HS_SVE2_HISTCNT_C_FLAGS}")
+endif()
 
 set (hs_exec_SRCS
     ${hs_HEADERS}

@@ -27,6 +27,7 @@
  */
 
 #include "fp_collector.h"
+#include "fp_collector_hist.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -39,8 +40,6 @@
 #include "rose/rose_internal.h"
 #include "scratch.h"
 #include "ue2common.h"
-
-#define HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE 64U
 
 struct hs_fp_counter {
     u32 key;
@@ -69,6 +68,7 @@ struct hs_fp_collector {
     u64a unknown_mpv_or_nfa_queue_count;
     u64a unknown_counter_missing_count;
     u64a dropped_trigger_count;
+    u8 histogram_backend;
     u32 pending_trigger_count;
     u32 pending_trigger_keys[HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE];
 };
@@ -146,8 +146,6 @@ struct hs_fp_feedback_build_options {
     u32 max_bad_fragments;
 };
 
-typedef void (*hs_fp_histogram_emit_fn)(void *ctx, u32 key, u64a count);
-
 static
 u64a sat_add_u64a(u64a a, u64a b) {
     const u64a max = ~(u64a)0;
@@ -162,6 +160,7 @@ u64a sub_or_zero_u64a(u64a a, u64a b) {
     return a > b ? a - b : 0;
 }
 
+static
 char ratio_at_least(u64a num, u64a den, u64a min_num, u64a min_den) {
     if (!den) {
         return 0;
@@ -632,41 +631,6 @@ void add_counter_trigger_count(void *ctx, u32 key, u64a count) {
     counter->trigger_count = sat_add_u64a(counter->trigger_count, count);
 }
 
-static
-void histogram_count_batch_scalar(const u32 *keys, u32 count,
-                                  hs_fp_histogram_emit_fn emit, void *ctx) {
-    for (u32 i = 0; i < count; i++) {
-        const u32 key = keys[i];
-        u64a key_count = 1;
-        char first = 1;
-
-        for (u32 j = 0; j < i; j++) {
-            if (keys[j] == key) {
-                first = 0;
-                break;
-            }
-        }
-
-        if (!first) {
-            continue;
-        }
-
-        for (u32 j = i + 1; j < count; j++) {
-            if (keys[j] == key) {
-                key_count++;
-            }
-        }
-
-        emit(ctx, key, key_count);
-    }
-}
-
-static
-void histogram_count_batch(const u32 *keys, u32 count,
-                           hs_fp_histogram_emit_fn emit, void *ctx) {
-    histogram_count_batch_scalar(keys, count, emit, ctx);
-}
-
 void hs_fp_collector_flush(hs_fp_collector_t *collector) {
     if (!collector || !collector->pending_trigger_count) {
         return;
@@ -674,8 +638,9 @@ void hs_fp_collector_flush(hs_fp_collector_t *collector) {
 
     const u32 count = collector->pending_trigger_count;
     collector->pending_trigger_count = 0;
-    histogram_count_batch(collector->pending_trigger_keys, count,
-                          add_counter_trigger_count, collector);
+    hs_fp_histogram_count_batch(collector->histogram_backend,
+                                collector->pending_trigger_keys, count,
+                                add_counter_trigger_count, collector);
 }
 
 static
@@ -729,6 +694,7 @@ hs_error_t HS_CDECL hs_fp_collector_create(const hs_database_t *db,
     memset(c, 0, sizeof(*c));
     c->db = db;
     c->rose = rose;
+    c->histogram_backend = hs_fp_histogram_select_backend();
 
     c->counter_capacity = choose_counter_capacity(rose);
     c->counters = hs_misc_alloc(sizeof(*c->counters) * c->counter_capacity);

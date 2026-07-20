@@ -36,6 +36,9 @@
 /* Define if the build toolchain can compile SVE2 code paths. */
 #cmakedefine HS_BUILD_HAVE_SVE2
 
+/* Define if the build toolchain can compile SVE2 HISTCNT code paths. */
+#cmakedefine HS_BUILD_HAVE_SVE2_HISTCNT
+
 /* Define if the build toolchain can compile SVE2 bitperm code paths. */
 #cmakedefine HS_BUILD_HAVE_SVEBITPERM
 
