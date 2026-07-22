@@ -44,8 +44,7 @@
 #include "hs_common.h"
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 /**
@@ -66,20 +65,20 @@ struct hs_scratch;
 typedef struct hs_scratch hs_scratch_t;
 
 /** Values reported in @ref hs_fp_fragment_info_t::table. */
-#define HS_FP_TABLE_UNKNOWN       0U
-#define HS_FP_TABLE_FLOATING      1U
-#define HS_FP_TABLE_EOD_ANCHORED  2U
-#define HS_FP_TABLE_SMALL_BLOCK   3U
+#define HS_FP_TABLE_UNKNOWN 0U
+#define HS_FP_TABLE_FLOATING 1U
+#define HS_FP_TABLE_EOD_ANCHORED 2U
+#define HS_FP_TABLE_SMALL_BLOCK 3U
 #define HS_FP_TABLE_DELAY_REBUILD 4U
-#define HS_FP_TABLE_ANCHORED      5U
+#define HS_FP_TABLE_ANCHORED 5U
 
 /** Values reported in @ref hs_fp_fragment_info_t::engine. */
 #define HS_FP_ENGINE_UNKNOWN 0U
-#define HS_FP_ENGINE_NOODLE  1U
-#define HS_FP_ENGINE_FDR     2U
+#define HS_FP_ENGINE_NOODLE 1U
+#define HS_FP_ENGINE_FDR 2U
 #define HS_FP_ENGINE_NEO_FDR 3U
-#define HS_FP_ENGINE_HAO     4U
-#define HS_FP_ENGINE_TEDDY   5U
+#define HS_FP_ENGINE_HAO 4U
+#define HS_FP_ENGINE_TEDDY 5U
 
 /** Flags reported in @ref hs_fp_fragment_info_t::flags. */
 #define HS_FP_FRAGMENT_FLAG_NOCASE 0x01U
@@ -90,18 +89,18 @@ typedef struct hs_scratch hs_scratch_t;
 #define HS_FP_FEEDBACK_RATE_SCALE 10000U
 
 /** Default false-positive feedback thresholds. */
-#define HS_FP_FEEDBACK_DEFAULT_MIN_TRIGGER_COUNT         1000ULL
-#define HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_COUNT  1000ULL
-#define HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_RATE   9900U
-#define HS_FP_FEEDBACK_DEFAULT_MIN_WASTE_SHARE           500U
-#define HS_FP_FEEDBACK_DEFAULT_MAX_BAD_FRAGMENTS         0U
+#define HS_FP_FEEDBACK_DEFAULT_MIN_TRIGGER_COUNT 1000ULL
+#define HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_COUNT 1000ULL
+#define HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_RATE 9900U
+#define HS_FP_FEEDBACK_DEFAULT_MIN_WASTE_SHARE 500U
+#define HS_FP_FEEDBACK_DEFAULT_MAX_BAD_FRAGMENTS 0U
 
 /** Flags for hs_fp_feedback_params_t::flags. */
-#define HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT         0x01U
-#define HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT  0x02U
-#define HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE   0x04U
-#define HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE           0x08U
-#define HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS         0x10U
+#define HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT 0x01U
+#define HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT 0x02U
+#define HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE 0x04U
+#define HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE 0x08U
+#define HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS 0x10U
 
 /** Summary counters exported from a false-positive feedback report. */
 typedef struct hs_fp_report_summary {
@@ -143,7 +142,8 @@ typedef struct hs_fp_report_summary {
 
 /** Summary counters exported from false-positive feedback. */
 typedef struct hs_fp_feedback_summary {
-    /** Number of bad fragments available through hs_fp_feedback_get_fragment(). */
+    /** Number of bad fragments available through hs_fp_feedback_get_fragment().
+     */
     unsigned int bad_fragment_count;
     /** Number of scan calls represented by the source report. */
     unsigned long long scan_calls;
@@ -276,8 +276,8 @@ hs_error_t HS_CDECL hs_fp_report_free(hs_fp_report_t *report);
  * @return
  *      @ref HS_SUCCESS on success, @ref HS_INVALID for invalid arguments.
  */
-hs_error_t HS_CDECL hs_fp_report_get_summary(
-    const hs_fp_report_t *report, hs_fp_report_summary_t *summary);
+hs_error_t HS_CDECL hs_fp_report_get_summary(const hs_fp_report_t *report,
+                                             hs_fp_report_summary_t *summary);
 
 /**
  * Export one fragment from a false-positive feedback report.
@@ -292,9 +292,9 @@ hs_error_t HS_CDECL hs_fp_report_get_summary(
  *      @ref HS_SUCCESS on success, @ref HS_INVALID for invalid arguments or
  *      an out-of-range index.
  */
-hs_error_t HS_CDECL hs_fp_report_get_fragment(
-    const hs_fp_report_t *report, unsigned int index,
-    hs_fp_fragment_info_t *fragment);
+hs_error_t HS_CDECL hs_fp_report_get_fragment(const hs_fp_report_t *report,
+                                              unsigned int index,
+                                              hs_fp_fragment_info_t *fragment);
 
 /**
  * Build compile-time false-positive feedback from a report.
@@ -414,11 +414,10 @@ hs_error_t HS_CDECL hs_fp_feedback_get_fragment(
  *      subsequent calls to @ref hs_scan_stream() for that stream will
  *      immediately return with @ref HS_SCAN_TERMINATED.
  */
-typedef int (HS_CDECL *match_event_handler)(unsigned int id,
-                                            unsigned long long from,
-                                            unsigned long long to,
-                                            unsigned int flags,
-                                            void *context);
+typedef int(HS_CDECL *match_event_handler)(unsigned int id,
+                                           unsigned long long from,
+                                           unsigned long long to,
+                                           unsigned int flags, void *context);
 
 /**
  * Open and initialise a stream.
@@ -973,7 +972,7 @@ hs_error_t HS_CDECL hs_free_scratch(hs_scratch_t *scratch);
  * Callback 'from' return value, indicating that the start of this match was
  * too early to be tracked with the requested SOM_HORIZON precision.
  */
-#define HS_OFFSET_PAST_HORIZON    (~0ULL)
+#define HS_OFFSET_PAST_HORIZON (~0ULL)
 
 #ifdef __cplusplus
 } /* extern "C" */

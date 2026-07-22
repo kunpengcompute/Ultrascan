@@ -34,18 +34,12 @@
 
 namespace ue2 {
 
-CompileContext::CompileContext(bool in_isStreaming, bool in_isVectored,
-                               const target_t &in_target_info,
-                               const Grey &in_grey,
-                               const hs_fp_feedback_t *in_fp_feedback,
-                               hs_compile_context_checkpoint_info_t *
-                                   in_fp_checkpoint_info)
-    : streaming(in_isStreaming || in_isVectored),
-      vectored(in_isVectored),
-      target_info(in_target_info),
-      grey(in_grey),
-      fp_feedback(in_fp_feedback),
-      fp_checkpoint_info(in_fp_checkpoint_info) {
-}
+CompileContext::CompileContext(
+    bool in_isStreaming, bool in_isVectored, const target_t &in_target_info,
+    const Grey &in_grey, const hs_fp_feedback_t *in_fp_feedback,
+    hs_compile_context_checkpoint_info_t *in_fp_checkpoint_info)
+    : streaming(in_isStreaming || in_isVectored), vectored(in_isVectored),
+      target_info(in_target_info), grey(in_grey), fp_feedback(in_fp_feedback),
+      fp_checkpoint_info(in_fp_checkpoint_info) {}
 
 } // namespace ue2

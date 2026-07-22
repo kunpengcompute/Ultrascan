@@ -42,8 +42,7 @@
 #include "hs_common.h"
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 /**
@@ -146,15 +145,15 @@ hs_error_t HS_CDECL hs_compile_context_free(hs_compile_context_t *ctx);
  * Return the number of bad fragments checked during compile-time observe.
  * NULL returns zero.
  */
-unsigned int HS_CDECL hs_compile_context_observe_checked_count(
-    const hs_compile_context_t *ctx);
+unsigned int HS_CDECL
+hs_compile_context_observe_checked_count(const hs_compile_context_t *ctx);
 
 /**
  * Return the number of feedback bad fragments found in the newly compiled
  * database during compile-time observe. NULL returns zero.
  */
-unsigned int HS_CDECL hs_compile_context_observe_hit_count(
-    const hs_compile_context_t *ctx);
+unsigned int HS_CDECL
+hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx);
 
 /**
  * Compile-time false-positive feedback checkpoint identifiers.
@@ -345,16 +344,16 @@ typedef struct hs_expr_ext {
  */
 
 /** Flag indicating that the hs_expr_ext::min_offset field is used. */
-#define HS_EXT_FLAG_MIN_OFFSET      1ULL
+#define HS_EXT_FLAG_MIN_OFFSET 1ULL
 
 /** Flag indicating that the hs_expr_ext::max_offset field is used. */
-#define HS_EXT_FLAG_MAX_OFFSET      2ULL
+#define HS_EXT_FLAG_MAX_OFFSET 2ULL
 
 /** Flag indicating that the hs_expr_ext::min_length field is used. */
-#define HS_EXT_FLAG_MIN_LENGTH      4ULL
+#define HS_EXT_FLAG_MIN_LENGTH 4ULL
 
 /** Flag indicating that the hs_expr_ext::edit_distance field is used. */
-#define HS_EXT_FLAG_EDIT_DISTANCE   8ULL
+#define HS_EXT_FLAG_EDIT_DISTANCE 8ULL
 
 /** Flag indicating that the hs_expr_ext::hamming_distance field is used. */
 #define HS_EXT_FLAG_HAMMING_DISTANCE 16ULL
@@ -431,9 +430,10 @@ hs_error_t HS_CDECL hs_compile(const char *expression, unsigned int flags,
                                hs_database_t **db, hs_compile_error_t **error);
 
 hs_error_t HS_CDECL fat_hs_compile(const char *expression, unsigned int flags,
-                               unsigned int mode,
-                               const hs_platform_info_t *platform,
-                               fat_hs_database_t **db, hs_compile_error_t **error);
+                                   unsigned int mode,
+                                   const hs_platform_info_t *platform,
+                                   fat_hs_database_t **db,
+                                   hs_compile_error_t **error);
 
 /**
  * The multiple regular expression compiler.
@@ -522,22 +522,16 @@ hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
                                      hs_compile_error_t **error);
 
 hs_error_t HS_CDECL hs_compile_multi_with_context(
-                                     const char *const *expressions,
-                                     const unsigned int *flags,
-                                     const unsigned int *ids,
-                                     unsigned int elements, unsigned int mode,
-                                     const hs_platform_info_t *platform,
-                                     const hs_compile_context_t *ctx,
-                                     hs_database_t **db,
-                                     hs_compile_error_t **error);
+    const char *const *expressions, const unsigned int *flags,
+    const unsigned int *ids, unsigned int elements, unsigned int mode,
+    const hs_platform_info_t *platform, const hs_compile_context_t *ctx,
+    hs_database_t **db, hs_compile_error_t **error);
 
-hs_error_t HS_CDECL fat_hs_compile_multi(const char *const *expressions,
-                                     const unsigned int *flags,
-                                     const unsigned int *ids,
-                                     unsigned int elements, unsigned int mode,
-                                     const hs_platform_info_t *platform,
-                                     fat_hs_database_t **db,
-                                     hs_compile_error_t **error);
+hs_error_t HS_CDECL
+fat_hs_compile_multi(const char *const *expressions, const unsigned int *flags,
+                     const unsigned int *ids, unsigned int elements,
+                     unsigned int mode, const hs_platform_info_t *platform,
+                     fat_hs_database_t **db, hs_compile_error_t **error);
 
 /**
  * The multiple regular expression compiler with extended parameter support.
@@ -622,33 +616,26 @@ hs_error_t HS_CDECL fat_hs_compile_multi(const char *const *expressions,
  *      parameter.
  *
  */
-hs_error_t HS_CDECL hs_compile_ext_multi(const char *const *expressions,
-                                const unsigned int *flags,
-                                const unsigned int *ids,
-                                const hs_expr_ext_t *const *ext,
-                                unsigned int elements, unsigned int mode,
-                                const hs_platform_info_t *platform,
-                                hs_database_t **db, hs_compile_error_t **error);
+hs_error_t HS_CDECL
+hs_compile_ext_multi(const char *const *expressions, const unsigned int *flags,
+                     const unsigned int *ids, const hs_expr_ext_t *const *ext,
+                     unsigned int elements, unsigned int mode,
+                     const hs_platform_info_t *platform, hs_database_t **db,
+                     hs_compile_error_t **error);
 
 hs_error_t HS_CDECL hs_compile_ext_multi_with_context(
-                                const char *const *expressions,
-                                const unsigned int *flags,
-                                const unsigned int *ids,
-                                const hs_expr_ext_t *const *ext,
-                                unsigned int elements, unsigned int mode,
-                                const hs_platform_info_t *platform,
-                                const hs_compile_context_t *ctx,
-                                hs_database_t **db,
-                                hs_compile_error_t **error);
+    const char *const *expressions, const unsigned int *flags,
+    const unsigned int *ids, const hs_expr_ext_t *const *ext,
+    unsigned int elements, unsigned int mode,
+    const hs_platform_info_t *platform, const hs_compile_context_t *ctx,
+    hs_database_t **db, hs_compile_error_t **error);
 
-hs_error_t HS_CDECL fat_hs_compile_ext_multi(const char *const *expressions,
-                                const unsigned int *flags,
-                                const unsigned int *ids,
-                                const hs_expr_ext_t *const *ext,
-                                unsigned int elements, unsigned int mode,
-                                const hs_platform_info_t *platform,
-                                fat_hs_database_t **db,
-                                hs_compile_error_t **error);
+hs_error_t HS_CDECL
+fat_hs_compile_ext_multi(const char *const *expressions,
+                         const unsigned int *flags, const unsigned int *ids,
+                         const hs_expr_ext_t *const *ext, unsigned int elements,
+                         unsigned int mode, const hs_platform_info_t *platform,
+                         fat_hs_database_t **db, hs_compile_error_t **error);
 
 /**
  * The basic pure literal expression compiler.
@@ -723,10 +710,10 @@ hs_error_t HS_CDECL hs_compile_lit(const char *expression, unsigned flags,
                                    hs_compile_error_t **error);
 
 hs_error_t HS_CDECL fat_hs_compile_lit(const char *expression, unsigned flags,
-                                   const size_t len, unsigned mode,
-                                   const hs_platform_info_t *platform,
-                                   fat_hs_database_t **db,
-                                   hs_compile_error_t **error);
+                                       const size_t len, unsigned mode,
+                                       const hs_platform_info_t *platform,
+                                       fat_hs_database_t **db,
+                                       hs_compile_error_t **error);
 /**
  * The multiple pure literal expression compiler.
  *
@@ -804,22 +791,16 @@ hs_error_t HS_CDECL fat_hs_compile_lit(const char *expression, unsigned flags,
  *      HS_COMPILER_ERROR on failure, with details provided in the error
  *      parameter.
  */
-hs_error_t HS_CDECL hs_compile_lit_multi(const char * const *expressions,
-                                         const unsigned *flags,
-                                         const unsigned *ids,
-                                         const size_t *lens,
-                                         unsigned elements, unsigned mode,
-                                         const hs_platform_info_t *platform,
-                                         hs_database_t **db,
-                                         hs_compile_error_t **error);
-hs_error_t HS_CDECL fat_hs_compile_lit_multi(const char * const *expressions,
-                                         const unsigned *flags,
-                                         const unsigned *ids,
-                                         const size_t *lens,
-                                         unsigned elements, unsigned mode,
-                                         const hs_platform_info_t *platform,
-                                         fat_hs_database_t **db,
-                                         hs_compile_error_t **error);
+hs_error_t HS_CDECL
+hs_compile_lit_multi(const char *const *expressions, const unsigned *flags,
+                     const unsigned *ids, const size_t *lens, unsigned elements,
+                     unsigned mode, const hs_platform_info_t *platform,
+                     hs_database_t **db, hs_compile_error_t **error);
+hs_error_t HS_CDECL fat_hs_compile_lit_multi(
+    const char *const *expressions, const unsigned *flags, const unsigned *ids,
+    const size_t *lens, unsigned elements, unsigned mode,
+    const hs_platform_info_t *platform, fat_hs_database_t **db,
+    hs_compile_error_t **error);
 
 /**
  * Free an error structure generated by @ref hs_compile(), @ref
@@ -1024,7 +1005,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * The expression may still use PCRE tokens (notably `(?i)` and
  * `(?-i)`) to switch case-insensitive matching on and off.
  */
-#define HS_FLAG_CASELESS        1
+#define HS_FLAG_CASELESS 1
 
 /**
  * Compile flag: Matching a `.` will not exclude newlines.
@@ -1034,7 +1015,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * token does not match newline characters by default, so without this flag the
  * `.` token will not cross line boundaries.
  */
-#define HS_FLAG_DOTALL          2
+#define HS_FLAG_DOTALL 2
 
 /**
  * Compile flag: Set multi-line anchoring.
@@ -1045,7 +1026,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * stream, and the `$` token will only ever match at the end of a stream within
  * the guidelines of the PCRE specification.
  */
-#define HS_FLAG_MULTILINE       4
+#define HS_FLAG_MULTILINE 4
 
 /**
  * Compile flag: Set single-match only mode.
@@ -1066,7 +1047,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * Note: The use of this flag in combination with @ref HS_FLAG_SOM_LEFTMOST
  * is not currently supported.
  */
-#define HS_FLAG_SINGLEMATCH     8
+#define HS_FLAG_SINGLEMATCH 8
 
 /**
  * Compile flag: Allow expressions that can match against empty buffers.
@@ -1078,7 +1059,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * compile one is made. Using this flag will force the compiler to allow such
  * an expression.
  */
-#define HS_FLAG_ALLOWEMPTY      16
+#define HS_FLAG_ALLOWEMPTY 16
 
 /**
  * Compile flag: Enable UTF-8 mode for this expression.
@@ -1088,7 +1069,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * library that has been compiled with one or more patterns using this flag are
  * undefined.
  */
-#define HS_FLAG_UTF8            32
+#define HS_FLAG_UTF8 32
 
 /**
  * Compile flag: Enable Unicode property support for this expression.
@@ -1098,7 +1079,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * well as the POSIX character classes. It is only meaningful in conjunction
  * with @ref HS_FLAG_UTF8.
  */
-#define HS_FLAG_UCP             64
+#define HS_FLAG_UCP 64
 
 /**
  * Compile flag: Enable prefiltering mode for this expression.
@@ -1126,7 +1107,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * Note: The use of this flag in combination with @ref HS_FLAG_SOM_LEFTMOST
  * is not currently supported.
  */
-#define HS_FLAG_PREFILTER       128
+#define HS_FLAG_PREFILTER 128
 
 /**
  * Compile flag: Enable leftmost start of match reporting.
@@ -1138,7 +1119,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * For all the 3 modes, enabling this behaviour may reduce performance. And
  * particularly, it may increase stream state requirements in streaming mode.
  */
-#define HS_FLAG_SOM_LEFTMOST    256
+#define HS_FLAG_SOM_LEFTMOST 256
 
 /**
  * Compile flag: Logical combination.
@@ -1152,7 +1133,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  *     (101&102&103)|(104&!105)
  *     ((301|302)&303)&(304|305)
  */
-#define HS_FLAG_COMBINATION     512
+#define HS_FLAG_COMBINATION 512
 
 /**
  * Compile flag: Don't do any match reporting.
@@ -1160,7 +1141,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * This flag instructs Hyperscan to ignore match reporting for this expression.
  * It is designed to be used on the sub-expressions in logical combinations.
  */
-#define HS_FLAG_QUIET           1024
+#define HS_FLAG_QUIET 1024
 
 /** @} */
 
@@ -1176,7 +1157,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * Setting this flag indicates that the target platform supports AVX2
  * instructions.
  */
-#define HS_CPU_FEATURES_AVX2             (1ULL << 2)
+#define HS_CPU_FEATURES_AVX2 (1ULL << 2)
 
 /**
  * CPU features flag - Intel(R) Advanced Vector Extensions 512 (Intel(R) AVX512)
@@ -1184,7 +1165,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * Setting this flag indicates that the target platform supports AVX512
  * instructions, specifically AVX-512BW. Using AVX512 implies the use of AVX2.
  */
-#define HS_CPU_FEATURES_AVX512           (1ULL << 3)
+#define HS_CPU_FEATURES_AVX512 (1ULL << 3)
 
 /**
  * CPU features flag - Intel(R) Advanced Vector Extensions 512
@@ -1193,7 +1174,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * Setting this flag indicates that the target platform supports AVX512VBMI
  * instructions. Using AVX512VBMI implies the use of AVX512.
  */
-#define HS_CPU_FEATURES_AVX512VBMI       (1ULL << 4)
+#define HS_CPU_FEATURES_AVX512VBMI (1ULL << 4)
 
 /**
  * CPU features flag - Arm Scalable Vector Extension (SVE)
@@ -1201,7 +1182,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * Setting this flag indicates that the target platform supports SVE
  * instructions.
  */
-#define HS_CPU_FEATURES_SVE              (1ULL << 5)
+#define HS_CPU_FEATURES_SVE (1ULL << 5)
 
 /**
  * CPU features flag - Arm Scalable Vector Extension 2 (SVE2)
@@ -1209,7 +1190,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * Setting this flag indicates that the target platform supports SVE2
  * instructions. Using SVE2 implies the use of SVE.
  */
-#define HS_CPU_FEATURES_SVE2             (1ULL << 6)
+#define HS_CPU_FEATURES_SVE2 (1ULL << 6)
 
 /**
  * CPU features flag - Arm SVE2 Bit Permute extension (SVEBITPERM)
@@ -1218,7 +1199,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * SVE2 bit permute instructions. Using SVEBITPERM implies the use of SVE2
  * and SVE.
  */
-#define HS_CPU_FEATURES_SVEBITPERM       (1ULL << 7)
+#define HS_CPU_FEATURES_SVEBITPERM (1ULL << 7)
 
 /** @} */
 
@@ -1336,22 +1317,22 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
 /**
  * Compiler mode flag: Block scan (non-streaming) database.
  */
-#define HS_MODE_BLOCK           1
+#define HS_MODE_BLOCK 1
 
 /**
  * Compiler mode flag: Alias for @ref HS_MODE_BLOCK.
  */
-#define HS_MODE_NOSTREAM        1
+#define HS_MODE_NOSTREAM 1
 
 /**
  * Compiler mode flag: Streaming database.
  */
-#define HS_MODE_STREAM          2
+#define HS_MODE_STREAM 2
 
 /**
  * Compiler mode flag: Vectored scanning database.
  */
-#define HS_MODE_VECTORED        4
+#define HS_MODE_VECTORED 4
 
 /**
  * Compiler mode flag: use full precision to track start of match offsets in
@@ -1364,7 +1345,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * One of the SOM_HORIZON modes must be selected to use the @ref
  * HS_FLAG_SOM_LEFTMOST expression flag.
  */
-#define HS_MODE_SOM_HORIZON_LARGE   (1U << 24)
+#define HS_MODE_SOM_HORIZON_LARGE (1U << 24)
 
 /**
  * Compiler mode flag: use medium precision to track start of match offsets in
@@ -1377,7 +1358,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * One of the SOM_HORIZON modes must be selected to use the @ref
  * HS_FLAG_SOM_LEFTMOST expression flag.
  */
-#define HS_MODE_SOM_HORIZON_MEDIUM  (1U << 25)
+#define HS_MODE_SOM_HORIZON_MEDIUM (1U << 25)
 
 /**
  * Compiler mode flag: use limited precision to track start of match offsets in
@@ -1390,7 +1371,7 @@ hs_error_t HS_CDECL hs_populate_platform(hs_platform_info_t *platform);
  * One of the SOM_HORIZON modes must be selected to use the @ref
  * HS_FLAG_SOM_LEFTMOST expression flag.
  */
-#define HS_MODE_SOM_HORIZON_SMALL   (1U << 26)
+#define HS_MODE_SOM_HORIZON_SMALL (1U << 26)
 
 /** @} */
 

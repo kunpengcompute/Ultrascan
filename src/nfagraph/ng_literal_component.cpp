@@ -33,17 +33,17 @@
 
 #include "ng_literal_component.h"
 
+#include "compiler/compiler.h"
 #include "fp_collector.h"
 #include "grey.h"
 #include "ng.h"
 #include "ng_literal_quality.h"
 #include "ng_prune.h"
 #include "ng_util.h"
-#include "ue2common.h"
-#include "compiler/compiler.h"
 #include "rose/rose_build.h"
-#include "util/container.h"
+#include "ue2common.h"
 #include "util/compile_context.h"
+#include "util/container.h"
 #include "util/graph.h"
 #include "util/graph_range.h"
 #include "util/ue2string.h"
@@ -54,9 +54,8 @@ using namespace std;
 
 namespace ue2 {
 
-static
-bool isLiteralChar(const NGHolder &g, NFAVertex v, bool &nocase,
-                   bool &casefixed) {
+static bool isLiteralChar(const NGHolder &g, NFAVertex v, bool &nocase,
+                          bool &casefixed) {
     const CharReach &cr = g[v].char_reach;
     const size_t num = cr.count();
     if (num > 2) {
@@ -91,8 +90,7 @@ bool isLiteralChar(const NGHolder &g, NFAVertex v, bool &nocase,
     return false;
 }
 
-static
-void addToString(string &s, const NGHolder &g, NFAVertex v) {
+static void addToString(string &s, const NGHolder &g, NFAVertex v) {
     const CharReach &cr = g[v].char_reach;
     assert(cr.count() == 1 || cr.isCaselessChar());
 
@@ -100,9 +98,8 @@ void addToString(string &s, const NGHolder &g, NFAVertex v) {
     s.push_back(c);
 }
 
-static
-bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v, const bool anchored,
-                     set<NFAVertex> &dead) {
+static bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v,
+                            const bool anchored, set<NFAVertex> &dead) {
     DEBUG_PRINTF("examine vertex %zu\n", g[v].index);
     bool nocase = false, casefixed = false;
 
@@ -191,10 +188,9 @@ bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v, const bool anchored,
     ue2_literal rose_literal(literal, nocase);
     if (ng.cc.fp_feedback) {
         fpCompileRecordCheck(ng.cc, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT);
-        if (hs_fp_feedback_literal_is_bad(ng.cc.fp_feedback,
-                                          rose_literal.c_str(),
-                                          rose_literal.length(),
-                                          rose_literal.any_nocase())) {
+        if (hs_fp_feedback_literal_is_bad(
+                ng.cc.fp_feedback, rose_literal.c_str(), rose_literal.length(),
+                rose_literal.any_nocase())) {
             DEBUG_PRINTF("skipping literal split due to fp feedback\n");
             fpCompileRecordHit(ng.cc, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT);
             fpCompileRecordBlocked(ng.cc,

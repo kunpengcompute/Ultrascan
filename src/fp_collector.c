@@ -146,8 +146,7 @@ struct hs_fp_feedback_build_options {
     u32 max_bad_fragments;
 };
 
-static
-u64a sat_add_u64a(u64a a, u64a b) {
+static u64a sat_add_u64a(u64a a, u64a b) {
     const u64a max = ~(u64a)0;
     if (max - a < b) {
         return max;
@@ -155,13 +154,9 @@ u64a sat_add_u64a(u64a a, u64a b) {
     return a + b;
 }
 
-static
-u64a sub_or_zero_u64a(u64a a, u64a b) {
-    return a > b ? a - b : 0;
-}
+static u64a sub_or_zero_u64a(u64a a, u64a b) { return a > b ? a - b : 0; }
 
-static
-char ratio_at_least(u64a num, u64a den, u64a min_num, u64a min_den) {
+static char ratio_at_least(u64a num, u64a den, u64a min_num, u64a min_den) {
     if (!den) {
         return 0;
     }
@@ -179,8 +174,7 @@ char ratio_at_least(u64a num, u64a den, u64a min_num, u64a min_den) {
     return lhs >= rhs;
 }
 
-static
-u32 hash_u32(u32 v) {
+static u32 hash_u32(u32 v) {
     v ^= v >> 16;
     v *= 0x7feb352dU;
     v ^= v >> 15;
@@ -189,8 +183,7 @@ u32 hash_u32(u32 v) {
     return v;
 }
 
-static
-u32 next_power_of_two_u32(u32 v) {
+static u32 next_power_of_two_u32(u32 v) {
     if (v <= 1) {
         return 1;
     }
@@ -204,8 +197,7 @@ u32 next_power_of_two_u32(u32 v) {
     return v + 1;
 }
 
-static
-u32 choose_counter_capacity(const struct RoseEngine *rose) {
+static u32 choose_counter_capacity(const struct RoseEngine *rose) {
     u32 wanted = rose->totalNumLiterals;
     if (wanted < 4) {
         wanted = 4;
@@ -218,8 +210,7 @@ u32 choose_counter_capacity(const struct RoseEngine *rose) {
     return next_power_of_two_u32(wanted);
 }
 
-static
-int compare_report_entry(const void *a, const void *b) {
+static int compare_report_entry(const void *a, const void *b) {
     const struct hs_fp_report_entry *entry_a = a;
     const struct hs_fp_report_entry *entry_b = b;
 
@@ -232,8 +223,7 @@ int compare_report_entry(const void *a, const void *b) {
     return 0;
 }
 
-static
-int compare_feedback_entry_score(const void *a, const void *b) {
+static int compare_feedback_entry_score(const void *a, const void *b) {
     const struct hs_fp_feedback_entry *entry_a = a;
     const struct hs_fp_feedback_entry *entry_b = b;
 
@@ -260,10 +250,9 @@ int compare_feedback_entry_score(const void *a, const void *b) {
     return 0;
 }
 
-static
-hs_error_t make_feedback_build_options(
-        const hs_fp_feedback_params_t *params,
-        struct hs_fp_feedback_build_options *options) {
+static hs_error_t
+make_feedback_build_options(const hs_fp_feedback_params_t *params,
+                            struct hs_fp_feedback_build_options *options) {
     static const u32 known_flags =
         HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT |
         HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT |
@@ -302,8 +291,7 @@ hs_error_t make_feedback_build_options(
         if (!params->min_false_positive_count) {
             return HS_INVALID;
         }
-        options->min_false_positive_count =
-            params->min_false_positive_count;
+        options->min_false_positive_count = params->min_false_positive_count;
     }
 
     if (params->flags & HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE) {
@@ -330,9 +318,8 @@ hs_error_t make_feedback_build_options(
     return HS_SUCCESS;
 }
 
-static
-const struct RoseFpFragmentMeta *find_fragment_meta(
-        const struct RoseEngine *rose, u32 key) {
+static const struct RoseFpFragmentMeta *
+find_fragment_meta(const struct RoseEngine *rose, u32 key) {
     const struct RoseFpFragmentMeta *meta = getRoseFpFragmentMeta(rose);
     if (!meta) {
         return NULL;
@@ -347,8 +334,7 @@ const struct RoseFpFragmentMeta *find_fragment_meta(
     return NULL;
 }
 
-static
-u32 count_used_counters(const hs_fp_collector_t *collector) {
+static u32 count_used_counters(const hs_fp_collector_t *collector) {
     u32 count = 0;
     for (u32 i = 0; i < collector->counter_capacity; i++) {
         if (collector->counters[i].used) {
@@ -358,10 +344,9 @@ u32 count_used_counters(const hs_fp_collector_t *collector) {
     return count;
 }
 
-static
-char fill_report_entry(struct hs_fp_report_entry *entry,
-                       const hs_fp_collector_t *collector,
-                       const struct hs_fp_counter *counter) {
+static char fill_report_entry(struct hs_fp_report_entry *entry,
+                              const hs_fp_collector_t *collector,
+                              const struct hs_fp_counter *counter) {
     entry->fragment_id = ROSE_OFFSET_INVALID;
     entry->trigger_count = counter->trigger_count;
     entry->true_trigger_count = counter->true_trigger_count;
@@ -387,31 +372,27 @@ char fill_report_entry(struct hs_fp_report_entry *entry,
     return 1;
 }
 
-static
-u64a count_total_false_positive_triggers(const hs_fp_report_t *report) {
+static u64a count_total_false_positive_triggers(const hs_fp_report_t *report) {
     u64a total = 0;
     for (u32 i = 0; i < report->entry_count; i++) {
         const struct hs_fp_report_entry *entry = report->entries + i;
-        u64a fp = sub_or_zero_u64a(entry->trigger_count,
-                                   entry->true_trigger_count);
+        u64a fp =
+            sub_or_zero_u64a(entry->trigger_count, entry->true_trigger_count);
         total = sat_add_u64a(total, fp);
     }
     return total;
 }
 
-static
-char report_entry_is_bad_fragment(const struct hs_fp_report_entry *entry,
-                                  u64a total_false_positive,
-                                  const struct hs_fp_feedback_build_options
-                                      *options) {
+static char report_entry_is_bad_fragment(
+    const struct hs_fp_report_entry *entry, u64a total_false_positive,
+    const struct hs_fp_feedback_build_options *options) {
     if (entry->fragment_id == ROSE_OFFSET_INVALID ||
         entry->table == HS_FP_TABLE_UNKNOWN ||
         entry->engine == HS_FP_ENGINE_UNKNOWN || !entry->length) {
         return 0;
     }
 
-    u64a fp = sub_or_zero_u64a(entry->trigger_count,
-                               entry->true_trigger_count);
+    u64a fp = sub_or_zero_u64a(entry->trigger_count, entry->true_trigger_count);
 
     if (!fp || entry->trigger_count < options->min_trigger_count ||
         fp < options->min_false_positive_count) {
@@ -424,8 +405,7 @@ char report_entry_is_bad_fragment(const struct hs_fp_report_entry *entry,
         return 0;
     }
 
-    if (!ratio_at_least(fp, total_false_positive,
-                        options->min_waste_share,
+    if (!ratio_at_least(fp, total_false_positive, options->min_waste_share,
                         HS_FP_FEEDBACK_RATE_SCALE)) {
         return 0;
     }
@@ -433,10 +413,9 @@ char report_entry_is_bad_fragment(const struct hs_fp_report_entry *entry,
     return 1;
 }
 
-static
-u32 count_bad_fragments(const hs_fp_report_t *report,
-                        u64a total_false_positive,
-                        const struct hs_fp_feedback_build_options *options) {
+static u32
+count_bad_fragments(const hs_fp_report_t *report, u64a total_false_positive,
+                    const struct hs_fp_feedback_build_options *options) {
     u32 count = 0;
     for (u32 i = 0; i < report->entry_count; i++) {
         if (report_entry_is_bad_fragment(report->entries + i,
@@ -447,9 +426,8 @@ u32 count_bad_fragments(const hs_fp_report_t *report,
     return count;
 }
 
-static
-void fill_feedback_entry(struct hs_fp_feedback_entry *dst,
-                         const struct hs_fp_report_entry *src) {
+static void fill_feedback_entry(struct hs_fp_feedback_entry *dst,
+                                const struct hs_fp_report_entry *src) {
     dst->key = src->key;
     dst->fragment_id = src->fragment_id;
     dst->literal_count = src->literal_count;
@@ -468,21 +446,18 @@ void fill_feedback_entry(struct hs_fp_feedback_entry *dst,
         sub_or_zero_u64a(src->trigger_count, src->true_trigger_count);
 }
 
-static
-hs_error_t build_feedback_entries(const hs_fp_report_t *report,
-                                  hs_fp_feedback_t *feedback,
-                                  u64a total_false_positive,
-                                  const struct hs_fp_feedback_build_options
-                                      *options) {
+static hs_error_t
+build_feedback_entries(const hs_fp_report_t *report, hs_fp_feedback_t *feedback,
+                       u64a total_false_positive,
+                       const struct hs_fp_feedback_build_options *options) {
     feedback->bad_fragment_count =
         count_bad_fragments(report, total_false_positive, options);
     if (!feedback->bad_fragment_count) {
         return HS_SUCCESS;
     }
 
-    feedback->entries =
-        hs_misc_alloc(sizeof(*feedback->entries) *
-                      feedback->bad_fragment_count);
+    feedback->entries = hs_misc_alloc(sizeof(*feedback->entries) *
+                                      feedback->bad_fragment_count);
     if (!feedback->entries) {
         return HS_NOMEM;
     }
@@ -512,9 +487,8 @@ hs_error_t build_feedback_entries(const hs_fp_report_t *report,
     return HS_SUCCESS;
 }
 
-static
-hs_error_t build_report_entries(const hs_fp_collector_t *collector,
-                                hs_fp_report_t *report) {
+static hs_error_t build_report_entries(const hs_fp_collector_t *collector,
+                                       hs_fp_report_t *report) {
     const u32 entry_count = count_used_counters(collector);
     if (!entry_count) {
         return HS_SUCCESS;
@@ -547,8 +521,7 @@ hs_error_t build_report_entries(const hs_fp_collector_t *collector,
     return HS_SUCCESS;
 }
 
-static
-void clear_collector_counts(hs_fp_collector_t *collector) {
+static void clear_collector_counts(hs_fp_collector_t *collector) {
     collector->scan_bytes = 0;
     collector->scan_calls = 0;
     collector->trigger_count = 0;
@@ -571,9 +544,8 @@ void clear_collector_counts(hs_fp_collector_t *collector) {
     }
 }
 
-static
-struct hs_fp_counter *get_counter(hs_fp_collector_t *collector, u32 key,
-                                  char create) {
+static struct hs_fp_counter *get_counter(hs_fp_collector_t *collector, u32 key,
+                                         char create) {
     if (!collector || !collector->counters || !collector->counter_capacity) {
         return NULL;
     }
@@ -599,8 +571,8 @@ struct hs_fp_counter *get_counter(hs_fp_collector_t *collector, u32 key,
     return NULL;
 }
 
-static
-void merge_counter(hs_fp_collector_t *dst, const struct hs_fp_counter *src) {
+static void merge_counter(hs_fp_collector_t *dst,
+                          const struct hs_fp_counter *src) {
     struct hs_fp_counter *dst_counter = get_counter(dst, src->key, 1);
     if (!dst_counter) {
         dst->dropped_trigger_count =
@@ -611,15 +583,12 @@ void merge_counter(hs_fp_collector_t *dst, const struct hs_fp_counter *src) {
     dst_counter->trigger_count =
         sat_add_u64a(dst_counter->trigger_count, src->trigger_count);
     dst_counter->true_trigger_count =
-        sat_add_u64a(dst_counter->true_trigger_count,
-                     src->true_trigger_count);
+        sat_add_u64a(dst_counter->true_trigger_count, src->true_trigger_count);
     dst_counter->final_report_count =
-        sat_add_u64a(dst_counter->final_report_count,
-                     src->final_report_count);
+        sat_add_u64a(dst_counter->final_report_count, src->final_report_count);
 }
 
-static
-void add_counter_trigger_count(void *ctx, u32 key, u64a count) {
+static void add_counter_trigger_count(void *ctx, u32 key, u64a count) {
     hs_fp_collector_t *collector = ctx;
     struct hs_fp_counter *counter = get_counter(collector, key, 1);
     if (!counter) {
@@ -643,8 +612,7 @@ void hs_fp_collector_flush(hs_fp_collector_t *collector) {
                                 add_counter_trigger_count, collector);
 }
 
-static
-void queue_trigger_key(hs_fp_collector_t *collector, u32 key) {
+static void queue_trigger_key(hs_fp_collector_t *collector, u32 key) {
     if (collector->pending_trigger_count ==
         HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE) {
         hs_fp_collector_flush(collector);
@@ -655,9 +623,9 @@ void queue_trigger_key(hs_fp_collector_t *collector, u32 key) {
     collector->pending_trigger_keys[collector->pending_trigger_count++] = key;
 }
 
-static
-hs_error_t validate_collector_database(const hs_database_t *db,
-                                       const struct RoseEngine **rose_out) {
+static hs_error_t
+validate_collector_database(const hs_database_t *db,
+                            const struct RoseEngine **rose_out) {
     hs_error_t err = validDatabase(db);
     if (err != HS_SUCCESS) {
         return err;
@@ -743,24 +711,20 @@ hs_error_t HS_CDECL hs_fp_collector_merge(hs_fp_collector_t *dst,
     dst->unknown_no_active_trigger_count =
         sat_add_u64a(dst->unknown_no_active_trigger_count,
                      src->unknown_no_active_trigger_count);
-    dst->unknown_delayed_replay_count =
-        sat_add_u64a(dst->unknown_delayed_replay_count,
-                     src->unknown_delayed_replay_count);
-    dst->unknown_anchored_replay_count =
-        sat_add_u64a(dst->unknown_anchored_replay_count,
-                     src->unknown_anchored_replay_count);
-    dst->unknown_eod_or_boundary_count =
-        sat_add_u64a(dst->unknown_eod_or_boundary_count,
-                     src->unknown_eod_or_boundary_count);
+    dst->unknown_delayed_replay_count = sat_add_u64a(
+        dst->unknown_delayed_replay_count, src->unknown_delayed_replay_count);
+    dst->unknown_anchored_replay_count = sat_add_u64a(
+        dst->unknown_anchored_replay_count, src->unknown_anchored_replay_count);
+    dst->unknown_eod_or_boundary_count = sat_add_u64a(
+        dst->unknown_eod_or_boundary_count, src->unknown_eod_or_boundary_count);
     dst->unknown_flush_combination_count =
         sat_add_u64a(dst->unknown_flush_combination_count,
                      src->unknown_flush_combination_count);
     dst->unknown_mpv_or_nfa_queue_count =
         sat_add_u64a(dst->unknown_mpv_or_nfa_queue_count,
                      src->unknown_mpv_or_nfa_queue_count);
-    dst->unknown_counter_missing_count =
-        sat_add_u64a(dst->unknown_counter_missing_count,
-                     src->unknown_counter_missing_count);
+    dst->unknown_counter_missing_count = sat_add_u64a(
+        dst->unknown_counter_missing_count, src->unknown_counter_missing_count);
     dst->dropped_trigger_count =
         sat_add_u64a(dst->dropped_trigger_count, src->dropped_trigger_count);
 
@@ -798,18 +762,14 @@ hs_error_t HS_CDECL hs_fp_collector_report(const hs_fp_collector_t *collector,
     r->unknown_report_count = collector->unknown_report_count;
     r->unknown_no_active_trigger_count =
         collector->unknown_no_active_trigger_count;
-    r->unknown_delayed_replay_count =
-        collector->unknown_delayed_replay_count;
-    r->unknown_anchored_replay_count =
-        collector->unknown_anchored_replay_count;
-    r->unknown_eod_or_boundary_count =
-        collector->unknown_eod_or_boundary_count;
+    r->unknown_delayed_replay_count = collector->unknown_delayed_replay_count;
+    r->unknown_anchored_replay_count = collector->unknown_anchored_replay_count;
+    r->unknown_eod_or_boundary_count = collector->unknown_eod_or_boundary_count;
     r->unknown_flush_combination_count =
         collector->unknown_flush_combination_count;
     r->unknown_mpv_or_nfa_queue_count =
         collector->unknown_mpv_or_nfa_queue_count;
-    r->unknown_counter_missing_count =
-        collector->unknown_counter_missing_count;
+    r->unknown_counter_missing_count = collector->unknown_counter_missing_count;
     r->dropped_trigger_count = collector->dropped_trigger_count;
 
     hs_error_t err = build_report_entries(collector, r);
@@ -840,8 +800,8 @@ hs_error_t HS_CDECL hs_fp_report_free(hs_fp_report_t *report) {
     return HS_SUCCESS;
 }
 
-hs_error_t HS_CDECL hs_fp_report_get_summary(
-        const hs_fp_report_t *report, hs_fp_report_summary_t *summary) {
+hs_error_t HS_CDECL hs_fp_report_get_summary(const hs_fp_report_t *report,
+                                             hs_fp_report_summary_t *summary) {
     if (!report || !summary) {
         return HS_INVALID;
     }
@@ -853,8 +813,7 @@ hs_error_t HS_CDECL hs_fp_report_get_summary(
     summary->trigger_count = report->trigger_count;
     summary->true_trigger_count = report->true_trigger_count;
     summary->final_report_count = report->final_report_count;
-    summary->false_positive_count =
-        count_total_false_positive_triggers(report);
+    summary->false_positive_count = count_total_false_positive_triggers(report);
     summary->unknown_report_count = report->unknown_report_count;
     summary->unknown_no_active_trigger_count =
         report->unknown_no_active_trigger_count;
@@ -876,9 +835,9 @@ hs_error_t HS_CDECL hs_fp_report_get_summary(
     return HS_SUCCESS;
 }
 
-hs_error_t HS_CDECL hs_fp_report_get_fragment(
-        const hs_fp_report_t *report, unsigned int index,
-        hs_fp_fragment_info_t *fragment) {
+hs_error_t HS_CDECL hs_fp_report_get_fragment(const hs_fp_report_t *report,
+                                              unsigned int index,
+                                              hs_fp_fragment_info_t *fragment) {
     if (!report || !fragment || index >= report->entry_count) {
         return HS_INVALID;
     }
@@ -912,8 +871,8 @@ hs_error_t HS_CDECL hs_fp_feedback_build(const hs_fp_report_t *report,
 
 HS_PUBLIC_API
 hs_error_t HS_CDECL hs_fp_feedback_build_ext(
-        const hs_fp_report_t *report, const hs_fp_feedback_params_t *params,
-        hs_fp_feedback_t **feedback) {
+    const hs_fp_report_t *report, const hs_fp_feedback_params_t *params,
+    hs_fp_feedback_t **feedback) {
     if (!report || !feedback) {
         return HS_INVALID;
     }
@@ -936,9 +895,8 @@ hs_error_t HS_CDECL hs_fp_feedback_build_ext(
     f->total_false_positive_trigger_count =
         count_total_false_positive_triggers(report);
 
-    err = build_feedback_entries(report, f,
-                                 f->total_false_positive_trigger_count,
-                                 &options);
+    err = build_feedback_entries(
+        report, f, f->total_false_positive_trigger_count, &options);
     if (err != HS_SUCCESS) {
         hs_misc_free(f);
         return err;
@@ -958,7 +916,7 @@ hs_error_t HS_CDECL hs_fp_feedback_free(hs_fp_feedback_t *feedback) {
 }
 
 hs_error_t HS_CDECL hs_fp_feedback_get_summary(
-        const hs_fp_feedback_t *feedback, hs_fp_feedback_summary_t *summary) {
+    const hs_fp_feedback_t *feedback, hs_fp_feedback_summary_t *summary) {
     if (!feedback || !summary) {
         return HS_INVALID;
     }
@@ -973,8 +931,8 @@ hs_error_t HS_CDECL hs_fp_feedback_get_summary(
 }
 
 hs_error_t HS_CDECL hs_fp_feedback_get_fragment(
-        const hs_fp_feedback_t *feedback, unsigned int index,
-        hs_fp_fragment_info_t *fragment) {
+    const hs_fp_feedback_t *feedback, unsigned int index,
+    hs_fp_fragment_info_t *fragment) {
     if (!feedback || !fragment || index >= feedback->bad_fragment_count) {
         return HS_INVALID;
     }
@@ -1033,9 +991,8 @@ hs_error_t hs_fp_feedback_clone(const hs_fp_feedback_t *src,
     return HS_SUCCESS;
 }
 
-static
-char import_fragment_is_valid(
-        const struct hs_fp_feedback_import_fragment *fragment) {
+static char import_fragment_is_valid(
+    const struct hs_fp_feedback_import_fragment *fragment) {
     if (!fragment || fragment->fragment_id == ROSE_OFFSET_INVALID ||
         fragment->table == HS_FP_TABLE_UNKNOWN ||
         fragment->engine == HS_FP_ENGINE_UNKNOWN || !fragment->bytes ||
@@ -1050,9 +1007,9 @@ char import_fragment_is_valid(
 }
 
 hs_error_t hs_fp_feedback_create_from_fragments(
-        const struct hs_fp_feedback_import_fragment *fragments,
-        u32 fragment_count, u64a scan_calls, u64a scan_bytes,
-        u64a total_false_positive_count, hs_fp_feedback_t **feedback) {
+    const struct hs_fp_feedback_import_fragment *fragments, u32 fragment_count,
+    u64a scan_calls, u64a scan_bytes, u64a total_false_positive_count,
+    hs_fp_feedback_t **feedback) {
     if (!feedback || (fragment_count && !fragments)) {
         return HS_INVALID;
     }
@@ -1109,13 +1066,11 @@ hs_error_t hs_fp_feedback_create_from_fragments(
     return HS_SUCCESS;
 }
 
-static
-char feedback_entry_matches_meta(const struct hs_fp_feedback_entry *entry,
-                                 const struct RoseFpFragmentMeta *meta) {
-    if (entry->key != meta->stableKey ||
-        entry->table != meta->table ||
-        entry->flags != meta->flags ||
-        entry->length != meta->length ||
+static char
+feedback_entry_matches_meta(const struct hs_fp_feedback_entry *entry,
+                            const struct RoseFpFragmentMeta *meta) {
+    if (entry->key != meta->stableKey || entry->table != meta->table ||
+        entry->flags != meta->flags || entry->length != meta->length ||
         entry->mask_length != meta->maskLength) {
         return 0;
     }
@@ -1177,8 +1132,7 @@ char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
 
     for (u32 i = 0; i < feedback->bad_fragment_count; i++) {
         const struct hs_fp_feedback_entry *entry = feedback->entries + i;
-        if (!entry->length || entry->length > length ||
-            entry->mask_length ||
+        if (!entry->length || entry->length > length || entry->mask_length ||
             ((entry->flags & ROSE_FP_FRAGMENT_FLAG_NOCASE) != flags)) {
             continue;
         }
@@ -1194,8 +1148,8 @@ char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
 
 char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
                                     const char *bytes, size_t length,
-                                    char nocase, const u8 *mask,
-                                    const u8 *cmp, size_t mask_length) {
+                                    char nocase, const u8 *mask, const u8 *cmp,
+                                    size_t mask_length) {
     if (!feedback || !feedback->bad_fragment_count || !bytes || !length) {
         return 0;
     }
@@ -1221,9 +1175,8 @@ char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
             continue;
         }
 
-        if (mask_length &&
-            (memcmp(entry->mask, mask, mask_length) ||
-             memcmp(entry->cmp, cmp, mask_length))) {
+        if (mask_length && (memcmp(entry->mask, mask, mask_length) ||
+                            memcmp(entry->cmp, cmp, mask_length))) {
             continue;
         }
 
@@ -1302,9 +1255,8 @@ void hs_fp_collector_end_trigger(struct hs_scratch *scratch) {
     scratch->core_info.fp_current_trigger_key = 0;
 }
 
-static
-void record_unknown_no_active_source(hs_fp_collector_t *collector,
-                                     u8 source) {
+static void record_unknown_no_active_source(hs_fp_collector_t *collector,
+                                            u8 source) {
     switch (source) {
     case HS_FP_UNKNOWN_SOURCE_DELAYED_REPLAY:
         collector->unknown_delayed_replay_count =
@@ -1366,8 +1318,7 @@ void hs_fp_collector_record_final_report(struct hs_scratch *scratch) {
         return;
     }
 
-    counter->final_report_count =
-        sat_add_u64a(counter->final_report_count, 1);
+    counter->final_report_count = sat_add_u64a(counter->final_report_count, 1);
     if (!ci->fp_current_trigger_reported) {
         ci->fp_current_trigger_reported = 1;
         collector->true_trigger_count =

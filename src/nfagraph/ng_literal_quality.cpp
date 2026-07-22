@@ -54,8 +54,7 @@ bool isZeroDenseNeoFdrLiteral(const ue2_literal &literal) {
 }
 
 bool isLowQualityNeoFdrLiteral(const ue2_literal &literal) {
-    return hasAllZeroNeoFdrTail(literal) ||
-           isZeroDenseNeoFdrLiteral(literal);
+    return hasAllZeroNeoFdrTail(literal) || isZeroDenseNeoFdrLiteral(literal);
 }
 
 } // namespace ue2

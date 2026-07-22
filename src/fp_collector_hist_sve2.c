@@ -28,8 +28,8 @@
 
 #include "fp_collector_hist.h"
 
-#include <assert.h>
 #include <arm_sve.h>
+#include <assert.h>
 
 #if !defined(__ARM_FEATURE_SVE2)
 #error "fp_collector_hist_sve2.c must be compiled with SVE2 enabled"
@@ -39,8 +39,7 @@
 #error "fp_collector_hist_sve2.c requires HS_BUILD_HAVE_SVE2_HISTCNT"
 #endif
 
-static
-char key_seen_before(const u32 *keys, u32 end, u32 key) {
+static char key_seen_before(const u32 *keys, u32 end, u32 key) {
     for (u32 i = 0; i < end; i++) {
         if (keys[i] == key) {
             return 1;
@@ -50,8 +49,7 @@ char key_seen_before(const u32 *keys, u32 end, u32 key) {
     return 0;
 }
 
-static
-u32 count_key_in_batch_sve2(const u32 *keys, u32 count, u32 key) {
+static u32 count_key_in_batch_sve2(const u32 *keys, u32 count, u32 key) {
     const u32 lanes = (u32)svcntw();
     const svuint32_t vkey = svdup_n_u32(key);
     u32 total = 0;
@@ -68,8 +66,9 @@ u32 count_key_in_batch_sve2(const u32 *keys, u32 count, u32 key) {
     return total;
 }
 
-void NEVER_INLINE hs_fp_histogram_count_batch_sve2(
-        const u32 *keys, u32 count, hs_fp_histogram_emit_fn emit, void *ctx) {
+void NEVER_INLINE hs_fp_histogram_count_batch_sve2(const u32 *keys, u32 count,
+                                                   hs_fp_histogram_emit_fn emit,
+                                                   void *ctx) {
     assert(count <= HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE);
     if (!count) {
         return;

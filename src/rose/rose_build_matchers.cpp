@@ -34,15 +34,16 @@
 #include "rose_build_matchers.h"
 
 #include "fp_collector.h"
-#include "rose_build_dump.h"
-#include "rose_build_impl.h"
-#include "rose_build_lit_accel.h"
-#include "rose_build_width.h"
 #include "hwlm/hwlm_build.h"
 #include "hwlm/hwlm_internal.h"
 #include "hwlm/hwlm_literal.h"
 #include "nfa/castlecompile.h"
 #include "nfa/nfa_api_queue.h"
+#include "rose_build_dump.h"
+#include "rose_build_impl.h"
+#include "rose_build_lit_accel.h"
+#include "rose_build_width.h"
+#include "ue2common.h"
 #include "util/charreach_util.h"
 #include "util/compile_context.h"
 #include "util/compile_error.h"
@@ -51,7 +52,6 @@
 #include "util/report.h"
 #include "util/report_manager.h"
 #include "util/verify_types.h"
-#include "ue2common.h"
 
 #include <iomanip>
 #include <sstream>
@@ -67,8 +67,7 @@ namespace ue2 {
 static const size_t MAX_ACCEL_STRING_LEN = 16;
 
 #if defined(DEBUG) || defined(DUMP_SUPPORT)
-static UNUSED
-string dumpMask(const vector<u8> &v) {
+static UNUSED string dumpMask(const vector<u8> &v) {
     ostringstream oss;
     for (u8 e : v) {
         oss << setfill('0') << setw(2) << hex << (unsigned int)e;
@@ -77,9 +76,8 @@ string dumpMask(const vector<u8> &v) {
 }
 #endif
 
-static
-bool maskFromLeftGraph(const LeftEngInfo &left, vector<u8> &msk,
-                       vector<u8> &cmp) {
+static bool maskFromLeftGraph(const LeftEngInfo &left, vector<u8> &msk,
+                              vector<u8> &cmp) {
     const u32 lag = left.lag;
     const ReportID report = left.leftfix_report;
 
@@ -100,8 +98,8 @@ bool maskFromLeftGraph(const LeftEngInfo &left, vector<u8> &msk,
 
     size_t i = HWLM_MASKLEN - lag - 1;
     do {
-        if (curr.empty() || contains(curr, h.start)
-            || contains(curr, h.startDs)) {
+        if (curr.empty() || contains(curr, h.start) ||
+            contains(curr, h.startDs)) {
             DEBUG_PRINTF("end of the road\n");
             break;
         }
@@ -124,9 +122,8 @@ bool maskFromLeftGraph(const LeftEngInfo &left, vector<u8> &msk,
     return true;
 }
 
-static
-bool maskFromLeftCastle(const LeftEngInfo &left, vector<u8> &msk,
-                        vector<u8> &cmp) {
+static bool maskFromLeftCastle(const LeftEngInfo &left, vector<u8> &msk,
+                               vector<u8> &cmp) {
     const u32 lag = left.lag;
     const ReportID report = left.leftfix_report;
 
@@ -159,8 +156,8 @@ bool maskFromLeftCastle(const LeftEngInfo &left, vector<u8> &msk,
     return true;
 }
 
-static
-bool maskFromLeft(const LeftEngInfo &left, vector<u8> &msk, vector<u8> &cmp) {
+static bool maskFromLeft(const LeftEngInfo &left, vector<u8> &msk,
+                         vector<u8> &cmp) {
     if (left.lag >= HWLM_MASKLEN) {
         DEBUG_PRINTF("too much lag\n");
         return false;
@@ -175,9 +172,9 @@ bool maskFromLeft(const LeftEngInfo &left, vector<u8> &msk, vector<u8> &cmp) {
     return false;
 }
 
-static
-bool maskFromPreds(const RoseBuildImpl &build, const rose_literal_id &id,
-                   const RoseVertex v, vector<u8> &msk, vector<u8> &cmp) {
+static bool maskFromPreds(const RoseBuildImpl &build, const rose_literal_id &id,
+                          const RoseVertex v, vector<u8> &msk,
+                          vector<u8> &cmp) {
     const RoseGraph &g = build.g;
 
     // For right now, wuss out and only handle cases with one pred.
@@ -225,7 +222,7 @@ bool maskFromPreds(const RoseBuildImpl &build, const rose_literal_id &id,
 
     ue2_literal::const_iterator it, ite;
     for (it = u_id.s.begin() + (u_len - u_sublen), ite = u_id.s.end();
-            it != ite; ++it) {
+         it != ite; ++it) {
         make_and_cmp_mask(*it, &msk.at(i), &cmp.at(i));
         ++i;
     }
@@ -233,9 +230,9 @@ bool maskFromPreds(const RoseBuildImpl &build, const rose_literal_id &id,
     return true;
 }
 
-static
-bool addSurroundingMask(const RoseBuildImpl &build, const rose_literal_id &id,
-                        const RoseVertex v, vector<u8> &msk, vector<u8> &cmp) {
+static bool addSurroundingMask(const RoseBuildImpl &build,
+                               const rose_literal_id &id, const RoseVertex v,
+                               vector<u8> &msk, vector<u8> &cmp) {
     // Start with zero masks.
     msk.assign(HWLM_MASKLEN, 0);
     cmp.assign(HWLM_MASKLEN, 0);
@@ -258,9 +255,9 @@ bool addSurroundingMask(const RoseBuildImpl &build, const rose_literal_id &id,
     return false;
 }
 
-static
-bool hamsterMaskCombine(vector<u8> &msk, vector<u8> &cmp,
-                        const vector<u8> &v_msk, const vector<u8> &v_cmp) {
+static bool hamsterMaskCombine(vector<u8> &msk, vector<u8> &cmp,
+                               const vector<u8> &v_msk,
+                               const vector<u8> &v_cmp) {
     assert(msk.size() == HWLM_MASKLEN && cmp.size() == HWLM_MASKLEN);
     assert(v_msk.size() == HWLM_MASKLEN && v_cmp.size() == HWLM_MASKLEN);
 
@@ -279,10 +276,10 @@ bool hamsterMaskCombine(vector<u8> &msk, vector<u8> &cmp,
     return all_masks != 0;
 }
 
-static
-bool addSurroundingMask(const RoseBuildImpl &build, const rose_literal_id &id,
-                        const rose_literal_info &info, vector<u8> &msk,
-                        vector<u8> &cmp) {
+static bool addSurroundingMask(const RoseBuildImpl &build,
+                               const rose_literal_id &id,
+                               const rose_literal_info &info, vector<u8> &msk,
+                               vector<u8> &cmp) {
     if (!build.cc.grey.roseHamsterMasks) {
         return false;
     }
@@ -394,12 +391,11 @@ void findMoreLiteralMasks(RoseBuildImpl &build) {
 
 // The mask already associated with the literal and any mask due to
 // mixed-case is mandatory.
-static
-void addLiteralMask(const rose_literal_id &id, vector<u8> &msk,
-                    vector<u8> &cmp) {
+static void addLiteralMask(const rose_literal_id &id, vector<u8> &msk,
+                           vector<u8> &cmp) {
     const size_t suffix_len = min(id.s.length(), size_t{HWLM_MASKLEN});
-    bool mixed_suffix = mixed_sensitivity_in(id.s.end() - suffix_len,
-                                             id.s.end());
+    bool mixed_suffix =
+        mixed_sensitivity_in(id.s.end() - suffix_len, id.s.end());
 
     if (id.msk.empty() && !mixed_suffix) {
         return;
@@ -437,9 +433,8 @@ void addLiteralMask(const rose_literal_id &id, vector<u8> &msk,
     normaliseLiteralMask(id.s, msk, cmp);
 }
 
-static
-bool isDirectHighlander(const RoseBuildImpl &build, const u32 id,
-                        const rose_literal_info &info) {
+static bool isDirectHighlander(const RoseBuildImpl &build, const u32 id,
+                               const rose_literal_info &info) {
     if (!build.isDirectReport(id)) {
         return false;
     }
@@ -453,8 +448,7 @@ bool isDirectHighlander(const RoseBuildImpl &build, const u32 id,
     for (const auto &v : info.vertices) {
         const auto &reports = build.g[v].reports;
         assert(!reports.empty());
-        if (!all_of(begin(reports), end(reports),
-                    is_simple_exhaustible)) {
+        if (!all_of(begin(reports), end(reports), is_simple_exhaustible)) {
             return false;
         }
     }
@@ -462,8 +456,7 @@ bool isDirectHighlander(const RoseBuildImpl &build, const u32 id,
 }
 
 // Called by isNoRunsLiteral below.
-static
-bool isNoRunsVertex(const RoseBuildImpl &build, RoseVertex u) {
+static bool isNoRunsVertex(const RoseBuildImpl &build, RoseVertex u) {
     const RoseGraph &g = build.g;
     if (!g[u].isBoring()) {
         DEBUG_PRINTF("u=%zu is not boring\n", g[u].index);
@@ -509,9 +502,9 @@ bool isNoRunsVertex(const RoseBuildImpl &build, RoseVertex u) {
     return true;
 }
 
-static
-bool isNoRunsLiteral(const RoseBuildImpl &build, const u32 id,
-                     const rose_literal_info &info, const size_t max_len) {
+static bool isNoRunsLiteral(const RoseBuildImpl &build, const u32 id,
+                            const rose_literal_info &info,
+                            const size_t max_len) {
     DEBUG_PRINTF("lit id %u\n", id);
 
     if (info.requires_benefits) {
@@ -558,9 +551,8 @@ bool isNoRunsLiteral(const RoseBuildImpl &build, const u32 id,
     return true;
 }
 
-static
-bool isNoRunsFragment(const RoseBuildImpl &build, const LitFragment &f,
-                      const size_t max_len) {
+static bool isNoRunsFragment(const RoseBuildImpl &build, const LitFragment &f,
+                             const size_t max_len) {
     // For the fragment to be marked "no runs", every literal it fires must
     // need no further confirmation work.
     return all_of_in(f.lit_ids, [&](u32 lit_id) {
@@ -569,9 +561,8 @@ bool isNoRunsFragment(const RoseBuildImpl &build, const LitFragment &f,
     });
 }
 
-static
-const raw_puff &getChainedPuff(const RoseBuildImpl &build,
-                               const Report &report) {
+static const raw_puff &getChainedPuff(const RoseBuildImpl &build,
+                                      const Report &report) {
     DEBUG_PRINTF("chained report, event %u\n", report.onmatch);
 
     // MPV has already been moved to the outfixes vector.
@@ -595,10 +586,9 @@ const raw_puff &getChainedPuff(const RoseBuildImpl &build,
  * TODO: This could be made more precise by calculating a "distance to accept"
  * for every vertex in the graph; right now we're only accurate for leaf nodes.
  */
-static
-u64a literalMinReportOffset(const RoseBuildImpl &build,
-                           const rose_literal_id &lit,
-                           const rose_literal_info &info) {
+static u64a literalMinReportOffset(const RoseBuildImpl &build,
+                                   const rose_literal_id &lit,
+                                   const rose_literal_info &info) {
     const auto &g = build.g;
 
     const u32 lit_len = verify_u32(lit.elength());
@@ -628,13 +618,13 @@ u64a literalMinReportOffset(const RoseBuildImpl &build,
                 DEBUG_PRINTF("chained puff repeats=%u\n", puff.repeats);
                 const Report &puff_report = build.rm.getReport(puff.report);
                 DEBUG_PRINTF("puff report %u, min offset=%llu\n", puff.report,
-                              puff_report.minOffset);
+                             puff_report.minOffset);
                 min_offset = min(min_offset, max(vert_offset + puff.repeats,
                                                  puff_report.minOffset));
             } else {
                 DEBUG_PRINTF("report min offset=%llu\n", report.minOffset);
-                min_offset = min(min_offset, max(vert_offset,
-                                                 report.minOffset));
+                min_offset =
+                    min(min_offset, max(vert_offset, report.minOffset));
             }
         }
 
@@ -657,8 +647,8 @@ u64a literalMinReportOffset(const RoseBuildImpl &build,
     for (const u32 &delayed_id : info.delayed_ids) {
         const auto &delayed_lit = build.literals.at(delayed_id);
         const auto &delayed_info = build.literal_info.at(delayed_id);
-        u64a delayed_min_offset = literalMinReportOffset(build, delayed_lit,
-                                                         delayed_info);
+        u64a delayed_min_offset =
+            literalMinReportOffset(build, delayed_lit, delayed_info);
         DEBUG_PRINTF("delayed_id=%u, min_offset = %llu\n", delayed_id,
                      delayed_min_offset);
         lit_min_offset = min(lit_min_offset, delayed_min_offset);
@@ -671,8 +661,7 @@ u64a literalMinReportOffset(const RoseBuildImpl &build,
     return lit_min_offset;
 }
 
-template<class Container>
-void trim_to_suffix(Container &c, size_t len) {
+template <class Container> void trim_to_suffix(Container &c, size_t len) {
     if (c.size() <= len) {
         return;
     }
@@ -697,15 +686,14 @@ struct MatcherProto {
     /** \brief Insert the contents of another MatcherProto. */
     void insert(const MatcherProto &a);
 };
-}
+} // namespace
 
-static
-void checkFpFeedbackMatcherFragment(const RoseBuildImpl &build,
-                                    UNUSED const LitFragment &f,
-                                    UNUSED const rose_literal_id &lit,
-                                    const string &s_final, bool nocase,
-                                    const vector<u8> &msk,
-                                    const vector<u8> &cmp) {
+static void checkFpFeedbackMatcherFragment(const RoseBuildImpl &build,
+                                           UNUSED const LitFragment &f,
+                                           UNUSED const rose_literal_id &lit,
+                                           const string &s_final, bool nocase,
+                                           const vector<u8> &msk,
+                                           const vector<u8> &cmp) {
     if (!build.cc.fp_feedback) {
         return;
     }
@@ -728,9 +716,8 @@ void checkFpFeedbackMatcherFragment(const RoseBuildImpl &build,
                  escapeString(s_final).c_str());
 }
 
-static
-void addFragmentLiteral(const RoseBuildImpl &build, MatcherProto &mp,
-                        const LitFragment &f, u32 id, size_t max_len) {
+static void addFragmentLiteral(const RoseBuildImpl &build, MatcherProto &mp,
+                               const LitFragment &f, u32 id, size_t max_len) {
     const rose_literal_id &lit = build.literals.at(id);
 
     DEBUG_PRINTF("lit='%s' (len %zu)\n", dumpString(lit.s).c_str(),
@@ -771,13 +758,12 @@ void addFragmentLiteral(const RoseBuildImpl &build, MatcherProto &mp,
 
     const auto &groups = f.groups;
 
-    mp.lits.emplace_back(move(s_final), nocase, noruns, f.fragment_id,
-                         groups, msk, cmp);
+    mp.lits.emplace_back(move(s_final), nocase, noruns, f.fragment_id, groups,
+                         msk, cmp);
 }
 
-static
-void addAccelLiteral(MatcherProto &mp, const rose_literal_id &lit,
-                     const rose_literal_info &info, size_t max_len) {
+static void addAccelLiteral(MatcherProto &mp, const rose_literal_id &lit,
+                            const rose_literal_info &info, size_t max_len) {
     const auto &s = lit.s; // copy
 
     DEBUG_PRINTF("lit='%s' (len %zu)\n", dumpString(s).c_str(), s.length());
@@ -809,11 +795,11 @@ void addAccelLiteral(MatcherProto &mp, const rose_literal_id &lit,
  * If max_offset is specified (and not ROSE_BOUND_INF), then literals that can
  * only lead to a pattern match after max_offset may be excluded.
  */
-static
-MatcherProto makeMatcherProto(const RoseBuildImpl &build,
-                              const vector<LitFragment> &fragments,
-                              rose_literal_table table, bool delay_rebuild,
-                              size_t max_len, u32 max_offset = ROSE_BOUND_INF) {
+static MatcherProto makeMatcherProto(const RoseBuildImpl &build,
+                                     const vector<LitFragment> &fragments,
+                                     rose_literal_table table,
+                                     bool delay_rebuild, size_t max_len,
+                                     u32 max_offset = ROSE_BOUND_INF) {
     MatcherProto mp;
 
     if (delay_rebuild) {
@@ -854,7 +840,8 @@ MatcherProto makeMatcherProto(const RoseBuildImpl &build,
                 u64a min_report = literalMinReportOffset(build, lit, info);
                 if (min_report > max_offset) {
                     DEBUG_PRINTF("min report offset=%llu exceeds "
-                                 "max_offset=%u\n", min_report, max_offset);
+                                 "max_offset=%u\n",
+                                 min_report, max_offset);
                     continue;
                 }
             }
@@ -904,9 +891,8 @@ void MatcherProto::insert(const MatcherProto &a) {
     history_required = max(history_required, a.history_required);
 }
 
-static
-void buildAccel(const RoseBuildImpl &build,
-                const vector<AccelString> &accel_lits, HWLM &hwlm) {
+static void buildAccel(const RoseBuildImpl &build,
+                       const vector<AccelString> &accel_lits, HWLM &hwlm) {
     if (!build.cc.grey.hamsterAccelForward) {
         return;
     }
@@ -918,15 +904,15 @@ void buildAccel(const RoseBuildImpl &build,
     buildForwardAccel(&hwlm, accel_lits, build.getInitialGroups());
 }
 
-bytecode_ptr<HWLM>
-buildHWLMMatcher(const RoseBuildImpl &build, LitProto *litProto,
-                 const char *matcherName) {
+bytecode_ptr<HWLM> buildHWLMMatcher(const RoseBuildImpl &build,
+                                    LitProto *litProto,
+                                    const char *matcherName) {
     if (!litProto) {
         return nullptr;
     }
     litProto->hwlmProto->debugName = matcherName;
-    auto hwlm = hwlmBuild(*litProto->hwlmProto, build.cc,
-                          build.getInitialGroups());
+    auto hwlm =
+        hwlmBuild(*litProto->hwlmProto, build.cc, build.getInitialGroups());
     if (!hwlm) {
         throw CompileError("Unable to generate bytecode.");
     }
@@ -941,37 +927,36 @@ buildHWLMMatcher(const RoseBuildImpl &build, LitProto *litProto,
 unique_ptr<LitProto>
 buildFloatingMatcherProto(const RoseBuildImpl &build,
                           const vector<LitFragment> &fragments,
-                          size_t longLitLengthThreshold,
-                          rose_group *fgroups,
+                          size_t longLitLengthThreshold, rose_group *fgroups,
                           size_t *historyRequired) {
     DEBUG_PRINTF("Floating literal matcher\n");
     *fgroups = 0;
 
-     auto mp = makeMatcherProto(build, fragments, ROSE_FLOATING, false,
-                                           longLitLengthThreshold);
-     if (mp.lits.empty()) {
-         DEBUG_PRINTF("empty floating matcher\n");
-         return nullptr;
-     }
-     dumpMatcherLiterals(mp.lits, "floating", build.cc.grey);
+    auto mp = makeMatcherProto(build, fragments, ROSE_FLOATING, false,
+                               longLitLengthThreshold);
+    if (mp.lits.empty()) {
+        DEBUG_PRINTF("empty floating matcher\n");
+        return nullptr;
+    }
+    dumpMatcherLiterals(mp.lits, "floating", build.cc.grey);
 
-     for (const hwlmLiteral &lit : mp.lits) {
-         *fgroups |= lit.groups;
-     }
+    for (const hwlmLiteral &lit : mp.lits) {
+        *fgroups |= lit.groups;
+    }
 
-     if (build.cc.streaming) {
-         DEBUG_PRINTF("history_required=%zu\n", mp.history_required);
-         assert(mp.history_required <= build.cc.grey.maxHistoryAvailable);
-         *historyRequired = max(*historyRequired, mp.history_required);
-     }
+    if (build.cc.streaming) {
+        DEBUG_PRINTF("history_required=%zu\n", mp.history_required);
+        assert(mp.history_required <= build.cc.grey.maxHistoryAvailable);
+        *historyRequired = max(*historyRequired, mp.history_required);
+    }
 
-     auto proto = hwlmBuildProto(mp.lits, false, build.cc);
+    auto proto = hwlmBuildProto(mp.lits, false, build.cc);
 
-     if (!proto) {
+    if (!proto) {
         throw CompileError("Unable to generate literal matcher proto.");
-     }
+    }
 
-     return ue2::make_unique<LitProto>(move(proto), mp.accel_lits);
+    return ue2::make_unique<LitProto>(move(proto), mp.accel_lits);
 }
 
 unique_ptr<LitProto>
@@ -991,7 +976,6 @@ buildDelayRebuildMatcherProto(const RoseBuildImpl &build,
         return nullptr;
     }
     dumpMatcherLiterals(mp.lits, "delay_rebuild", build.cc.grey);
-
 
     auto proto = hwlmBuildProto(mp.lits, false, build.cc);
 
@@ -1028,10 +1012,9 @@ buildSmallBlockMatcherProto(const RoseBuildImpl &build,
         return nullptr;
     }
 
-    auto mp_anchored = makeMatcherProto(build, fragments,
-                                        ROSE_ANCHORED_SMALL_BLOCK, false,
-                                        ROSE_SMALL_BLOCK_LEN,
-                                        ROSE_SMALL_BLOCK_LEN);
+    auto mp_anchored =
+        makeMatcherProto(build, fragments, ROSE_ANCHORED_SMALL_BLOCK, false,
+                         ROSE_SMALL_BLOCK_LEN, ROSE_SMALL_BLOCK_LEN);
     if (mp_anchored.lits.empty()) {
         DEBUG_PRINTF("no small-block anchored literals\n");
         return nullptr;

@@ -33,40 +33,40 @@
 #ifndef ROSE_INTERNAL_H
 #define ROSE_INTERNAL_H
 
-#include "ue2common.h"
 #include "rose_common.h"
+#include "ue2common.h"
 #include "util/scatter.h"
 
-#define ROSE_OFFSET_INVALID          0xffffffff
+#define ROSE_OFFSET_INVALID 0xffffffff
 
 // Group constants
 typedef u64a rose_group;
 #define KHSEL_ROSE_CONTINUE_MATCHING_NO_EXHAUST 2
 
 // Delayed literal stuff
-#define DELAY_BITS                  5
-#define DELAY_SLOT_COUNT            (1U << DELAY_BITS)
-#define MAX_DELAY                   (DELAY_SLOT_COUNT - 1)
-#define DELAY_MASK                  (DELAY_SLOT_COUNT - 1)
+#define DELAY_BITS 5
+#define DELAY_SLOT_COUNT (1U << DELAY_BITS)
+#define MAX_DELAY (DELAY_SLOT_COUNT - 1)
+#define DELAY_MASK (DELAY_SLOT_COUNT - 1)
 
 // 最大支持的lily匹配数限制
-#define LILY_ITEMS_COUNT            4096
+#define LILY_ITEMS_COUNT 4096
 
-#define ROSE_FP_FRAGMENT_BYTES_MAX  8
+#define ROSE_FP_FRAGMENT_BYTES_MAX 8
 
-#define ROSE_FP_TABLE_UNKNOWN       0
-#define ROSE_FP_TABLE_FLOATING      1
-#define ROSE_FP_TABLE_EOD_ANCHORED  2
-#define ROSE_FP_TABLE_SMALL_BLOCK   3
+#define ROSE_FP_TABLE_UNKNOWN 0
+#define ROSE_FP_TABLE_FLOATING 1
+#define ROSE_FP_TABLE_EOD_ANCHORED 2
+#define ROSE_FP_TABLE_SMALL_BLOCK 3
 #define ROSE_FP_TABLE_DELAY_REBUILD 4
-#define ROSE_FP_TABLE_ANCHORED      5
+#define ROSE_FP_TABLE_ANCHORED 5
 
 #define ROSE_FP_ENGINE_UNKNOWN 0
-#define ROSE_FP_ENGINE_NOODLE  1
-#define ROSE_FP_ENGINE_FDR     2
+#define ROSE_FP_ENGINE_NOODLE 1
+#define ROSE_FP_ENGINE_FDR 2
 #define ROSE_FP_ENGINE_NEO_FDR 3
-#define ROSE_FP_ENGINE_HAO     4
-#define ROSE_FP_ENGINE_TEDDY   5
+#define ROSE_FP_ENGINE_HAO 4
+#define ROSE_FP_ENGINE_TEDDY 5
 
 #define ROSE_FP_FRAGMENT_FLAG_NOCASE 0x01
 #define ROSE_FP_FRAGMENT_FLAG_NORUNS 0x02
@@ -168,52 +168,54 @@ struct RoseFpFragmentMeta {
 
 struct RoseCountingMiracle {
     char shufti; /** 1: count shufti class; 0: count a single character */
-    u8 count; /** minimum number of occurrences for the counting
-               * miracle char to kill the leftfix. */
-    u8 c; /** character to look for if not shufti */
-    u8 poison; /** character not in the shufti mask */
-    m128 lo; /** shufti lo mask */
-    m128 hi; /** shufti hi mask */
+    u8 count;    /** minimum number of occurrences for the counting
+                  * miracle char to kill the leftfix. */
+    u8 c;        /** character to look for if not shufti */
+    u8 poison;   /** character not in the shufti mask */
+    m128 lo;     /** shufti lo mask */
+    m128 hi;     /** shufti hi mask */
 };
 
 struct LeftNfaInfo {
     u32 maxQueueLen;
-    u32 maxLag; // maximum of successor roles' lag
-    u32 lagIndex; // iff lag != 0, index into leftfixLagTable
+    u32 maxLag;    // maximum of successor roles' lag
+    u32 lagIndex;  // iff lag != 0, index into leftfixLagTable
     u32 stopTable; // stop table index, or ROSE_OFFSET_INVALID
     u8 transient; /**< 0 if not transient, else max width of transient prefix */
-    char infix; /* TODO: make flags */
-    char eager; /**< nfa should be run eagerly to first match or death */
-    char eod_check; /**< nfa is used by the event eod literal */
+    char infix;   /* TODO: make flags */
+    char eager;   /**< nfa should be run eagerly to first match or death */
+    char eod_check;            /**< nfa is used by the event eod literal */
     u32 countingMiracleOffset; /** if not 0, offset to RoseCountingMiracle. */
-    rose_group squash_mask; /* & mask applied when rose nfa dies */
+    rose_group squash_mask;    /* & mask applied when rose nfa dies */
 };
 
 struct NfaInfo {
     u32 nfaOffset;
     u32 stateOffset;
     u32 fullStateOffset; /* offset in scratch, relative to ??? */
-    u32 ekeyListOffset; /* suffix, relative to base of rose, 0 if no ekeys */
-    u8 no_retrigger; /* TODO */
-    u8 in_sbmatcher;  /**< this outfix should not be run in small-block
-                       * execution, as it will be handled by the sbmatcher
-                       * HWLM table. */
+    u32 ekeyListOffset;  /* suffix, relative to base of rose, 0 if no ekeys */
+    u8 no_retrigger;     /* TODO */
+    u8 in_sbmatcher;     /**< this outfix should not be run in small-block
+                          * execution, as it will be handled by the sbmatcher
+                          * HWLM table. */
     u8 eod; /* suffix is triggered by the etable --> can only produce eod
              * matches */
 };
 
-#define MAX_STORED_LEFTFIX_LAG 127 /* max leftfix lag that we can store in one
-                                    * whole byte (OWB) (streaming only). Other
-                                    * values in OWB are reserved for zombie
-                                    * status */
-#define OWB_ZOMBIE_ALWAYS_YES 128 /* nfa will always answer yes to any rose
-                                   * prefix checks */
+#define MAX_STORED_LEFTFIX_LAG                                                 \
+    127 /* max leftfix lag that we can store in one                            \
+         * whole byte (OWB) (streaming only). Other                            \
+         * values in OWB are reserved for zombie                               \
+         * status */
+#define OWB_ZOMBIE_ALWAYS_YES                                                  \
+    128 /* nfa will always answer yes to any rose                              \
+         * prefix checks */
 
 /* offset of the status flags in the stream state. */
 #define ROSE_STATE_OFFSET_STATUS_FLAGS 0
 
 /* offset of role mmbit in stream state (just after the status flag byte). */
-#define ROSE_STATE_OFFSET_ROLE_MMBIT   sizeof(u8)
+#define ROSE_STATE_OFFSET_ROLE_MMBIT sizeof(u8)
 
 /**
  * \brief Rose state offsets.
@@ -345,8 +347,8 @@ struct RoseBoundaryReports {
  *  #
  */
 
-#define ROSE_RUNTIME_FULL_ROSE     0
-#define ROSE_RUNTIME_PURE_LITERAL  1
+#define ROSE_RUNTIME_FULL_ROSE 0
+#define ROSE_RUNTIME_PURE_LITERAL 1
 #define ROSE_RUNTIME_SINGLE_OUTFIX 2
 
 /**
@@ -368,75 +370,75 @@ struct RoseBoundaryReports {
  */
 
 struct x86_RoseEngine {
-    u8  pureLiteral; /* Indicator of pure literal API */
-    u8  noFloatingRoots; /* only need to run the anchored table if something
+    u8 pureLiteral;      /* Indicator of pure literal API */
+    u8 noFloatingRoots;  /* only need to run the anchored table if something
                           * matched in the anchored table */
-    u8  requiresEodCheck; /* stuff happens at eod time */
-    u8  hasOutfixesInSmallBlock; /**< has at least one outfix that must run even
-                                    in small block scans. */
-    u8  runtimeImpl; /**< can we just run the floating table or a single outfix?
-                      * or do we need a full rose? */
-    u8  mpvTriggeredByLeaf; /**< need to check (suf|out)fixes for mpv trigger */
-    u8  canExhaust; /**< every pattern has an exhaustion key */
-    u8  hasSom; /**< has at least one pattern which tracks SOM. */
-    u8  somHorizon; /**< width in bytes of SOM offset storage (governed by
-                        SOM precision) */
-    u32 mode; /**< scanning mode, one of HS_MODE_{BLOCK,STREAM,VECTORED} */
-    u32 historyRequired; /**< max amount of history required for streaming */
-    u32 ekeyCount; /**< number of exhaustion keys */
-    u32 lkeyCount; /**< number of logical keys */
-    u32 lopCount; /**< number of logical ops */
-    u32 ckeyCount; /**< number of combination keys */
+    u8 requiresEodCheck; /* stuff happens at eod time */
+    u8 hasOutfixesInSmallBlock; /**< has at least one outfix that must run even
+                                   in small block scans. */
+    u8 runtimeImpl; /**< can we just run the floating table or a single outfix?
+                     * or do we need a full rose? */
+    u8 mpvTriggeredByLeaf; /**< need to check (suf|out)fixes for mpv trigger */
+    u8 canExhaust;         /**< every pattern has an exhaustion key */
+    u8 hasSom;             /**< has at least one pattern which tracks SOM. */
+    u8 somHorizon; /**< width in bytes of SOM offset storage (governed by
+                       SOM precision) */
+    u32 mode;      /**< scanning mode, one of HS_MODE_{BLOCK,STREAM,VECTORED} */
+    u32 historyRequired;   /**< max amount of history required for streaming */
+    u32 ekeyCount;         /**< number of exhaustion keys */
+    u32 lkeyCount;         /**< number of logical keys */
+    u32 lopCount;          /**< number of logical ops */
+    u32 ckeyCount;         /**< number of combination keys */
     u32 logicalTreeOffset; /**< offset to mapping from lkey to LogicalOp */
     u32 combInfoMapOffset; /**< offset to mapping from ckey to combInfo */
-    u32 dkeyCount; /**< number of dedupe keys */
-    u32 dkeyLogSize; /**< size of fatbit for storing dkey log (bytes) */
+    u32 dkeyCount;         /**< number of dedupe keys */
+    u32 dkeyLogSize;       /**< size of fatbit for storing dkey log (bytes) */
     u32 invDkeyOffset; /**< offset to table mapping from dkeys to the external
-                         *  report ids */
-    u32 somLocationCount; /**< number of som locations required */
+                        *  report ids */
+    u32 somLocationCount;      /**< number of som locations required */
     u32 somLocationFatbitSize; /**< size of SOM location fatbit (bytes) */
-    u32 rolesWithStateCount; // number of roles with entries in state bitset
-    u32 stateSize; /* size of the state bitset
-                    * WARNING: not the size of the rose state */
-    u32 anchorStateSize; /* size of the state for the anchor dfas */
-    u32 tStateSize; /* total size of the state for transient rose nfas */
+    u32 rolesWithStateCount;   // number of roles with entries in state bitset
+    u32 stateSize;             /* size of the state bitset
+                                * WARNING: not the size of the rose state */
+    u32 anchorStateSize;       /* size of the state for the anchor dfas */
+    u32 tStateSize;       /* total size of the state for transient rose nfas */
     u32 scratchStateSize; /**< uncompressed state req'd for NFAs in scratch;
                            * used for sizing scratch only. */
     u32 smallWriteOffset; /**< offset of small-write matcher */
-    u32 lilyOffset;           // 防止报错
-    u32 lilyForTeddyOffset;   // 防止报错
-    u32 amatcherOffset; // offset of the anchored literal matcher (bytes)
-    u32 ematcherOffset; // offset of the eod-anchored literal matcher (bytes)
-    u32 fmatcherOffset; // offset of the floating literal matcher (bytes)
+    u32 lilyOffset;       // 防止报错
+    u32 lilyForTeddyOffset; // 防止报错
+    u32 amatcherOffset;     // offset of the anchored literal matcher (bytes)
+    u32 ematcherOffset;  // offset of the eod-anchored literal matcher (bytes)
+    u32 fmatcherOffset;  // offset of the floating literal matcher (bytes)
     u32 drmatcherOffset; // offset of the delayed rebuild table (bytes)
     u32 sbmatcherOffset; // offset of the small-block literal matcher (bytes)
     u32 longLitTableOffset; // offset of the long literal table
-    u32 amatcherMinWidth; 
-    u32 fmatcherMinWidth; 
-    u32 eodmatcherMinWidth; 
+    u32 amatcherMinWidth;
+    u32 fmatcherMinWidth;
+    u32 eodmatcherMinWidth;
     u32 amatcherMaxBiAnchoredWidth;
     u32 fmatcherMaxBiAnchoredWidth;
     u32 reportProgramOffset;
     u32 reportProgramCount;
     u32 delayProgramOffset;
     u32 anchoredProgramOffset;
-    u32 activeArrayCount; //number of nfas tracked in the active array
-    u32 activeLeftCount; //number of nfas tracked in the active rose array
-    u32 queueCount;      /**< number of nfa queues */
+    u32 activeArrayCount;     // number of nfas tracked in the active array
+    u32 activeLeftCount;      // number of nfas tracked in the active rose array
+    u32 queueCount;           /**< number of nfa queues */
     u32 activeQueueArraySize; //!< size of fatbit for active queues (bytes)
     u32 eagerIterOffset;
     u32 handledKeyCount;
     u32 handledKeyFatbitSize;
     u32 leftOffset;
     u32 roseCount;
-    u32 eodProgramOffset; //!< EOD program, otherwise 0.
+    u32 eodProgramOffset;       //!< EOD program, otherwise 0.
     u32 flushCombProgramOffset; /**< FlushCombination program, otherwise 0 */
     u32 lastFlushCombProgramOffset;
-    u32 lastByteHistoryIterOffset; 
+    u32 lastByteHistoryIterOffset;
     u32 minWidth;
     u32 minWidthExcludingBoundaries;
     u32 maxBiAnchoredWidth;
-    u32 anchoredDistance; // region to run the anchored table over
+    u32 anchoredDistance;    // region to run the anchored table over
     u32 anchoredMinDistance; /* start of region to run anchored table over */
     u32 floatingDistance;
     u32 floatingMinDistance; /* start of region to run floating table over */
@@ -445,85 +447,85 @@ struct x86_RoseEngine {
     u32 nfaInfoOffset; /* offset to the nfa info offset array */
     rose_group initialGroups;
     rose_group floating_group_mask; /* groups that are used by the ftable */
-    u32 size; // (bytes)
-    u32 delay_count; /* number of delayed literal ids. */
-    u32 delay_fatbit_size; //!< size of each delay fatbit in scratch (bytes)
-    u32 anchored_count; /* number of anchored literal ids */
+    u32 size;                       // (bytes)
+    u32 delay_count;                /* number of delayed literal ids. */
+    u32 delay_fatbit_size;    //!< size of each delay fatbit in scratch (bytes)
+    u32 anchored_count;       /* number of anchored literal ids */
     u32 anchored_fatbit_size; //!< size of each anch fatbit in scratch (bytes)
     u32 maxFloatingDelayedMatch;
     u32 delayRebuildLength;
     struct RoseStateOffsets stateOffsets;
     struct RoseBoundaryReports boundary;
-    u32 totalNumLiterals; /* total number of literals including dr */
+    u32 totalNumLiterals;     /* total number of literals including dr */
     u32 fpFragmentMetaOffset; /* offset of RoseFpFragmentMeta array */
     u32 fpFragmentMetaCount;
-    u32 asize; /* size of the atable */
-    u32 outfixBeginQueue; /* first outfix queue */
-    u32 outfixEndQueue; /* one past the last outfix queue */
-    u32 leftfixBeginQueue; /* first prefix/infix queue */
-    u32 initMpvNfa; /* (allegedly chained) mpv to force on at init */
-    u32 rosePrefixCount; /* number of rose prefixes */
+    u32 asize;                /* size of the atable */
+    u32 outfixBeginQueue;     /* first outfix queue */
+    u32 outfixEndQueue;       /* one past the last outfix queue */
+    u32 leftfixBeginQueue;    /* first prefix/infix queue */
+    u32 initMpvNfa;           /* (allegedly chained) mpv to force on at init */
+    u32 rosePrefixCount;      /* number of rose prefixes */
     u32 activeLeftIterOffset; /* mmbit_sparse_iter over non-transient roses */
-    u32 ematcherRegionSize; /* max region size to pass to ematcher */
-    u32 somRevCount; /**< number of som reverse nfas */
-    u32 somRevOffsetOffset; /**< offset to array of offsets to som rev nfas */
-    u32 longLitStreamState; // size in bytes
+    u32 ematcherRegionSize;   /* max region size to pass to ematcher */
+    u32 somRevCount;          /**< number of som reverse nfas */
+    u32 somRevOffsetOffset;   /**< offset to array of offsets to som rev nfas */
+    u32 longLitStreamState;   // size in bytes
     struct scatter_full_plan state_init;
 };
 
 struct RoseEngine {
-    u8  pureLiteral; /* Indicator of pure literal API */
-    u8  noFloatingRoots; /* only need to run the anchored table if something
+    u8 pureLiteral;      /* Indicator of pure literal API */
+    u8 noFloatingRoots;  /* only need to run the anchored table if something
                           * matched in the anchored table */
-    u8  requiresEodCheck; /* stuff happens at eod time */
-    u8  hasOutfixesInSmallBlock; /**< has at least one outfix that must run even
-                                    in small block scans. */
-    u8  runtimeImpl; /**< can we just run the floating table or a single outfix?
-                      * or do we need a full rose? */
-    u8  mpvTriggeredByLeaf; /**< need to check (suf|out)fixes for mpv trigger */
-    u8  canExhaust; /**< every pattern has an exhaustion key */
-    u8  hasSom; /**< has at least one pattern which tracks SOM. */
-    u8  somHorizon; /**< width in bytes of SOM offset storage (governed by
-                        SOM precision) */
-    u32 mode; /**< scanning mode, one of HS_MODE_{BLOCK,STREAM,VECTORED} */
-    u32 historyRequired; /**< max amount of history required for streaming */
-    u32 ekeyCount; /**< number of exhaustion keys */
-    u32 lkeyCount; /**< number of logical keys */
-    u32 lopCount; /**< number of logical ops */
-    u32 ckeyCount; /**< number of combination keys */
+    u8 requiresEodCheck; /* stuff happens at eod time */
+    u8 hasOutfixesInSmallBlock; /**< has at least one outfix that must run even
+                                   in small block scans. */
+    u8 runtimeImpl; /**< can we just run the floating table or a single outfix?
+                     * or do we need a full rose? */
+    u8 mpvTriggeredByLeaf; /**< need to check (suf|out)fixes for mpv trigger */
+    u8 canExhaust;         /**< every pattern has an exhaustion key */
+    u8 hasSom;             /**< has at least one pattern which tracks SOM. */
+    u8 somHorizon; /**< width in bytes of SOM offset storage (governed by
+                       SOM precision) */
+    u32 mode;      /**< scanning mode, one of HS_MODE_{BLOCK,STREAM,VECTORED} */
+    u32 historyRequired;   /**< max amount of history required for streaming */
+    u32 ekeyCount;         /**< number of exhaustion keys */
+    u32 lkeyCount;         /**< number of logical keys */
+    u32 lopCount;          /**< number of logical ops */
+    u32 ckeyCount;         /**< number of combination keys */
     u32 logicalTreeOffset; /**< offset to mapping from lkey to LogicalOp */
     u32 combInfoMapOffset; /**< offset to mapping from ckey to combInfo */
-    u32 dkeyCount; /**< number of dedupe keys */
-    u32 dkeyLogSize; /**< size of fatbit for storing dkey log (bytes) */
+    u32 dkeyCount;         /**< number of dedupe keys */
+    u32 dkeyLogSize;       /**< size of fatbit for storing dkey log (bytes) */
     u32 invDkeyOffset; /**< offset to table mapping from dkeys to the external
-                         *  report ids */
-    u32 somLocationCount; /**< number of som locations required */
+                        *  report ids */
+    u32 somLocationCount;      /**< number of som locations required */
     u32 somLocationFatbitSize; /**< size of SOM location fatbit (bytes) */
-    u32 rolesWithStateCount; // number of roles with entries in state bitset
-    u32 stateSize; /* size of the state bitset
-                    * WARNING: not the size of the rose state */
-    u32 anchorStateSize; /* size of the state for the anchor dfas */
-    u32 tStateSize; /* total size of the state for transient rose nfas */
+    u32 rolesWithStateCount;   // number of roles with entries in state bitset
+    u32 stateSize;             /* size of the state bitset
+                                * WARNING: not the size of the rose state */
+    u32 anchorStateSize;       /* size of the state for the anchor dfas */
+    u32 tStateSize;       /* total size of the state for transient rose nfas */
     u32 scratchStateSize; /**< uncompressed state req'd for NFAs in scratch;
                            * used for sizing scratch only. */
     u32 smallWriteOffset; /**< offset of small-write matcher */
-    u32 lilyOffset;     /**< offset of lily matcher */
-    u32 lilyForTeddyOffset;     /**< offset of lily teddy matcher */
-    u32 amatcherOffset; // offset of the anchored literal matcher (bytes)
-    u32 ematcherOffset; // offset of the eod-anchored literal matcher (bytes)
-    u32 fmatcherOffset; // offset of the floating literal matcher (bytes)
+    u32 lilyOffset;       /**< offset of lily matcher */
+    u32 lilyForTeddyOffset; /**< offset of lily teddy matcher */
+    u32 amatcherOffset;     // offset of the anchored literal matcher (bytes)
+    u32 ematcherOffset;  // offset of the eod-anchored literal matcher (bytes)
+    u32 fmatcherOffset;  // offset of the floating literal matcher (bytes)
     u32 drmatcherOffset; // offset of the delayed rebuild table (bytes)
     u32 sbmatcherOffset; // offset of the small-block literal matcher (bytes)
     u32 longLitTableOffset; // offset of the long literal table
-    u32 amatcherMinWidth; /**< minimum number of bytes required for a pattern
-                           * involved with the anchored table to produce a full
-                           * match. */
-    u32 fmatcherMinWidth; /**< minimum number of bytes required for a pattern
-                           * involved with the floating table to produce a full
-                           * match. */
+    u32 amatcherMinWidth;   /**< minimum number of bytes required for a pattern
+                             * involved with the anchored table to produce a full
+                             * match. */
+    u32 fmatcherMinWidth;   /**< minimum number of bytes required for a pattern
+                             * involved with the floating table to produce a full
+                             * match. */
     u32 eodmatcherMinWidth; /**< minimum number of bytes required for a pattern
-                               * involved with the eod table to produce a full
-                               * match. */
+                             * involved with the eod table to produce a full
+                             * match. */
     u32 amatcherMaxBiAnchoredWidth; /**< maximum number of bytes that can still
                                      * produce a match for a pattern involved
                                      * with the anchored table. */
@@ -553,9 +555,9 @@ struct RoseEngine {
      */
     u32 anchoredProgramOffset;
 
-    u32 activeArrayCount; //number of nfas tracked in the active array
-    u32 activeLeftCount; //number of nfas tracked in the active rose array
-    u32 queueCount;      /**< number of nfa queues */
+    u32 activeArrayCount;     // number of nfas tracked in the active array
+    u32 activeLeftCount;      // number of nfas tracked in the active rose array
+    u32 queueCount;           /**< number of nfa queues */
     u32 activeQueueArraySize; //!< size of fatbit for active queues (bytes)
 
     u32 eagerIterOffset; /**< offset to sparse iter for eager prefixes or 0 if
@@ -571,7 +573,7 @@ struct RoseEngine {
     u32 leftOffset;
     u32 roseCount;
 
-    u32 eodProgramOffset; //!< EOD program, otherwise 0.
+    u32 eodProgramOffset;       //!< EOD program, otherwise 0.
     u32 flushCombProgramOffset; /**< FlushCombination program, otherwise 0 */
     u32 lastFlushCombProgramOffset; /**< LastFlushCombination program,
                                      * otherwise 0 */
@@ -585,25 +587,25 @@ struct RoseEngine {
      * reports. */
     u32 minWidthExcludingBoundaries;
 
-    u32 maxBiAnchoredWidth; /* ROSE_BOUND_INF if any non bianchored patterns
-                             * present */
-    u32 anchoredDistance; // region to run the anchored table over
+    u32 maxBiAnchoredWidth;  /* ROSE_BOUND_INF if any non bianchored patterns
+                              * present */
+    u32 anchoredDistance;    // region to run the anchored table over
     u32 anchoredMinDistance; /* start of region to run anchored table over */
-    u32 floatingDistance; /* end of region to run the floating table over
-                             ROSE_BOUND_INF if not bounded */
+    u32 floatingDistance;    /* end of region to run the floating table over
+                                ROSE_BOUND_INF if not bounded */
     u32 floatingMinDistance; /* start of region to run floating table over */
-    u32 smallBlockDistance; /* end of region to run the floating table over
-                               ROSE_BOUND_INF if not bounded */
+    u32 smallBlockDistance;  /* end of region to run the floating table over
+                                ROSE_BOUND_INF if not bounded */
     u32 floatingMinLiteralMatchOffset; /* the minimum offset that we can get a
                                         * 'valid' match from the floating
                                         * table */
-    u32 nfaInfoOffset; /* offset to the nfa info offset array */
+    u32 nfaInfoOffset;                 /* offset to the nfa info offset array */
     rose_group initialGroups;
     rose_group floating_group_mask; /* groups that are used by the ftable */
-    u32 size; // (bytes)
-    u32 delay_count; /* number of delayed literal ids. */
-    u32 delay_fatbit_size; //!< size of each delay fatbit in scratch (bytes)
-    u32 anchored_count; /* number of anchored literal ids */
+    u32 size;                       // (bytes)
+    u32 delay_count;                /* number of delayed literal ids. */
+    u32 delay_fatbit_size;    //!< size of each delay fatbit in scratch (bytes)
+    u32 anchored_count;       /* number of anchored literal ids */
     u32 anchored_fatbit_size; //!< size of each anch fatbit in scratch (bytes)
     u32 maxFloatingDelayedMatch; /* max offset that a delayed literal can
                                   * usefully be reported */
@@ -612,27 +614,27 @@ struct RoseEngine {
                              * rebuild scan. */
     struct RoseStateOffsets stateOffsets;
     struct RoseBoundaryReports boundary;
-    u32 totalNumLiterals; /* total number of literals including dr */
+    u32 totalNumLiterals;     /* total number of literals including dr */
     u32 fpFragmentMetaOffset; /**< offset of RoseFpFragmentMeta array */
-    u32 fpFragmentMetaCount; /**< number of RoseFpFragmentMeta records */
-    u32 asize; /* size of the atable */
-    u32 outfixBeginQueue; /* first outfix queue */
-    u32 outfixEndQueue; /* one past the last outfix queue */
-    u32 leftfixBeginQueue; /* first prefix/infix queue */
-    u32 initMpvNfa; /* (allegedly chained) mpv to force on at init */
-    u32 rosePrefixCount; /* number of rose prefixes */
+    u32 fpFragmentMetaCount;  /**< number of RoseFpFragmentMeta records */
+    u32 asize;                /* size of the atable */
+    u32 outfixBeginQueue;     /* first outfix queue */
+    u32 outfixEndQueue;       /* one past the last outfix queue */
+    u32 leftfixBeginQueue;    /* first prefix/infix queue */
+    u32 initMpvNfa;           /* (allegedly chained) mpv to force on at init */
+    u32 rosePrefixCount;      /* number of rose prefixes */
     u32 activeLeftIterOffset; /* mmbit_sparse_iter over non-transient roses */
-    u32 ematcherRegionSize; /* max region size to pass to ematcher */
-    u32 somRevCount; /**< number of som reverse nfas */
-    u32 somRevOffsetOffset; /**< offset to array of offsets to som rev nfas */
-    u32 longLitStreamState; // size in bytes
+    u32 ematcherRegionSize;   /* max region size to pass to ematcher */
+    u32 somRevCount;          /**< number of som reverse nfas */
+    u32 somRevOffsetOffset;   /**< offset to array of offsets to som rev nfas */
+    u32 longLitStreamState;   // size in bytes
 
     struct scatter_full_plan state_init;
 };
 
 struct ALIGN_CL_DIRECTIVE anchored_matcher_info {
-    u32 next_offset; /* relative to this, 0 for end */
-    u32 state_offset; /* relative to anchorState */
+    u32 next_offset;         /* relative to this, 0 for end */
+    u32 state_offset;        /* relative to anchorState */
     u32 anchoredMinDistance; /* start of region to run anchored table over */
 };
 
@@ -702,9 +704,8 @@ struct RoseLongLitHashEntry {
     u32 str_len;
 };
 
-static really_inline
-const struct anchored_matcher_info *getALiteralMatcher(
-        const struct RoseEngine *t) {
+static really_inline const struct anchored_matcher_info *
+getALiteralMatcher(const struct RoseEngine *t) {
     if (!t->amatcherOffset) {
         return NULL;
     }
@@ -716,8 +717,8 @@ const struct anchored_matcher_info *getALiteralMatcher(
 
 struct HWLM;
 
-static really_inline
-const struct HWLM *getFLiteralMatcher(const struct RoseEngine *t) {
+static really_inline const struct HWLM *
+getFLiteralMatcher(const struct RoseEngine *t) {
     if (!t->fmatcherOffset) {
         return NULL;
     }
@@ -727,8 +728,8 @@ const struct HWLM *getFLiteralMatcher(const struct RoseEngine *t) {
     return (const struct HWLM *)lt;
 }
 
-static really_inline
-const void *getSBLiteralMatcher(const struct RoseEngine *t) {
+static really_inline const void *
+getSBLiteralMatcher(const struct RoseEngine *t) {
     if (!t->sbmatcherOffset) {
         return NULL;
     }
@@ -738,9 +739,8 @@ const void *getSBLiteralMatcher(const struct RoseEngine *t) {
     return matcher;
 }
 
-static really_inline
-const struct RoseFpFragmentMeta *getRoseFpFragmentMeta(
-        const struct RoseEngine *t) {
+static really_inline const struct RoseFpFragmentMeta *
+getRoseFpFragmentMeta(const struct RoseEngine *t) {
     if (!t->fpFragmentMetaOffset || !t->fpFragmentMetaCount) {
         return NULL;
     }
@@ -750,88 +750,88 @@ const struct RoseFpFragmentMeta *getRoseFpFragmentMeta(
     return (const struct RoseFpFragmentMeta *)meta;
 }
 
-static really_inline
-const struct LeftNfaInfo *getLeftTable(const struct RoseEngine *t) {
-    const struct LeftNfaInfo *r
-        = (const struct LeftNfaInfo *)((const char *)t + t->leftOffset);
+static really_inline const struct LeftNfaInfo *
+getLeftTable(const struct RoseEngine *t) {
+    const struct LeftNfaInfo *r =
+        (const struct LeftNfaInfo *)((const char *)t + t->leftOffset);
     assert(ISALIGNED_N(r, 4));
     return r;
 }
 
-static really_inline
-const struct LeftNfaInfo *x86_getLeftTable(const struct x86_RoseEngine *t) {
-    const struct LeftNfaInfo *r
-        = (const struct LeftNfaInfo *)((const char *)t + t->leftOffset);
+static really_inline const struct LeftNfaInfo *
+x86_getLeftTable(const struct x86_RoseEngine *t) {
+    const struct LeftNfaInfo *r =
+        (const struct LeftNfaInfo *)((const char *)t + t->leftOffset);
     assert(ISALIGNED_N(r, 4));
     return r;
 }
 
 struct mmbit_sparse_iter; // forward decl
 
-static really_inline
-const struct mmbit_sparse_iter *getActiveLeftIter(const struct RoseEngine *t) {
+static really_inline const struct mmbit_sparse_iter *
+getActiveLeftIter(const struct RoseEngine *t) {
     assert(t->activeLeftIterOffset);
-    const struct mmbit_sparse_iter *it = (const struct mmbit_sparse_iter *)
-            ((const char *)t + t->activeLeftIterOffset);
+    const struct mmbit_sparse_iter *it =
+        (const struct mmbit_sparse_iter *)((const char *)t +
+                                           t->activeLeftIterOffset);
     assert(ISALIGNED_N(it, 4));
     return it;
 }
 
-static really_inline
-const struct NfaInfo *getNfaInfoByQueue(const struct RoseEngine *t, u32 qi) {
-    const struct NfaInfo *infos
-        = (const struct NfaInfo *)((const char *)t + t->nfaInfoOffset);
+static really_inline const struct NfaInfo *
+getNfaInfoByQueue(const struct RoseEngine *t, u32 qi) {
+    const struct NfaInfo *infos =
+        (const struct NfaInfo *)((const char *)t + t->nfaInfoOffset);
     assert(ISALIGNED_N(infos, sizeof(u32)));
 
     return &infos[qi];
 }
 
-static really_inline
-const struct NFA *getNfaByInfo(const struct RoseEngine *t,
-                               const struct NfaInfo *info) {
+static really_inline const struct NFA *
+getNfaByInfo(const struct RoseEngine *t, const struct NfaInfo *info) {
     return (const struct NFA *)((const char *)t + info->nfaOffset);
 }
 
-static really_inline
-const struct NFA *getNfaByQueue(const struct RoseEngine *t, u32 qi) {
+static really_inline const struct NFA *getNfaByQueue(const struct RoseEngine *t,
+                                                     u32 qi) {
     const struct NfaInfo *info = getNfaInfoByQueue(t, qi);
     return getNfaByInfo(t, info);
 }
 
-static really_inline
-u32 queueToLeftIndex(const struct RoseEngine *t, u32 qi) {
+static really_inline u32 queueToLeftIndex(const struct RoseEngine *t, u32 qi) {
     assert(qi >= t->leftfixBeginQueue);
     return qi - t->leftfixBeginQueue;
 }
 
-static really_inline
-const struct LeftNfaInfo *getLeftInfoByQueue(const struct RoseEngine *t,
-                                             u32 qi) {
+static really_inline const struct LeftNfaInfo *
+getLeftInfoByQueue(const struct RoseEngine *t, u32 qi) {
     const struct LeftNfaInfo *infos = getLeftTable(t);
     return &infos[queueToLeftIndex(t, qi)];
 }
 
 struct SmallWriteEngine;
 
-static really_inline
-const struct SmallWriteEngine *getSmallWrite(const struct RoseEngine *t) {
+static really_inline const struct SmallWriteEngine *
+getSmallWrite(const struct RoseEngine *t) {
     if (!t->smallWriteOffset) {
         return NULL;
     }
 
     const struct SmallWriteEngine *smwr =
-        (const struct SmallWriteEngine *)((const char *)t + t->smallWriteOffset);
+        (const struct SmallWriteEngine *)((const char *)t +
+                                          t->smallWriteOffset);
     return smwr;
 }
 
-static really_inline
-const struct SmallWriteEngine *x86_getSmallWrite(const struct x86_RoseEngine *t) {
+static really_inline const struct SmallWriteEngine *
+x86_getSmallWrite(const struct x86_RoseEngine *t) {
     if (!t->smallWriteOffset) {
         return NULL;
     }
 
     const struct SmallWriteEngine *smwr =
-        (const struct SmallWriteEngine *)((const char *)t + t->smallWriteOffset);
+        (const struct SmallWriteEngine *)((const char *)t +
+                                          t->smallWriteOffset);
     return smwr;
 }
 

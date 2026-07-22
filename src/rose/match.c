@@ -26,9 +26,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "match.h"
 #include "catchup.h"
 #include "fp_collector.h"
-#include "match.h"
 #include "program_runtime.h"
 #include "rose.h"
 #include "util/bitutils.h"
@@ -38,8 +38,8 @@
 #include "util/compare.h"
 /** A debugging crutch: print a hex-escaped version of the match for our
  * perusal. The start and end offsets are stream offsets. */
-static UNUSED
-void printMatch(const struct core_info *ci, u64a start, u64a end) {
+static UNUSED void printMatch(const struct core_info *ci, u64a start,
+                              u64a end) {
     assert(start <= end);
     assert(end <= ci->buf_offset + ci->len);
 
@@ -67,8 +67,8 @@ void printMatch(const struct core_info *ci, u64a start, u64a end) {
 }
 #endif
 
-static really_inline
-u8 setFpUnknownSource(struct hs_scratch *scratch, u8 source) {
+static really_inline u8 setFpUnknownSource(struct hs_scratch *scratch,
+                                           u8 source) {
     struct core_info *ci = &scratch->core_info;
     u8 old_source = ci->fp_unknown_source;
     if (ci->fp_collector) {
@@ -77,8 +77,8 @@ u8 setFpUnknownSource(struct hs_scratch *scratch, u8 source) {
     return old_source;
 }
 
-static really_inline
-void restoreFpUnknownSource(struct hs_scratch *scratch, u8 old_source) {
+static really_inline void restoreFpUnknownSource(struct hs_scratch *scratch,
+                                                 u8 old_source) {
     struct core_info *ci = &scratch->core_info;
     if (ci->fp_collector) {
         ci->fp_unknown_source = old_source;
@@ -119,10 +119,9 @@ hwlmcb_rv_t roseDelayRebuildCallback(size_t end, u32 id,
     return tctx->groups;
 }
 
-static really_inline
-hwlmcb_rv_t ensureMpvQueueFlushed(const struct RoseEngine *t,
-                                  struct hs_scratch *scratch, u32 qi, s64a loc,
-                                  char in_chained) {
+static really_inline hwlmcb_rv_t
+ensureMpvQueueFlushed(const struct RoseEngine *t, struct hs_scratch *scratch,
+                      u32 qi, s64a loc, char in_chained) {
     return ensureQueueFlushed_i(t, scratch, qi, loc, 1, in_chained);
 }
 
@@ -162,8 +161,8 @@ hwlmcb_rv_t roseHandleChainMatch(const struct RoseEngine *t,
         DEBUG_PRINTF("queue %u full -> catching up nfas\n", qi);
         /* we know it is a chained nfa and the suffixes/outfixes must already
          * be known to be consistent */
-        if (ensureMpvQueueFlushed(t, scratch, qi, loc, in_catchup)
-            == HWLM_TERMINATE_MATCHING) {
+        if (ensureMpvQueueFlushed(t, scratch, qi, loc, in_catchup) ==
+            HWLM_TERMINATE_MATCHING) {
             DEBUG_PRINTF("terminating...\n");
             return HWLM_TERMINATE_MATCHING;
         }
@@ -172,8 +171,8 @@ hwlmcb_rv_t roseHandleChainMatch(const struct RoseEngine *t,
     if (top_squash_distance) {
         assert(q->cur < q->end);
         struct mq_item *last = &q->items[q->end - 1];
-        if (last->type == event
-            && last->location >= loc - (s64a)top_squash_distance) {
+        if (last->type == event &&
+            last->location >= loc - (s64a)top_squash_distance) {
             last->location = loc;
             goto event_enqueued;
         }
@@ -254,10 +253,8 @@ int roseAnchoredCallback(u64a start, u64a end, u32 id, void *ctx) {
  *
  * Assumes not in_anchored.
  */
-static really_inline
-hwlmcb_rv_t roseProcessMatchInline(const struct RoseEngine *t,
-                                   struct hs_scratch *scratch, u64a end,
-                                   u32 id) {
+static really_inline hwlmcb_rv_t roseProcessMatchInline(
+    const struct RoseEngine *t, struct hs_scratch *scratch, u64a end, u32 id) {
     DEBUG_PRINTF("id=%u\n", id);
     assert(id && id < t->size); // id is an offset into bytecode
     const u64a som = 0;
@@ -269,11 +266,10 @@ hwlmcb_rv_t roseProcessMatchInline(const struct RoseEngine *t,
     }
 }
 
-static rose_inline
-hwlmcb_rv_t playDelaySlot(const struct RoseEngine *t,
-                          struct hs_scratch *scratch,
-                          struct fatbit **delaySlots, u32 vicIndex,
-                          u64a offset) {
+static rose_inline hwlmcb_rv_t playDelaySlot(const struct RoseEngine *t,
+                                             struct hs_scratch *scratch,
+                                             struct fatbit **delaySlots,
+                                             u32 vicIndex, u64a offset) {
     /* assert(!tctxt->in_anchored); */
     assert(vicIndex < DELAY_SLOT_COUNT);
     const struct fatbit *vicSlot = delaySlots[vicIndex];
@@ -299,8 +295,8 @@ hwlmcb_rv_t playDelaySlot(const struct RoseEngine *t,
         const u8 flags = 0;
         u8 old_source =
             setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_DELAYED_REPLAY);
-        hwlmcb_rv_t rv = roseRunProgram(t, scratch, programs[it], som, offset,
-                                        flags);
+        hwlmcb_rv_t rv =
+            roseRunProgram(t, scratch, programs[it], som, offset, flags);
         restoreFpUnknownSource(scratch, old_source);
         DEBUG_PRINTF("DONE groups=0x%016llx\n", tctxt->groups);
 
@@ -318,10 +314,8 @@ hwlmcb_rv_t playDelaySlot(const struct RoseEngine *t,
     return HWLM_CONTINUE_MATCHING;
 }
 
-static really_inline
-hwlmcb_rv_t flushAnchoredLiteralAtLoc(const struct RoseEngine *t,
-                                      struct hs_scratch *scratch,
-                                      u32 curr_loc) {
+static really_inline hwlmcb_rv_t flushAnchoredLiteralAtLoc(
+    const struct RoseEngine *t, struct hs_scratch *scratch, u32 curr_loc) {
     struct RoseContext *tctxt = &scratch->tctxt;
     struct fatbit *curr_row = getAnchoredLiteralLog(scratch)[curr_loc - 1];
     u32 region_width = t->anchored_count;
@@ -339,8 +333,8 @@ hwlmcb_rv_t flushAnchoredLiteralAtLoc(const struct RoseEngine *t,
         const u8 flags = 0;
         u8 old_source =
             setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_ANCHORED_REPLAY);
-        hwlmcb_rv_t rv = roseRunProgram(t, scratch, programs[it], som, curr_loc,
-                                        flags);
+        hwlmcb_rv_t rv =
+            roseRunProgram(t, scratch, programs[it], som, curr_loc, flags);
         restoreFpUnknownSource(scratch, old_source);
         DEBUG_PRINTF("DONE groups=0x%016llx\n", tctxt->groups);
 
@@ -362,8 +356,7 @@ hwlmcb_rv_t flushAnchoredLiteralAtLoc(const struct RoseEngine *t,
     return HWLM_CONTINUE_MATCHING;
 }
 
-static really_inline
-u32 anchored_it_begin(struct hs_scratch *scratch) {
+static really_inline u32 anchored_it_begin(struct hs_scratch *scratch) {
     struct RoseContext *tctxt = &scratch->tctxt;
     if (tctxt->lastEndOffset >= scratch->anchored_literal_region_len) {
         return MMB_INVALID;
@@ -374,10 +367,9 @@ u32 anchored_it_begin(struct hs_scratch *scratch) {
     return bf64_iterate(scratch->al_log_sum, begin);
 }
 
-static really_inline
-hwlmcb_rv_t flushAnchoredLiterals(const struct RoseEngine *t,
-                                  struct hs_scratch *scratch,
-                                  u32 *anchored_it_param, u64a to_off) {
+static really_inline hwlmcb_rv_t
+flushAnchoredLiterals(const struct RoseEngine *t, struct hs_scratch *scratch,
+                      u32 *anchored_it_param, u64a to_off) {
     struct RoseContext *tctxt = &scratch->tctxt;
     u32 anchored_it = *anchored_it_param;
     /* catch up any remaining anchored matches */
@@ -389,8 +381,8 @@ hwlmcb_rv_t flushAnchoredLiterals(const struct RoseEngine *t,
         roseFlushLastByteHistory(t, scratch, curr_off);
         tctxt->lastEndOffset = curr_off;
 
-        if (flushAnchoredLiteralAtLoc(t, scratch, curr_off)
-            == HWLM_TERMINATE_MATCHING) {
+        if (flushAnchoredLiteralAtLoc(t, scratch, curr_off) ==
+            HWLM_TERMINATE_MATCHING) {
             return HWLM_TERMINATE_MATCHING;
         }
     }
@@ -399,17 +391,18 @@ hwlmcb_rv_t flushAnchoredLiterals(const struct RoseEngine *t,
     return HWLM_CONTINUE_MATCHING;
 }
 
-static really_inline
-hwlmcb_rv_t playVictims(const struct RoseEngine *t, struct hs_scratch *scratch,
-                        u32 *anchored_it, u64a lastEnd, u64a victimDelaySlots,
-                        struct fatbit **delaySlots) {
+static really_inline hwlmcb_rv_t playVictims(const struct RoseEngine *t,
+                                             struct hs_scratch *scratch,
+                                             u32 *anchored_it, u64a lastEnd,
+                                             u64a victimDelaySlots,
+                                             struct fatbit **delaySlots) {
     while (victimDelaySlots) {
         u32 vic = findAndClearLSB_64(&victimDelaySlots);
         DEBUG_PRINTF("vic = %u\n", vic);
         u64a vicOffset = vic + (lastEnd & ~(u64a)DELAY_MASK);
 
-        if (flushAnchoredLiterals(t, scratch, anchored_it, vicOffset)
-            == HWLM_TERMINATE_MATCHING) {
+        if (flushAnchoredLiterals(t, scratch, anchored_it, vicOffset) ==
+            HWLM_TERMINATE_MATCHING) {
             return HWLM_TERMINATE_MATCHING;
         }
 
@@ -505,8 +498,8 @@ anchored_leftovers:;
     return rv;
 }
 
-static really_inline
-hwlmcb_rv_t roseCallback_i(size_t end, u32 id, struct hs_scratch *scratch) {
+static really_inline hwlmcb_rv_t roseCallback_i(size_t end, u32 id,
+                                                struct hs_scratch *scratch) {
     struct RoseContext *tctx = &scratch->tctxt;
     const struct RoseEngine *t = scratch->core_info.rose;
 
@@ -600,8 +593,8 @@ int roseRunBoundaryProgram(const struct RoseEngine *rose, u32 program,
     const u8 flags = 0;
     u8 old_source =
         setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_EOD_OR_BOUNDARY);
-    hwlmcb_rv_t rv = roseRunProgram(rose, scratch, program, som, stream_offset,
-                                    flags);
+    hwlmcb_rv_t rv =
+        roseRunProgram(rose, scratch, program, som, stream_offset, flags);
     restoreFpUnknownSource(scratch, old_source);
     if (rv == HWLM_TERMINATE_MATCHING) {
         return MO_HALT_MATCHING;
@@ -620,8 +613,8 @@ int roseRunFlushCombProgram(const struct RoseEngine *rose,
                             struct hs_scratch *scratch, u64a end) {
     u8 old_source =
         setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_FLUSH_COMBINATION);
-    hwlmcb_rv_t rv = roseRunProgram(rose, scratch, rose->flushCombProgramOffset,
-                                    0, end, 0);
+    hwlmcb_rv_t rv =
+        roseRunProgram(rose, scratch, rose->flushCombProgramOffset, 0, end, 0);
     restoreFpUnknownSource(scratch, old_source);
     if (rv == HWLM_TERMINATE_MATCHING) {
         return MO_HALT_MATCHING;
@@ -639,9 +632,8 @@ int roseRunLastFlushCombProgram(const struct RoseEngine *rose,
                                 struct hs_scratch *scratch, u64a end) {
     u8 old_source =
         setFpUnknownSource(scratch, HS_FP_UNKNOWN_SOURCE_FLUSH_COMBINATION);
-    hwlmcb_rv_t rv = roseRunProgram(rose, scratch,
-                                    rose->lastFlushCombProgramOffset,
-                                    0, end, 0);
+    hwlmcb_rv_t rv = roseRunProgram(
+        rose, scratch, rose->lastFlushCombProgramOffset, 0, end, 0);
     restoreFpUnknownSource(scratch, old_source);
     if (rv == HWLM_TERMINATE_MATCHING) {
         return MO_HALT_MATCHING;

@@ -29,7 +29,7 @@
 #include "rose_build_misc.h"
 #include "rose_build_impl.h"
 
-#include "rose_build_resources.h"
+#include "grey.h"
 #include "hwlm/hwlm_literal.h"
 #include "nfa/castlecompile.h"
 #include "nfa/goughcompile.h"
@@ -38,13 +38,15 @@
 #include "nfa/rdfa.h"
 #include "nfa/tamaramacompile.h"
 #include "nfagraph/ng_holder.h"
-#include "nfagraph/ng_literal_quality.h"
 #include "nfagraph/ng_limex.h"
-#include "nfagraph/ng_reports.h"
+#include "nfagraph/ng_literal_quality.h"
 #include "nfagraph/ng_repeat.h"
+#include "nfagraph/ng_reports.h"
 #include "nfagraph/ng_util.h"
 #include "nfagraph/ng_width.h"
+#include "rose_build_resources.h"
 #include "smallwrite/smallwrite_build.h"
+#include "ue2common.h"
 #include "util/alloc.h"
 #include "util/boundary_reports.h"
 #include "util/compile_context.h"
@@ -56,8 +58,6 @@
 #include "util/report_manager.h"
 #include "util/ue2string.h"
 #include "util/verify_types.h"
-#include "ue2common.h"
-#include "grey.h"
 
 #include <boost/graph/breadth_first_search.hpp>
 
@@ -66,26 +66,17 @@ using namespace std;
 namespace ue2 {
 
 // just to get it out of the header
-RoseBuild::~RoseBuild() { }
+RoseBuild::~RoseBuild() {}
 
-RoseBuildImpl::RoseBuildImpl(ReportManager &rm_in,
-                             SomSlotManager &ssm_in,
+RoseBuildImpl::RoseBuildImpl(ReportManager &rm_in, SomSlotManager &ssm_in,
                              SmallWriteBuild &smwr_in,
                              const CompileContext &cc_in,
                              const BoundaryReports &boundary_in)
-    : cc(cc_in),
-      root(add_vertex(g)),
-      anchored_root(add_vertex(g)),
-      hasSom(false),
-      group_end(0),
-      ematcher_region_size(0),
+    : cc(cc_in), root(add_vertex(g)), anchored_root(add_vertex(g)),
+      hasSom(false), group_end(0), ematcher_region_size(0),
       eod_event_literal_id(MO_INVALID_IDX),
-      max_rose_anchored_floating_overlap(0),
-      rm(rm_in),
-      ssm(ssm_in),
-      smwr(smwr_in),
-      boundary(boundary_in),
-      next_nfa_report(0) {
+      max_rose_anchored_floating_overlap(0), rm(rm_in), ssm(ssm_in),
+      smwr(smwr_in), boundary(boundary_in), next_nfa_report(0) {
     // add root vertices to graph
     g[root].min_offset = 0;
     g[root].max_offset = 0;
@@ -98,9 +89,7 @@ RoseBuildImpl::~RoseBuildImpl() {
     // empty
 }
 
-bool RoseVertexProps::isBoring(void) const {
-    return !suffix && !left;
-}
+bool RoseVertexProps::isBoring(void) const { return !suffix && !left; }
 
 bool RoseVertexProps::fixedOffset(void) const {
     assert(min_offset <= max_offset); /* ensure offsets calculated */
@@ -145,9 +134,8 @@ bool hasLastByteHistorySucc(const RoseGraph &g, RoseVertex v) {
     return false;
 }
 
-static
-bool isInTable(const RoseBuildImpl &tbi, RoseVertex v,
-               rose_literal_table table) {
+static bool isInTable(const RoseBuildImpl &tbi, RoseVertex v,
+                      rose_literal_table table) {
     const auto &lit_ids = tbi.g[v].literals;
     if (lit_ids.empty()) {
         return false; // special role with no literals
@@ -230,8 +218,7 @@ size_t RoseBuildImpl::minLiteralLen(RoseVertex v) const {
 }
 
 // RoseBuild factory
-unique_ptr<RoseBuild> makeRoseBuilder(ReportManager &rm,
-                                      SomSlotManager &ssm,
+unique_ptr<RoseBuild> makeRoseBuilder(ReportManager &rm, SomSlotManager &ssm,
                                       SmallWriteBuild &smwr,
                                       const CompileContext &cc,
                                       const BoundaryReports &boundary) {
@@ -287,9 +274,8 @@ size_t maxOverlap(const rose_literal_id &a, const rose_literal_id &b) {
     return maxOverlap(a.s, b.s, b.delay);
 }
 
-static
-const rose_literal_id &getOverlapLiteral(const RoseBuildImpl &tbi,
-                                         u32 literal_id) {
+static const rose_literal_id &getOverlapLiteral(const RoseBuildImpl &tbi,
+                                                u32 literal_id) {
     auto it = tbi.anchoredLitSuffix.find(literal_id);
     if (it != tbi.anchoredLitSuffix.end()) {
         return it->second;
@@ -302,8 +288,8 @@ ue2_literal findNonOverlappingTail(const set<ue2_literal> &lits,
     size_t max_overlap = 0;
 
     for (const auto &lit : lits) {
-        size_t overlap = lit != s ? maxStringOverlap(lit, s)
-                                  : maxStringSelfOverlap(s);
+        size_t overlap =
+            lit != s ? maxStringOverlap(lit, s) : maxStringSelfOverlap(s);
         max_overlap = max(max_overlap, overlap);
     }
 
@@ -444,10 +430,11 @@ void normaliseLiteralMask(const ue2_literal &s_in, vector<u8> &msk,
 }
 
 rose_literal_id::rose_literal_id(const ue2_literal &s_in,
-        const vector<u8> &msk_in, const vector<u8> &cmp_in,
-        rose_literal_table table_in, u32 delay_in)
-            : s(s_in), msk(msk_in), cmp(cmp_in), table(table_in),
-              delay(delay_in), distinctiveness(0) {
+                                 const vector<u8> &msk_in,
+                                 const vector<u8> &cmp_in,
+                                 rose_literal_table table_in, u32 delay_in)
+    : s(s_in), msk(msk_in), cmp(cmp_in), table(table_in), delay(delay_in),
+      distinctiveness(0) {
     assert(msk.size() == cmp.size());
     assert(msk.size() <= HWLM_MASKLEN);
     assert(delay <= MAX_DELAY);
@@ -541,8 +528,7 @@ public:
         return set<ReportID>();
     }
 
-    template<class T>
-    set<ReportID> operator()(const unique_ptr<T> &x) const {
+    template <class T> set<ReportID> operator()(const unique_ptr<T> &x) const {
         return all_reports(*x);
     }
 
@@ -557,7 +543,7 @@ public:
         return reports;
     }
 };
-}
+} // namespace
 
 set<ReportID> all_reports(const OutfixInfo &outfix) {
     auto reports = boost::apply_visitor(OutfixAllReports(), outfix.proto);
@@ -700,9 +686,7 @@ set<u32> all_tops(const suffix_id &s) {
     return {0};
 }
 
-size_t suffix_id::hash() const {
-    return hash_all(g, c, d, h, t);
-}
+size_t suffix_id::hash() const { return hash_all(g, c, d, h, t); }
 
 bool isAnchored(const left_id &r) {
     assert(r.graph() || r.castle() || r.haig() || r.dfa());
@@ -770,13 +754,9 @@ set<u32> all_reports(const left_id &left) {
     }
 }
 
-u32 num_tops(const left_id &r) {
-    return all_tops(r).size();
-}
+u32 num_tops(const left_id &r) { return all_tops(r).size(); }
 
-size_t left_id::hash() const {
-    return hash_all(g, c, d, h);
-}
+size_t left_id::hash() const { return hash_all(g, c, d, h); }
 
 u64a findMaxOffset(const set<ReportID> &reports, const ReportManager &rm) {
     assert(!reports.empty());
@@ -881,7 +861,6 @@ u32 roseQuality(const RoseResources &res, const RoseEngine *t) {
 
     return 1;
 }
-
 
 u32 x86_roseQuality(const RoseResources &res, const x86_RoseEngine *t) {
     /* Rose is low quality if the atable is a Mcclellan 16 or has multiple DFAs
@@ -1026,8 +1005,8 @@ bool canImplementGraphs(const RoseBuildImpl &tbi) {
             continue;
         }
         if (g[v].left.graph) {
-            assert(g[v].left.graph->kind
-                   == (tbi.isRootSuccessor(v) ? NFA_PREFIX : NFA_INFIX));
+            assert(g[v].left.graph->kind ==
+                   (tbi.isRootSuccessor(v) ? NFA_PREFIX : NFA_INFIX));
             if (!isImplementableNFA(*g[v].left.graph, nullptr, tbi.cc)) {
                 DEBUG_PRINTF("nfa prefix %zu failed (%zu vertices)\n",
                              g[v].index, num_vertices(*g[v].left.graph));

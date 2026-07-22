@@ -36,8 +36,8 @@ repos:
         types_or: [c, c++]
         exclude: ^build/|^test/|^third_party/
 
-  # ===================== Go 语言 ==========
-  - repo: https://gitcode.com/gh_mirrors/go/golangci-lint # 使用gitcode镜像加速
-    rev: v2.12.2
-    hooks:
-      - id: golangci-lint-full
+  # # ===================== Go 语言 ==========
+  # - repo: https://gitcode.com/gh_mirrors/go/golangci-lint # 使用gitcode镜像加速
+  #   rev: v2.12.2
+  #   hooks:
+  #     - id: golangci-lint-full

@@ -33,9 +33,9 @@
 #include "hs_compile.h"
 #include "util/cpuid_flags.h"
 
-static
-void histogram_count_batch_scalar(const u32 *keys, u32 count,
-                                  hs_fp_histogram_emit_fn emit, void *ctx) {
+static void histogram_count_batch_scalar(const u32 *keys, u32 count,
+                                         hs_fp_histogram_emit_fn emit,
+                                         void *ctx) {
     for (u32 i = 0; i < count; i++) {
         const u32 key = keys[i];
         u64a key_count = 1;

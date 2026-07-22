@@ -35,19 +35,18 @@
 #include "ue2common.h"
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 struct RoseEngine;
 struct hs_scratch;
 
-#define HS_FP_UNKNOWN_SOURCE_NONE              0U
-#define HS_FP_UNKNOWN_SOURCE_DELAYED_REPLAY    1U
-#define HS_FP_UNKNOWN_SOURCE_ANCHORED_REPLAY   2U
-#define HS_FP_UNKNOWN_SOURCE_EOD_OR_BOUNDARY   3U
+#define HS_FP_UNKNOWN_SOURCE_NONE 0U
+#define HS_FP_UNKNOWN_SOURCE_DELAYED_REPLAY 1U
+#define HS_FP_UNKNOWN_SOURCE_ANCHORED_REPLAY 2U
+#define HS_FP_UNKNOWN_SOURCE_EOD_OR_BOUNDARY 3U
 #define HS_FP_UNKNOWN_SOURCE_FLUSH_COMBINATION 4U
-#define HS_FP_UNKNOWN_SOURCE_MPV_OR_NFA_QUEUE  5U
+#define HS_FP_UNKNOWN_SOURCE_MPV_OR_NFA_QUEUE 5U
 
 hs_error_t hs_fp_collector_check_db(const hs_fp_collector_t *collector,
                                     const hs_database_t *db);
@@ -87,9 +86,9 @@ struct hs_fp_feedback_import_fragment {
 };
 
 hs_error_t hs_fp_feedback_create_from_fragments(
-        const struct hs_fp_feedback_import_fragment *fragments,
-        u32 fragment_count, u64a scan_calls, u64a scan_bytes,
-        u64a total_false_positive_count, hs_fp_feedback_t **feedback);
+    const struct hs_fp_feedback_import_fragment *fragments, u32 fragment_count,
+    u64a scan_calls, u64a scan_bytes, u64a total_false_positive_count,
+    hs_fp_feedback_t **feedback);
 
 u32 hs_fp_feedback_count_matches_in_rose(const hs_fp_feedback_t *feedback,
                                          const struct RoseEngine *rose,
@@ -101,14 +100,14 @@ char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
 
 char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
                                     const char *bytes, size_t length,
-                                    char nocase, const u8 *mask,
-                                    const u8 *cmp, size_t mask_length);
+                                    char nocase, const u8 *mask, const u8 *cmp,
+                                    size_t mask_length);
 
-unsigned int hs_compile_context_observe_checked_count(
-        const hs_compile_context_t *ctx);
+unsigned int
+hs_compile_context_observe_checked_count(const hs_compile_context_t *ctx);
 
-unsigned int hs_compile_context_observe_hit_count(
-        const hs_compile_context_t *ctx);
+unsigned int
+hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx);
 
 #ifdef __cplusplus
 } /* extern C */

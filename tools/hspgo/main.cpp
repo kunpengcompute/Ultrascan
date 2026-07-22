@@ -41,6 +41,7 @@
 #include "hs.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <climits>
@@ -48,7 +49,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cctype>
 #include <exception>
 #include <fstream>
 #include <iomanip>
@@ -56,8 +56,8 @@
 #include <iterator>
 #include <limits>
 #include <memory>
-#include <stdint.h>
 #include <sstream>
+#include <stdint.h>
 #include <string>
 #include <thread>
 #include <vector>
@@ -171,15 +171,11 @@ struct DatabaseStats {
 };
 
 struct DatabaseDeleter {
-    void operator()(hs_database_t *db) const {
-        hs_free_database(db);
-    }
+    void operator()(hs_database_t *db) const { hs_free_database(db); }
 };
 
 struct ScratchDeleter {
-    void operator()(hs_scratch_t *scratch) const {
-        hs_free_scratch(scratch);
-    }
+    void operator()(hs_scratch_t *scratch) const { hs_free_scratch(scratch); }
 };
 
 struct CollectorDeleter {
@@ -189,9 +185,7 @@ struct CollectorDeleter {
 };
 
 struct ReportDeleter {
-    void operator()(hs_fp_report_t *report) const {
-        hs_fp_report_free(report);
-    }
+    void operator()(hs_fp_report_t *report) const { hs_fp_report_free(report); }
 };
 
 struct FeedbackDeleter {
@@ -215,43 +209,54 @@ using CompileContextPtr =
     std::unique_ptr<hs_compile_context_t, CompileContextDeleter>;
 
 void usage(const char *error) {
-    cout << "Usage: hspgo [OPTIONS...]\n\n"
-         << "Options:\n\n"
-         << "  -h, --help              Display help and exit.\n"
-         << "  -G OVERRIDES            Overrides for the grey box.\n"
-         << "  -e PATH                 Load hsbench expression file/directory.\n"
-         << "  -c FILE                 Load hsbench sqlite corpus.\n"
-         << "  -b N                    Run N normal hs_scan() baseline rounds (default 1).\n"
-         << "  -r N                    Run N collection rounds with collector (default 3).\n"
-         << "  -n N                    Run N measurement rounds after DB switch (default 5).\n"
-         << "  -N                      Run in block mode (default: streaming).\n"
-         << "  -V                      Run in vectored mode (default: streaming).\n"
-         << "  -m N                    Minimum trigger count for feedback (default 1000).\n"
-         << "  -p N                    Minimum false-positive trigger count (default 1000).\n"
-         << "  -q PCT                  Minimum false-positive rate percent, up to 2 decimals (default 99.00).\n"
-         << "  -s PCT                  Minimum waste share percent, up to 2 decimals (default 5.00).\n"
-         << "  -k N                    Maximum bad fragments kept for feedback (default all).\n"
-         << "  -T CPU,CPU... or CPU-CPU\n"
-         << "                          Run one worker per CPU and bind affinity.\n"
-         << "  -v                      Verbose feedback view with summaries, diagnostics and top 10 fragments.\n"
-         << "  --echo-matches          Display optimized measurement matches.\n"
-         << "  -o DIR                  Dump report/feedback CSV files into DIR.\n"
-         << "  -O DIR                  Dump reusable feedback binary into DIR.\n"
-         << "  -I DIR                  Load reusable feedback binary from DIR and skip collection.\n\n"
-         << "Optimized throughput is measured only after the feedback-compiled DB is active.\n";
+    cout
+        << "Usage: hspgo [OPTIONS...]\n\n"
+        << "Options:\n\n"
+        << "  -h, --help              Display help and exit.\n"
+        << "  -G OVERRIDES            Overrides for the grey box.\n"
+        << "  -e PATH                 Load hsbench expression file/directory.\n"
+        << "  -c FILE                 Load hsbench sqlite corpus.\n"
+        << "  -b N                    Run N normal hs_scan() baseline rounds "
+           "(default 1).\n"
+        << "  -r N                    Run N collection rounds with collector "
+           "(default 3).\n"
+        << "  -n N                    Run N measurement rounds after DB switch "
+           "(default 5).\n"
+        << "  -N                      Run in block mode (default: streaming).\n"
+        << "  -V                      Run in vectored mode (default: "
+           "streaming).\n"
+        << "  -m N                    Minimum trigger count for feedback "
+           "(default 1000).\n"
+        << "  -p N                    Minimum false-positive trigger count "
+           "(default 1000).\n"
+        << "  -q PCT                  Minimum false-positive rate percent, up "
+           "to 2 decimals (default 99.00).\n"
+        << "  -s PCT                  Minimum waste share percent, up to 2 "
+           "decimals (default 5.00).\n"
+        << "  -k N                    Maximum bad fragments kept for feedback "
+           "(default all).\n"
+        << "  -T CPU,CPU... or CPU-CPU\n"
+        << "                          Run one worker per CPU and bind "
+           "affinity.\n"
+        << "  -v                      Verbose feedback view with summaries, "
+           "diagnostics and top 10 fragments.\n"
+        << "  --echo-matches          Display optimized measurement matches.\n"
+        << "  -o DIR                  Dump report/feedback CSV files into "
+           "DIR.\n"
+        << "  -O DIR                  Dump reusable feedback binary into DIR.\n"
+        << "  -I DIR                  Load reusable feedback binary from DIR "
+           "and skip collection.\n\n"
+        << "Optimized throughput is measured only after the feedback-compiled "
+           "DB is active.\n";
 
     if (error) {
         cerr << "Error: " << error << "\n";
     }
 }
 
-void usage(const string &error) {
-    usage(error.c_str());
-}
+void usage(const string &error) { usage(error.c_str()); }
 
-bool isPathSeparator(char c) {
-    return c == '/' || c == '\\';
-}
+bool isPathSeparator(char c) { return c == '/' || c == '\\'; }
 
 string trimTrailingSeparators(const string &path) {
     if (path.empty()) {
@@ -330,8 +335,7 @@ bool ensureDirectory(const string &path, const char *purpose) {
     }
 
     if (!makeDirectory(dir) || !directoryExists(dir)) {
-        cerr << "Unable to create " << purpose << " directory: " << dir
-             << "\n";
+        cerr << "Unable to create " << purpose << " directory: " << dir << "\n";
         return false;
     }
     return true;
@@ -424,7 +428,8 @@ bool parsePercentScaled(const char *text, unsigned *out) {
     }
 
     const string wholeText = dot == string::npos ? value : value.substr(0, dot);
-    const string fracText = dot == string::npos ? string() : value.substr(dot + 1);
+    const string fracText =
+        dot == string::npos ? string() : value.substr(dot + 1);
     if (wholeText.empty() || fracText.size() > 2) {
         return false;
     }
@@ -615,15 +620,13 @@ bool processArgs(int argc, char **argv, Options *opts) {
     static const struct option longopts[] = {
         {"help", no_argument, nullptr, 'h'},
         {"echo-matches", no_argument, nullptr, OPT_ECHO_MATCHES},
-        {nullptr, 0, nullptr, 0}
-    };
+        {nullptr, 0, nullptr, 0}};
 
     opterr = 0;
     int optionIndex = 0;
     for (;;) {
         int c = getopt_long(argc, argv, ":b:c:e:G:hI:k:m:Nn:o:O:p:q:r:s:T:vV",
-                            longopts,
-                            &optionIndex);
+                            longopts, &optionIndex);
         if (c < 0) {
             break;
         }
@@ -668,7 +671,8 @@ bool processArgs(int argc, char **argv, Options *opts) {
             break;
         case 'p':
             if (!parsePositiveU64(optarg, &value64)) {
-                usage("minimum false-positive count must be a positive integer");
+                usage(
+                    "minimum false-positive count must be a positive integer");
                 return false;
             }
             opts->feedbackParams.flags |=
@@ -680,7 +684,8 @@ bool processArgs(int argc, char **argv, Options *opts) {
                 usage("feedback TopK must be a positive integer");
                 return false;
             }
-            opts->feedbackParams.flags |= HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS;
+            opts->feedbackParams.flags |=
+                HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS;
             opts->feedbackParams.max_bad_fragments = value;
             break;
         case 'I':
@@ -695,7 +700,8 @@ bool processArgs(int argc, char **argv, Options *opts) {
                 usage("minimum trigger count must be a positive integer");
                 return false;
             }
-            opts->feedbackParams.flags |= HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT;
+            opts->feedbackParams.flags |=
+                HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT;
             opts->feedbackParams.min_trigger_count = value64;
             break;
         case 'n':
@@ -724,7 +730,8 @@ bool processArgs(int argc, char **argv, Options *opts) {
             break;
         case 'q':
             if (!parsePercentScaled(optarg, &value)) {
-                usage("minimum false-positive rate must be a percent from 0 to 100 with at most two decimal places");
+                usage("minimum false-positive rate must be a percent from 0 to "
+                      "100 with at most two decimal places");
                 return false;
             }
             opts->feedbackParams.flags |=
@@ -768,7 +775,8 @@ bool processArgs(int argc, char **argv, Options *opts) {
             break;
         case 's':
             if (!parsePercentScaled(optarg, &value)) {
-                usage("minimum waste share must be a percent from 0 to 100 with at most two decimal places");
+                usage("minimum waste share must be a percent from 0 to 100 "
+                      "with at most two decimal places");
                 return false;
             }
             opts->feedbackParams.flags |= HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE;
@@ -867,8 +875,7 @@ bool loadPatternSet(const Options &opts, PatternSet *patterns) {
         cerr << "No expressions loaded\n";
         return false;
     }
-    if (patterns->exprs.size() >
-        std::numeric_limits<unsigned int>::max()) {
+    if (patterns->exprs.size() > std::numeric_limits<unsigned int>::max()) {
         cerr << "Too many expressions\n";
         return false;
     }
@@ -957,9 +964,7 @@ string formatHex64(uint64_t value) {
     return oss.str();
 }
 
-string signatureName(const Options &opts) {
-    return opts.exprPath;
-}
+string signatureName(const Options &opts) { return opts.exprPath; }
 
 const char *scanModeName(ScanMode mode) {
     switch (mode) {
@@ -1010,8 +1015,8 @@ bool compileDatabase(const PatternSet &patterns, ScanMode mode,
     if (ctx) {
         err = hs_compile_ext_multi_with_context(
             exprPtrs.data(), patterns.flags.data(), patterns.ids.data(),
-            extPtrs.data(), count, compileModeFlags(mode), nullptr, ctx,
-            &rawDb, &compileErr);
+            extPtrs.data(), count, compileModeFlags(mode), nullptr, ctx, &rawDb,
+            &compileErr);
     } else {
         err = hs_compile_ext_multi(exprPtrs.data(), patterns.flags.data(),
                                    patterns.ids.data(), extPtrs.data(), count,
@@ -1082,8 +1087,8 @@ bool queryDatabaseStats(const hs_database_t *db, const hs_scratch_t *scratch,
     return true;
 }
 
-int HS_CDECL onMatch(unsigned int id, unsigned long long,
-                     unsigned long long to, unsigned int, void *ctx) {
+int HS_CDECL onMatch(unsigned int id, unsigned long long, unsigned long long to,
+                     unsigned int, void *ctx) {
     if (ctx) {
         MatchContext *matchCtx = static_cast<MatchContext *>(ctx);
         if (matchCtx->stats) {
@@ -1091,8 +1096,8 @@ int HS_CDECL onMatch(unsigned int id, unsigned long long,
         }
         if (matchCtx->echoMatches) {
             if (matchCtx->streaming) {
-                std::printf("Match @%u:%u:%llu for %u\n",
-                            matchCtx->streamId, matchCtx->blockId, to, id);
+                std::printf("Match @%u:%u:%llu for %u\n", matchCtx->streamId,
+                            matchCtx->blockId, to, id);
             } else {
                 std::printf("Match @%u:%llu for %u\n", matchCtx->blockId, to,
                             id);
@@ -1146,8 +1151,7 @@ bool prepVectorData(const vector<DataBlock> &blocks,
     vectors->resize(streamSlotCount(blocks));
 
     for (const auto &block : blocks) {
-        if (block.payload.size() >
-            std::numeric_limits<unsigned int>::max()) {
+        if (block.payload.size() > std::numeric_limits<unsigned int>::max()) {
             std::ostringstream oss;
             oss << "Corpus block " << block.id
                 << " is too large for vector scan";
@@ -1158,8 +1162,7 @@ bool prepVectorData(const vector<DataBlock> &blocks,
         }
 
         VectoredInfo &vector = (*vectors)[block.internal_stream_index];
-        if (vector.data.size() >=
-            std::numeric_limits<unsigned int>::max()) {
+        if (vector.data.size() >= std::numeric_limits<unsigned int>::max()) {
             std::ostringstream oss;
             oss << "Corpus stream " << block.stream_id
                 << " has too many blocks for vector scan";
@@ -1182,8 +1185,7 @@ bool prepVectorData(const vector<DataBlock> &blocks,
 
 bool scanBlocks(const hs_database_t *db, hs_scratch_t *scratch,
                 const vector<DataBlock> &blocks, unsigned rounds,
-                hs_fp_collector_t *collector, bool echoMatches,
-                RunStats *stats,
+                hs_fp_collector_t *collector, bool echoMatches, RunStats *stats,
                 string *error) {
     for (unsigned round = 0; round < rounds; round++) {
         for (const auto &block : blocks) {
@@ -1303,9 +1305,9 @@ bool scanStreaming(const hs_database_t *db, hs_scratch_t *scratch,
                 static_cast<unsigned int>(block.payload.size());
             hs_error_t err = HS_SUCCESS;
             if (collector) {
-                err = hs_scan_stream_with_collector(
-                    stream.handle, data, len, 0, scratch, onMatch, &matchCtx,
-                    collector);
+                err = hs_scan_stream_with_collector(stream.handle, data, len, 0,
+                                                    scratch, onMatch, &matchCtx,
+                                                    collector);
             } else {
                 err = hs_scan_stream(stream.handle, data, len, 0, scratch,
                                      onMatch, &matchCtx);
@@ -1384,8 +1386,8 @@ bool scanVectored(const hs_database_t *db, hs_scratch_t *scratch,
 
 bool scanCorpus(const hs_database_t *db, hs_scratch_t *scratch,
                 const vector<DataBlock> &blocks, unsigned rounds,
-                hs_fp_collector_t *collector, bool echoMatches,
-                ScanMode mode, RunStats *stats, string *error) {
+                hs_fp_collector_t *collector, bool echoMatches, ScanMode mode,
+                RunStats *stats, string *error) {
     switch (mode) {
     case ScanMode::STREAMING:
         return scanStreaming(db, scratch, blocks, rounds, collector,
@@ -1394,8 +1396,8 @@ bool scanCorpus(const hs_database_t *db, hs_scratch_t *scratch,
         return scanBlocks(db, scratch, blocks, rounds, collector, echoMatches,
                           stats, error);
     case ScanMode::VECTORED:
-        return scanVectored(db, scratch, blocks, rounds, collector,
-                            echoMatches, stats, error);
+        return scanVectored(db, scratch, blocks, rounds, collector, echoMatches,
+                            stats, error);
     }
     if (error) {
         *error = "unknown scan mode";
@@ -1432,8 +1434,7 @@ bool createCollectors(const hs_database_t *db, unsigned count,
         hs_fp_collector_t *rawCollector = nullptr;
         hs_error_t err = hs_fp_collector_create(db, &rawCollector);
         if (err != HS_SUCCESS) {
-            cerr << "hs_fp_collector_create failed with error " << err
-                 << "\n";
+            cerr << "hs_fp_collector_create failed with error " << err << "\n";
             return false;
         }
         (*collectors)[i].reset(rawCollector);
@@ -1500,9 +1501,8 @@ bool runParallelScan(const hs_database_t *db,
                      const vector<ScratchPtr> &scratches,
                      const vector<DataBlock> &blocks, unsigned rounds,
                      const vector<CollectorPtr> *collectors,
-                     const vector<unsigned> *cpuList,
-                     bool echoMatches, ScanMode mode,
-                     ParallelRunResult *result) {
+                     const vector<unsigned> *cpuList, bool echoMatches,
+                     ScanMode mode, ParallelRunResult *result) {
     const size_t threadCount = scratches.size();
     if (!threadCount) {
         cerr << "no worker scratch allocated\n";
@@ -1533,10 +1533,9 @@ bool runParallelScan(const hs_database_t *db,
                     return;
                 }
                 const auto workerStart = std::chrono::steady_clock::now();
-                results[i].ok = scanCorpus(db, scratches[i].get(), blocks,
-                                           rounds, collector, echoMatches, mode,
-                                           &results[i].stats,
-                                           &results[i].error);
+                results[i].ok = scanCorpus(
+                    db, scratches[i].get(), blocks, rounds, collector,
+                    echoMatches, mode, &results[i].stats, &results[i].error);
                 const auto workerEnd = std::chrono::steady_clock::now();
                 results[i].seconds = secondsSince(workerStart, workerEnd);
             });
@@ -1561,8 +1560,7 @@ bool runParallelScan(const hs_database_t *db,
     result->fastestWorkerSeconds = 0.0;
     for (size_t i = 0; i < threadCount; i++) {
         if (!results[i].ok) {
-            cerr << "worker " << i << " failed: " << results[i].error
-                 << "\n";
+            cerr << "worker " << i << " failed: " << results[i].error << "\n";
             return false;
         }
         addRunStats(&result->stats, results[i].stats);
@@ -1693,29 +1691,24 @@ bool loadFeedbackFragments(const hs_fp_feedback_t *feedback,
 }
 
 void sortFragments(vector<hs_fp_fragment_info_t> *fragments) {
-    std::sort(fragments->begin(), fragments->end(),
-              [](const hs_fp_fragment_info_t &a,
-                 const hs_fp_fragment_info_t &b) {
-                  if (a.false_positive_count != b.false_positive_count) {
-                      return a.false_positive_count > b.false_positive_count;
-                  }
-                  if (a.trigger_count != b.trigger_count) {
-                      return a.trigger_count > b.trigger_count;
-                  }
-                  return a.key < b.key;
-              });
+    std::sort(
+        fragments->begin(), fragments->end(),
+        [](const hs_fp_fragment_info_t &a, const hs_fp_fragment_info_t &b) {
+            if (a.false_positive_count != b.false_positive_count) {
+                return a.false_positive_count > b.false_positive_count;
+            }
+            if (a.trigger_count != b.trigger_count) {
+                return a.trigger_count > b.trigger_count;
+            }
+            return a.key < b.key;
+        });
 }
 
 void printFragmentHeader() {
-    cout << left << setw(4) << "#"
-         << setw(20) << "key"
-         << setw(10) << "table"
-         << setw(10) << "engine"
-         << right << setw(12) << "trigger"
-         << setw(12) << "true"
-         << setw(12) << "false"
-         << setw(10) << "fp_rate"
-         << setw(10) << "fp_share"
+    cout << left << setw(4) << "#" << setw(20) << "key" << setw(10) << "table"
+         << setw(10) << "engine" << right << setw(12) << "trigger" << setw(12)
+         << "true" << setw(12) << "false" << setw(10) << "fp_rate" << setw(10)
+         << "fp_share"
          << "  fragment\n";
 }
 
@@ -1728,15 +1721,12 @@ string fragmentKeyString(const hs_fp_fragment_info_t &fragment) {
 
 void printFragmentRow(size_t index, const hs_fp_fragment_info_t &fragment,
                       unsigned long long totalFalsePositive) {
-    cout << left << setw(4) << index
-         << setw(20) << fragmentKeyString(fragment)
-         << setw(10) << tableName(fragment.table)
-         << setw(10) << engineName(fragment.engine)
-         << right << setw(12) << fragment.trigger_count
-         << setw(12) << fragment.true_trigger_count
-         << setw(12) << fragment.false_positive_count
-         << setw(10) << formatPercent(falsePositiveRate(fragment))
-         << setw(10)
+    cout << left << setw(4) << index << setw(20) << fragmentKeyString(fragment)
+         << setw(10) << tableName(fragment.table) << setw(10)
+         << engineName(fragment.engine) << right << setw(12)
+         << fragment.trigger_count << setw(12) << fragment.true_trigger_count
+         << setw(12) << fragment.false_positive_count << setw(10)
+         << formatPercent(falsePositiveRate(fragment)) << setw(10)
          << formatPercent(falsePositiveShare(fragment, totalFalsePositive))
          << "  \"" << escapedBytes(fragment.bytes, fragment.length) << "\"\n";
 }
@@ -1764,8 +1754,7 @@ void printTopReportFragments(const hs_fp_report_t *report, unsigned top) {
     printFragmentHeader();
     const size_t limit = std::min<size_t>(top, fragments.size());
     for (size_t i = 0; i < limit; i++) {
-        printFragmentRow(i + 1, fragments[i],
-                         summary.false_positive_count);
+        printFragmentRow(i + 1, fragments[i], summary.false_positive_count);
     }
 }
 
@@ -1835,17 +1824,14 @@ bool writeFragmentCsv(const string &path,
            "false_positive_count,fp_rate,fp_share,fragment\n";
     for (const auto &fragment : fragments) {
         const string bytes = escapedBytes(fragment.bytes, fragment.length);
-        out << fragmentKeyString(fragment) << ','
-            << tableName(fragment.table) << ','
-            << engineName(fragment.engine) << ','
-            << fragment.trigger_count << ','
-            << fragment.true_trigger_count << ','
-            << fragment.false_positive_count << ','
+        out << fragmentKeyString(fragment) << ',' << tableName(fragment.table)
+            << ',' << engineName(fragment.engine) << ','
+            << fragment.trigger_count << ',' << fragment.true_trigger_count
+            << ',' << fragment.false_positive_count << ','
             << formatFixed(falsePositiveRate(fragment) * 100.0, 2) << ','
-            << formatFixed(falsePositiveShare(fragment, totalFalsePositive) *
-                               100.0,
-                           2) << ','
-            << csvEscape(bytes) << "\n";
+            << formatFixed(
+                   falsePositiveShare(fragment, totalFalsePositive) * 100.0, 2)
+            << ',' << csvEscape(bytes) << "\n";
     }
 
     if (!out.good()) {
@@ -1874,8 +1860,7 @@ bool dumpReportCsvFile(const hs_fp_report_t *report, const string &path) {
                             summary.false_positive_count);
 }
 
-bool dumpFeedbackCsvFile(const hs_fp_feedback_t *feedback,
-                         const string &path) {
+bool dumpFeedbackCsvFile(const hs_fp_feedback_t *feedback, const string &path) {
     if (path.empty()) {
         return true;
     }
@@ -1902,20 +1887,19 @@ bool dumpCsvOutputs(const hs_fp_report_t *report,
     if (!ensureDirectory(dir, "CSV output")) {
         return false;
     }
-    if (report && !dumpReportCsvFile(report,
-                                     joinPath(dir, HSPGO_REPORT_CSV_NAME))) {
+    if (report &&
+        !dumpReportCsvFile(report, joinPath(dir, HSPGO_REPORT_CSV_NAME))) {
         return false;
     }
-    if (feedback &&
-        !dumpFeedbackCsvFile(feedback, joinPath(dir, HSPGO_FEEDBACK_CSV_NAME))) {
+    if (feedback && !dumpFeedbackCsvFile(
+                        feedback, joinPath(dir, HSPGO_FEEDBACK_CSV_NAME))) {
         return false;
     }
     return true;
 }
 
-const uint8_t HSPGO_FEEDBACK_BIN_MAGIC[8] = {
-    'H', 'S', 'P', 'G', 'O', 'F', 'B', '1'
-};
+const uint8_t HSPGO_FEEDBACK_BIN_MAGIC[8] = {'H', 'S', 'P', 'G',
+                                             'O', 'F', 'B', '1'};
 const uint32_t HSPGO_FEEDBACK_BIN_VERSION = 2;
 const uint64_t MAX_FEEDBACK_BIN_SIZE = 128ULL * 1024ULL * 1024ULL;
 const uint32_t MAX_SERIALIZED_FRAGMENT_BYTES = 4096;
@@ -2217,8 +2201,7 @@ bool readSerializedFragment(const vector<uint8_t> &payload, size_t *offset,
 }
 
 bool loadFeedbackBin(const string &path, ScanMode mode,
-                     uint64_t sourceFingerprint,
-                     FeedbackPtr *feedback) {
+                     uint64_t sourceFingerprint, FeedbackPtr *feedback) {
     vector<uint8_t> file;
     if (!readBinaryFile(path, &file)) {
         return false;
@@ -2326,8 +2309,8 @@ bool loadFeedbackBin(const string &path, ScanMode mode,
         imports.empty() ? nullptr : imports.data(), fragmentCount, scanCalls,
         scanBytes, totalFalsePositive, &rawFeedback);
     if (err != HS_SUCCESS) {
-        cerr << "hs_fp_feedback_create_from_fragments failed with error "
-             << err << "\n";
+        cerr << "hs_fp_feedback_create_from_fragments failed with error " << err
+             << "\n";
         return false;
     }
     feedback->reset(rawFeedback);
@@ -2335,8 +2318,7 @@ bool loadFeedbackBin(const string &path, ScanMode mode,
 }
 
 bool loadFeedbackBinFromDir(const string &dir, ScanMode mode,
-                            uint64_t sourceFingerprint,
-                            FeedbackPtr *feedback) {
+                            uint64_t sourceFingerprint, FeedbackPtr *feedback) {
     const string trimmed = trimTrailingSeparators(dir);
     if (trimmed.empty()) {
         cerr << "feedback binary input directory must not be empty\n";
@@ -2361,8 +2343,8 @@ void printReportSummaryWithTitle(const char *title,
     }
 
     cout << "\n" << title << ":\n";
-    printField("Fragments:", static_cast<unsigned long long>(
-                                  summary.fragment_count));
+    printField("Fragments:",
+               static_cast<unsigned long long>(summary.fragment_count));
     printField("Scan calls:", summary.scan_calls);
     printField("Scan bytes:", summary.scan_bytes);
     printField("Triggers:", summary.trigger_count);
@@ -2386,16 +2368,12 @@ void printReportSummaryWithTitle(const char *title,
         printField("Unknown breakdown:", "");
         printField("  no active trigger:",
                    summary.unknown_no_active_trigger_count);
-        printField("  delayed replay:",
-                   summary.unknown_delayed_replay_count);
-        printField("  anchored replay:",
-                   summary.unknown_anchored_replay_count);
-        printField("  EOD/boundary:",
-                   summary.unknown_eod_or_boundary_count);
+        printField("  delayed replay:", summary.unknown_delayed_replay_count);
+        printField("  anchored replay:", summary.unknown_anchored_replay_count);
+        printField("  EOD/boundary:", summary.unknown_eod_or_boundary_count);
         printField("  flush combination:",
                    summary.unknown_flush_combination_count);
-        printField("  MPV/NFA queue:",
-                   summary.unknown_mpv_or_nfa_queue_count);
+        printField("  MPV/NFA queue:", summary.unknown_mpv_or_nfa_queue_count);
         printField("  unclassified:", unclassifiedUnknown);
         printField("  counter missing:", summary.unknown_counter_missing_count);
         printField("  meta missing:",
@@ -2421,8 +2399,7 @@ void printFeedbackSummary(const hs_fp_feedback_t *feedback) {
                static_cast<unsigned long long>(summary.bad_fragment_count));
     printField("Source scan calls:", summary.scan_calls);
     printField("Source scan bytes:", summary.scan_bytes);
-    printField("Source false positives:",
-               summary.total_false_positive_count);
+    printField("Source false positives:", summary.total_false_positive_count);
 }
 
 struct FragmentTotals {
@@ -2495,9 +2472,9 @@ FragmentTotals sumFragments(const vector<hs_fp_fragment_info_t> &fragments) {
     return totals;
 }
 
-FragmentTotals sumMatchingFragments(
-        const vector<hs_fp_fragment_info_t> &reportFragments,
-        const vector<hs_fp_fragment_info_t> &needles) {
+FragmentTotals
+sumMatchingFragments(const vector<hs_fp_fragment_info_t> &reportFragments,
+                     const vector<hs_fp_fragment_info_t> &needles) {
     FragmentTotals totals;
     for (const auto &fragment : reportFragments) {
         if (!containsFragmentIdentity(needles, fragment)) {
@@ -2545,7 +2522,8 @@ bool printVerificationComparison(const hs_fp_report_t *beforeReport,
 
     const double beforeTriggerRate =
         perMiB(before.trigger_count, before.scan_bytes);
-    const double afterTriggerRate = perMiB(after.trigger_count, after.scan_bytes);
+    const double afterTriggerRate =
+        perMiB(after.trigger_count, after.scan_bytes);
     const double beforeFpRate =
         perMiB(before.false_positive_count, before.scan_bytes);
     const double afterFpRate =
@@ -2580,9 +2558,9 @@ bool printVerificationComparison(const hs_fp_report_t *beforeReport,
                formatCount(selectedAfter.trigger) + " (" +
                    formatFixedWithCommas(selectedAfterTriggerRate, 2) +
                    " / MiB)");
-    printField("Bad fragment reduction:",
-               formatReduction(selectedBeforeTriggerRate,
-                               selectedAfterTriggerRate));
+    printField(
+        "Bad fragment reduction:",
+        formatReduction(selectedBeforeTriggerRate, selectedAfterTriggerRate));
     printField("Bad fragment FP before:",
                formatCount(selectedBefore.falsePositive) + " (" +
                    formatFixedWithCommas(selectedBeforeFpRate, 2) + " / MiB)");
@@ -2702,8 +2680,8 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
     unsigned long long passed = 0;
     for (const auto &checkpoint : checkpoints) {
         hs_compile_context_checkpoint_info_t info = {};
-        hs_error_t err = hs_compile_context_get_checkpoint_info(
-            ctx, checkpoint.id, &info);
+        hs_error_t err =
+            hs_compile_context_get_checkpoint_info(ctx, checkpoint.id, &info);
         if (err != HS_SUCCESS) {
             continue;
         }
@@ -2735,23 +2713,21 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
     printField("Passed candidates:", passed);
 
     cout << "\nCompile feedback checkpoints:\n";
-    cout << left << setw(18) << "checkpoint"
-         << right << setw(12) << "checked"
-         << setw(12) << "hit"
-         << setw(12) << "blocked"
-         << setw(12) << "passed" << "\n";
+    cout << left << setw(18) << "checkpoint" << right << setw(12) << "checked"
+         << setw(12) << "hit" << setw(12) << "blocked" << setw(12) << "passed"
+         << "\n";
     for (const auto &checkpoint : checkpoints) {
         hs_compile_context_checkpoint_info_t info = {};
-        hs_error_t err = hs_compile_context_get_checkpoint_info(
-            ctx, checkpoint.id, &info);
+        hs_error_t err =
+            hs_compile_context_get_checkpoint_info(ctx, checkpoint.id, &info);
         if (err != HS_SUCCESS) {
             continue;
         }
-        cout << left << setw(18) << checkpoint.name
-             << right << setw(12) << formatCount(info.checked_count)
-             << setw(12) << formatCount(info.hit_count)
-             << setw(12) << formatCount(info.blocked_count)
-             << setw(12) << formatCount(info.passed_count) << "\n";
+        cout << left << setw(18) << checkpoint.name << right << setw(12)
+             << formatCount(info.checked_count) << setw(12)
+             << formatCount(info.hit_count) << setw(12)
+             << formatCount(info.blocked_count) << setw(12)
+             << formatCount(info.passed_count) << "\n";
     }
 }
 
@@ -2781,15 +2757,15 @@ void printDatabaseStats(const char *title, const DatabaseStats &stats) {
     printField("Ultrascan info:", stats.info);
     printField("Expression count:",
                static_cast<unsigned long long>(stats.expressionCount));
-    printField("Bytecode size:",
-               formatCount(static_cast<unsigned long long>(stats.bytecodeSize)) +
-                   " bytes");
+    printField("Bytecode size:", formatCount(static_cast<unsigned long long>(
+                                     stats.bytecodeSize)) +
+                                     " bytes");
     printField("Database CRC:", formatHex32(stats.crc32));
     printField("Scratch size:",
                formatCount(static_cast<unsigned long long>(stats.scratchSize)) +
                    " bytes");
-    printField("Compile time:", formatFixed(stats.compileSeconds, 3) +
-                                    " seconds");
+    printField("Compile time:",
+               formatFixed(stats.compileSeconds, 3) + " seconds");
     printField("Peak heap usage:",
                formatCount(static_cast<unsigned long long>(stats.peakHeap)) +
                    " bytes");
@@ -2884,23 +2860,24 @@ void printScanSummary(const char *title, const vector<DataBlock> &blocks,
     const unsigned long long workerBytes = bytesPerRun * rounds;
 
     cout << "\n" << title << ":\n";
-    printField("Time spent scanning:", formatFixed(result.seconds, 3) +
-                                           " seconds");
+    printField("Time spent scanning:",
+               formatFixed(result.seconds, 3) + " seconds");
     printField("Corpus size:",
                formatCount(bytesPerRun) + " bytes (" + corpusShape + ")");
-    printField("Matches per iteration:",
-               formatFixed(matchesPerIteration, 0) + " (" +
-                   formatFixed(matchRate, 3) + " matches/kilobyte)");
+    printField("Matches per iteration:", formatFixed(matchesPerIteration, 0) +
+                                             " (" + formatFixed(matchRate, 3) +
+                                             " matches/kilobyte)");
     printField("Overall block rate:",
                formatFixedWithCommas(blockRate, 2) + " blocks/sec");
-    printField("Mean throughput (overall):",
-               formatFixedWithCommas(throughputMbit(result.stats,
-                                                    result.seconds),
-                                     2) + " Mbit/sec");
-    printField("Max throughput (per core):",
-               formatFixedWithCommas(throughputMbit(workerBytes,
-                                                    result.fastestWorkerSeconds),
-                                     2) + " Mbit/sec");
+    printField(
+        "Mean throughput (overall):",
+        formatFixedWithCommas(throughputMbit(result.stats, result.seconds), 2) +
+            " Mbit/sec");
+    printField(
+        "Max throughput (per core):",
+        formatFixedWithCommas(
+            throughputMbit(workerBytes, result.fastestWorkerSeconds), 2) +
+            " Mbit/sec");
 }
 
 void printOptimizedBaselineRatio(const ParallelRunResult &baseline,
@@ -2914,8 +2891,7 @@ void printOptimizedBaselineRatio(const ParallelRunResult &baseline,
     }
 
     const double ratio = optimizedThroughput * 100.0 / baselineThroughput;
-    printField("Optimized/Baseline:",
-               formatFixed(ratio, 2) + "%");
+    printField("Optimized/Baseline:", formatFixed(ratio, 2) + "%");
     if (ratio > 100.0) {
         printField("Feedback result:",
                    "improved +" + formatFixed(ratio - 100.0, 2) + "%");
@@ -2964,11 +2940,11 @@ int HS_CDECL main(int argc, char **argv) {
             return 1;
         }
 
-        if (!queryDatabaseStats(baselineDb.get(), baselineScratches[0].get(),
-                                signatureName(opts), patterns.exprs.size(),
-                                secondsSince(baselineCompileStart,
-                                             baselineCompileEnd),
-                                &baselineDbStats)) {
+        if (!queryDatabaseStats(
+                baselineDb.get(), baselineScratches[0].get(),
+                signatureName(opts), patterns.exprs.size(),
+                secondsSince(baselineCompileStart, baselineCompileEnd),
+                &baselineDbStats)) {
             return 1;
         }
     }
@@ -3000,13 +2976,11 @@ int HS_CDECL main(int argc, char **argv) {
         if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
                              opts.baselineRounds, nullptr,
                              opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                             false, opts.scanMode,
-                             &baselineResult)) {
+                             false, opts.scanMode, &baselineResult)) {
             return 1;
         }
         printScanSummary("Baseline scan", blocks, baselineResult,
-                         opts.baselineRounds, opts.threadCount,
-                         opts.scanMode);
+                         opts.baselineRounds, opts.threadCount, opts.scanMode);
         haveBaselineResult = true;
     }
 
@@ -3036,8 +3010,7 @@ int HS_CDECL main(int argc, char **argv) {
         if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
                              opts.collectRounds, &workerCollectors,
                              opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                             false, opts.scanMode,
-                             &collectResult)) {
+                             false, opts.scanMode, &collectResult)) {
             return 1;
         }
         printScanSummary("Collection scan", blocks, collectResult,
@@ -3093,11 +3066,11 @@ int HS_CDECL main(int argc, char **argv) {
     }
 
     DatabaseStats optimizedDbStats;
-    if (!queryDatabaseStats(optimizedDb.get(), optimizedScratches[0].get(),
-                            signatureName(opts), patterns.exprs.size(),
-                            secondsSince(optimizedCompileStart,
-                                         optimizedCompileEnd),
-                            &optimizedDbStats)) {
+    if (!queryDatabaseStats(
+            optimizedDb.get(), optimizedScratches[0].get(), signatureName(opts),
+            patterns.exprs.size(),
+            secondsSince(optimizedCompileStart, optimizedCompileEnd),
+            &optimizedDbStats)) {
         return 1;
     }
     printDatabaseStats("Feedback database", optimizedDbStats);
@@ -3124,8 +3097,7 @@ int HS_CDECL main(int argc, char **argv) {
     if (!runParallelScan(optimizedDb.get(), optimizedScratches, blocks,
                          opts.measureRounds, nullptr,
                          opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                         opts.echoMatches, opts.scanMode,
-                         &measureResult)) {
+                         opts.echoMatches, opts.scanMode, &measureResult)) {
         return 1;
     }
     printScanSummary("Optimized measurement", blocks, measureResult,
@@ -3145,8 +3117,7 @@ int HS_CDECL main(int argc, char **argv) {
         if (!runParallelScan(optimizedDb.get(), optimizedScratches, blocks,
                              opts.verifyRounds, &verifyCollectors,
                              opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                             false, opts.scanMode,
-                             &verifyResult)) {
+                             false, opts.scanMode, &verifyResult)) {
             return 1;
         }
         printScanSummary("Verification scan", blocks, verifyResult,

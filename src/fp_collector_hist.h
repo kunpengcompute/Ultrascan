@@ -32,8 +32,7 @@
 #include "ue2common.h"
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 #define HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE 64U
@@ -51,8 +50,9 @@ void hs_fp_histogram_count_batch(u8 backend, const u32 *keys, u32 count,
                                  hs_fp_histogram_emit_fn emit, void *ctx);
 
 #if defined(ARCH_AARCH64) && defined(HS_BUILD_HAVE_SVE2_HISTCNT)
-void NEVER_INLINE hs_fp_histogram_count_batch_sve2(
-        const u32 *keys, u32 count, hs_fp_histogram_emit_fn emit, void *ctx);
+void NEVER_INLINE hs_fp_histogram_count_batch_sve2(const u32 *keys, u32 count,
+                                                   hs_fp_histogram_emit_fn emit,
+                                                   void *ctx);
 #endif
 
 #ifdef __cplusplus

@@ -33,8 +33,8 @@
 #ifndef HS_INTERNAL_H
 #define HS_INTERNAL_H
 
-#include "ue2common.h"
 #include "hs.h"
+#include "ue2common.h"
 
 #ifdef __cplusplus
 
@@ -48,19 +48,13 @@ hs_error_t fat_hs_compile_multi_int(const char *const *expressions,
                                     unsigned int elements, unsigned int mode,
                                     const hs_platform_info_t *platform,
                                     fat_hs_database_t **db,
-                                    hs_compile_error_t **error,
-                                    const Grey &g);
+                                    hs_compile_error_t **error, const Grey &g);
 
-hs_error_t fat_hs_compile_lit_multi_int(const char *const *expressions,
-                                        const unsigned *flags,
-                                        const unsigned *ids,
-                                        const hs_expr_ext *const *ext,
-                                        const size_t *lens,
-                                        unsigned elements, unsigned mode,
-                                        const hs_platform_info_t *platform,
-                                        fat_hs_database_t **db,
-                                        hs_compile_error_t **comp_error,
-                                        const Grey &g);
+hs_error_t fat_hs_compile_lit_multi_int(
+    const char *const *expressions, const unsigned *flags, const unsigned *ids,
+    const hs_expr_ext *const *ext, const size_t *lens, unsigned elements,
+    unsigned mode, const hs_platform_info_t *platform, fat_hs_database_t **db,
+    hs_compile_error_t **comp_error, const Grey &g);
 
 /** \brief Internal use only: takes a Grey argument so that we can use it in
  * tools. */
@@ -70,41 +64,30 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
                                 unsigned elements, unsigned mode,
                                 const hs_platform_info_t *platform,
                                 hs_database_t **db,
-                                hs_compile_error_t **comp_error,
-                                const Grey &g,
+                                hs_compile_error_t **comp_error, const Grey &g,
                                 const hs_compile_context_t *fp_ctx = nullptr);
 
 /** \brief Internal use only: takes a Grey argument so that we can use it in
  * tools. */
-hs_error_t hs_compile_lit_multi_int(const char *const *expressions,
-                                    const unsigned *flags, const unsigned *ids,
-                                    const hs_expr_ext *const *ext,
-                                    const size_t *lens, unsigned elements,
-                                    unsigned mode,
-                                    const hs_platform_info_t *platform,
-                                    hs_database_t **db,
-                                    hs_compile_error_t **comp_error,
-                                    const Grey &g);
+hs_error_t
+hs_compile_lit_multi_int(const char *const *expressions, const unsigned *flags,
+                         const unsigned *ids, const hs_expr_ext *const *ext,
+                         const size_t *lens, unsigned elements, unsigned mode,
+                         const hs_platform_info_t *platform, hs_database_t **db,
+                         hs_compile_error_t **comp_error, const Grey &g);
 } // namespace ue2
 
-extern "C"
-{
+extern "C" {
 #endif
 
-#define HS_MATCH_FLAG_ADJUSTED  1U
+#define HS_MATCH_FLAG_ADJUSTED 1U
 
 /** \brief Bitmask of all valid Hyperscan flags. */
-#define HS_FLAG_ALL ( HS_FLAG_CASELESS \
-                    | HS_FLAG_DOTALL \
-                    | HS_FLAG_MULTILINE \
-                    | HS_FLAG_UTF8 \
-                    | HS_FLAG_UCP \
-                    | HS_FLAG_PREFILTER \
-                    | HS_FLAG_SINGLEMATCH \
-                    | HS_FLAG_ALLOWEMPTY \
-                    | HS_FLAG_SOM_LEFTMOST \
-                    | HS_FLAG_COMBINATION \
-                    | HS_FLAG_QUIET)
+#define HS_FLAG_ALL                                                            \
+    (HS_FLAG_CASELESS | HS_FLAG_DOTALL | HS_FLAG_MULTILINE | HS_FLAG_UTF8 |    \
+     HS_FLAG_UCP | HS_FLAG_PREFILTER | HS_FLAG_SINGLEMATCH |                   \
+     HS_FLAG_ALLOWEMPTY | HS_FLAG_SOM_LEFTMOST | HS_FLAG_COMBINATION |         \
+     HS_FLAG_QUIET)
 
 #ifdef __cplusplus
 } /* extern "C" */
