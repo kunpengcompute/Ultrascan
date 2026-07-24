@@ -53,7 +53,6 @@ set(unit_hyperscan_SOURCES
     hyperscan/behaviour.cpp
     hyperscan/expr_info.cpp
     hyperscan/extparam.cpp
-    hyperscan/fp_collector.cpp
     hyperscan/grey_overrides.cpp
     hyperscan/identical.cpp
     hyperscan/literals.cpp
@@ -70,6 +69,9 @@ set(unit_hyperscan_SOURCES
     hyperscan/test_util.cpp
     hyperscan/test_util.h
     )
+if (HS_ENABLE_FP_FEEDBACK)
+    list(APPEND unit_hyperscan_SOURCES hyperscan/fp_collector.cpp)
+endif()
 add_executable(unit-hyperscan ${unit_hyperscan_SOURCES})
 if (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS)
 target_link_libraries(unit-hyperscan hs_shared expressionutil)

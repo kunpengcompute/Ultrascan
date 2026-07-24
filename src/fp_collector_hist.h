@@ -38,7 +38,7 @@ extern "C" {
 #define HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE 64U
 
 enum hs_fp_histogram_backend {
-    HS_FP_HISTOGRAM_BACKEND_SCALAR = 0,
+    HS_FP_HISTOGRAM_BACKEND_NEON = 0,
     HS_FP_HISTOGRAM_BACKEND_SVE2 = 1
 };
 

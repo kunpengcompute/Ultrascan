@@ -42,6 +42,9 @@
 /* Define if the build toolchain can compile SVE2 bitperm code paths. */
 #cmakedefine HS_BUILD_HAVE_SVEBITPERM
 
+/* Define if false-positive feedback optimization support is enabled. */
+#cmakedefine HS_ENABLE_FP_FEEDBACK
+
 /* Define to 1 if `backtrace' works. */
 #cmakedefine HAVE_BACKTRACE
 

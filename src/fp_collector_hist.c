@@ -33,32 +33,42 @@
 #include "hs_compile.h"
 #include "util/cpuid_flags.h"
 
-static void histogram_count_batch_scalar(const u32 *keys, u32 count,
-                                         hs_fp_histogram_emit_fn emit,
-                                         void *ctx) {
+#if !defined(__aarch64__)
+#error "false-positive feedback histogram requires AArch64 NEON"
+#endif
+
+#include <arm_neon.h>
+
+static u32 count_key_in_range_neon(const u32 *keys, u32 count, u32 key) {
+    const uint32x4_t vkey = vdupq_n_u32(key);
+    u32 total = 0;
+    u32 pos = 0;
+
+    for (; pos + 4 <= count; pos += 4) {
+        const uint32x4_t vals = vld1q_u32(keys + pos);
+        const uint32x4_t hits = vceqq_u32(vals, vkey);
+        total += vaddvq_u32(vshrq_n_u32(hits, 31));
+    }
+
+    for (; pos < count; pos++) {
+        if (keys[pos] == key) {
+            total++;
+        }
+    }
+
+    return total;
+}
+
+static void histogram_count_batch_neon(const u32 *keys, u32 count,
+                                       hs_fp_histogram_emit_fn emit,
+                                       void *ctx) {
     for (u32 i = 0; i < count; i++) {
         const u32 key = keys[i];
-        u64a key_count = 1;
-        char first = 1;
-
-        for (u32 j = 0; j < i; j++) {
-            if (keys[j] == key) {
-                first = 0;
-                break;
-            }
-        }
-
-        if (!first) {
+        if (count_key_in_range_neon(keys, i, key)) {
             continue;
         }
 
-        for (u32 j = i + 1; j < count; j++) {
-            if (keys[j] == key) {
-                key_count++;
-            }
-        }
-
-        emit(ctx, key, key_count);
+        emit(ctx, key, count_key_in_range_neon(keys, count, key));
     }
 }
 
@@ -68,7 +78,7 @@ u8 hs_fp_histogram_select_backend(void) {
         return HS_FP_HISTOGRAM_BACKEND_SVE2;
     }
 #endif
-    return HS_FP_HISTOGRAM_BACKEND_SCALAR;
+    return HS_FP_HISTOGRAM_BACKEND_NEON;
 }
 
 void hs_fp_histogram_count_batch(u8 backend, const u32 *keys, u32 count,
@@ -89,5 +99,5 @@ void hs_fp_histogram_count_batch(u8 backend, const u32 *keys, u32 count,
     (void)backend;
 #endif
 
-    histogram_count_batch_scalar(keys, count, emit, ctx);
+    histogram_count_batch_neon(keys, count, emit, ctx);
 }

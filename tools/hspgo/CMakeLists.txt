@@ -1,3 +1,8 @@
+if (NOT HS_ENABLE_FP_FEEDBACK)
+    message(STATUS "false-positive feedback disabled; not building hspgo")
+    return()
+endif()
+
 include (${CMAKE_MODULE_PATH}/sqlite3.cmake)
 if (NOT SQLITE3_FOUND)
     message(STATUS "sqlite3 not found, not building hspgo")

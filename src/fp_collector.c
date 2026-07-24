@@ -41,6 +41,12 @@
 #include "scratch.h"
 #include "ue2common.h"
 
+#if !defined(__aarch64__)
+#error "false-positive feedback collector requires AArch64 NEON"
+#endif
+
+#include <arm_neon.h>
+
 struct hs_fp_counter {
     u32 key;
     u8 used;
@@ -145,6 +151,35 @@ struct hs_fp_feedback_build_options {
     u32 min_waste_share;
     u32 max_bad_fragments;
 };
+
+static char bytes_equal_short_neon(const u8 *lhs, const u8 *rhs, size_t len) {
+    assert(len <= ROSE_FP_FRAGMENT_BYTES_MAX);
+    if (!len) {
+        return 1;
+    }
+
+    u8 lhs_buf[ROSE_FP_FRAGMENT_BYTES_MAX] = {0};
+    u8 rhs_buf[ROSE_FP_FRAGMENT_BYTES_MAX] = {0};
+    u8 cmp_buf[ROSE_FP_FRAGMENT_BYTES_MAX];
+
+    for (size_t i = 0; i < len; i++) {
+        lhs_buf[i] = lhs[i];
+        rhs_buf[i] = rhs[i];
+    }
+
+    const uint8x8_t lhs_vec = vld1_u8(lhs_buf);
+    const uint8x8_t rhs_vec = vld1_u8(rhs_buf);
+    const uint8x8_t eq = vceq_u8(lhs_vec, rhs_vec);
+    vst1_u8(cmp_buf, eq);
+
+    for (size_t i = 0; i < len; i++) {
+        if (cmp_buf[i] != 0xffU) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
 
 static u64a sat_add_u64a(u64a a, u64a b) {
     const u64a max = ~(u64a)0;
@@ -1075,13 +1110,13 @@ feedback_entry_matches_meta(const struct hs_fp_feedback_entry *entry,
         return 0;
     }
 
-    if (memcmp(entry->bytes, meta->bytes, entry->length)) {
+    if (!bytes_equal_short_neon(entry->bytes, meta->bytes, entry->length)) {
         return 0;
     }
 
     if (entry->mask_length &&
-        (memcmp(entry->mask, meta->mask, entry->mask_length) ||
-         memcmp(entry->cmp, meta->cmp, entry->mask_length))) {
+        (!bytes_equal_short_neon(entry->mask, meta->mask, entry->mask_length) ||
+         !bytes_equal_short_neon(entry->cmp, meta->cmp, entry->mask_length))) {
         return 0;
     }
 
@@ -1138,7 +1173,8 @@ char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
         }
 
         const char *suffix = bytes + length - entry->length;
-        if (!memcmp(entry->bytes, suffix, entry->length)) {
+        if (bytes_equal_short_neon(entry->bytes, (const u8 *)suffix,
+                                   entry->length)) {
             return 1;
         }
     }
@@ -1167,7 +1203,8 @@ char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
         }
 
         const char *suffix = bytes + length - entry->length;
-        if (memcmp(entry->bytes, suffix, entry->length)) {
+        if (!bytes_equal_short_neon(entry->bytes, (const u8 *)suffix,
+                                    entry->length)) {
             continue;
         }
 
@@ -1175,8 +1212,9 @@ char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
             continue;
         }
 
-        if (mask_length && (memcmp(entry->mask, mask, mask_length) ||
-                            memcmp(entry->cmp, cmp, mask_length))) {
+        if (mask_length &&
+            (!bytes_equal_short_neon(entry->mask, mask, mask_length) ||
+             !bytes_equal_short_neon(entry->cmp, cmp, mask_length))) {
             continue;
         }
 

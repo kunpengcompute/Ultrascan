@@ -916,6 +916,9 @@ hs_compile_context_create(hs_compile_context_t **ctx) {
     }
     *ctx = nullptr;
 
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    return HS_ARCH_ERROR;
+#else
     hs_compile_context_t *out =
         (hs_compile_context_t *)hs_misc_alloc(sizeof(*out));
     if (!out) {
@@ -925,6 +928,7 @@ hs_compile_context_create(hs_compile_context_t **ctx) {
     memset(out, 0, sizeof(*out));
     *ctx = out;
     return HS_SUCCESS;
+#endif
 }
 
 extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
@@ -933,6 +937,10 @@ extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
         return HS_INVALID;
     }
 
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)feedback;
+    return HS_ARCH_ERROR;
+#else
     hs_fp_feedback_t *copy = nullptr;
     if (feedback) {
         hs_error_t err = hs_fp_feedback_clone(feedback, &copy);
@@ -945,6 +953,7 @@ extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
     ctx->fp_feedback = copy;
     resetCompileContextDiagnostics(ctx);
     return HS_SUCCESS;
+#endif
 }
 
 extern "C" HS_PUBLIC_API hs_error_t HS_CDECL
@@ -992,6 +1001,23 @@ extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_multi_with_context(
     unsigned elements, unsigned mode, const hs_platform_info_t *platform,
     const hs_compile_context_t *ctx, hs_database_t **db,
     hs_compile_error_t **error) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)expressions;
+    (void)flags;
+    (void)ids;
+    (void)elements;
+    (void)mode;
+    (void)platform;
+    (void)ctx;
+    if (db) {
+        *db = nullptr;
+    }
+    if (error) {
+        *error = generateCompileError(
+            "False-positive feedback is not enabled for this build", -1);
+    }
+    return HS_ARCH_ERROR;
+#else
     const hs_expr_ext *const *ext = nullptr; // unused for this call.
     hs_error_t err =
         hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
@@ -1002,6 +1028,7 @@ extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_multi_with_context(
         resetCompileContextDiagnostics(ctx);
     }
     return err;
+#endif
 }
 
 extern "C" HS_PUBLIC_API hs_error_t HS_CDECL fat_hs_compile_multi(
@@ -1027,6 +1054,24 @@ extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_ext_multi_with_context(
     const hs_expr_ext *const *ext, unsigned elements, unsigned mode,
     const hs_platform_info_t *platform, const hs_compile_context_t *ctx,
     hs_database_t **db, hs_compile_error_t **error) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)expressions;
+    (void)flags;
+    (void)ids;
+    (void)ext;
+    (void)elements;
+    (void)mode;
+    (void)platform;
+    (void)ctx;
+    if (db) {
+        *db = nullptr;
+    }
+    if (error) {
+        *error = generateCompileError(
+            "False-positive feedback is not enabled for this build", -1);
+    }
+    return HS_ARCH_ERROR;
+#else
     hs_error_t err =
         hs_compile_multi_int(expressions, flags, ids, ext, elements, mode,
                              platform, db, error, Grey(), ctx);
@@ -1036,6 +1081,7 @@ extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_ext_multi_with_context(
         resetCompileContextDiagnostics(ctx);
     }
     return err;
+#endif
 }
 
 extern "C" HS_PUBLIC_API hs_error_t HS_CDECL fat_hs_compile_ext_multi(

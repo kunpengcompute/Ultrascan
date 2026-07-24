@@ -749,6 +749,32 @@ int main(void) {
     endif()
 endif()
 
+set(HS_TARGET_AARCH64 FALSE)
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+    set(HS_TARGET_AARCH64 TRUE)
+endif()
+
+if (HS_TARGET_AARCH64)
+    set(HS_ENABLE_FP_FEEDBACK_DEFAULT ON)
+else()
+    set(HS_ENABLE_FP_FEEDBACK_DEFAULT OFF)
+endif()
+
+option(HS_ENABLE_FP_FEEDBACK
+    "Build false-positive feedback optimization support"
+    ${HS_ENABLE_FP_FEEDBACK_DEFAULT})
+
+if (HS_ENABLE_FP_FEEDBACK AND NOT HS_TARGET_AARCH64)
+    message(FATAL_ERROR
+        "False-positive feedback optimization is only supported on AArch64")
+endif()
+
+if (HS_ENABLE_FP_FEEDBACK)
+    message(STATUS "False-positive feedback optimization enabled")
+else()
+    message(STATUS "False-positive feedback optimization disabled")
+endif()
+
 # testing a builtin takes a little more work
 CHECK_C_SOURCE_COMPILES("void *aa_test(void *x) { return __builtin_assume_aligned(x, 16);}\nint main(void) { return 0; }" HAVE_CC_BUILTIN_ASSUME_ALIGNED)
 CHECK_CXX_SOURCE_COMPILES("void *aa_test(void *x) { return __builtin_assume_aligned(x, 16);}\nint main(void) { return 0; }" HAVE_CXX_BUILTIN_ASSUME_ALIGNED)
@@ -1018,17 +1044,23 @@ set (hs_exec_common_SRCS
     src/util/multibit.c
     src/fat_database.c
     src/fat_database.h
-    src/fp_collector.c
     src/fp_collector.h
-    src/fp_collector_hist.c
-    src/fp_collector_hist.h
     )
 
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64" AND
-        HS_BUILD_HAVE_SVE2_HISTCNT)
-    list(APPEND hs_exec_common_SRCS src/fp_collector_hist_sve2.c)
-    set_source_files_properties(src/fp_collector_hist_sve2.c PROPERTIES
-        COMPILE_FLAGS "${HS_SVE2_HISTCNT_C_FLAGS}")
+if (HS_ENABLE_FP_FEEDBACK)
+    list(APPEND hs_exec_common_SRCS
+        src/fp_collector.c
+        src/fp_collector_hist.c
+        src/fp_collector_hist.h
+        )
+
+    if (HS_TARGET_AARCH64 AND HS_BUILD_HAVE_SVE2_HISTCNT)
+        list(APPEND hs_exec_common_SRCS src/fp_collector_hist_sve2.c)
+        set_source_files_properties(src/fp_collector_hist_sve2.c PROPERTIES
+            COMPILE_FLAGS "${HS_SVE2_HISTCNT_C_FLAGS}")
+    endif()
+else()
+    list(APPEND hs_exec_common_SRCS src/fp_feedback_disabled.c)
 endif()
 
 set (hs_exec_SRCS
