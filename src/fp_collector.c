@@ -48,8 +48,6 @@
 #include <arm_neon.h>
 
 struct hs_fp_counter {
-    u32 key;
-    u8 used;
     u64a trigger_count;
     u64a true_trigger_count;
     u64a final_report_count;
@@ -60,6 +58,7 @@ struct hs_fp_collector {
     const struct RoseEngine *rose;
     struct hs_fp_counter *counters;
     u32 counter_capacity;
+    struct hs_fp_counter unknown_counter;
     u64a scan_bytes;
     u64a scan_calls;
     u64a trigger_count;
@@ -78,6 +77,8 @@ struct hs_fp_collector {
     u32 pending_trigger_count;
     u32 pending_trigger_keys[HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE];
 };
+
+#define HS_FP_COUNTER_INDEX_INVALID 0xffffffffU
 
 struct hs_fp_report_entry {
     u64a key;
@@ -191,6 +192,11 @@ static u64a sat_add_u64a(u64a a, u64a b) {
 
 static u64a sub_or_zero_u64a(u64a a, u64a b) { return a > b ? a - b : 0; }
 
+static char counter_is_used(const struct hs_fp_counter *counter) {
+    return counter->trigger_count || counter->true_trigger_count ||
+           counter->final_report_count;
+}
+
 static char ratio_at_least(u64a num, u64a den, u64a min_num, u64a min_den) {
     if (!den) {
         return 0;
@@ -207,42 +213,6 @@ static char ratio_at_least(u64a num, u64a den, u64a min_num, u64a min_den) {
     long double lhs = (long double)num / (long double)den;
     long double rhs = (long double)min_num / (long double)min_den;
     return lhs >= rhs;
-}
-
-static u32 hash_u32(u32 v) {
-    v ^= v >> 16;
-    v *= 0x7feb352dU;
-    v ^= v >> 15;
-    v *= 0x846ca68bU;
-    v ^= v >> 16;
-    return v;
-}
-
-static u32 next_power_of_two_u32(u32 v) {
-    if (v <= 1) {
-        return 1;
-    }
-
-    v--;
-    v |= v >> 1;
-    v |= v >> 2;
-    v |= v >> 4;
-    v |= v >> 8;
-    v |= v >> 16;
-    return v + 1;
-}
-
-static u32 choose_counter_capacity(const struct RoseEngine *rose) {
-    u32 wanted = rose->totalNumLiterals;
-    if (wanted < 4) {
-        wanted = 4;
-    }
-    if (wanted > (1U << 28)) {
-        wanted = 1U << 28;
-    } else {
-        wanted *= 4;
-    }
-    return next_power_of_two_u32(wanted);
 }
 
 static int compare_report_entry(const void *a, const void *b) {
@@ -353,45 +323,54 @@ make_feedback_build_options(const hs_fp_feedback_params_t *params,
     return HS_SUCCESS;
 }
 
-static const struct RoseFpFragmentMeta *
-find_fragment_meta(const struct RoseEngine *rose, u32 key) {
+static u32 find_fragment_meta_index(const struct RoseEngine *rose, u32 key) {
     const struct RoseFpFragmentMeta *meta = getRoseFpFragmentMeta(rose);
     if (!meta) {
-        return NULL;
+        return HS_FP_COUNTER_INDEX_INVALID;
     }
 
-    for (u32 i = 0; i < rose->fpFragmentMetaCount; i++) {
-        if (meta[i].programOffset == key) {
-            return meta + i;
+    u32 left = 0;
+    u32 right = rose->fpFragmentMetaCount;
+    while (left < right) {
+        const u32 mid = left + (right - left) / 2;
+        if (meta[mid].programOffset < key) {
+            left = mid + 1;
+        } else {
+            right = mid;
         }
     }
 
-    return NULL;
+    if (left < rose->fpFragmentMetaCount && meta[left].programOffset == key) {
+        return left;
+    }
+
+    return HS_FP_COUNTER_INDEX_INVALID;
 }
 
 static u32 count_used_counters(const hs_fp_collector_t *collector) {
     u32 count = 0;
     for (u32 i = 0; i < collector->counter_capacity; i++) {
-        if (collector->counters[i].used) {
+        if (counter_is_used(collector->counters + i)) {
             count++;
         }
+    }
+    if (counter_is_used(&collector->unknown_counter)) {
+        count++;
     }
     return count;
 }
 
-static char fill_report_entry(struct hs_fp_report_entry *entry,
-                              const hs_fp_collector_t *collector,
-                              const struct hs_fp_counter *counter) {
+static void fill_known_report_entry(struct hs_fp_report_entry *entry,
+                                    const hs_fp_collector_t *collector,
+                                    const struct hs_fp_counter *counter,
+                                    u32 counter_index) {
     entry->fragment_id = ROSE_OFFSET_INVALID;
     entry->trigger_count = counter->trigger_count;
     entry->true_trigger_count = counter->true_trigger_count;
     entry->final_report_count = counter->final_report_count;
 
     const struct RoseFpFragmentMeta *meta =
-        find_fragment_meta(collector->rose, counter->key);
-    if (!meta) {
-        return 0;
-    }
+        getRoseFpFragmentMeta(collector->rose) + counter_index;
 
     entry->key = meta->stableKey;
     entry->fragment_id = meta->fragmentId;
@@ -404,7 +383,14 @@ static char fill_report_entry(struct hs_fp_report_entry *entry,
     memcpy(entry->bytes, meta->bytes, sizeof(entry->bytes));
     memcpy(entry->mask, meta->mask, sizeof(entry->mask));
     memcpy(entry->cmp, meta->cmp, sizeof(entry->cmp));
-    return 1;
+}
+
+static void fill_unknown_report_entry(struct hs_fp_report_entry *entry,
+                                      const struct hs_fp_counter *counter) {
+    entry->fragment_id = ROSE_OFFSET_INVALID;
+    entry->trigger_count = counter->trigger_count;
+    entry->true_trigger_count = counter->true_trigger_count;
+    entry->final_report_count = counter->final_report_count;
 }
 
 static u64a count_total_false_positive_triggers(const hs_fp_report_t *report) {
@@ -539,14 +525,18 @@ static hs_error_t build_report_entries(const hs_fp_collector_t *collector,
     u32 entry = 0;
     for (u32 i = 0; i < collector->counter_capacity; i++) {
         const struct hs_fp_counter *counter = collector->counters + i;
-        if (!counter->used) {
+        if (!counter_is_used(counter)) {
             continue;
         }
 
-        if (!fill_report_entry(report->entries + entry, collector, counter)) {
-            report->unknown_fragment_meta_missing_count =
-                sat_add_u64a(report->unknown_fragment_meta_missing_count, 1);
-        }
+        fill_known_report_entry(report->entries + entry, collector, counter, i);
+        entry++;
+    }
+    if (counter_is_used(&collector->unknown_counter)) {
+        fill_unknown_report_entry(report->entries + entry,
+                                  &collector->unknown_counter);
+        report->unknown_fragment_meta_missing_count =
+            sat_add_u64a(report->unknown_fragment_meta_missing_count, 1);
         entry++;
     }
     assert(entry == entry_count);
@@ -577,6 +567,7 @@ static void clear_collector_counts(hs_fp_collector_t *collector) {
         memset(collector->counters, 0,
                sizeof(*collector->counters) * collector->counter_capacity);
     }
+    memset(&collector->unknown_counter, 0, sizeof(collector->unknown_counter));
 }
 
 static struct hs_fp_counter *get_counter(hs_fp_collector_t *collector, u32 key,
@@ -585,50 +576,33 @@ static struct hs_fp_counter *get_counter(hs_fp_collector_t *collector, u32 key,
         return NULL;
     }
 
-    const u32 mask = collector->counter_capacity - 1;
-    u32 idx = hash_u32(key) & mask;
-    for (u32 i = 0; i < collector->counter_capacity; i++) {
-        struct hs_fp_counter *counter = collector->counters + idx;
-        if (!counter->used) {
-            if (!create) {
-                return NULL;
-            }
-            counter->used = 1;
-            counter->key = key;
-            return counter;
-        }
-        if (counter->key == key) {
-            return counter;
-        }
-        idx = (idx + 1) & mask;
+    const u32 idx = find_fragment_meta_index(collector->rose, key);
+    if (idx == HS_FP_COUNTER_INDEX_INVALID) {
+        return NULL;
     }
 
-    return NULL;
+    struct hs_fp_counter *counter = collector->counters + idx;
+    if (!create && !counter_is_used(counter)) {
+        return NULL;
+    }
+    return counter;
 }
 
-static void merge_counter(hs_fp_collector_t *dst,
-                          const struct hs_fp_counter *src) {
-    struct hs_fp_counter *dst_counter = get_counter(dst, src->key, 1);
-    if (!dst_counter) {
-        dst->dropped_trigger_count =
-            sat_add_u64a(dst->dropped_trigger_count, src->trigger_count);
-        return;
-    }
-
-    dst_counter->trigger_count =
-        sat_add_u64a(dst_counter->trigger_count, src->trigger_count);
-    dst_counter->true_trigger_count =
-        sat_add_u64a(dst_counter->true_trigger_count, src->true_trigger_count);
-    dst_counter->final_report_count =
-        sat_add_u64a(dst_counter->final_report_count, src->final_report_count);
+static void add_counter_counts(struct hs_fp_counter *dst,
+                               const struct hs_fp_counter *src) {
+    dst->trigger_count = sat_add_u64a(dst->trigger_count, src->trigger_count);
+    dst->true_trigger_count =
+        sat_add_u64a(dst->true_trigger_count, src->true_trigger_count);
+    dst->final_report_count =
+        sat_add_u64a(dst->final_report_count, src->final_report_count);
 }
 
 static void add_counter_trigger_count(void *ctx, u32 key, u64a count) {
     hs_fp_collector_t *collector = ctx;
     struct hs_fp_counter *counter = get_counter(collector, key, 1);
     if (!counter) {
-        collector->dropped_trigger_count =
-            sat_add_u64a(collector->dropped_trigger_count, count);
+        collector->unknown_counter.trigger_count =
+            sat_add_u64a(collector->unknown_counter.trigger_count, count);
         return;
     }
 
@@ -699,13 +673,15 @@ hs_error_t HS_CDECL hs_fp_collector_create(const hs_database_t *db,
     c->rose = rose;
     c->histogram_backend = hs_fp_histogram_select_backend();
 
-    c->counter_capacity = choose_counter_capacity(rose);
-    c->counters = hs_misc_alloc(sizeof(*c->counters) * c->counter_capacity);
-    if (!c->counters) {
-        hs_misc_free(c);
-        return HS_NOMEM;
+    c->counter_capacity = rose->fpFragmentMetaCount;
+    if (c->counter_capacity) {
+        c->counters = hs_misc_alloc(sizeof(*c->counters) * c->counter_capacity);
+        if (!c->counters) {
+            hs_misc_free(c);
+            return HS_NOMEM;
+        }
+        memset(c->counters, 0, sizeof(*c->counters) * c->counter_capacity);
     }
-    memset(c->counters, 0, sizeof(*c->counters) * c->counter_capacity);
 
     *collector = c;
     return HS_SUCCESS;
@@ -765,9 +741,12 @@ hs_error_t HS_CDECL hs_fp_collector_merge(hs_fp_collector_t *dst,
 
     for (u32 i = 0; i < src->counter_capacity; i++) {
         const struct hs_fp_counter *counter = src->counters + i;
-        if (counter->used) {
-            merge_counter(dst, counter);
+        if (counter_is_used(counter)) {
+            add_counter_counts(dst->counters + i, counter);
         }
+    }
+    if (counter_is_used(&src->unknown_counter)) {
+        add_counter_counts(&dst->unknown_counter, &src->unknown_counter);
     }
 
     return HS_SUCCESS;
@@ -1353,6 +1332,17 @@ void hs_fp_collector_record_final_report(struct hs_scratch *scratch) {
             sat_add_u64a(collector->unknown_report_count, 1);
         collector->unknown_counter_missing_count =
             sat_add_u64a(collector->unknown_counter_missing_count, 1);
+        if (counter_is_used(&collector->unknown_counter)) {
+            collector->unknown_counter.final_report_count =
+                sat_add_u64a(collector->unknown_counter.final_report_count, 1);
+            if (!ci->fp_current_trigger_reported) {
+                ci->fp_current_trigger_reported = 1;
+                collector->true_trigger_count =
+                    sat_add_u64a(collector->true_trigger_count, 1);
+                collector->unknown_counter.true_trigger_count = sat_add_u64a(
+                    collector->unknown_counter.true_trigger_count, 1);
+            }
+        }
         return;
     }
 

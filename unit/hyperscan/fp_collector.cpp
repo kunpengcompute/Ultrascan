@@ -1209,6 +1209,50 @@ TEST(FpCollector, FeedbackBuildSkipsUnknownFragments) {
     ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
 }
 
+TEST(FpCollector, DenseCountersAggregateUnknownFragmentKeys) {
+    hs_scratch_t *scratch = nullptr;
+    hs_database_t *db = buildDBAndScratch("foo", 0, 0, HS_MODE_BLOCK, &scratch);
+    ASSERT_NE(nullptr, db);
+    ASSERT_NE(nullptr, scratch);
+
+    hs_fp_collector_t *collector = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_create(db, &collector));
+
+    scratch->core_info.fp_collector = collector;
+    hs_fp_collector_begin_trigger(scratch, 0xfffffffeU);
+    hs_fp_collector_end_trigger(scratch);
+    hs_fp_collector_begin_trigger(scratch, 0xffffffffU);
+    hs_fp_collector_end_trigger(scratch);
+    hs_fp_collector_begin_trigger(scratch, 0xfffffffeU);
+    hs_fp_collector_end_trigger(scratch);
+    hs_fp_collector_flush(collector);
+    scratch->core_info.fp_collector = nullptr;
+
+    hs_fp_report_t *report = nullptr;
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_report(collector, &report));
+    ASSERT_NE(nullptr, report);
+
+    hs_fp_report_summary_t summary = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
+    EXPECT_EQ(1U, summary.fragment_count);
+    EXPECT_EQ(3U, summary.trigger_count);
+    EXPECT_EQ(3U, summary.false_positive_count);
+    EXPECT_EQ(1U, summary.unknown_fragment_meta_missing_count);
+    EXPECT_EQ(0U, summary.dropped_trigger_count);
+
+    hs_fp_fragment_info_t fragment = {};
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_fragment(report, 0, &fragment));
+    EXPECT_EQ(HS_FP_TABLE_UNKNOWN, fragment.table);
+    EXPECT_EQ(HS_FP_ENGINE_UNKNOWN, fragment.engine);
+    EXPECT_EQ(0U, fragment.length);
+    EXPECT_EQ(3U, fragment.trigger_count);
+
+    ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
+    ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(collector));
+    ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+    ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+}
+
 TEST(FpCollector, MergeAggregatesTriggerSummary) {
     hs_scratch_t *scratch1 = nullptr;
     hs_database_t *db =
