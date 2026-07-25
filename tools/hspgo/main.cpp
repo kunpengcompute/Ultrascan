@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2026, Intel Corporation
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -9,7 +9,7 @@
  *  * Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- *  * Neither the name of Intel Corporation nor the names of its contributors
+ *  * Neither the name of Huawei Corporation nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -113,8 +113,6 @@ struct Options {
     unsigned baselineRounds = 1;
     unsigned collectRounds = 3;
     unsigned measureRounds = 5;
-    unsigned verifyRounds = 0;
-    unsigned warmupRounds = 0;
     unsigned threadCount = 1;
     unsigned top = 0;
     ScanMode scanMode = ScanMode::STREAMING;
@@ -2402,176 +2400,6 @@ void printFeedbackSummary(const hs_fp_feedback_t *feedback) {
     printField("Source false positives:", summary.total_false_positive_count);
 }
 
-struct FragmentTotals {
-    unsigned long long trigger = 0;
-    unsigned long long falsePositive = 0;
-};
-
-double perMiB(unsigned long long count, unsigned long long bytes) {
-    if (!bytes) {
-        return 0.0;
-    }
-    return static_cast<double>(count) * 1024.0 * 1024.0 /
-           static_cast<double>(bytes);
-}
-
-string formatPerMiB(unsigned long long count, unsigned long long bytes) {
-    return formatFixedWithCommas(perMiB(count, bytes), 2) + " / MiB";
-}
-
-string formatReduction(double beforeRate, double afterRate) {
-    if (beforeRate <= 0.0) {
-        return "n/a";
-    }
-    const double reduction = (beforeRate - afterRate) * 100.0 / beforeRate;
-    return formatFixed(reduction, 2) + "%";
-}
-
-bool sameFragmentIdentity(const hs_fp_fragment_info_t &a,
-                          const hs_fp_fragment_info_t &b) {
-    if (a.key != b.key || a.table != b.table || a.flags != b.flags ||
-        a.length != b.length || a.mask_length != b.mask_length) {
-        return false;
-    }
-    if (a.length) {
-        if (!a.bytes || !b.bytes) {
-            return false;
-        }
-        if (std::memcmp(a.bytes, b.bytes, a.length)) {
-            return false;
-        }
-    }
-    if (a.mask_length) {
-        if (!a.mask || !b.mask || !a.cmp || !b.cmp) {
-            return false;
-        }
-        if (std::memcmp(a.mask, b.mask, a.mask_length) ||
-            std::memcmp(a.cmp, b.cmp, a.mask_length)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool containsFragmentIdentity(const vector<hs_fp_fragment_info_t> &fragments,
-                              const hs_fp_fragment_info_t &fragment) {
-    for (const auto &existing : fragments) {
-        if (sameFragmentIdentity(existing, fragment)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-FragmentTotals sumFragments(const vector<hs_fp_fragment_info_t> &fragments) {
-    FragmentTotals totals;
-    for (const auto &fragment : fragments) {
-        totals.trigger += fragment.trigger_count;
-        totals.falsePositive += fragment.false_positive_count;
-    }
-    return totals;
-}
-
-FragmentTotals
-sumMatchingFragments(const vector<hs_fp_fragment_info_t> &reportFragments,
-                     const vector<hs_fp_fragment_info_t> &needles) {
-    FragmentTotals totals;
-    for (const auto &fragment : reportFragments) {
-        if (!containsFragmentIdentity(needles, fragment)) {
-            continue;
-        }
-        totals.trigger += fragment.trigger_count;
-        totals.falsePositive += fragment.false_positive_count;
-    }
-    return totals;
-}
-
-bool printVerificationComparison(const hs_fp_report_t *beforeReport,
-                                 const hs_fp_feedback_t *feedback,
-                                 const hs_fp_report_t *afterReport) {
-    hs_fp_report_summary_t before = {};
-    hs_fp_report_summary_t after = {};
-    hs_error_t err = hs_fp_report_get_summary(beforeReport, &before);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_report_get_summary failed with error " << err << "\n";
-        return false;
-    }
-    err = hs_fp_report_get_summary(afterReport, &after);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_report_get_summary failed with error " << err << "\n";
-        return false;
-    }
-
-    vector<hs_fp_fragment_info_t> feedbackFragments;
-    vector<hs_fp_fragment_info_t> afterFragments;
-    if (!loadFeedbackFragments(feedback, &feedbackFragments) ||
-        !loadReportFragments(afterReport, &afterFragments)) {
-        return false;
-    }
-
-    vector<hs_fp_fragment_info_t> uniqueFeedbackFragments;
-    for (const auto &fragment : feedbackFragments) {
-        if (!containsFragmentIdentity(uniqueFeedbackFragments, fragment)) {
-            uniqueFeedbackFragments.push_back(fragment);
-        }
-    }
-
-    const FragmentTotals selectedBefore = sumFragments(feedbackFragments);
-    const FragmentTotals selectedAfter =
-        sumMatchingFragments(afterFragments, uniqueFeedbackFragments);
-
-    const double beforeTriggerRate =
-        perMiB(before.trigger_count, before.scan_bytes);
-    const double afterTriggerRate =
-        perMiB(after.trigger_count, after.scan_bytes);
-    const double beforeFpRate =
-        perMiB(before.false_positive_count, before.scan_bytes);
-    const double afterFpRate =
-        perMiB(after.false_positive_count, after.scan_bytes);
-    const double selectedBeforeTriggerRate =
-        perMiB(selectedBefore.trigger, before.scan_bytes);
-    const double selectedAfterTriggerRate =
-        perMiB(selectedAfter.trigger, after.scan_bytes);
-    const double selectedBeforeFpRate =
-        perMiB(selectedBefore.falsePositive, before.scan_bytes);
-    const double selectedAfterFpRate =
-        perMiB(selectedAfter.falsePositive, after.scan_bytes);
-
-    cout << "\nVerification comparison:\n";
-    printField("Trigger rate before:",
-               formatPerMiB(before.trigger_count, before.scan_bytes));
-    printField("Trigger rate after:",
-               formatPerMiB(after.trigger_count, after.scan_bytes));
-    printField("Trigger reduction:",
-               formatReduction(beforeTriggerRate, afterTriggerRate));
-    printField("False-positive before:",
-               formatPerMiB(before.false_positive_count, before.scan_bytes));
-    printField("False-positive after:",
-               formatPerMiB(after.false_positive_count, after.scan_bytes));
-    printField("False-positive reduction:",
-               formatReduction(beforeFpRate, afterFpRate));
-    printField("Bad fragment trigger before:",
-               formatCount(selectedBefore.trigger) + " (" +
-                   formatFixedWithCommas(selectedBeforeTriggerRate, 2) +
-                   " / MiB)");
-    printField("Bad fragment trigger after:",
-               formatCount(selectedAfter.trigger) + " (" +
-                   formatFixedWithCommas(selectedAfterTriggerRate, 2) +
-                   " / MiB)");
-    printField(
-        "Bad fragment reduction:",
-        formatReduction(selectedBeforeTriggerRate, selectedAfterTriggerRate));
-    printField("Bad fragment FP before:",
-               formatCount(selectedBefore.falsePositive) + " (" +
-                   formatFixedWithCommas(selectedBeforeFpRate, 2) + " / MiB)");
-    printField("Bad fragment FP after:",
-               formatCount(selectedAfter.falsePositive) + " (" +
-                   formatFixedWithCommas(selectedAfterFpRate, 2) + " / MiB)");
-    printField("Bad fragment FP reduction:",
-               formatReduction(selectedBeforeFpRate, selectedAfterFpRate));
-    return true;
-}
-
 string formatScaledPercent(unsigned scaled) {
     return formatFixed(static_cast<double>(scaled) / 100.0, 2) + "%";
 }
@@ -2924,8 +2752,8 @@ int HS_CDECL main(int argc, char **argv) {
 
     const uint64_t sourceFingerprint =
         computeSourceFingerprint(patterns, opts.scanMode, opts.greyOverrides);
-    const bool needBaselineDb = opts.feedbackImportPath.empty() ||
-                                opts.baselineRounds || opts.warmupRounds;
+    const bool needBaselineDb =
+        opts.feedbackImportPath.empty() || opts.baselineRounds;
     DatabasePtr baselineDb;
     vector<ScratchPtr> baselineScratches;
     DatabaseStats baselineDbStats;
@@ -2957,18 +2785,6 @@ int HS_CDECL main(int argc, char **argv) {
     }
     printHspgoConfig(opts, sourceFingerprint);
     printCorpusLayoutNote(opts.scanMode, blocks);
-
-    if (opts.warmupRounds && baselineDb) {
-        ParallelRunResult warmupResult;
-        if (!runParallelScan(baselineDb.get(), baselineScratches, blocks,
-                             opts.warmupRounds, nullptr,
-                             opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                             false, opts.scanMode, &warmupResult)) {
-            return 1;
-        }
-        printScanSummary("Baseline warmup", blocks, warmupResult,
-                         opts.warmupRounds, opts.threadCount, opts.scanMode);
-    }
 
     ParallelRunResult baselineResult;
     bool haveBaselineResult = false;
@@ -3081,18 +2897,6 @@ int HS_CDECL main(int argc, char **argv) {
     baselineDb.reset();
     cout << "\nHot switch: active database replaced by feedback-compiled DB.\n";
 
-    if (opts.warmupRounds) {
-        ParallelRunResult warmupResult;
-        if (!runParallelScan(optimizedDb.get(), optimizedScratches, blocks,
-                             opts.warmupRounds, nullptr,
-                             opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                             false, opts.scanMode, &warmupResult)) {
-            return 1;
-        }
-        printScanSummary("Optimized warmup", blocks, warmupResult,
-                         opts.warmupRounds, opts.threadCount, opts.scanMode);
-    }
-
     ParallelRunResult measureResult;
     if (!runParallelScan(optimizedDb.get(), optimizedScratches, blocks,
                          opts.measureRounds, nullptr,
@@ -3104,49 +2908,6 @@ int HS_CDECL main(int argc, char **argv) {
                      opts.measureRounds, opts.threadCount, opts.scanMode);
     if (haveBaselineResult) {
         printOptimizedBaselineRatio(baselineResult, measureResult);
-    }
-
-    if (opts.verifyRounds) {
-        vector<CollectorPtr> verifyCollectors;
-        if (!createCollectors(optimizedDb.get(), opts.threadCount,
-                              &verifyCollectors)) {
-            return 1;
-        }
-
-        ParallelRunResult verifyResult;
-        if (!runParallelScan(optimizedDb.get(), optimizedScratches, blocks,
-                             opts.verifyRounds, &verifyCollectors,
-                             opts.cpuList.empty() ? nullptr : &opts.cpuList,
-                             false, opts.scanMode, &verifyResult)) {
-            return 1;
-        }
-        printScanSummary("Verification scan", blocks, verifyResult,
-                         opts.verifyRounds, opts.threadCount, opts.scanMode);
-
-        CollectorPtr verifyCollector;
-        if (!mergeCollectors(optimizedDb.get(), verifyCollectors,
-                             &verifyCollector)) {
-            return 1;
-        }
-
-        hs_fp_report_t *rawVerifyReport = nullptr;
-        hs_error_t err =
-            hs_fp_collector_report(verifyCollector.get(), &rawVerifyReport);
-        if (err != HS_SUCCESS) {
-            cerr << "hs_fp_collector_report failed with error " << err << "\n";
-            return 1;
-        }
-        ReportPtr verifyReport(rawVerifyReport);
-
-        if (report) {
-            if (!printVerificationComparison(report.get(), feedback.get(),
-                                             verifyReport.get())) {
-                return 1;
-            }
-        } else if (opts.showSummaries) {
-            printReportSummaryWithTitle("Verification report",
-                                        verifyReport.get());
-        }
     }
 
     return 0;
