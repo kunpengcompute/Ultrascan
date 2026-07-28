@@ -50,21 +50,15 @@ hs_error_t HS_CDECL hs_fp_collector_reset(hs_fp_collector_t *collector) {
 }
 
 HS_PUBLIC_API
-hs_error_t HS_CDECL hs_fp_collector_merge(hs_fp_collector_t *dst,
-                                          const hs_fp_collector_t *src) {
-    (void)dst;
-    (void)src;
-    return HS_ARCH_ERROR;
-}
-
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_fp_collector_report(const hs_fp_collector_t *collector,
-                                           hs_fp_report_t **report) {
-    (void)collector;
-    if (!report) {
+hs_error_t HS_CDECL hs_fp_collector_merge(hs_fp_collector_t *const *collectors,
+                                          unsigned int count,
+                                          hs_fp_collector_t **collector) {
+    (void)collectors;
+    (void)count;
+    if (!collector) {
         return HS_INVALID;
     }
-    *report = NULL;
+    *collector = NULL;
     return HS_ARCH_ERROR;
 }
 
@@ -74,15 +68,23 @@ hs_error_t HS_CDECL hs_fp_collector_free(hs_fp_collector_t *collector) {
     return HS_SUCCESS;
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_fp_report_free(hs_fp_report_t *report) {
+hs_error_t hs_fp_collector_report(const hs_fp_collector_t *collector,
+                                  hs_fp_report_t **report) {
+    (void)collector;
+    if (!report) {
+        return HS_INVALID;
+    }
+    *report = NULL;
+    return HS_ARCH_ERROR;
+}
+
+hs_error_t hs_fp_report_free(hs_fp_report_t *report) {
     (void)report;
     return HS_SUCCESS;
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_fp_report_get_summary(const hs_fp_report_t *report,
-                                             hs_fp_report_summary_t *summary) {
+hs_error_t hs_fp_report_get_summary(const hs_fp_report_t *report,
+                                    hs_fp_report_summary_t *summary) {
     (void)report;
     if (!summary) {
         return HS_INVALID;
@@ -91,10 +93,8 @@ hs_error_t HS_CDECL hs_fp_report_get_summary(const hs_fp_report_t *report,
     return HS_ARCH_ERROR;
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_fp_report_get_fragment(const hs_fp_report_t *report,
-                                              unsigned int index,
-                                              hs_fp_fragment_info_t *fragment) {
+hs_error_t hs_fp_report_get_fragment(const hs_fp_report_t *report, u32 index,
+                                     hs_fp_fragment_info_t *fragment) {
     (void)report;
     (void)index;
     if (!fragment) {
@@ -104,10 +104,16 @@ hs_error_t HS_CDECL hs_fp_report_get_fragment(const hs_fp_report_t *report,
     return HS_ARCH_ERROR;
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_fp_feedback_build(const hs_fp_report_t *report,
-                                         hs_fp_feedback_t **feedback) {
+hs_error_t hs_fp_feedback_build(const hs_fp_report_t *report,
+                                hs_fp_feedback_t **feedback) {
+    return hs_fp_feedback_build_ext(report, NULL, feedback);
+}
+
+hs_error_t hs_fp_feedback_build_ext(const hs_fp_report_t *report,
+                                    const hs_fp_feedback_params_t *params,
+                                    hs_fp_feedback_t **feedback) {
     (void)report;
+    (void)params;
     if (!feedback) {
         return HS_INVALID;
     }
@@ -116,11 +122,22 @@ hs_error_t HS_CDECL hs_fp_feedback_build(const hs_fp_report_t *report,
 }
 
 HS_PUBLIC_API
-hs_error_t HS_CDECL hs_fp_feedback_build_ext(
-    const hs_fp_report_t *report, const hs_fp_feedback_params_t *params,
+hs_error_t HS_CDECL hs_fp_collector_to_feedback(
+    hs_fp_collector_t *collector, const hs_fp_feedback_params_t *params,
     hs_fp_feedback_t **feedback) {
-    (void)report;
+    return hs_fp_collector_to_feedback_with_dump(collector, params, NULL, NULL,
+                                                 feedback);
+}
+
+HS_PUBLIC_API
+hs_error_t HS_CDECL hs_fp_collector_to_feedback_with_dump(
+    hs_fp_collector_t *collector, const hs_fp_feedback_params_t *params,
+    const hs_fp_feedback_dump_callbacks_t *callbacks, void *context,
+    hs_fp_feedback_t **feedback) {
+    (void)collector;
     (void)params;
+    (void)callbacks;
+    (void)context;
     if (!feedback) {
         return HS_INVALID;
     }
@@ -134,9 +151,8 @@ hs_error_t HS_CDECL hs_fp_feedback_free(hs_fp_feedback_t *feedback) {
     return HS_SUCCESS;
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_fp_feedback_get_summary(
-    const hs_fp_feedback_t *feedback, hs_fp_feedback_summary_t *summary) {
+hs_error_t hs_fp_feedback_get_summary(const hs_fp_feedback_t *feedback,
+                                      hs_fp_feedback_summary_t *summary) {
     (void)feedback;
     if (!summary) {
         return HS_INVALID;
@@ -145,10 +161,14 @@ hs_error_t HS_CDECL hs_fp_feedback_get_summary(
     return HS_ARCH_ERROR;
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_fp_feedback_get_fragment(
-    const hs_fp_feedback_t *feedback, unsigned int index,
-    hs_fp_fragment_info_t *fragment) {
+u32 hs_fp_feedback_fragment_count(const hs_fp_feedback_t *feedback) {
+    (void)feedback;
+    return 0;
+}
+
+hs_error_t hs_fp_feedback_get_fragment(const hs_fp_feedback_t *feedback,
+                                       u32 index,
+                                       hs_fp_fragment_info_t *fragment) {
     (void)feedback;
     (void)index;
     if (!fragment) {

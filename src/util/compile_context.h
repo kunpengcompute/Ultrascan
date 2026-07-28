@@ -33,8 +33,8 @@
 #ifndef COMPILE_CONTEXT_H
 #define COMPILE_CONTEXT_H
 
+#include "fp_collector.h"
 #include "grey.h"
-#include "hs_compile.h"
 #include "target_info.h"
 
 struct hs_fp_feedback;

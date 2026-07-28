@@ -29,10 +29,6 @@
 #include "rose_build_convert.h"
 
 #include "grey.h"
-#include "rose_build.h"
-#include "rose_build_impl.h"
-#include "rose_build_util.h"
-#include "ue2common.h"
 #include "hwlm/hwlm_build.h"
 #include "nfa/castlecompile.h"
 #include "nfa/limex_limits.h"
@@ -43,6 +39,11 @@
 #include "nfagraph/ng_split.h"
 #include "nfagraph/ng_util.h"
 #include "nfagraph/ng_width.h"
+#include "rose_build.h"
+#include "rose_build_fp_feedback.h"
+#include "rose_build_impl.h"
+#include "rose_build_util.h"
+#include "ue2common.h"
 #include "util/bitutils.h"
 #include "util/charreach.h"
 #include "util/charreach_util.h"
@@ -69,16 +70,14 @@ using boost::adaptors::map_values;
 
 namespace ue2 {
 
-static
-NFAVertex addHolderVertex(const CharReach &cr, NGHolder &out) {
+static NFAVertex addHolderVertex(const CharReach &cr, NGHolder &out) {
     assert(cr.any());
     NFAVertex v = add_vertex(out);
     out[v].char_reach = cr;
     return v;
 }
 
-static
-size_t suffixFloodLen(const ue2_literal &s) {
+static size_t suffixFloodLen(const ue2_literal &s) {
     if (s.empty()) {
         return 0;
     }
@@ -89,9 +88,9 @@ size_t suffixFloodLen(const ue2_literal &s) {
     return distance(s.rbegin(), it);
 }
 
-static
-unique_ptr<NGHolder> makeFloodProneSuffix(const ue2_literal &s, size_t len,
-                                          const flat_set<ReportID> &reports) {
+static unique_ptr<NGHolder>
+makeFloodProneSuffix(const ue2_literal &s, size_t len,
+                     const flat_set<ReportID> &reports) {
     assert(len < s.length());
     assert(!reports.empty());
 
@@ -112,8 +111,7 @@ unique_ptr<NGHolder> makeFloodProneSuffix(const ue2_literal &s, size_t len,
     return h;
 }
 
-static
-unique_ptr<NGHolder> makeRosePrefix(const ue2_literal &s) {
+static unique_ptr<NGHolder> makeRosePrefix(const ue2_literal &s) {
     unique_ptr<NGHolder> h = ue2::make_unique<NGHolder>(NFA_PREFIX);
 
     NFAVertex u = h->startDs;
@@ -126,10 +124,9 @@ unique_ptr<NGHolder> makeRosePrefix(const ue2_literal &s) {
     return h;
 }
 
-static
-void replaceWithLitPrefix(RoseBuildImpl &tbi, RoseVertex v, u32 lit_id,
-                          const rose_literal_id &lit, size_t suffixlen,
-                          size_t delay) {
+static void replaceWithLitPrefix(RoseBuildImpl &tbi, RoseVertex v, u32 lit_id,
+                                 const rose_literal_id &lit, size_t suffixlen,
+                                 size_t delay) {
     assert(suffixlen < lit.s.length());
 
     DEBUG_PRINTF("replacing '%s' with prefix, length=%zu, delay=%zu\n",
@@ -145,9 +142,9 @@ void replaceWithLitPrefix(RoseBuildImpl &tbi, RoseVertex v, u32 lit_id,
     g[v].literals.insert(new_id);
 }
 
-static
-bool delayLiteralWithPrefix(RoseBuildImpl &tbi, RoseVertex v, u32 lit_id,
-                            const rose_literal_id &lit, size_t suffixlen) {
+static bool delayLiteralWithPrefix(RoseBuildImpl &tbi, RoseVertex v, u32 lit_id,
+                                   const rose_literal_id &lit,
+                                   size_t suffixlen) {
     if (suffixlen > MAX_DELAY) {
         DEBUG_PRINTF("delay too large\n");
         return false;
@@ -161,7 +158,7 @@ bool delayLiteralWithPrefix(RoseBuildImpl &tbi, RoseVertex v, u32 lit_id,
     if (tbi.cc.streaming &&
         lit.s.length() > tbi.cc.grey.maxHistoryAvailable + 1) {
         DEBUG_PRINTF("insufficient history to delay literal of len %zu\n",
-                      lit.s.length());
+                     lit.s.length());
         return false;
     }
 
@@ -186,9 +183,9 @@ bool delayLiteralWithPrefix(RoseBuildImpl &tbi, RoseVertex v, u32 lit_id,
     return true;
 }
 
-static
-void convertFloodProneSuffix(RoseBuildImpl &tbi, RoseVertex v, u32 lit_id,
-                             const rose_literal_id &lit, size_t suffixlen) {
+static void convertFloodProneSuffix(RoseBuildImpl &tbi, RoseVertex v,
+                                    u32 lit_id, const rose_literal_id &lit,
+                                    size_t suffixlen) {
     DEBUG_PRINTF("flood-prone leaf '%s'\n", dumpString(lit.s).c_str());
     DEBUG_PRINTF("turning last %zu chars into a suffix NFA\n", suffixlen);
     RoseGraph &g = tbi.g;
@@ -233,8 +230,7 @@ void convertFloodProneSuffix(RoseBuildImpl &tbi, RoseVertex v, u32 lit_id,
  * Collect an estimate of the number of literals in the floating table, and use
  * this to estimate the flood prone suffix length.
  */
-static
-size_t findFloodProneSuffixLen(const RoseBuildImpl &tbi) {
+static size_t findFloodProneSuffixLen(const RoseBuildImpl &tbi) {
     size_t numLiterals = 0;
     for (const rose_literal_id &lit : tbi.literals) {
         if (lit.delay) {
@@ -338,12 +334,15 @@ void convertFloodProneSuffixes(RoseBuildImpl &tbi) {
             continue;
         }
 
+        ue2_literal new_lit = lit.s.substr(0, lit.s.length() - suffixLen);
+        fpFeedbackObservesRoseLiteral(
+            tbi.cc, new_lit, HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX);
+
         convertFloodProneSuffix(tbi, v, lit_id, lit, suffixLen);
     }
 }
 
-static
-CharReach getReachOfNormalVertex(const NGHolder &g) {
+static CharReach getReachOfNormalVertex(const NGHolder &g) {
     for (auto v : vertices_range(g)) {
         if (is_special(v, g)) {
             continue;
@@ -358,9 +357,8 @@ CharReach getReachOfNormalVertex(const NGHolder &g) {
  * \brief Set the edge bounds and appropriate history on the given edge in the
  * Rose graph.
  */
-static
-void setEdgeBounds(RoseGraph &g, const RoseEdge &e, u32 min_bound,
-                   u32 max_bound) {
+static void setEdgeBounds(RoseGraph &g, const RoseEdge &e, u32 min_bound,
+                          u32 max_bound) {
     assert(min_bound <= max_bound);
     assert(max_bound <= ROSE_BOUND_INF);
 
@@ -374,10 +372,10 @@ void setEdgeBounds(RoseGraph &g, const RoseEdge &e, u32 min_bound,
     }
 }
 
-static
-bool handleStartPrefixCliche(const NGHolder &h, RoseGraph &g, RoseVertex v,
-                             const RoseEdge &e_old, RoseVertex ar,
-                             vector<RoseEdge> *to_delete) {
+static bool handleStartPrefixCliche(const NGHolder &h, RoseGraph &g,
+                                    RoseVertex v, const RoseEdge &e_old,
+                                    RoseVertex ar,
+                                    vector<RoseEdge> *to_delete) {
     DEBUG_PRINTF("hi\n");
 
     /* check for prefix cliches connected to start (^.{N,M}) */
@@ -420,9 +418,8 @@ bool handleStartPrefixCliche(const NGHolder &h, RoseGraph &g, RoseVertex v,
     return true;
 }
 
-static
-bool handleStartDsPrefixCliche(const NGHolder &h, RoseGraph &g, RoseVertex v,
-                               const RoseEdge &e) {
+static bool handleStartDsPrefixCliche(const NGHolder &h, RoseGraph &g,
+                                      RoseVertex v, const RoseEdge &e) {
     DEBUG_PRINTF("hi\n");
     /* check for prefix cliches connected to start-ds (.{N}, ^.{N,}) */
     u32 repeatCount = 0;
@@ -454,7 +451,7 @@ bool handleStartDsPrefixCliche(const NGHolder &h, RoseGraph &g, RoseVertex v,
         if (hu == h.accept) {
             break;
         }
-    } while(1);
+    } while (1);
 
     assert(hu == h.accept);
 
@@ -471,11 +468,10 @@ bool handleStartDsPrefixCliche(const NGHolder &h, RoseGraph &g, RoseVertex v,
     return true;
 }
 
-static
-bool handleMixedPrefixCliche(const NGHolder &h, RoseGraph &g, RoseVertex v,
-                             const RoseEdge &e_old, RoseVertex ar,
-                             vector<RoseEdge> *to_delete,
-                             const CompileContext &cc) {
+static bool handleMixedPrefixCliche(const NGHolder &h, RoseGraph &g,
+                                    RoseVertex v, const RoseEdge &e_old,
+                                    RoseVertex ar, vector<RoseEdge> *to_delete,
+                                    const CompileContext &cc) {
     assert(in_degree(h.acceptEod, h) == 1);
 
     bool anchored = !proper_out_degree(h.startDs, h);
@@ -514,8 +510,8 @@ bool handleMixedPrefixCliche(const NGHolder &h, RoseGraph &g, RoseVertex v,
     vector<GraphRepeatInfo>::const_iterator it;
     for (it = repeats.begin(); it != repeats.end(); ++it) {
         DEBUG_PRINTF("checking.. %zu verts\n", it->vertices.size());
-        if (find(it->vertices.begin(), it->vertices.end(), key)
-            != it->vertices.end()) {
+        if (find(it->vertices.begin(), it->vertices.end(), key) !=
+            it->vertices.end()) {
             break;
         }
     }
@@ -548,9 +544,8 @@ bool handleMixedPrefixCliche(const NGHolder &h, RoseGraph &g, RoseVertex v,
 
     if (is_subset_of(base_succ, rep_verts)) {
         /* all good: repeat dominates the rest of the pattern */
-    } else if (ri.repeatMin == depth(1)
-               && is_subset_of(exits, base_succ)
-               && is_subset_of(base_succ, exits_and_repeat_verts)) {
+    } else if (ri.repeatMin == depth(1) && is_subset_of(exits, base_succ) &&
+               is_subset_of(base_succ, exits_and_repeat_verts)) {
         /* we have a jump edge */
         ri.repeatMin = depth(0);
     } else {
@@ -649,8 +644,8 @@ void convertPrefixToBounds(RoseBuildImpl &tbi) {
 
         const NGHolder &h = *g[v].left.graph;
 
-        if (g[v].left.lag != tbi.minLiteralLen(v)
-            || g[v].left.lag != tbi.maxLiteralLen(v)) {
+        if (g[v].left.lag != tbi.minLiteralLen(v) ||
+            g[v].left.lag != tbi.maxLiteralLen(v)) {
             continue;
         }
 
@@ -694,8 +689,8 @@ void convertPrefixToBounds(RoseBuildImpl &tbi) {
             continue;
         }
 
-        if (g[v].left.lag != tbi.minLiteralLen(v)
-            || g[v].left.lag != tbi.maxLiteralLen(v)) {
+        if (g[v].left.lag != tbi.minLiteralLen(v) ||
+            g[v].left.lag != tbi.maxLiteralLen(v)) {
             continue;
         }
 
@@ -812,9 +807,9 @@ void convertAnchPrefixToBounds(RoseBuildImpl &tbi) {
             bounds.min -= delay_adj;
         }
         bounds.max -= delay_adj;
-        setEdgeBounds(g, e, bounds.min, bounds.max.is_finite()
-                                            ? (u32)bounds.max
-                                            : ROSE_BOUND_INF);
+        setEdgeBounds(g, e, bounds.min,
+                      bounds.max.is_finite() ? (u32)bounds.max
+                                             : ROSE_BOUND_INF);
         g[v].left.reset();
     }
 }

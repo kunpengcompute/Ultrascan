@@ -39,24 +39,54 @@
 
 #include <arm_neon.h>
 
-static u32 count_key_in_range_neon(const u32 *keys, u32 count, u32 key) {
+/* 统计 keys[0, count) 中 key 出现的次数。
+ * 关键点：
+ *  - vceqq 的命中掩码是全 1（即 -1），用向量减法直接垂直累加，
+ *    避免每次迭代做水平归约（vaddvq）造成的标量依赖链；
+ *  - 双累加器展开，打破循环携带依赖，提升 ILP；
+ *  - 整个循环只在最后做一次 vaddvq。
+ */
+static u32 count_key_neon(const u32 *keys, u32 count, u32 key) {
     const uint32x4_t vkey = vdupq_n_u32(key);
-    u32 total = 0;
+    uint32x4_t acc0 = vdupq_n_u32(0);
+    uint32x4_t acc1 = vdupq_n_u32(0);
     u32 pos = 0;
 
-    for (; pos + 4 <= count; pos += 4) {
-        const uint32x4_t vals = vld1q_u32(keys + pos);
-        const uint32x4_t hits = vceqq_u32(vals, vkey);
-        total += vaddvq_u32(vshrq_n_u32(hits, 31));
+    for (; pos + 8 <= count; pos += 8) {
+        acc0 = vsubq_u32(acc0, vceqq_u32(vld1q_u32(keys + pos), vkey));
+        acc1 = vsubq_u32(acc1, vceqq_u32(vld1q_u32(keys + pos + 4), vkey));
+    }
+    if (pos + 4 <= count) {
+        acc0 = vsubq_u32(acc0, vceqq_u32(vld1q_u32(keys + pos), vkey));
+        pos += 4;
     }
 
+    u32 total = vaddvq_u32(vaddq_u32(acc0, acc1)); /* 唯一一次水平归约 */
+
     for (; pos < count; pos++) {
-        if (keys[pos] == key) {
-            total++;
-        }
+        total += (keys[pos] == key);
     }
 
     return total;
+}
+
+/* 判断 keys[0, end) 中是否存在 key，命中立即返回。 */
+static int key_seen_before_neon(const u32 *keys, u32 end, u32 key) {
+    const uint32x4_t vkey = vdupq_n_u32(key);
+    u32 pos = 0;
+
+    for (; pos + 4 <= end; pos += 4) {
+        const uint32x4_t hits = vceqq_u32(vld1q_u32(keys + pos), vkey);
+        if (vmaxvq_u32(hits)) {
+            return 1;
+        }
+    }
+    for (; pos < end; pos++) {
+        if (keys[pos] == key) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void histogram_count_batch_neon(const u32 *keys, u32 count,
@@ -64,11 +94,14 @@ static void histogram_count_batch_neon(const u32 *keys, u32 count,
                                        void *ctx) {
     for (u32 i = 0; i < count; i++) {
         const u32 key = keys[i];
-        if (count_key_in_range_neon(keys, i, key)) {
+
+        if (key_seen_before_neon(keys, i, key)) {
             continue;
         }
 
-        emit(ctx, key, count_key_in_range_neon(keys, count, key));
+        /* key 首次出现在 i 处，前缀中必然没有它，
+         * 只需统计后缀 [i, count) 即为总次数。 */
+        emit(ctx, key, count_key_neon(keys + i, count - i, key));
     }
 }
 

@@ -39,9 +39,24 @@
 #error "fp_collector_hist_sve2.c requires HS_BUILD_HAVE_SVE2_HISTCNT"
 #endif
 
+/*
+ * 跨段查重（向量化版）：在 [0, end) 范围内查找 key 是否已出现过。
+ * 用于判断当前向量段里发现的"段内首次出现"是否其实已经在
+ * 更早的段里被 emit 过（即真正意义上的全局首次出现）。
+ *
+ * 相比逐元素标量扫描，这里用 svcntw() 宽度一次比较多个历史元素，
+ * 命中即可通过 svptest_any 提前返回。
+ */
 static char key_seen_before(const u32 *keys, u32 end, u32 key) {
-    for (u32 i = 0; i < end; i++) {
-        if (keys[i] == key) {
+    const u32 lanes = (u32)svcntw();
+    const svuint32_t vkey = svdup_n_u32(key);
+
+    for (u32 pos = 0; pos < end; pos += lanes) {
+        const svbool_t pg = svwhilelt_b32(pos, end);
+        const svuint32_t vals = svld1_u32(pg, keys + pos);
+        const svbool_t hit = svcmpeq_u32(pg, vals, vkey);
+
+        if (svptest_any(pg, hit)) {
             return 1;
         }
     }
@@ -49,21 +64,32 @@ static char key_seen_before(const u32 *keys, u32 end, u32 key) {
     return 0;
 }
 
+/*
+ * 统计 key 在 [keys, keys + count) 内的出现次数。
+ *
+ * 调用方保证传入的 keys 指针已经指向 key 的“全局首次出现”位置，
+ * 因此这里只需要向后扫一次，不需要像原版那样每次都从数组开头
+ * 全量重扫。理论比较总量由 O(uniq_count * n) 降为 O(n^2 / 2)。
+ *
+ * 另外，归约（svaddv）被延迟到循环结束后只做一次；循环体内只用
+ * svadd_u32_m 做纯数据并行的掩码累加，避免每个向量段都触发一次
+ * 代价较高的水平归约（svcntp）。
+ */
 static u32 count_key_in_batch_sve2(const u32 *keys, u32 count, u32 key) {
     const u32 lanes = (u32)svcntw();
     const svuint32_t vkey = svdup_n_u32(key);
-    u32 total = 0;
+    const svuint32_t one = svdup_n_u32(1);
+    svuint32_t acc = svdup_n_u32(0);
 
     for (u32 pos = 0; pos < count; pos += lanes) {
-        const u32 active = MIN(lanes, count - pos);
-        const svbool_t pg = svwhilelt_b32((u32)0, active);
+        const svbool_t pg = svwhilelt_b32(pos, count);
         const svuint32_t vals = svld1_u32(pg, keys + pos);
         const svbool_t hit = svcmpeq_u32(pg, vals, vkey);
 
-        total += (u32)svcntp_b32(pg, hit);
+        acc = svadd_u32_m(hit, acc, one);
     }
 
-    return total;
+    return (u32)svaddv_u32(svptrue_b32(), acc);
 }
 
 void NEVER_INLINE hs_fp_histogram_count_batch_sve2(const u32 *keys, u32 count,
@@ -92,11 +118,14 @@ void NEVER_INLINE hs_fp_histogram_count_batch_sve2(const u32 *keys, u32 count,
         for (u32 lane = 0; lane < active; lane++) {
             const u32 key = key_buf[lane];
 
-            if (rank_buf[lane] != 1U || key_seen_before(keys, pos, key)) {
+            if (rank_buf[lane] != 1U ||
+                (pos && key_seen_before(keys, pos, key))) {
                 continue;
             }
 
-            emit(ctx, key, count_key_in_batch_sve2(keys, count, key));
+            const u32 first = pos + lane;
+            emit(ctx, key,
+                 count_key_in_batch_sve2(keys + first, count - first, key));
         }
     }
 }

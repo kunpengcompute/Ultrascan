@@ -868,23 +868,6 @@ hs_error_t HS_CDECL hs_reset_and_copy_stream(hs_stream_t *to_id,
                                              context, NULL);
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_reset_and_copy_stream_with_collector(
-    hs_stream_t *to_id, const hs_stream_t *from_id, hs_scratch_t *scratch,
-    match_event_handler onEvent, void *context, hs_fp_collector_t *collector) {
-    if (unlikely(!to_id)) {
-        return HS_INVALID;
-    }
-
-    hs_error_t err = hs_fp_collector_check_rose(collector, to_id->rose);
-    if (unlikely(err != HS_SUCCESS)) {
-        return err;
-    }
-
-    return hs_reset_and_copy_stream_internal(to_id, from_id, scratch, onEvent,
-                                             context, collector);
-}
-
 static really_inline void rawStreamExec(struct hs_stream *stream_state,
                                         struct hs_scratch *scratch) {
     assert(stream_state);
@@ -1205,22 +1188,6 @@ hs_error_t HS_CDECL hs_close_stream(hs_stream_t *id, hs_scratch_t *scratch,
     return hs_close_stream_internal(id, scratch, onEvent, context, NULL);
 }
 
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_close_stream_with_collector(
-    hs_stream_t *id, hs_scratch_t *scratch, match_event_handler onEvent,
-    void *context, hs_fp_collector_t *collector) {
-    if (unlikely(!id)) {
-        return HS_INVALID;
-    }
-
-    hs_error_t err = hs_fp_collector_check_rose(collector, id->rose);
-    if (unlikely(err != HS_SUCCESS)) {
-        return err;
-    }
-
-    return hs_close_stream_internal(id, scratch, onEvent, context, collector);
-}
-
 static really_inline hs_error_t hs_reset_stream_internal(
     hs_stream_t *id, UNUSED unsigned int flags, hs_scratch_t *scratch,
     match_event_handler onEvent, void *context, hs_fp_collector_t *collector) {
@@ -1246,23 +1213,6 @@ hs_error_t HS_CDECL hs_reset_stream(hs_stream_t *id, unsigned int flags,
                                     match_event_handler onEvent,
                                     void *context) {
     return hs_reset_stream_internal(id, flags, scratch, onEvent, context, NULL);
-}
-
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_reset_stream_with_collector(
-    hs_stream_t *id, unsigned int flags, hs_scratch_t *scratch,
-    match_event_handler onEvent, void *context, hs_fp_collector_t *collector) {
-    if (unlikely(!id)) {
-        return HS_INVALID;
-    }
-
-    hs_error_t err = hs_fp_collector_check_rose(collector, id->rose);
-    if (unlikely(err != HS_SUCCESS)) {
-        return err;
-    }
-
-    return hs_reset_stream_internal(id, flags, scratch, onEvent, context,
-                                    collector);
 }
 
 HS_PUBLIC_API
@@ -1512,22 +1462,4 @@ hs_error_t HS_CDECL hs_reset_and_expand_stream(hs_stream_t *to_stream,
                                                void *context) {
     return hs_reset_and_expand_stream_internal(to_stream, buf, buf_size,
                                                scratch, onEvent, context, NULL);
-}
-
-HS_PUBLIC_API
-hs_error_t HS_CDECL hs_reset_and_expand_stream_with_collector(
-    hs_stream_t *to_stream, const char *buf, size_t buf_size,
-    hs_scratch_t *scratch, match_event_handler onEvent, void *context,
-    hs_fp_collector_t *collector) {
-    if (unlikely(!to_stream)) {
-        return HS_INVALID;
-    }
-
-    hs_error_t err = hs_fp_collector_check_rose(collector, to_stream->rose);
-    if (unlikely(err != HS_SUCCESS)) {
-        return err;
-    }
-
-    return hs_reset_and_expand_stream_internal(
-        to_stream, buf, buf_size, scratch, onEvent, context, collector);
 }

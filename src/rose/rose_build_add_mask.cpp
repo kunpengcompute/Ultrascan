@@ -704,7 +704,7 @@ static unique_ptr<NGHolder> buildMaskRhs(const flat_set<ReportID> &reports,
     return rhs;
 }
 
-static void doAddMask(RoseBuildImpl &tbi, bool anchored,
+static bool doAddMask(RoseBuildImpl &tbi, bool anchored,
                       const vector<CharReach> &mask, const ue2_literal &lit,
                       u32 prefix_len, u32 suffix_len,
                       const flat_set<ReportID> &reports) {
@@ -785,12 +785,7 @@ do_rhs:
 
     calcVertexOffsets(ig);
 
-    bool rv = tbi.addRose(ig, false);
-
-    assert(rv); /* checkAllowMask should have prevented this */
-    if (!rv) {
-        throw std::exception();
-    }
+    return tbi.addRose(ig, false);
 }
 
 static bool checkAllowMask(const vector<CharReach> &mask, ue2_literal *lit,
@@ -861,9 +856,8 @@ bool RoseBuildImpl::add(bool anchored, const vector<CharReach> &mask,
 
     /* we know that the mask can be handled now, start playing with the rose
      * graph */
-    doAddMask(*this, anchored, mask, lit, prefix_len, suffix_len, reports);
-
-    return true;
+    return doAddMask(*this, anchored, mask, lit, prefix_len, suffix_len,
+                     reports);
 }
 
 bool RoseBuildImpl::validateMask(const vector<CharReach> &mask,

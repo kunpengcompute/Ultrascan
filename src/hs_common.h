@@ -65,29 +65,20 @@ typedef struct hs_database hs_database_t;
 typedef struct fat_hs_database fat_hs_database_t;
 
 struct hs_fp_collector;
-struct hs_fp_report;
 struct hs_fp_feedback;
-struct hs_compile_context;
 
 /**
- * A false-positive feedback collector used by the runtime collector scan APIs.
+ * A false-positive feedback collector used by the runtime collector scan
+ * APIs.
  */
 typedef struct hs_fp_collector hs_fp_collector_t;
 
 /**
- * A false-positive feedback report exported from a collector.
- */
-typedef struct hs_fp_report hs_fp_report_t;
-
-/**
- * False-positive feedback produced from a report and consumed by compilation.
+ * False-positive feedback produced from a collector and consumed by
+ *
+ * compilation.
  */
 typedef struct hs_fp_feedback hs_fp_feedback_t;
-
-/**
- * A compilation context carrying optional false-positive feedback.
- */
-typedef struct hs_compile_context hs_compile_context_t;
 
 /**
  * A type for errors returned by Hyperscan functions.

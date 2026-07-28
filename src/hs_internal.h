@@ -38,9 +38,13 @@
 
 #ifdef __cplusplus
 
+struct hs_compile_context;
+typedef struct hs_compile_context hs_compile_context_t;
+
 namespace ue2 {
 
 struct Grey;
+
 hs_error_t fat_hs_compile_multi_int(const char *const *expressions,
                                     const unsigned int *flags,
                                     const unsigned int *ids,

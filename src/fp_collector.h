@@ -32,6 +32,8 @@
 #include <stddef.h>
 
 #include "hs_common.h"
+#include "hs_compile.h"
+#include "hs_runtime.h"
 #include "ue2common.h"
 
 #ifdef __cplusplus
@@ -40,6 +42,38 @@ extern "C" {
 
 struct RoseEngine;
 struct hs_scratch;
+struct hs_fp_report;
+struct hs_compile_context;
+
+typedef struct hs_fp_report hs_fp_report_t;
+typedef struct hs_compile_context hs_compile_context_t;
+
+/**
+ * Private compile-time false-positive feedback checkpoint identifiers.
+ *
+ * These diagnostics are used by in-tree tools and tests only; they are not
+ * part of the public API surface.
+ */
+#define HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT 0U
+#define HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT 1U
+#define HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL 2U
+#define HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD 3U
+#define HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL 4U
+#define HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET 5U
+#define HS_FP_COMPILE_CHECKPOINT_SOMBE_LITERAL 6U
+#define HS_FP_COMPILE_CHECKPOINT_REWRITE_EOD_TO_FLOATING 7U
+#define HS_FP_COMPILE_CHECKPOINT_REWRITE_ANCHORED_REHOME 8U
+#define HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX 9U
+#define HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK 10U
+#define HS_FP_COMPILE_CHECKPOINT_ANCHORED_ACYCLIC 11U
+#define HS_FP_COMPILE_CHECKPOINT_COUNT 12U
+
+typedef struct hs_compile_context_checkpoint_info {
+    unsigned int checked_count;
+    unsigned int hit_count;
+    unsigned int blocked_count;
+    unsigned int passed_count;
+} hs_compile_context_checkpoint_info_t;
 
 #define HS_FP_UNKNOWN_SOURCE_NONE 0U
 #define HS_FP_UNKNOWN_SOURCE_DELAYED_REPLAY 1U
@@ -85,10 +119,61 @@ struct hs_fp_feedback_import_fragment {
     u64a false_positive_count;
 };
 
+typedef struct hs_fp_report_summary {
+    unsigned int fragment_count;
+    u64a scan_calls;
+    u64a scan_bytes;
+    u64a trigger_count;
+    u64a true_trigger_count;
+    u64a final_report_count;
+    u64a false_positive_count;
+    u64a unknown_report_count;
+    u64a unknown_no_active_trigger_count;
+    u64a unknown_delayed_replay_count;
+    u64a unknown_anchored_replay_count;
+    u64a unknown_eod_or_boundary_count;
+    u64a unknown_flush_combination_count;
+    u64a unknown_mpv_or_nfa_queue_count;
+    u64a unknown_counter_missing_count;
+    u64a unknown_fragment_meta_missing_count;
+    u64a dropped_trigger_count;
+} hs_fp_report_summary_t;
+
+typedef struct hs_fp_feedback_summary {
+    unsigned int bad_fragment_count;
+} hs_fp_feedback_summary_t;
+
+hs_error_t hs_fp_collector_report(const hs_fp_collector_t *collector,
+                                  hs_fp_report_t **report);
+
+hs_error_t hs_fp_report_free(hs_fp_report_t *report);
+
+hs_error_t hs_fp_report_get_summary(const hs_fp_report_t *report,
+                                    hs_fp_report_summary_t *summary);
+
+hs_error_t hs_fp_report_get_fragment(const hs_fp_report_t *report, u32 index,
+                                     hs_fp_fragment_info_t *fragment);
+
+hs_error_t hs_fp_feedback_build(const hs_fp_report_t *report,
+                                hs_fp_feedback_t **feedback);
+
+hs_error_t hs_fp_feedback_build_ext(const hs_fp_report_t *report,
+                                    const hs_fp_feedback_params_t *params,
+                                    hs_fp_feedback_t **feedback);
+
+hs_error_t hs_fp_feedback_get_summary(const hs_fp_feedback_t *feedback,
+                                      hs_fp_feedback_summary_t *summary);
+
 hs_error_t hs_fp_feedback_create_from_fragments(
     const struct hs_fp_feedback_import_fragment *fragments, u32 fragment_count,
     u64a scan_calls, u64a scan_bytes, u64a total_false_positive_count,
     hs_fp_feedback_t **feedback);
+
+u32 hs_fp_feedback_fragment_count(const hs_fp_feedback_t *feedback);
+
+hs_error_t hs_fp_feedback_get_fragment(const hs_fp_feedback_t *feedback,
+                                       u32 index,
+                                       hs_fp_fragment_info_t *fragment);
 
 u32 hs_fp_feedback_count_matches_in_rose(const hs_fp_feedback_t *feedback,
                                          const struct RoseEngine *rose,
@@ -108,6 +193,30 @@ hs_compile_context_observe_checked_count(const hs_compile_context_t *ctx);
 
 unsigned int
 hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx);
+
+hs_error_t hs_compile_context_get_checkpoint_info(
+    const hs_compile_context_t *ctx, unsigned int checkpoint,
+    hs_compile_context_checkpoint_info_t *info);
+
+hs_error_t hs_compile_context_create(hs_compile_context_t **ctx);
+
+hs_error_t hs_compile_context_set_fp_feedback(hs_compile_context_t *ctx,
+                                              const hs_fp_feedback_t *feedback);
+
+hs_error_t hs_compile_context_free(hs_compile_context_t *ctx);
+
+hs_error_t hs_compile_multi_with_context(
+    const char *const *expressions, const unsigned int *flags,
+    const unsigned int *ids, unsigned int elements, unsigned int mode,
+    const hs_platform_info_t *platform, const hs_compile_context_t *ctx,
+    hs_database_t **db, hs_compile_error_t **error);
+
+hs_error_t hs_compile_ext_multi_with_context(
+    const char *const *expressions, const unsigned int *flags,
+    const unsigned int *ids, const hs_expr_ext_t *const *ext,
+    unsigned int elements, unsigned int mode,
+    const hs_platform_info_t *platform, const hs_compile_context_t *ctx,
+    hs_database_t **db, hs_compile_error_t **error);
 
 #ifdef __cplusplus
 } /* extern C */

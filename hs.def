@@ -6,18 +6,11 @@ EXPORTS
    hs_alloc_scratch
    hs_clone_scratch
    hs_close_stream
-   hs_close_stream_with_collector
    hs_compile
-   hs_compile_context_create
-   hs_compile_context_free
-   hs_compile_context_get_checkpoint_info
-   hs_compile_context_observe_checked_count
-   hs_compile_context_observe_hit_count
-   hs_compile_context_set_fp_feedback
    hs_compile_ext_multi
-   hs_compile_ext_multi_with_context
+   hs_compile_ext_multi_with_feedback
    hs_compile_multi
-   hs_compile_multi_with_context
+   hs_compile_multi_with_feedback
    hs_compress_stream
    hs_copy_stream
    hs_database_info
@@ -30,27 +23,18 @@ EXPORTS
    hs_fp_collector_create
    hs_fp_collector_free
    hs_fp_collector_merge
-   hs_fp_collector_report
    hs_fp_collector_reset
-   hs_fp_feedback_build
-   hs_fp_feedback_build_ext
+   hs_fp_collector_to_feedback
+   hs_fp_collector_to_feedback_with_dump
    hs_fp_feedback_free
-   hs_fp_feedback_get_fragment
-   hs_fp_feedback_get_summary
-   hs_fp_report_free
-   hs_fp_report_get_fragment
-   hs_fp_report_get_summary
    hs_free_compile_error
    hs_free_database
    hs_free_scratch
    hs_open_stream
    hs_populate_platform
    hs_reset_and_copy_stream
-   hs_reset_and_copy_stream_with_collector
    hs_reset_and_expand_stream
-   hs_reset_and_expand_stream_with_collector
    hs_reset_stream
-   hs_reset_stream_with_collector
    hs_scan
    hs_scan_stream
    hs_scan_stream_with_collector

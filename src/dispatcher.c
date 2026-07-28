@@ -113,10 +113,6 @@ CREATE_DISPATCH(hs_error_t, hs_scan_stream_with_collector, hs_stream_t *id,
 CREATE_DISPATCH(hs_error_t, hs_close_stream, hs_stream_t *id,
                 hs_scratch_t *scratch, match_event_handler onEvent, void *ctxt);
 
-CREATE_DISPATCH(hs_error_t, hs_close_stream_with_collector, hs_stream_t *id,
-                hs_scratch_t *scratch, match_event_handler onEvent, void *ctxt,
-                hs_fp_collector_t *collector);
-
 CREATE_DISPATCH(hs_error_t, hs_scan_vector, const hs_database_t *db,
                 const char *const *data, const unsigned int *length,
                 unsigned int count, unsigned int flags, hs_scratch_t *scratch,
@@ -139,19 +135,9 @@ CREATE_DISPATCH(hs_error_t, hs_reset_stream, hs_stream_t *id,
                 unsigned int flags, hs_scratch_t *scratch,
                 match_event_handler onEvent, void *context);
 
-CREATE_DISPATCH(hs_error_t, hs_reset_stream_with_collector, hs_stream_t *id,
-                unsigned int flags, hs_scratch_t *scratch,
-                match_event_handler onEvent, void *context,
-                hs_fp_collector_t *collector);
-
 CREATE_DISPATCH(hs_error_t, hs_reset_and_copy_stream, hs_stream_t *to_id,
                 const hs_stream_t *from_id, hs_scratch_t *scratch,
                 match_event_handler onEvent, void *context);
-
-CREATE_DISPATCH(hs_error_t, hs_reset_and_copy_stream_with_collector,
-                hs_stream_t *to_id, const hs_stream_t *from_id,
-                hs_scratch_t *scratch, match_event_handler onEvent,
-                void *context, hs_fp_collector_t *collector);
 
 CREATE_DISPATCH(hs_error_t, hs_serialize_database, const hs_database_t *db,
                 char **bytes, size_t *length);
@@ -177,11 +163,6 @@ CREATE_DISPATCH(hs_error_t, hs_expand_stream, const hs_database_t *db,
 CREATE_DISPATCH(hs_error_t, hs_reset_and_expand_stream, hs_stream_t *to_stream,
                 const char *buf, size_t buf_size, hs_scratch_t *scratch,
                 match_event_handler onEvent, void *context);
-
-CREATE_DISPATCH(hs_error_t, hs_reset_and_expand_stream_with_collector,
-                hs_stream_t *to_stream, const char *buf, size_t buf_size,
-                hs_scratch_t *scratch, match_event_handler onEvent,
-                void *context, hs_fp_collector_t *collector);
 
 /** INTERNALS **/
 

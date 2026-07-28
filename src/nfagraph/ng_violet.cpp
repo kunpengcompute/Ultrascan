@@ -1992,6 +1992,22 @@ static bool makeTransientFromLongLiteral(NGHolder &h, RoseInGraph &vg,
         graphs[v] = h_new;
     }
 
+    for (const RoseInEdge &e : ee) {
+        RoseInVertex t = target(e, vg);
+        const ue2_literal &orig_lit = vg[t].s;
+        ue2_literal head_lit(orig_lit.begin(), orig_lit.end() - delta);
+        ue2_literal tail_lit(orig_lit.end() - delta, orig_lit.end());
+
+        if (fpFeedbackLiteralIsBad(cc, head_lit) ||
+            fpFeedbackLiteralIsBad(cc, tail_lit)) {
+            DEBUG_PRINTF("not splitting long literal due to fp feedback: "
+                         "head='%s', tail='%s'\n",
+                         dumpString(head_lit).c_str(),
+                         dumpString(tail_lit).c_str());
+            return false;
+        }
+    }
+
     /* add .{repeats} from prefixes to long literals */
     for (const RoseInEdge &e : ee) {
         RoseInVertex s = source(e, vg);

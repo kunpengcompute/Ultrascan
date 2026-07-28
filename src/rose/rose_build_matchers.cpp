@@ -40,6 +40,7 @@
 #include "nfa/castlecompile.h"
 #include "nfa/nfa_api_queue.h"
 #include "rose_build_dump.h"
+#include "rose_build_fp_feedback.h"
 #include "rose_build_impl.h"
 #include "rose_build_lit_accel.h"
 #include "rose_build_width.h"
@@ -364,6 +365,14 @@ void findMoreLiteralMasks(RoseBuildImpl &build) {
         }
         DEBUG_PRINTF("found surrounding mask for lit_id=%u (%s)\n", id,
                      dumpString(lit.s).c_str());
+        if (fpFeedbackBlocksRoseFragment(
+                build.cc, lit.s, &msk, &cmp,
+                HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL)) {
+            DEBUG_PRINTF("not replacing literal with surrounding mask due to "
+                         "fp feedback\n");
+            continue;
+        }
+
         u32 new_id = build.getLiteralId(lit.s, msk, cmp, lit.delay, lit.table);
         if (new_id == id) {
             continue;

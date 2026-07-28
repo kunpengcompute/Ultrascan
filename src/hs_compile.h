@@ -123,74 +123,6 @@ typedef struct hs_compile_error {
 } hs_compile_error_t;
 
 /**
- * Create a compile context for false-positive feedback aware compile calls.
- */
-hs_error_t HS_CDECL hs_compile_context_create(hs_compile_context_t **ctx);
-
-/**
- * Set false-positive feedback on a compile context.
- *
- * The context takes an internal copy of the feedback object. Passing NULL as
- * feedback clears any existing feedback from the context.
- */
-hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
-    hs_compile_context_t *ctx, const hs_fp_feedback_t *feedback);
-
-/**
- * Free a compile context. NULL may also be safely provided.
- */
-hs_error_t HS_CDECL hs_compile_context_free(hs_compile_context_t *ctx);
-
-/**
- * Return the number of bad fragments checked during compile-time observe.
- * NULL returns zero.
- */
-unsigned int HS_CDECL
-hs_compile_context_observe_checked_count(const hs_compile_context_t *ctx);
-
-/**
- * Return the number of feedback bad fragments found in the newly compiled
- * database during compile-time observe. NULL returns zero.
- */
-unsigned int HS_CDECL
-hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx);
-
-/**
- * Compile-time false-positive feedback checkpoint identifiers.
- */
-#define HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT 0U
-#define HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT 1U
-#define HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL 2U
-#define HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD 3U
-#define HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL 4U
-#define HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET 5U
-#define HS_FP_COMPILE_CHECKPOINT_COUNT 6U
-
-/**
- * Compile-time false-positive feedback diagnostics for one checkpoint.
- */
-typedef struct hs_compile_context_checkpoint_info {
-    /** Number of candidates checked at this checkpoint. */
-    unsigned int checked_count;
-
-    /** Number of checked candidates matching feedback bad fragments. */
-    unsigned int hit_count;
-
-    /** Number of hit candidates rejected at this checkpoint. */
-    unsigned int blocked_count;
-
-    /** Number of hit candidates allowed to continue at this checkpoint. */
-    unsigned int passed_count;
-} hs_compile_context_checkpoint_info_t;
-
-/**
- * Return diagnostics for a compile-time false-positive feedback checkpoint.
- */
-hs_error_t HS_CDECL hs_compile_context_get_checkpoint_info(
-    const hs_compile_context_t *ctx, unsigned int checkpoint,
-    hs_compile_context_checkpoint_info_t *info);
-
-/**
  * A type containing information on the target platform which may optionally be
  * provided to the compile calls (@ref hs_compile(), @ref hs_compile_multi(),
  * @ref hs_compile_ext_multi()).
@@ -521,10 +453,20 @@ hs_error_t HS_CDECL hs_compile_multi(const char *const *expressions,
                                      hs_database_t **db,
                                      hs_compile_error_t **error);
 
-hs_error_t HS_CDECL hs_compile_multi_with_context(
+/**
+ * Compile a group of expressions while consuming false-positive feedback.
+
+ * *
+ * This API has the same input and output contract as @ref
+ * hs_compile_multi(),
+ * with one additional feedback object. Passing NULL
+ * feedback is equivalent to
+ * calling @ref hs_compile_multi().
+ */
+hs_error_t HS_CDECL hs_compile_multi_with_feedback(
     const char *const *expressions, const unsigned int *flags,
     const unsigned int *ids, unsigned int elements, unsigned int mode,
-    const hs_platform_info_t *platform, const hs_compile_context_t *ctx,
+    const hs_platform_info_t *platform, const hs_fp_feedback_t *feedback,
     hs_database_t **db, hs_compile_error_t **error);
 
 hs_error_t HS_CDECL
@@ -623,11 +565,23 @@ hs_compile_ext_multi(const char *const *expressions, const unsigned int *flags,
                      const hs_platform_info_t *platform, hs_database_t **db,
                      hs_compile_error_t **error);
 
-hs_error_t HS_CDECL hs_compile_ext_multi_with_context(
+/**
+ * Compile a group of expressions with extended parameters while consuming
+
+ * * false-positive feedback.
+ *
+ * This API has the same input and output
+ * contract as
+ * @ref hs_compile_ext_multi(), with one additional feedback
+ * object. Passing
+ * NULL feedback is equivalent to calling @ref
+ * hs_compile_ext_multi().
+ */
+hs_error_t HS_CDECL hs_compile_ext_multi_with_feedback(
     const char *const *expressions, const unsigned int *flags,
     const unsigned int *ids, const hs_expr_ext_t *const *ext,
     unsigned int elements, unsigned int mode,
-    const hs_platform_info_t *platform, const hs_compile_context_t *ctx,
+    const hs_platform_info_t *platform, const hs_fp_feedback_t *feedback,
     hs_database_t **db, hs_compile_error_t **error);
 
 hs_error_t HS_CDECL

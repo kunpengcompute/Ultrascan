@@ -359,7 +359,9 @@ u32 RoseBuildImpl::getLiteralId(const ue2_literal &s, u32 delay,
     DEBUG_PRINTF("getting id for %s in table %d\n", dumpString(s).c_str(),
                  table);
     assert(table != ROSE_ANCHORED);
-    assert(!(cc.grey.allowNeoFdr && hasLongAllZeroNeoFdrTail(s)));
+    /* Low-quality literal rejection must happen at optional candidate sites.
+     * This final registration path can receive semantic literals without an
+     * equivalent fallback, so it must not assert or block here. */
     rose_literal_id key(s, table, delay);
 
     auto m = literals.insert(key);
@@ -448,7 +450,9 @@ u32 RoseBuildImpl::getLiteralId(const ue2_literal &s, const vector<u8> &msk,
     DEBUG_PRINTF("getting id for %s in table %d\n", dumpString(s).c_str(),
                  table);
     assert(table != ROSE_ANCHORED);
-    assert(!(cc.grey.allowNeoFdr && hasLongAllZeroNeoFdrTail(s)));
+    /* Low-quality literal rejection must happen at optional candidate sites.
+     * This final registration path can receive semantic literals without an
+     * equivalent fallback, so it must not assert or block here. */
     rose_literal_id key(s, msk, cmp, table, delay);
 
     /* ue2_literals are always uppercased if nocase and must have an

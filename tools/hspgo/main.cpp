@@ -94,6 +94,7 @@ const int OPT_ECHO_MATCHES = 1000;
 const char *HSPGO_REPORT_CSV_NAME = "report.csv";
 const char *HSPGO_FEEDBACK_CSV_NAME = "feedback.csv";
 const char *HSPGO_FEEDBACK_BIN_NAME = "feedback.bin";
+const unsigned HSPGO_RATE_SCALE_DECIMALS = 12;
 
 enum class ScanMode {
     STREAMING,
@@ -111,7 +112,7 @@ struct Options {
     string greyOverrides;
     vector<unsigned> cpuList;
     unsigned baselineRounds = 1;
-    unsigned collectRounds = 3;
+    unsigned collectRounds = 1;
     unsigned measureRounds = 5;
     unsigned threadCount = 1;
     unsigned top = 0;
@@ -120,7 +121,6 @@ struct Options {
     bool showSummaries = false;
     bool showDiagnostics = false;
     bool echoMatches = false;
-    bool collectRoundsSet = false;
 };
 
 struct PatternSet {
@@ -182,10 +182,6 @@ struct CollectorDeleter {
     }
 };
 
-struct ReportDeleter {
-    void operator()(hs_fp_report_t *report) const { hs_fp_report_free(report); }
-};
-
 struct FeedbackDeleter {
     void operator()(hs_fp_feedback_t *feedback) const {
         hs_fp_feedback_free(feedback);
@@ -201,10 +197,22 @@ struct CompileContextDeleter {
 using DatabasePtr = std::unique_ptr<hs_database_t, DatabaseDeleter>;
 using ScratchPtr = std::unique_ptr<hs_scratch_t, ScratchDeleter>;
 using CollectorPtr = std::unique_ptr<hs_fp_collector_t, CollectorDeleter>;
-using ReportPtr = std::unique_ptr<hs_fp_report_t, ReportDeleter>;
 using FeedbackPtr = std::unique_ptr<hs_fp_feedback_t, FeedbackDeleter>;
 using CompileContextPtr =
     std::unique_ptr<hs_compile_context_t, CompileContextDeleter>;
+
+struct OwnedFragment {
+    hs_fp_fragment_info_t info = {};
+    vector<u8> bytes;
+    vector<u8> mask;
+    vector<u8> cmp;
+};
+
+struct DumpData {
+    hs_fp_feedback_dump_summary_t summary = {};
+    vector<OwnedFragment> reportFragments;
+    vector<OwnedFragment> feedbackFragments;
+};
 
 void usage(const char *error) {
     cout
@@ -216,8 +224,6 @@ void usage(const char *error) {
         << "  -c FILE                 Load hsbench sqlite corpus.\n"
         << "  -b N                    Run N normal hs_scan() baseline rounds "
            "(default 1).\n"
-        << "  -r N                    Run N collection rounds with collector "
-           "(default 3).\n"
         << "  -n N                    Run N measurement rounds after DB switch "
            "(default 5).\n"
         << "  -N                      Run in block mode (default: streaming).\n"
@@ -227,13 +233,13 @@ void usage(const char *error) {
            "(default 1000).\n"
         << "  -p N                    Minimum false-positive trigger count "
            "(default 1000).\n"
-        << "  -q PCT                  Minimum false-positive rate percent, up "
-           "to 2 decimals (default 99.00).\n"
-        << "  -s PCT                  Minimum waste share percent, up to 2 "
-           "decimals (default 5.00).\n"
+        << "  -q RATIO                Minimum false-positive rate ratio, 0..1 "
+           "(default 0.99).\n"
+        << "  -s RATIO                Minimum false-positive share ratio, 0..1 "
+           "(default 0.05).\n"
         << "  -k N                    Maximum bad fragments kept for feedback "
            "(default all).\n"
-        << "  -T CPU,CPU... or CPU-CPU\n"
+        << "  -T CPU[,CPU|CPU-CPU]...\n"
         << "                          Run one worker per CPU and bind "
            "affinity.\n"
         << "  -v                      Verbose feedback view with summaries, "
@@ -374,7 +380,7 @@ bool parsePositiveUnsigned(const char *text, unsigned *out) {
     return true;
 }
 
-bool parsePositiveU64(const char *text, unsigned long long *out) {
+bool parseU64(const char *text, unsigned long long *out) {
     if (!text || !*text || !out || text[0] == '+' || text[0] == '-') {
         return false;
     }
@@ -382,7 +388,7 @@ bool parsePositiveU64(const char *text, unsigned long long *out) {
     errno = 0;
     char *end = nullptr;
     unsigned long long value = std::strtoull(text, &end, 10);
-    if (errno || !end || *end != '\0' || value == 0) {
+    if (errno || !end || *end != '\0') {
         return false;
     }
 
@@ -407,58 +413,69 @@ bool parseUnsigned(const char *text, unsigned *out) {
     return true;
 }
 
-bool parsePercentScaled(const char *text, unsigned *out) {
+bool parseRatioScaled(const char *text, unsigned long long *out) {
     if (!text || !*text || !out || text[0] == '+' || text[0] == '-') {
         return false;
     }
 
-    string value(text);
-    if (!value.empty() && value.back() == '%') {
-        value.pop_back();
-    }
-    if (value.empty()) {
-        return false;
-    }
-
+    const string value(text);
     const size_t dot = value.find('.');
     if (dot != string::npos && value.find('.', dot + 1) != string::npos) {
         return false;
     }
 
-    const string wholeText = dot == string::npos ? value : value.substr(0, dot);
-    const string fracText =
-        dot == string::npos ? string() : value.substr(dot + 1);
-    if (wholeText.empty() || fracText.size() > 2) {
+    const string whole = dot == string::npos ? value : value.substr(0, dot);
+    const string frac = dot == string::npos ? string() : value.substr(dot + 1);
+    if (whole.empty() && frac.empty()) {
         return false;
     }
-    for (char c : wholeText) {
+
+    unsigned wholeValue = 0;
+    for (char c : whole) {
         if (!std::isdigit(static_cast<unsigned char>(c))) {
             return false;
         }
-    }
-    for (char c : fracText) {
-        if (!std::isdigit(static_cast<unsigned char>(c))) {
+        wholeValue = wholeValue * 10U + static_cast<unsigned>(c - '0');
+        if (wholeValue > 1U) {
             return false;
         }
     }
 
-    unsigned whole = 0;
-    if (!parseUnsigned(wholeText.c_str(), &whole) || whole > 100) {
-        return false;
+    if (wholeValue == 1U) {
+        for (char c : frac) {
+            if (!std::isdigit(static_cast<unsigned char>(c)) || c != '0') {
+                return false;
+            }
+        }
+        *out = HS_FP_FEEDBACK_RATE_SCALE;
+        return true;
     }
 
-    unsigned frac = 0;
-    if (!fracText.empty()) {
-        frac = static_cast<unsigned>(fracText[0] - '0') * 10;
-        if (fracText.size() == 2) {
-            frac += static_cast<unsigned>(fracText[1] - '0');
+    unsigned long long scaled = 0;
+    unsigned digits = 0;
+    bool ceilTail = false;
+    for (char c : frac) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) {
+            return false;
+        }
+        const unsigned digit = static_cast<unsigned>(c - '0');
+        if (digits < HSPGO_RATE_SCALE_DECIMALS) {
+            scaled = scaled * 10ULL + digit;
+            digits++;
+        } else if (digit) {
+            ceilTail = true;
         }
     }
-    if (whole == 100 && frac != 0) {
-        return false;
+
+    while (digits < HSPGO_RATE_SCALE_DECIMALS) {
+        scaled *= 10ULL;
+        digits++;
     }
 
-    *out = whole * 100 + frac;
+    if (ceilTail && scaled < HS_FP_FEEDBACK_RATE_SCALE) {
+        scaled++;
+    }
+    *out = scaled;
     return true;
 }
 
@@ -623,7 +640,7 @@ bool processArgs(int argc, char **argv, Options *opts) {
     opterr = 0;
     int optionIndex = 0;
     for (;;) {
-        int c = getopt_long(argc, argv, ":b:c:e:G:hI:k:m:Nn:o:O:p:q:r:s:T:vV",
+        int c = getopt_long(argc, argv, ":b:c:e:G:hI:k:m:Nn:o:O:p:q:s:T:vV",
                             longopts, &optionIndex);
         if (c < 0) {
             break;
@@ -668,9 +685,9 @@ bool processArgs(int argc, char **argv, Options *opts) {
             opts->exprPath.assign(optarg);
             break;
         case 'p':
-            if (!parsePositiveU64(optarg, &value64)) {
-                usage(
-                    "minimum false-positive count must be a positive integer");
+            if (!parseU64(optarg, &value64)) {
+                usage("minimum false-positive count must be a non-negative "
+                      "integer");
                 return false;
             }
             opts->feedbackParams.flags |=
@@ -694,8 +711,8 @@ bool processArgs(int argc, char **argv, Options *opts) {
             opts->feedbackImportPath.assign(optarg);
             break;
         case 'm':
-            if (!parsePositiveU64(optarg, &value64)) {
-                usage("minimum trigger count must be a positive integer");
+            if (!parseU64(optarg, &value64)) {
+                usage("minimum trigger count must be a non-negative integer");
                 return false;
             }
             opts->feedbackParams.flags |=
@@ -727,22 +744,14 @@ bool processArgs(int argc, char **argv, Options *opts) {
             opts->feedbackBinPath.assign(optarg);
             break;
         case 'q':
-            if (!parsePercentScaled(optarg, &value)) {
-                usage("minimum false-positive rate must be a percent from 0 to "
-                      "100 with at most two decimal places");
+            if (!parseRatioScaled(optarg, &value64)) {
+                usage("minimum false-positive rate must be a ratio from 0 to "
+                      "1");
                 return false;
             }
             opts->feedbackParams.flags |=
                 HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE;
-            opts->feedbackParams.min_false_positive_rate = value;
-            break;
-        case 'r':
-            if (!parseUnsigned(optarg, &value)) {
-                usage("collection rounds must be a non-negative integer");
-                return false;
-            }
-            opts->collectRounds = value;
-            opts->collectRoundsSet = true;
+            opts->feedbackParams.min_false_positive_rate = value64;
             break;
         case 'T': {
             if (!optarg || !*optarg) {
@@ -753,7 +762,7 @@ bool processArgs(int argc, char **argv, Options *opts) {
             string cpuError;
             if (!parseCpuList(optarg, &opts->cpuList, &cpuError)) {
                 if (cpuError.empty()) {
-                    cpuError = "thread CPU list must be CPU,CPU... or CPU-CPU";
+                    cpuError = "thread CPU list must be CPU[,CPU|CPU-CPU]...";
                 }
                 usage(cpuError);
                 return false;
@@ -772,13 +781,13 @@ bool processArgs(int argc, char **argv, Options *opts) {
             opts->scanMode = ScanMode::VECTORED;
             break;
         case 's':
-            if (!parsePercentScaled(optarg, &value)) {
-                usage("minimum waste share must be a percent from 0 to 100 "
-                      "with at most two decimal places");
+            if (!parseRatioScaled(optarg, &value64)) {
+                usage(
+                    "minimum false-positive share must be a ratio from 0 to 1");
                 return false;
             }
             opts->feedbackParams.flags |= HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE;
-            opts->feedbackParams.min_waste_share = value;
+            opts->feedbackParams.min_waste_share = value64;
             break;
         case OPT_ECHO_MATCHES:
             opts->echoMatches = true;
@@ -814,15 +823,7 @@ bool processArgs(int argc, char **argv, Options *opts) {
         return false;
     }
     if (!opts->feedbackImportPath.empty()) {
-        if (!opts->collectRoundsSet) {
-            opts->collectRounds = 0;
-        } else if (opts->collectRounds != 0) {
-            usage("-I requires -r 0 because collection is skipped");
-            return false;
-        }
-    } else if (!opts->collectRounds) {
-        usage("collection rounds must be positive unless -I is used");
-        return false;
+        opts->collectRounds = 0;
     }
 
     return true;
@@ -1232,6 +1233,7 @@ bool scanBlocks(const hs_database_t *db, hs_scratch_t *scratch,
 bool closeStream(StreamInfo *stream, hs_scratch_t *scratch,
                  hs_fp_collector_t *collector, bool echoMatches,
                  RunStats *stats, string *error) {
+    (void)collector;
     MatchContext matchCtx;
     matchCtx.stats = stats;
     matchCtx.blockId = 0;
@@ -1239,13 +1241,8 @@ bool closeStream(StreamInfo *stream, hs_scratch_t *scratch,
     matchCtx.echoMatches = echoMatches;
     matchCtx.streaming = true;
 
-    hs_error_t err = HS_SUCCESS;
-    if (collector) {
-        err = hs_close_stream_with_collector(stream->handle, scratch, onMatch,
-                                             &matchCtx, collector);
-    } else {
-        err = hs_close_stream(stream->handle, scratch, onMatch, &matchCtx);
-    }
+    hs_error_t err =
+        hs_close_stream(stream->handle, scratch, onMatch, &matchCtx);
     stream->handle = nullptr;
 
     if (err != HS_SUCCESS) {
@@ -1443,21 +1440,26 @@ bool createCollectors(const hs_database_t *db, unsigned count,
 bool mergeCollectors(const hs_database_t *db,
                      const vector<CollectorPtr> &collectors,
                      CollectorPtr *merged) {
+    (void)db;
+    if (collectors.empty()) {
+        cerr << "no collectors to merge\n";
+        return false;
+    }
+
+    vector<hs_fp_collector_t *> inputs;
+    inputs.reserve(collectors.size());
+    for (const auto &collector : collectors) {
+        inputs.push_back(collector.get());
+    }
+
     hs_fp_collector_t *rawCollector = nullptr;
-    hs_error_t err = hs_fp_collector_create(db, &rawCollector);
+    hs_error_t err = hs_fp_collector_merge(
+        inputs.data(), static_cast<unsigned>(inputs.size()), &rawCollector);
     if (err != HS_SUCCESS) {
-        cerr << "hs_fp_collector_create failed with error " << err << "\n";
+        cerr << "hs_fp_collector_merge failed with error " << err << "\n";
         return false;
     }
     merged->reset(rawCollector);
-
-    for (const auto &collector : collectors) {
-        err = hs_fp_collector_merge(merged->get(), collector.get());
-        if (err != HS_SUCCESS) {
-            cerr << "hs_fp_collector_merge failed with error " << err << "\n";
-            return false;
-        }
-    }
     return true;
 }
 
@@ -1625,6 +1627,20 @@ string escapedBytes(const unsigned char *bytes, size_t length) {
     return oss.str();
 }
 
+string hexBytes(const unsigned char *bytes, size_t length) {
+    if (!length) {
+        return "";
+    }
+
+    std::ostringstream oss;
+    oss << "0x";
+    for (size_t i = 0; i < length; i++) {
+        oss << hex << setw(2) << setfill('0')
+            << static_cast<unsigned int>(bytes[i]);
+    }
+    return oss.str();
+}
+
 double falsePositiveRate(const hs_fp_fragment_info_t &fragment) {
     if (!fragment.trigger_count) {
         return 0.0;
@@ -1646,46 +1662,35 @@ string formatPercent(double ratio) {
     return formatFixed(ratio * 100.0, 2) + "%";
 }
 
-bool loadReportFragments(const hs_fp_report_t *report,
-                         vector<hs_fp_fragment_info_t> *fragments) {
-    hs_fp_report_summary_t summary = {};
-    hs_error_t err = hs_fp_report_get_summary(report, &summary);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_report_get_summary failed with error " << err << "\n";
-        return false;
+void copyFragment(const hs_fp_fragment_info_t &src, OwnedFragment *dst) {
+    dst->info = src;
+    dst->bytes.assign(src.bytes, src.bytes + src.length);
+    if (src.mask_length) {
+        dst->mask.assign(src.mask, src.mask + src.mask_length);
+        dst->cmp.assign(src.cmp, src.cmp + src.mask_length);
+    } else {
+        dst->mask.clear();
+        dst->cmp.clear();
     }
-
-    fragments->resize(summary.fragment_count);
-    for (unsigned int i = 0; i < summary.fragment_count; i++) {
-        err = hs_fp_report_get_fragment(report, i, &(*fragments)[i]);
-        if (err != HS_SUCCESS) {
-            cerr << "hs_fp_report_get_fragment failed with error " << err
-                 << "\n";
-            return false;
-        }
-    }
-    return true;
+    dst->info.bytes = dst->bytes.empty() ? nullptr : dst->bytes.data();
+    dst->info.mask = dst->mask.empty() ? nullptr : dst->mask.data();
+    dst->info.cmp = dst->cmp.empty() ? nullptr : dst->cmp.data();
 }
 
-bool loadFeedbackFragments(const hs_fp_feedback_t *feedback,
-                           vector<hs_fp_fragment_info_t> *fragments) {
-    hs_fp_feedback_summary_t summary = {};
-    hs_error_t err = hs_fp_feedback_get_summary(feedback, &summary);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_feedback_get_summary failed with error " << err << "\n";
-        return false;
-    }
+void appendOwnedFragment(vector<OwnedFragment> *fragments,
+                         const hs_fp_fragment_info_t &fragment) {
+    fragments->push_back(OwnedFragment());
+    copyFragment(fragment, &fragments->back());
+}
 
-    fragments->resize(summary.bad_fragment_count);
-    for (unsigned int i = 0; i < summary.bad_fragment_count; i++) {
-        err = hs_fp_feedback_get_fragment(feedback, i, &(*fragments)[i]);
-        if (err != HS_SUCCESS) {
-            cerr << "hs_fp_feedback_get_fragment failed with error " << err
-                 << "\n";
-            return false;
-        }
+vector<hs_fp_fragment_info_t>
+fragmentInfos(const vector<OwnedFragment> &fragments) {
+    vector<hs_fp_fragment_info_t> out;
+    out.reserve(fragments.size());
+    for (const auto &fragment : fragments) {
+        out.push_back(fragment.info);
     }
-    return true;
+    return out;
 }
 
 void sortFragments(vector<hs_fp_fragment_info_t> *fragments) {
@@ -1706,8 +1711,8 @@ void printFragmentHeader() {
     cout << left << setw(4) << "#" << setw(20) << "key" << setw(10) << "table"
          << setw(10) << "engine" << right << setw(12) << "trigger" << setw(12)
          << "true" << setw(12) << "false" << setw(10) << "fp_rate" << setw(10)
-         << "fp_share"
-         << "  fragment\n";
+         << "fp_share" << left << "  " << setw(18) << "msk" << setw(18) << "cmp"
+         << "fragment\n";
 }
 
 string fragmentKeyString(const hs_fp_fragment_info_t &fragment) {
@@ -1717,8 +1722,20 @@ string fragmentKeyString(const hs_fp_fragment_info_t &fragment) {
     return key.str();
 }
 
+string quotedBytes(const unsigned char *bytes, size_t length) {
+    return "\"" + escapedBytes(bytes, length) + "\"";
+}
+
+string quotedHexBytes(const unsigned char *bytes, size_t length) {
+    return "\"" + hexBytes(bytes, length) + "\"";
+}
+
 void printFragmentRow(size_t index, const hs_fp_fragment_info_t &fragment,
                       unsigned long long totalFalsePositive) {
+    const string mask = quotedHexBytes(fragment.mask, fragment.mask_length);
+    const string cmp = quotedHexBytes(fragment.cmp, fragment.mask_length);
+    const string bytes = quotedBytes(fragment.bytes, fragment.length);
+
     cout << left << setw(4) << index << setw(20) << fragmentKeyString(fragment)
          << setw(10) << tableName(fragment.table) << setw(10)
          << engineName(fragment.engine) << right << setw(12)
@@ -1726,21 +1743,13 @@ void printFragmentRow(size_t index, const hs_fp_fragment_info_t &fragment,
          << setw(12) << fragment.false_positive_count << setw(10)
          << formatPercent(falsePositiveRate(fragment)) << setw(10)
          << formatPercent(falsePositiveShare(fragment, totalFalsePositive))
-         << "  \"" << escapedBytes(fragment.bytes, fragment.length) << "\"\n";
+         << left << "  " << setw(18) << mask << setw(18) << cmp << bytes
+         << "\n";
 }
 
-void printTopReportFragments(const hs_fp_report_t *report, unsigned top) {
-    hs_fp_report_summary_t summary = {};
-    hs_error_t err = hs_fp_report_get_summary(report, &summary);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_report_get_summary failed with error " << err << "\n";
-        return;
-    }
-
-    vector<hs_fp_fragment_info_t> fragments;
-    if (!loadReportFragments(report, &fragments)) {
-        return;
-    }
+void printTopReportFragments(const DumpData &dump, unsigned top) {
+    vector<hs_fp_fragment_info_t> fragments =
+        fragmentInfos(dump.reportFragments);
     sortFragments(&fragments);
 
     cout << "\nTop report fragments:\n";
@@ -1752,22 +1761,14 @@ void printTopReportFragments(const hs_fp_report_t *report, unsigned top) {
     printFragmentHeader();
     const size_t limit = std::min<size_t>(top, fragments.size());
     for (size_t i = 0; i < limit; i++) {
-        printFragmentRow(i + 1, fragments[i], summary.false_positive_count);
+        printFragmentRow(i + 1, fragments[i],
+                         dump.summary.false_positive_count);
     }
 }
 
-void printFeedbackFragments(const hs_fp_feedback_t *feedback, unsigned top) {
-    hs_fp_feedback_summary_t summary = {};
-    hs_error_t err = hs_fp_feedback_get_summary(feedback, &summary);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_feedback_get_summary failed with error " << err << "\n";
-        return;
-    }
-
-    vector<hs_fp_fragment_info_t> fragments;
-    if (!loadFeedbackFragments(feedback, &fragments)) {
-        return;
-    }
+void printFeedbackFragments(const vector<OwnedFragment> &selected, unsigned top,
+                            unsigned long long totalFalsePositive) {
+    vector<hs_fp_fragment_info_t> fragments = fragmentInfos(selected);
     sortFragments(&fragments);
 
     cout << "\nBad fragments selected for feedback:\n";
@@ -1779,8 +1780,7 @@ void printFeedbackFragments(const hs_fp_feedback_t *feedback, unsigned top) {
     printFragmentHeader();
     const size_t limit = std::min<size_t>(top, fragments.size());
     for (size_t i = 0; i < limit; i++) {
-        printFragmentRow(i + 1, fragments[i],
-                         summary.total_false_positive_count);
+        printFragmentRow(i + 1, fragments[i], totalFalsePositive);
     }
 }
 
@@ -1819,9 +1819,11 @@ bool writeFragmentCsv(const string &path,
 
     sortFragments(&fragments);
     out << "key,table,engine,trigger_count,true_trigger_count,"
-           "false_positive_count,fp_rate,fp_share,fragment\n";
+           "false_positive_count,fp_rate,fp_share,msk,cmp,fragment\n";
     for (const auto &fragment : fragments) {
         const string bytes = escapedBytes(fragment.bytes, fragment.length);
+        const string mask = hexBytes(fragment.mask, fragment.mask_length);
+        const string cmp = hexBytes(fragment.cmp, fragment.mask_length);
         out << fragmentKeyString(fragment) << ',' << tableName(fragment.table)
             << ',' << engineName(fragment.engine) << ','
             << fragment.trigger_count << ',' << fragment.true_trigger_count
@@ -1829,7 +1831,8 @@ bool writeFragmentCsv(const string &path,
             << formatFixed(falsePositiveRate(fragment) * 100.0, 2) << ','
             << formatFixed(
                    falsePositiveShare(fragment, totalFalsePositive) * 100.0, 2)
-            << ',' << csvEscape(bytes) << "\n";
+            << ',' << csvEscape(mask) << ',' << csvEscape(cmp) << ','
+            << csvEscape(bytes) << "\n";
     }
 
     if (!out.good()) {
@@ -1839,58 +1842,49 @@ bool writeFragmentCsv(const string &path,
     return true;
 }
 
-bool dumpReportCsvFile(const hs_fp_report_t *report, const string &path) {
+bool dumpReportCsvFile(const DumpData &dump, const string &path) {
     if (path.empty()) {
         return true;
     }
-    hs_fp_report_summary_t summary = {};
-    hs_error_t err = hs_fp_report_get_summary(report, &summary);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_report_get_summary failed with error " << err << "\n";
-        return false;
-    }
-
-    vector<hs_fp_fragment_info_t> fragments;
-    if (!loadReportFragments(report, &fragments)) {
-        return false;
-    }
-    return writeFragmentCsv(path, move(fragments),
-                            summary.false_positive_count);
+    return writeFragmentCsv(path, fragmentInfos(dump.reportFragments),
+                            dump.summary.false_positive_count);
 }
 
-bool dumpFeedbackCsvFile(const hs_fp_feedback_t *feedback, const string &path) {
+bool dumpFeedbackCsvFile(const vector<OwnedFragment> &selected,
+                         unsigned long long totalFalsePositive,
+                         const string &path) {
     if (path.empty()) {
         return true;
     }
-    hs_fp_feedback_summary_t summary = {};
-    hs_error_t err = hs_fp_feedback_get_summary(feedback, &summary);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_feedback_get_summary failed with error " << err << "\n";
-        return false;
-    }
-
-    vector<hs_fp_fragment_info_t> fragments;
-    if (!loadFeedbackFragments(feedback, &fragments)) {
-        return false;
-    }
-    return writeFragmentCsv(path, move(fragments),
-                            summary.total_false_positive_count);
+    return writeFragmentCsv(path, fragmentInfos(selected), totalFalsePositive);
 }
 
-bool dumpCsvOutputs(const hs_fp_report_t *report,
-                    const hs_fp_feedback_t *feedback, const string &dir) {
+bool dumpCsvOutputs(const DumpData *dump, const vector<OwnedFragment> &selected,
+                    unsigned long long totalFalsePositive, const string &dir) {
     if (dir.empty()) {
         return true;
     }
     if (!ensureDirectory(dir, "CSV output")) {
         return false;
     }
-    if (report &&
-        !dumpReportCsvFile(report, joinPath(dir, HSPGO_REPORT_CSV_NAME))) {
+    if (dump &&
+        !dumpReportCsvFile(*dump, joinPath(dir, HSPGO_REPORT_CSV_NAME))) {
         return false;
     }
-    if (feedback && !dumpFeedbackCsvFile(
-                        feedback, joinPath(dir, HSPGO_FEEDBACK_CSV_NAME))) {
+    if (!dumpFeedbackCsvFile(selected, totalFalsePositive,
+                             joinPath(dir, HSPGO_FEEDBACK_CSV_NAME))) {
+        return false;
+    }
+    return true;
+}
+
+bool prepareOutputDirectories(const Options &opts) {
+    if (!opts.reportCsvPath.empty() &&
+        !ensureDirectory(opts.reportCsvPath, "CSV output")) {
+        return false;
+    }
+    if (!opts.feedbackBinPath.empty() &&
+        !ensureDirectory(opts.feedbackBinPath, "feedback binary output")) {
         return false;
     }
     return true;
@@ -1898,7 +1892,7 @@ bool dumpCsvOutputs(const hs_fp_report_t *report,
 
 const uint8_t HSPGO_FEEDBACK_BIN_MAGIC[8] = {'H', 'S', 'P', 'G',
                                              'O', 'F', 'B', '1'};
-const uint32_t HSPGO_FEEDBACK_BIN_VERSION = 2;
+const uint32_t HSPGO_FEEDBACK_BIN_VERSION = 3;
 const uint64_t MAX_FEEDBACK_BIN_SIZE = 128ULL * 1024ULL * 1024ULL;
 const uint32_t MAX_SERIALIZED_FRAGMENT_BYTES = 4096;
 const uint64_t FNV1A64_OFFSET = 14695981039346656037ULL;
@@ -2075,7 +2069,6 @@ bool appendSerializedFragment(vector<uint8_t> *payload,
     appendU32(payload, static_cast<uint32_t>(fragment.mask_length));
     appendU64(payload, fragment.trigger_count);
     appendU64(payload, fragment.true_trigger_count);
-    appendU64(payload, fragment.final_report_count);
     appendU64(payload, fragment.false_positive_count);
     appendBytes(payload, fragment.bytes, fragment.length);
     appendBytes(payload, fragment.mask, fragment.mask_length);
@@ -2083,21 +2076,14 @@ bool appendSerializedFragment(vector<uint8_t> *payload,
     return true;
 }
 
-bool dumpFeedbackBin(const hs_fp_feedback_t *feedback, const string &path,
-                     ScanMode mode, uint64_t sourceFingerprint) {
+bool dumpFeedbackBin(const vector<OwnedFragment> &selected, const string &path,
+                     ScanMode mode, uint64_t sourceFingerprint,
+                     unsigned long long totalFalsePositive) {
     if (path.empty()) {
         return true;
     }
-
-    hs_fp_feedback_summary_t summary = {};
-    hs_error_t err = hs_fp_feedback_get_summary(feedback, &summary);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_feedback_get_summary failed with error " << err << "\n";
-        return false;
-    }
-
-    vector<hs_fp_fragment_info_t> fragments;
-    if (!loadFeedbackFragments(feedback, &fragments)) {
+    if (selected.size() > std::numeric_limits<uint32_t>::max()) {
+        cerr << "Too many feedback fragments for feedback binary output\n";
         return false;
     }
 
@@ -2105,13 +2091,11 @@ bool dumpFeedbackBin(const hs_fp_feedback_t *feedback, const string &path,
     appendU32(&payload, scanModeCode(mode));
     appendU32(&payload, 0);
     appendU64(&payload, sourceFingerprint);
-    appendU64(&payload, summary.scan_calls);
-    appendU64(&payload, summary.scan_bytes);
-    appendU64(&payload, summary.total_false_positive_count);
-    appendU32(&payload, summary.bad_fragment_count);
+    appendU64(&payload, totalFalsePositive);
+    appendU32(&payload, static_cast<uint32_t>(selected.size()));
     appendU32(&payload, 0);
-    for (const auto &fragment : fragments) {
-        if (!appendSerializedFragment(&payload, fragment)) {
+    for (const auto &fragment : selected) {
+        if (!appendSerializedFragment(&payload, fragment.info)) {
             return false;
         }
     }
@@ -2126,16 +2110,18 @@ bool dumpFeedbackBin(const hs_fp_feedback_t *feedback, const string &path,
     return writeBinaryFile(path, file);
 }
 
-bool dumpFeedbackBinToDir(const hs_fp_feedback_t *feedback, const string &dir,
-                          ScanMode mode, uint64_t sourceFingerprint) {
+bool dumpFeedbackBinToDir(const vector<OwnedFragment> &selected,
+                          const string &dir, ScanMode mode,
+                          uint64_t sourceFingerprint,
+                          unsigned long long totalFalsePositive) {
     if (dir.empty()) {
         return true;
     }
     if (!ensureDirectory(dir, "feedback binary output")) {
         return false;
     }
-    return dumpFeedbackBin(feedback, joinPath(dir, HSPGO_FEEDBACK_BIN_NAME),
-                           mode, sourceFingerprint);
+    return dumpFeedbackBin(selected, joinPath(dir, HSPGO_FEEDBACK_BIN_NAME),
+                           mode, sourceFingerprint, totalFalsePositive);
 }
 
 struct OwnedImportFragment {
@@ -2173,17 +2159,14 @@ bool readSerializedFragment(const vector<uint8_t> &payload, size_t *offset,
 
     uint64_t triggerCount = 0;
     uint64_t trueTriggerCount = 0;
-    uint64_t finalReportCount = 0;
     uint64_t falsePositiveCount = 0;
     if (!readU64(payload, offset, &triggerCount) ||
         !readU64(payload, offset, &trueTriggerCount) ||
-        !readU64(payload, offset, &finalReportCount) ||
         !readU64(payload, offset, &falsePositiveCount)) {
         return false;
     }
     out->fragment.trigger_count = triggerCount;
     out->fragment.true_trigger_count = trueTriggerCount;
-    out->fragment.final_report_count = finalReportCount;
     out->fragment.false_positive_count = falsePositiveCount;
 
     if (!readBytes(payload, offset, out->fragment.length, &out->bytes) ||
@@ -2199,7 +2182,9 @@ bool readSerializedFragment(const vector<uint8_t> &payload, size_t *offset,
 }
 
 bool loadFeedbackBin(const string &path, ScanMode mode,
-                     uint64_t sourceFingerprint, FeedbackPtr *feedback) {
+                     uint64_t sourceFingerprint, FeedbackPtr *feedback,
+                     vector<OwnedFragment> *selected,
+                     unsigned long long *totalFalsePositiveOut) {
     vector<uint8_t> file;
     if (!readBinaryFile(path, &file)) {
         return false;
@@ -2244,16 +2229,12 @@ bool loadFeedbackBin(const string &path, ScanMode mode,
     uint32_t storedMode = 0;
     uint32_t reservedHeader = 0;
     uint64_t storedSourceFingerprint = 0;
-    uint64_t scanCalls = 0;
-    uint64_t scanBytes = 0;
     uint64_t totalFalsePositive = 0;
     uint32_t fragmentCount = 0;
     uint32_t reserved = 0;
     if (!readU32(payload, &offset, &storedMode) ||
         !readU32(payload, &offset, &reservedHeader) ||
         !readU64(payload, &offset, &storedSourceFingerprint) ||
-        !readU64(payload, &offset, &scanCalls) ||
-        !readU64(payload, &offset, &scanBytes) ||
         !readU64(payload, &offset, &totalFalsePositive) ||
         !readU32(payload, &offset, &fragmentCount) ||
         !readU32(payload, &offset, &reserved)) {
@@ -2280,7 +2261,7 @@ bool loadFeedbackBin(const string &path, ScanMode mode,
              << formatHex64(sourceFingerprint) << "\n";
         return false;
     }
-    const size_t minFragmentPayloadSize = 69;
+    const size_t minFragmentPayloadSize = 61;
     if (fragmentCount &&
         fragmentCount > (payload.size() - offset) / minFragmentPayloadSize) {
         cerr << "Feedback binary fragment count exceeds payload capacity: "
@@ -2290,12 +2271,38 @@ bool loadFeedbackBin(const string &path, ScanMode mode,
 
     vector<OwnedImportFragment> owned(fragmentCount);
     vector<hs_fp_feedback_import_fragment> imports(fragmentCount);
+    if (selected) {
+        selected->clear();
+        selected->reserve(fragmentCount);
+    }
     for (uint32_t i = 0; i < fragmentCount; i++) {
         if (!readSerializedFragment(payload, &offset, &owned[i])) {
             cerr << "Feedback binary fragment " << i << " is invalid\n";
             return false;
         }
         imports[i] = owned[i].fragment;
+        if (selected) {
+            OwnedFragment copy;
+            copy.info.key = owned[i].fragment.key;
+            copy.info.fragment_id = owned[i].fragment.fragment_id;
+            copy.info.literal_count = owned[i].fragment.literal_count;
+            copy.info.table = owned[i].fragment.table;
+            copy.info.engine = owned[i].fragment.engine;
+            copy.info.flags = owned[i].fragment.flags;
+            copy.info.length = owned[i].fragment.length;
+            copy.info.mask_length = owned[i].fragment.mask_length;
+            copy.info.trigger_count = owned[i].fragment.trigger_count;
+            copy.info.true_trigger_count = owned[i].fragment.true_trigger_count;
+            copy.info.false_positive_count =
+                owned[i].fragment.false_positive_count;
+            copy.bytes = owned[i].bytes;
+            copy.mask = owned[i].mask;
+            copy.cmp = owned[i].cmp;
+            copy.info.bytes = copy.bytes.empty() ? nullptr : copy.bytes.data();
+            copy.info.mask = copy.mask.empty() ? nullptr : copy.mask.data();
+            copy.info.cmp = copy.cmp.empty() ? nullptr : copy.cmp.data();
+            selected->push_back(move(copy));
+        }
     }
     if (offset != payload.size()) {
         cerr << "Feedback binary has trailing payload bytes: " << path << "\n";
@@ -2304,19 +2311,24 @@ bool loadFeedbackBin(const string &path, ScanMode mode,
 
     hs_fp_feedback_t *rawFeedback = nullptr;
     hs_error_t err = hs_fp_feedback_create_from_fragments(
-        imports.empty() ? nullptr : imports.data(), fragmentCount, scanCalls,
-        scanBytes, totalFalsePositive, &rawFeedback);
+        imports.empty() ? nullptr : imports.data(), fragmentCount, 0, 0,
+        totalFalsePositive, &rawFeedback);
     if (err != HS_SUCCESS) {
         cerr << "hs_fp_feedback_create_from_fragments failed with error " << err
              << "\n";
         return false;
     }
     feedback->reset(rawFeedback);
+    if (totalFalsePositiveOut) {
+        *totalFalsePositiveOut = totalFalsePositive;
+    }
     return true;
 }
 
 bool loadFeedbackBinFromDir(const string &dir, ScanMode mode,
-                            uint64_t sourceFingerprint, FeedbackPtr *feedback) {
+                            uint64_t sourceFingerprint, FeedbackPtr *feedback,
+                            vector<OwnedFragment> *selected,
+                            unsigned long long *totalFalsePositive) {
     const string trimmed = trimTrailingSeparators(dir);
     if (trimmed.empty()) {
         cerr << "feedback binary input directory must not be empty\n";
@@ -2328,80 +2340,50 @@ bool loadFeedbackBinFromDir(const string &dir, ScanMode mode,
         return false;
     }
     return loadFeedbackBin(joinPath(trimmed, HSPGO_FEEDBACK_BIN_NAME), mode,
-                           sourceFingerprint, feedback);
+                           sourceFingerprint, feedback, selected,
+                           totalFalsePositive);
 }
 
-void printReportSummaryWithTitle(const char *title,
-                                 const hs_fp_report_t *report) {
-    hs_fp_report_summary_t summary = {};
-    hs_error_t err = hs_fp_report_get_summary(report, &summary);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_report_get_summary failed with error " << err << "\n";
-        return;
-    }
-
+void printDumpSummaryWithTitle(const char *title, const DumpData &dump) {
+    const hs_fp_feedback_dump_summary_t &summary = dump.summary;
     cout << "\n" << title << ":\n";
     printField("Fragments:",
                static_cast<unsigned long long>(summary.fragment_count));
-    printField("Scan calls:", summary.scan_calls);
-    printField("Scan bytes:", summary.scan_bytes);
     printField("Triggers:", summary.trigger_count);
     printField("True triggers:", summary.true_trigger_count);
-    printField("Final reports:", summary.final_report_count);
     printField("False positives:", summary.false_positive_count);
-    printField("Unknown reports:", summary.unknown_report_count);
-    if (summary.unknown_report_count ||
-        summary.unknown_fragment_meta_missing_count) {
-        unsigned long long classifiedUnknown =
-            summary.unknown_delayed_replay_count +
-            summary.unknown_anchored_replay_count +
-            summary.unknown_eod_or_boundary_count +
-            summary.unknown_flush_combination_count +
-            summary.unknown_mpv_or_nfa_queue_count;
-        unsigned long long unclassifiedUnknown =
-            summary.unknown_no_active_trigger_count > classifiedUnknown
-                ? summary.unknown_no_active_trigger_count - classifiedUnknown
-                : 0;
-
-        printField("Unknown breakdown:", "");
-        printField("  no active trigger:",
-                   summary.unknown_no_active_trigger_count);
-        printField("  delayed replay:", summary.unknown_delayed_replay_count);
-        printField("  anchored replay:", summary.unknown_anchored_replay_count);
-        printField("  EOD/boundary:", summary.unknown_eod_or_boundary_count);
-        printField("  flush combination:",
-                   summary.unknown_flush_combination_count);
-        printField("  MPV/NFA queue:", summary.unknown_mpv_or_nfa_queue_count);
-        printField("  unclassified:", unclassifiedUnknown);
-        printField("  counter missing:", summary.unknown_counter_missing_count);
-        printField("  meta missing:",
-                   summary.unknown_fragment_meta_missing_count);
-    }
-    printField("Dropped:", summary.dropped_trigger_count);
 }
 
-void printReportSummary(const hs_fp_report_t *report) {
-    printReportSummaryWithTitle("Collection report", report);
+void printReportSummary(const DumpData &dump) {
+    printDumpSummaryWithTitle("Collection report", dump);
 }
 
-void printFeedbackSummary(const hs_fp_feedback_t *feedback) {
-    hs_fp_feedback_summary_t summary = {};
-    hs_error_t err = hs_fp_feedback_get_summary(feedback, &summary);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_feedback_get_summary failed with error " << err << "\n";
-        return;
-    }
-
+void printFeedbackSummary(const DumpData &dump) {
     cout << "\nFeedback summary:\n";
-    printField("Bad fragments:",
-               static_cast<unsigned long long>(summary.bad_fragment_count));
-    printField("Source scan calls:", summary.scan_calls);
-    printField("Source scan bytes:", summary.scan_bytes);
-    printField("Source false positives:", summary.total_false_positive_count);
+    printField("Bad fragments:", static_cast<unsigned long long>(
+                                     dump.summary.bad_fragment_count));
+    printField("Source false positives:", dump.summary.false_positive_count);
 }
 
-string formatScaledPercent(unsigned scaled) {
-    return formatFixed(static_cast<double>(scaled) / 100.0, 2) + "%";
+string formatScaledRatio(unsigned long long scaled) {
+    if (scaled >= HS_FP_FEEDBACK_RATE_SCALE) {
+        return "1";
+    }
+
+    const unsigned long long whole = scaled / HS_FP_FEEDBACK_RATE_SCALE;
+    const unsigned long long frac = scaled % HS_FP_FEEDBACK_RATE_SCALE;
+    if (!frac) {
+        return whole ? "1" : "0";
+    }
+
+    std::ostringstream oss;
+    oss << whole << "." << setw(HSPGO_RATE_SCALE_DECIMALS) << setfill('0')
+        << frac;
+    string out = oss.str();
+    while (out.back() == '0') {
+        out.pop_back();
+    }
+    return out;
 }
 
 string feedbackThresholdString(const hs_fp_feedback_params_t &params) {
@@ -2413,11 +2395,11 @@ string feedbackThresholdString(const hs_fp_feedback_params_t &params) {
         (params.flags & HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT)
             ? params.min_false_positive_count
             : HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_COUNT;
-    const unsigned fpRate =
+    const unsigned long long fpRate =
         (params.flags & HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE)
             ? params.min_false_positive_rate
             : HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_RATE;
-    const unsigned wasteShare =
+    const unsigned long long wasteShare =
         (params.flags & HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE)
             ? params.min_waste_share
             : HS_FP_FEEDBACK_DEFAULT_MIN_WASTE_SHARE;
@@ -2427,10 +2409,10 @@ string feedbackThresholdString(const hs_fp_feedback_params_t &params) {
             : HS_FP_FEEDBACK_DEFAULT_MAX_BAD_FRAGMENTS;
 
     vector<string> parts;
-    parts.push_back("min_trigger=" + formatCount(minTrigger));
-    parts.push_back("min_fp=" + formatCount(minFp));
-    parts.push_back("fp_rate>=" + formatScaledPercent(fpRate));
-    parts.push_back("waste_share>=" + formatScaledPercent(wasteShare));
+    parts.push_back("trigger>=" + formatCount(minTrigger));
+    parts.push_back("false>=" + formatCount(minFp));
+    parts.push_back("fp_rate>=" + formatScaledRatio(fpRate));
+    parts.push_back("fp_share>=" + formatScaledRatio(wasteShare));
     if (topK) {
         parts.push_back("topk=" + formatCount(topK));
     } else {
@@ -2447,21 +2429,46 @@ string feedbackThresholdString(const hs_fp_feedback_params_t &params) {
     return oss.str();
 }
 
-bool buildReportAndFeedback(const hs_fp_collector_t *collector,
-                            const hs_fp_feedback_params_t &params,
-                            ReportPtr *report, FeedbackPtr *feedback) {
-    hs_fp_report_t *rawReport = nullptr;
-    hs_error_t err = hs_fp_collector_report(collector, &rawReport);
-    if (err != HS_SUCCESS) {
-        cerr << "hs_fp_collector_report failed with error " << err << "\n";
+void dumpSummaryCallback(const hs_fp_feedback_dump_summary_t *summary,
+                         void *context) {
+    if (!summary || !context) {
+        return;
+    }
+    DumpData *dump = static_cast<DumpData *>(context);
+    dump->summary = *summary;
+}
+
+void dumpFragmentCallback(const hs_fp_fragment_info_t *fragment,
+                          unsigned int selected, void *context) {
+    if (!fragment || !context) {
+        return;
+    }
+    DumpData *dump = static_cast<DumpData *>(context);
+    appendOwnedFragment(&dump->reportFragments, *fragment);
+    if (selected) {
+        appendOwnedFragment(&dump->feedbackFragments, *fragment);
+    }
+}
+
+bool buildFeedbackFromCollector(hs_fp_collector_t *collector,
+                                const hs_fp_feedback_params_t &params,
+                                DumpData *dump, FeedbackPtr *feedback) {
+    if (!dump) {
         return false;
     }
-    report->reset(rawReport);
+    dump->summary = hs_fp_feedback_dump_summary_t();
+    dump->reportFragments.clear();
+    dump->feedbackFragments.clear();
 
     hs_fp_feedback_t *rawFeedback = nullptr;
-    err = hs_fp_feedback_build_ext(report->get(), &params, &rawFeedback);
+    hs_fp_feedback_dump_callbacks_t callbacks = {};
+    callbacks.on_summary = dumpSummaryCallback;
+    callbacks.on_fragment = dumpFragmentCallback;
+    hs_error_t err = hs_fp_collector_to_feedback_with_dump(
+        collector, &params, &callbacks, dump, &rawFeedback);
     if (err != HS_SUCCESS) {
-        cerr << "hs_fp_feedback_build_ext failed with error " << err << "\n";
+        cerr << "hs_fp_collector_to_feedback_with_dump failed with error "
+             << err << "\n";
         return false;
     }
     feedback->reset(rawFeedback);
@@ -2492,14 +2499,25 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
     struct CheckpointName {
         unsigned int id;
         const char *name;
+        bool canBlock;
     };
     const CheckpointName checkpoints[] = {
-        {HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT, "literal_split"},
-        {HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT, "violet_split"},
-        {HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL, "masked_literal"},
-        {HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL, "shortcut_literal"},
-        {HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET, "small_literal_set"},
-        {HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD, "matcher_build"},
+        {HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL, "shortcut_literal", true},
+        {HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT, "literal_split", true},
+        {HS_FP_COMPILE_CHECKPOINT_ANCHORED_ACYCLIC, "anchored_acyclic", true},
+        {HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET, "small_literal_set", true},
+        {HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL, "masked_literal", true},
+        {HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT, "violet_split", true},
+        {HS_FP_COMPILE_CHECKPOINT_SOMBE_LITERAL, "sombe_literal", true},
+        {HS_FP_COMPILE_CHECKPOINT_REWRITE_EOD_TO_FLOATING,
+         "rewrite_eod_to_floating", false},
+        {HS_FP_COMPILE_CHECKPOINT_REWRITE_ANCHORED_REHOME,
+         "rewrite_anchored_rehome", false},
+        {HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX, "rewrite_flood_suffix",
+         false},
+        {HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK, "rewrite_small_block",
+         false},
+        {HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD, "matcher_build", false},
     };
 
     unsigned long long blockChecked = 0;
@@ -2513,7 +2531,9 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
         if (err != HS_SUCCESS) {
             continue;
         }
-        blockChecked += info.checked_count;
+        if (checkpoint.canBlock) {
+            blockChecked += info.checked_count;
+        }
         blockHit += info.hit_count;
         blocked += info.blocked_count;
         passed += info.passed_count;
@@ -2540,10 +2560,15 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
     printField("Blocked candidates:", blocked);
     printField("Passed candidates:", passed);
 
+    const int checkpointNameWidth = 28;
+    const int checkpointCountWidth = 14;
     cout << "\nCompile feedback checkpoints:\n";
-    cout << left << setw(18) << "checkpoint" << right << setw(12) << "checked"
-         << setw(12) << "hit" << setw(12) << "blocked" << setw(12) << "passed"
-         << "\n";
+    cout << "Note: rewrite_* and matcher_build are diagnostic-only; hits are "
+            "counted as passed.\n";
+    cout << left << setw(checkpointNameWidth) << "checkpoint" << right
+         << setw(checkpointCountWidth) << "checked"
+         << setw(checkpointCountWidth) << "hit" << setw(checkpointCountWidth)
+         << "blocked" << setw(checkpointCountWidth) << "passed" << "\n";
     for (const auto &checkpoint : checkpoints) {
         hs_compile_context_checkpoint_info_t info = {};
         hs_error_t err =
@@ -2551,11 +2576,12 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
         if (err != HS_SUCCESS) {
             continue;
         }
-        cout << left << setw(18) << checkpoint.name << right << setw(12)
-             << formatCount(info.checked_count) << setw(12)
-             << formatCount(info.hit_count) << setw(12)
-             << formatCount(info.blocked_count) << setw(12)
-             << formatCount(info.passed_count) << "\n";
+        cout << left << setw(checkpointNameWidth) << checkpoint.name << right
+             << setw(checkpointCountWidth) << formatCount(info.checked_count)
+             << setw(checkpointCountWidth) << formatCount(info.hit_count)
+             << setw(checkpointCountWidth) << formatCount(info.blocked_count)
+             << setw(checkpointCountWidth) << formatCount(info.passed_count)
+             << "\n";
     }
 }
 
@@ -2609,8 +2635,6 @@ void printHspgoConfig(const Options &opts, uint64_t sourceFingerprint) {
     printField("Threads:", workers);
     printField("Baseline rounds:",
                static_cast<unsigned long long>(opts.baselineRounds));
-    printField("Collection rounds:",
-               static_cast<unsigned long long>(opts.collectRounds));
     printField("Measurement rounds:",
                static_cast<unsigned long long>(opts.measureRounds));
     printField("Source fingerprint:", formatHex64(sourceFingerprint));
@@ -2720,15 +2744,6 @@ void printOptimizedBaselineRatio(const ParallelRunResult &baseline,
 
     const double ratio = optimizedThroughput * 100.0 / baselineThroughput;
     printField("Optimized/Baseline:", formatFixed(ratio, 2) + "%");
-    if (ratio > 100.0) {
-        printField("Feedback result:",
-                   "improved +" + formatFixed(ratio - 100.0, 2) + "%");
-    } else if (ratio < 100.0) {
-        printField("Feedback result:",
-                   "regression -" + formatFixed(100.0 - ratio, 2) + "%");
-    } else {
-        printField("Feedback result:", "neutral");
-    }
 }
 } // namespace
 
@@ -2745,13 +2760,45 @@ int HS_CDECL main(int argc, char **argv) {
         return 1;
     }
 
+    const uint64_t sourceFingerprint =
+        computeSourceFingerprint(patterns, opts.scanMode, opts.greyOverrides);
+    FeedbackPtr feedback;
+    DumpData dump;
+    unsigned long long feedbackTotalFalsePositive = 0;
+
+    cout << "hspgo feedback demo\n";
+    printHspgoConfig(opts, sourceFingerprint);
+    cout.flush();
+
+    if (!opts.feedbackImportPath.empty()) {
+        if (!loadFeedbackBinFromDir(opts.feedbackImportPath, opts.scanMode,
+                                    sourceFingerprint, &feedback,
+                                    &dump.feedbackFragments,
+                                    &feedbackTotalFalsePositive)) {
+            return 1;
+        }
+        dump.summary.bad_fragment_count =
+            static_cast<unsigned>(dump.feedbackFragments.size());
+        dump.summary.false_positive_count = feedbackTotalFalsePositive;
+        cout << "\nFeedback import: loaded reusable feedback binary.\n";
+        if (opts.showSummaries) {
+            printFeedbackSummary(dump);
+        }
+        if (opts.top) {
+            printFeedbackFragments(dump.feedbackFragments, opts.top,
+                                   dump.summary.false_positive_count);
+        }
+    }
+
+    if (!prepareOutputDirectories(opts)) {
+        return 1;
+    }
+
     vector<DataBlock> blocks;
     if (!loadCorpus(opts, &blocks)) {
         return 1;
     }
 
-    const uint64_t sourceFingerprint =
-        computeSourceFingerprint(patterns, opts.scanMode, opts.greyOverrides);
     const bool needBaselineDb =
         opts.feedbackImportPath.empty() || opts.baselineRounds;
     DatabasePtr baselineDb;
@@ -2777,14 +2824,12 @@ int HS_CDECL main(int argc, char **argv) {
         }
     }
 
-    cout << "hspgo feedback demo\n";
+    printCorpusLayoutNote(opts.scanMode, blocks);
     if (needBaselineDb) {
         printDatabaseStats("Baseline database", baselineDbStats);
     } else {
         cout << "\nBaseline database: skipped (binary feedback import).\n";
     }
-    printHspgoConfig(opts, sourceFingerprint);
-    printCorpusLayoutNote(opts.scanMode, blocks);
 
     ParallelRunResult baselineResult;
     bool haveBaselineResult = false;
@@ -2800,23 +2845,9 @@ int HS_CDECL main(int argc, char **argv) {
         haveBaselineResult = true;
     }
 
-    ReportPtr report;
-    FeedbackPtr feedback;
     vector<CollectorPtr> workerCollectors;
     CollectorPtr collector;
-    if (!opts.feedbackImportPath.empty()) {
-        if (!loadFeedbackBinFromDir(opts.feedbackImportPath, opts.scanMode,
-                                    sourceFingerprint, &feedback)) {
-            return 1;
-        }
-        cout << "\nFeedback import: loaded reusable feedback binary.\n";
-        if (opts.showSummaries) {
-            printFeedbackSummary(feedback.get());
-        }
-        if (opts.top) {
-            printFeedbackFragments(feedback.get(), opts.top);
-        }
-    } else {
+    if (opts.feedbackImportPath.empty()) {
         if (!createCollectors(baselineDb.get(), opts.threadCount,
                               &workerCollectors)) {
             return 1;
@@ -2829,33 +2860,36 @@ int HS_CDECL main(int argc, char **argv) {
                              false, opts.scanMode, &collectResult)) {
             return 1;
         }
-        printScanSummary("Collection scan", blocks, collectResult,
-                         opts.collectRounds, opts.threadCount, opts.scanMode);
 
         if (!mergeCollectors(baselineDb.get(), workerCollectors, &collector)) {
             return 1;
         }
 
-        if (!buildReportAndFeedback(collector.get(), opts.feedbackParams,
-                                    &report, &feedback)) {
+        if (!buildFeedbackFromCollector(collector.get(), opts.feedbackParams,
+                                        &dump, &feedback)) {
             return 1;
         }
 
         if (opts.showSummaries) {
-            printReportSummary(report.get());
-            printFeedbackSummary(feedback.get());
+            printReportSummary(dump);
+            printFeedbackSummary(dump);
         }
         if (opts.top) {
-            printTopReportFragments(report.get(), opts.top);
-            printFeedbackFragments(feedback.get(), opts.top);
+            printTopReportFragments(dump, opts.top);
+            printFeedbackFragments(dump.feedbackFragments, opts.top,
+                                   dump.summary.false_positive_count);
         }
     }
 
-    if (!dumpCsvOutputs(report.get(), feedback.get(), opts.reportCsvPath)) {
+    if (!dumpCsvOutputs(dump.reportFragments.empty() ? nullptr : &dump,
+                        dump.feedbackFragments,
+                        dump.summary.false_positive_count,
+                        opts.reportCsvPath)) {
         return 1;
     }
-    if (!dumpFeedbackBinToDir(feedback.get(), opts.feedbackBinPath,
-                              opts.scanMode, sourceFingerprint)) {
+    if (!dumpFeedbackBinToDir(dump.feedbackFragments, opts.feedbackBinPath,
+                              opts.scanMode, sourceFingerprint,
+                              dump.summary.false_positive_count)) {
         return 1;
     }
 

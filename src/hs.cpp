@@ -909,7 +909,7 @@ fat_hs_compile(const char *expression, unsigned flags, unsigned mode,
                                     platform, db, error, Grey());
 }
 
-extern "C" HS_PUBLIC_API hs_error_t HS_CDECL
+extern "C" hs_error_t HS_CDECL
 hs_compile_context_create(hs_compile_context_t **ctx) {
     if (!ctx) {
         return HS_INVALID;
@@ -931,7 +931,7 @@ hs_compile_context_create(hs_compile_context_t **ctx) {
 #endif
 }
 
-extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
+extern "C" hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
     hs_compile_context_t *ctx, const hs_fp_feedback_t *feedback) {
     if (!ctx) {
         return HS_INVALID;
@@ -956,7 +956,7 @@ extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
 #endif
 }
 
-extern "C" HS_PUBLIC_API hs_error_t HS_CDECL
+extern "C" hs_error_t HS_CDECL
 hs_compile_context_free(hs_compile_context_t *ctx) {
     if (ctx) {
         hs_fp_feedback_free(ctx->fp_feedback);
@@ -965,18 +965,17 @@ hs_compile_context_free(hs_compile_context_t *ctx) {
     return HS_SUCCESS;
 }
 
-extern "C" HS_PUBLIC_API unsigned int HS_CDECL
+extern "C" unsigned int HS_CDECL
 hs_compile_context_observe_checked_count(const hs_compile_context_t *ctx) {
     return ctx ? ctx->fp_observe_checked_count : 0;
 }
 
-extern "C" HS_PUBLIC_API unsigned int HS_CDECL
+extern "C" unsigned int HS_CDECL
 hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx) {
     return ctx ? ctx->fp_observe_hit_count : 0;
 }
 
-extern "C" HS_PUBLIC_API hs_error_t HS_CDECL
-hs_compile_context_get_checkpoint_info(
+extern "C" hs_error_t HS_CDECL hs_compile_context_get_checkpoint_info(
     const hs_compile_context_t *ctx, unsigned int checkpoint,
     hs_compile_context_checkpoint_info_t *info) {
     if (!ctx || !info || checkpoint >= HS_FP_COMPILE_CHECKPOINT_COUNT) {
@@ -996,7 +995,7 @@ extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_multi(
                                 platform, db, error, Grey());
 }
 
-extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_multi_with_context(
+extern "C" hs_error_t HS_CDECL hs_compile_multi_with_context(
     const char *const *expressions, const unsigned *flags, const unsigned *ids,
     unsigned elements, unsigned mode, const hs_platform_info_t *platform,
     const hs_compile_context_t *ctx, hs_database_t **db,
@@ -1031,6 +1030,47 @@ extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_multi_with_context(
 #endif
 }
 
+extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_multi_with_feedback(
+    const char *const *expressions, const unsigned *flags, const unsigned *ids,
+    unsigned elements, unsigned mode, const hs_platform_info_t *platform,
+    const hs_fp_feedback_t *feedback, hs_database_t **db,
+    hs_compile_error_t **error) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)expressions;
+    (void)flags;
+    (void)ids;
+    (void)elements;
+    (void)mode;
+    (void)platform;
+    (void)feedback;
+    if (db) {
+        *db = nullptr;
+    }
+    if (error) {
+        *error = generateCompileError(
+            "False-positive feedback is not enabled for this build", -1);
+    }
+    return HS_ARCH_ERROR;
+#else
+    hs_compile_context_t *ctx = nullptr;
+    hs_error_t err = hs_compile_context_create(&ctx);
+    if (err != HS_SUCCESS) {
+        return err;
+    }
+
+    err = hs_compile_context_set_fp_feedback(ctx, feedback);
+    if (err != HS_SUCCESS) {
+        hs_compile_context_free(ctx);
+        return err;
+    }
+
+    err = hs_compile_multi_with_context(expressions, flags, ids, elements, mode,
+                                        platform, ctx, db, error);
+    hs_compile_context_free(ctx);
+    return err;
+#endif
+}
+
 extern "C" HS_PUBLIC_API hs_error_t HS_CDECL fat_hs_compile_multi(
     const char *const *expressions, const unsigned *flags, const unsigned *ids,
     unsigned elements, unsigned mode, const hs_platform_info_t *platform,
@@ -1049,7 +1089,7 @@ extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_ext_multi(
                                 platform, db, error, Grey());
 }
 
-extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_ext_multi_with_context(
+extern "C" hs_error_t HS_CDECL hs_compile_ext_multi_with_context(
     const char *const *expressions, const unsigned *flags, const unsigned *ids,
     const hs_expr_ext *const *ext, unsigned elements, unsigned mode,
     const hs_platform_info_t *platform, const hs_compile_context_t *ctx,
@@ -1080,6 +1120,48 @@ extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_ext_multi_with_context(
     } else {
         resetCompileContextDiagnostics(ctx);
     }
+    return err;
+#endif
+}
+
+extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_ext_multi_with_feedback(
+    const char *const *expressions, const unsigned *flags, const unsigned *ids,
+    const hs_expr_ext *const *ext, unsigned elements, unsigned mode,
+    const hs_platform_info_t *platform, const hs_fp_feedback_t *feedback,
+    hs_database_t **db, hs_compile_error_t **error) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)expressions;
+    (void)flags;
+    (void)ids;
+    (void)ext;
+    (void)elements;
+    (void)mode;
+    (void)platform;
+    (void)feedback;
+    if (db) {
+        *db = nullptr;
+    }
+    if (error) {
+        *error = generateCompileError(
+            "False-positive feedback is not enabled for this build", -1);
+    }
+    return HS_ARCH_ERROR;
+#else
+    hs_compile_context_t *ctx = nullptr;
+    hs_error_t err = hs_compile_context_create(&ctx);
+    if (err != HS_SUCCESS) {
+        return err;
+    }
+
+    err = hs_compile_context_set_fp_feedback(ctx, feedback);
+    if (err != HS_SUCCESS) {
+        hs_compile_context_free(ctx);
+        return err;
+    }
+
+    err = hs_compile_ext_multi_with_context(
+        expressions, flags, ids, ext, elements, mode, platform, ctx, db, error);
+    hs_compile_context_free(ctx);
     return err;
 #endif
 }
