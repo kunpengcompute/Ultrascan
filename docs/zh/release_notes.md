@@ -4,6 +4,7 @@
 
 |发布日期|修改说明|
 |--|--|
+|2026-09-30|第三次正式发布，基于鲲鹏920新型号处理器新增mcsheng算法性能优化, 默认使能该优化|
 |2026-06-30|第二次正式发布，基于鲲鹏920新型号处理器新增通用字节码功能。|
 |2026-03-30|第一次正式发布，基于鲲鹏920新型号处理器优化Ultrascan 2~4字节短字节规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
 
@@ -19,7 +20,7 @@
 </tr>
 <tr id="row24726251"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.2.1"><p id="p56669300"><a name="p56669300"></a><a name="p56669300"></a>产品版本</p>
 </th>
-<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.2.1 "><p id="p11923034"><a name="p11923034"></a><a name="p11923034"></a><span id="text152431189308"><a name="text152431189308"></a><a name="text152431189308"></a>26.1.RC1</span></p>
+<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.2.1 "><p id="p11923034"><a name="p11923034"></a><a name="p11923034"></a><span id="text152431189308"><a name="text152431189308"></a><a name="text152431189308"></a>26.2.RC1</span></p>
 </td>
 </tr>
 <tr id="row1930811171892"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.3.1"><p id="p2030912172097"><a name="p2030912172097"></a><a name="p2030912172097"></a>软件名称</p>
@@ -29,7 +30,7 @@
 </tr>
 <tr id="row5497143514612"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.4.1"><p id="p162251517551"><a name="p162251517551"></a><a name="p162251517551"></a>软件版本</p>
 </th>
-<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.4.1 "><p id="p6225131165519"><a name="p6225131165519"></a><a name="p6225131165519"></a>5.7.0</p>
+<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.4.1 "><p id="p6225131165519"><a name="p6225131165519"></a><a name="p6225131165519"></a>5.7.1</p>
 </td>
 </tr>
 </tbody>
@@ -39,12 +40,22 @@
 
 |操作系统|CPU类型|编译器|
 |--|--|--|
-|openEuler 22.03 LTS SP4|鲲鹏920系列处理器|GCC 10.3.1|
-|openEuler 24.03 LTS SP3|鲲鹏920系列处理器|GCC 12.3.1|
+|openEuler 22.03 LTS SP4|鲲鹏920新型号处理器|GCC 10.3.1|
+|openEuler 24.03 LTS SP3|鲲鹏920新型号处理器|GCC 12.3.1|
 
 ### 病毒扫描结果<a name="ZH-CN_TOPIC_0000002549885239"></a>
 
 本特性以源码的形式发布，不涉及软件包，因此暂不需要病毒扫描。
+
+## V5.7.1
+
+### 更新说明
+
+**新增特性**
+
+|特性描述| 更新说明                                     |
+|--|------------------------------------------|
+|mcsheng算法优化| 基于鲲鹏920新型号处理器新增mcsheng算法优化。  |
 
 ## V5.7.0
 
@@ -174,7 +185,7 @@
       <td style="text-align: left;">开源仓</td>
     </tr>
     <tr>
-      <td style="text-align: left;">使用指南</td>
+      <td style="text-align: left;">用户指南</td>
       <td style="text-align: left;">提供Ultrascan的使用操作指导。</td>
       <td style="text-align: left;">开源仓</td>
     </tr>

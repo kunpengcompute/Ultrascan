@@ -308,5 +308,6 @@ hs_error_t fat_hs_compile_lit_multi(const char *const *expressions,
 
 |文档版本|发布日期|修改说明|
 |--|--|--|
+|03|2026-09-30|第三次正式发布，基于鲲鹏920新型号处理器新增mcsheng算法性能优化, 默认使能该优化|
 |02|2026-06-30|第二次正式发布，基于鲲鹏920新型号处理器新增通用字节码功能和HAO算法引擎。|
 |01|2026-03-30|第一次正式发布，基于鲲鹏920新型号处理器优化Ultrascan 2~4字节短规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
