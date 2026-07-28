@@ -2,7 +2,7 @@
 
 ## 简介
 
-本文基于鲲鹏920系列处理器和openEuler操作系统，提供Ultrascan的安装和编译指导。
+本文基于鲲鹏920新型号处理器和openEuler操作系统，提供Ultrascan的安装和编译指导。
 
 Ultrascan是一款高性能的正则表达式匹配库，它是以PCRE（Perl-compatible regular expression）为原型开发，并以BSD（Berkeley Software Distribution）许可证开源，遵循libpcre库通用的正则表达式语法，拥有独立的C语言接口。在Ultrascan正式发布版本的基础上，参考鲲鹏微架构特征，重新设计核心接口的实现机制，并完成了开发和性能优化，推出适合鲲鹏计算平台的软件包。使用鲲鹏计算平台的用户可以根据自己业务需求下载本软件包，提升业务在鲲鹏平台上的稳定性和性能。
 
@@ -23,7 +23,7 @@ Ultrascan鲲鹏计算平台软件版本主要增加了以下功能：
 
 ### 已验证环境
 
-Ultrascan当前适配鲲鹏920系列处理器，操作系统为openEuler 22.03 LTS SP4/openEuler 24.03 LTS SP3。若您在使用过程中遇到问题，请先检查使用的环境是否在已验证的环境范围内。
+Ultrascan当前适配鲲鹏920新型号处理器，操作系统为openEuler 22.03 LTS SP4/openEuler 24.03 LTS SP3。若您在使用过程中遇到问题，请先检查使用的环境是否在已验证的环境范围内。
 
 ### 软件要求
 
