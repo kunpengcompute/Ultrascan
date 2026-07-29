@@ -75,20 +75,13 @@ typedef struct hs_compile_context_checkpoint_info {
     unsigned int passed_count;
 } hs_compile_context_checkpoint_info_t;
 
-#define HS_FP_UNKNOWN_SOURCE_NONE 0U
-#define HS_FP_UNKNOWN_SOURCE_DELAYED_REPLAY 1U
-#define HS_FP_UNKNOWN_SOURCE_ANCHORED_REPLAY 2U
-#define HS_FP_UNKNOWN_SOURCE_EOD_OR_BOUNDARY 3U
-#define HS_FP_UNKNOWN_SOURCE_FLUSH_COMBINATION 4U
-#define HS_FP_UNKNOWN_SOURCE_MPV_OR_NFA_QUEUE 5U
-
 hs_error_t hs_fp_collector_check_db(const hs_fp_collector_t *collector,
                                     const hs_database_t *db);
 
 hs_error_t hs_fp_collector_check_rose(const hs_fp_collector_t *collector,
                                       const struct RoseEngine *rose);
 
-void hs_fp_collector_record_scan(hs_fp_collector_t *collector, size_t bytes);
+void hs_fp_collector_record_scan(hs_fp_collector_t *collector);
 
 void hs_fp_collector_flush(hs_fp_collector_t *collector);
 
@@ -103,8 +96,6 @@ hs_error_t hs_fp_feedback_clone(const hs_fp_feedback_t *src,
 
 struct hs_fp_feedback_import_fragment {
     u64a key;
-    u32 fragment_id;
-    u32 literal_count;
     u32 table;
     u32 engine;
     u32 flags;
@@ -115,28 +106,14 @@ struct hs_fp_feedback_import_fragment {
     size_t mask_length;
     u64a trigger_count;
     u64a true_trigger_count;
-    u64a final_report_count;
     u64a false_positive_count;
 };
 
 typedef struct hs_fp_report_summary {
     unsigned int fragment_count;
-    u64a scan_calls;
-    u64a scan_bytes;
     u64a trigger_count;
     u64a true_trigger_count;
-    u64a final_report_count;
     u64a false_positive_count;
-    u64a unknown_report_count;
-    u64a unknown_no_active_trigger_count;
-    u64a unknown_delayed_replay_count;
-    u64a unknown_anchored_replay_count;
-    u64a unknown_eod_or_boundary_count;
-    u64a unknown_flush_combination_count;
-    u64a unknown_mpv_or_nfa_queue_count;
-    u64a unknown_counter_missing_count;
-    u64a unknown_fragment_meta_missing_count;
-    u64a dropped_trigger_count;
 } hs_fp_report_summary_t;
 
 typedef struct hs_fp_feedback_summary {
@@ -166,7 +143,6 @@ hs_error_t hs_fp_feedback_get_summary(const hs_fp_feedback_t *feedback,
 
 hs_error_t hs_fp_feedback_create_from_fragments(
     const struct hs_fp_feedback_import_fragment *fragments, u32 fragment_count,
-    u64a scan_calls, u64a scan_bytes, u64a total_false_positive_count,
     hs_fp_feedback_t **feedback);
 
 u32 hs_fp_feedback_fragment_count(const hs_fp_feedback_t *feedback);

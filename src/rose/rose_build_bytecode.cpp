@@ -2997,26 +2997,6 @@ static void buildLiteralPrograms(const RoseBuildImpl &build,
     updateLitProgramOffset(fragments, fproto, drproto, eproto, sbproto);
 }
 
-using FpFragmentIdMap = map<u32, pair<u32, u32>>;
-
-static FpFragmentIdMap makeFpFragmentIdMap(const vector<LitFragment> &fragments,
-                                           bool delay) {
-    FpFragmentIdMap id_by_program;
-    for (const auto &frag : fragments) {
-        u32 program =
-            delay ? frag.delay_program_offset : frag.lit_program_offset;
-        if (program == ROSE_INVALID_PROG_OFFSET) {
-            continue;
-        }
-
-        id_by_program.emplace(
-            program,
-            make_pair(frag.fragment_id, verify_u32(frag.lit_ids.size())));
-    }
-
-    return id_by_program;
-}
-
 static u64a hashFpFragmentByte(u64a hash, u8 value) {
     static constexpr u64a FNV_PRIME = 1099511628211ULL;
     return (hash ^ value) * FNV_PRIME;
@@ -3081,7 +3061,6 @@ static u8 getFpFragmentEngine(const LitProto *litProto) {
 }
 
 static void addFpFragmentMeta(vector<RoseFpFragmentMeta> &out, set<u32> &seen,
-                              const FpFragmentIdMap &id_by_program,
                               const LitProto *litProto, u8 table) {
     if (!litProto || !litProto->hwlmProto) {
         return;
@@ -3095,13 +3074,6 @@ static void addFpFragmentMeta(vector<RoseFpFragmentMeta> &out, set<u32> &seen,
 
         RoseFpFragmentMeta meta = {};
         meta.programOffset = lit.id;
-        meta.fragmentId = ROSE_OFFSET_INVALID;
-
-        auto id_it = id_by_program.find(lit.id);
-        if (id_it != id_by_program.end()) {
-            meta.fragmentId = id_it->second.first;
-            meta.literalCount = id_it->second.second;
-        }
 
         meta.table = table;
         meta.engine = getFpFragmentEngine(litProto);
@@ -3134,22 +3106,18 @@ static void addFpFragmentMeta(vector<RoseFpFragmentMeta> &out, set<u32> &seen,
     }
 }
 
-static pair<u32, u32> writeFpFragmentMeta(const vector<LitFragment> &fragments,
-                                          RoseEngineBlob &engine_blob,
+static pair<u32, u32> writeFpFragmentMeta(RoseEngineBlob &engine_blob,
                                           const LitProto *fproto,
                                           const LitProto *drproto,
                                           const LitProto *eproto,
                                           const LitProto *sbproto) {
     vector<RoseFpFragmentMeta> meta;
     set<u32> seen;
-    auto lit_ids = makeFpFragmentIdMap(fragments, false);
-    auto delay_ids = makeFpFragmentIdMap(fragments, true);
 
-    addFpFragmentMeta(meta, seen, lit_ids, fproto, ROSE_FP_TABLE_FLOATING);
-    addFpFragmentMeta(meta, seen, lit_ids, eproto, ROSE_FP_TABLE_EOD_ANCHORED);
-    addFpFragmentMeta(meta, seen, lit_ids, sbproto, ROSE_FP_TABLE_SMALL_BLOCK);
-    addFpFragmentMeta(meta, seen, delay_ids, drproto,
-                      ROSE_FP_TABLE_DELAY_REBUILD);
+    addFpFragmentMeta(meta, seen, fproto, ROSE_FP_TABLE_FLOATING);
+    addFpFragmentMeta(meta, seen, eproto, ROSE_FP_TABLE_EOD_ANCHORED);
+    addFpFragmentMeta(meta, seen, sbproto, ROSE_FP_TABLE_SMALL_BLOCK);
+    addFpFragmentMeta(meta, seen, drproto, ROSE_FP_TABLE_DELAY_REBUILD);
 
     if (meta.empty()) {
         return make_pair(0U, 0U);
@@ -3905,8 +3873,8 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildFinalEngine(u32 minWidth) {
                          drproto.get(), eproto.get(), sbproto.get());
 
     tie(proto.fpFragmentMetaOffset, proto.fpFragmentMetaCount) =
-        writeFpFragmentMeta(fragments, bc.engine_blob, fproto.get(),
-                            drproto.get(), eproto.get(), sbproto.get());
+        writeFpFragmentMeta(bc.engine_blob, fproto.get(), drproto.get(),
+                            eproto.get(), sbproto.get());
 
     auto eod_prog = makeEodProgram(*this, bc, prog_build, eodNfaIterOffset);
     proto.eodProgramOffset = writeProgram(bc, move(eod_prog));
@@ -4211,8 +4179,8 @@ bytecode_ptr<x86_RoseEngine> RoseBuildImpl::x86_buildFinalEngine(u32 minWidth) {
                          drproto.get(), eproto.get(), sbproto.get());
 
     tie(proto.fpFragmentMetaOffset, proto.fpFragmentMetaCount) =
-        writeFpFragmentMeta(fragments, bc.engine_blob, fproto.get(),
-                            drproto.get(), eproto.get(), sbproto.get());
+        writeFpFragmentMeta(bc.engine_blob, fproto.get(), drproto.get(),
+                            eproto.get(), sbproto.get());
 
     auto eod_prog = makeEodProgram(*this, bc, prog_build, eodNfaIterOffset);
     proto.eodProgramOffset = writeProgram(bc, move(eod_prog));

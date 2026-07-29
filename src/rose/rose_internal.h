@@ -74,8 +74,6 @@ typedef u64a rose_group;
 
 struct RoseFpFragmentMeta {
     u32 programOffset;
-    u32 fragmentId;
-    u32 literalCount;
     u64a stableKey;
     u8 table;
     u8 engine;

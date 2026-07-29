@@ -1892,7 +1892,7 @@ bool prepareOutputDirectories(const Options &opts) {
 
 const uint8_t HSPGO_FEEDBACK_BIN_MAGIC[8] = {'H', 'S', 'P', 'G',
                                              'O', 'F', 'B', '1'};
-const uint32_t HSPGO_FEEDBACK_BIN_VERSION = 3;
+const uint32_t HSPGO_FEEDBACK_BIN_VERSION = 4;
 const uint64_t MAX_FEEDBACK_BIN_SIZE = 128ULL * 1024ULL * 1024ULL;
 const uint32_t MAX_SERIALIZED_FRAGMENT_BYTES = 4096;
 const uint64_t FNV1A64_OFFSET = 14695981039346656037ULL;
@@ -2060,8 +2060,6 @@ bool appendSerializedFragment(vector<uint8_t> *payload,
     }
 
     appendU64(payload, fragment.key);
-    appendU32(payload, fragment.fragment_id);
-    appendU32(payload, fragment.literal_count);
     appendU32(payload, fragment.table);
     appendU32(payload, fragment.engine);
     appendU32(payload, fragment.flags);
@@ -2139,9 +2137,7 @@ bool readSerializedFragment(const vector<uint8_t> &payload, size_t *offset,
         return false;
     }
     out->fragment.key = value64;
-    if (!readU32(payload, offset, &out->fragment.fragment_id) ||
-        !readU32(payload, offset, &out->fragment.literal_count) ||
-        !readU32(payload, offset, &out->fragment.table) ||
+    if (!readU32(payload, offset, &out->fragment.table) ||
         !readU32(payload, offset, &out->fragment.engine) ||
         !readU32(payload, offset, &out->fragment.flags) ||
         !readU32(payload, offset, &value32)) {
@@ -2261,7 +2257,7 @@ bool loadFeedbackBin(const string &path, ScanMode mode,
              << formatHex64(sourceFingerprint) << "\n";
         return false;
     }
-    const size_t minFragmentPayloadSize = 61;
+    const size_t minFragmentPayloadSize = 53;
     if (fragmentCount &&
         fragmentCount > (payload.size() - offset) / minFragmentPayloadSize) {
         cerr << "Feedback binary fragment count exceeds payload capacity: "
@@ -2284,8 +2280,6 @@ bool loadFeedbackBin(const string &path, ScanMode mode,
         if (selected) {
             OwnedFragment copy;
             copy.info.key = owned[i].fragment.key;
-            copy.info.fragment_id = owned[i].fragment.fragment_id;
-            copy.info.literal_count = owned[i].fragment.literal_count;
             copy.info.table = owned[i].fragment.table;
             copy.info.engine = owned[i].fragment.engine;
             copy.info.flags = owned[i].fragment.flags;
@@ -2311,8 +2305,8 @@ bool loadFeedbackBin(const string &path, ScanMode mode,
 
     hs_fp_feedback_t *rawFeedback = nullptr;
     hs_error_t err = hs_fp_feedback_create_from_fragments(
-        imports.empty() ? nullptr : imports.data(), fragmentCount, 0, 0,
-        totalFalsePositive, &rawFeedback);
+        imports.empty() ? nullptr : imports.data(), fragmentCount,
+        &rawFeedback);
     if (err != HS_SUCCESS) {
         cerr << "hs_fp_feedback_create_from_fragments failed with error " << err
              << "\n";

@@ -143,7 +143,6 @@ populateCoreInfo(struct hs_scratch *s, const struct RoseEngine *rose,
     s->core_info.fp_current_trigger_key = 0;
     s->core_info.fp_current_trigger_active = 0;
     s->core_info.fp_current_trigger_reported = 0;
-    s->core_info.fp_unknown_source = HS_FP_UNKNOWN_SOURCE_NONE;
 
     /* and some stuff not actually in core info */
     s->som_set_now_offset = ~0ULL;
@@ -526,7 +525,7 @@ hs_error_t HS_CDECL hs_scan_with_collector(
     hs_error_t rv = hs_scan_internal(db, data, length, flags, scratch, onEvent,
                                      userCtx, collector);
     if (rv == HS_SUCCESS || rv == HS_SCAN_TERMINATED) {
-        hs_fp_collector_record_scan(collector, length);
+        hs_fp_collector_record_scan(collector);
     }
     return rv;
 }
@@ -704,11 +703,6 @@ static really_inline void report_eod_matches(hs_stream_t *id,
                      getHistory(state, rose, id->offset),
                      getHistoryAmount(rose, id->offset), id->offset, status, 0);
     scratch->core_info.fp_collector = collector;
-    u8 old_unknown_source = scratch->core_info.fp_unknown_source;
-    if (collector) {
-        scratch->core_info.fp_unknown_source =
-            HS_FP_UNKNOWN_SOURCE_EOD_OR_BOUNDARY;
-    }
 
     if (rose->ckeyCount) {
         scratch->core_info.logicalVector =
@@ -772,9 +766,7 @@ static really_inline void report_eod_matches(hs_stream_t *id,
     }
 
 done:
-    if (collector) {
-        scratch->core_info.fp_unknown_source = old_unknown_source;
-    }
+    return;
 }
 
 static really_inline hs_error_t report_eod_matches_if_needed(
@@ -1155,7 +1147,7 @@ hs_error_t HS_CDECL hs_scan_stream_with_collector(
                                             onEvent, context, collector);
     unmarkScratchInUse(scratch);
     if (rv == HS_SUCCESS || rv == HS_SCAN_TERMINATED) {
-        hs_fp_collector_record_scan(collector, length);
+        hs_fp_collector_record_scan(collector);
     }
     return rv;
 }
@@ -1355,11 +1347,7 @@ hs_error_t HS_CDECL hs_scan_vector_with_collector(
     hs_error_t rv = hs_scan_vector_internal(
         db, data, length, count, flags, scratch, onEvent, context, collector);
     if (rv == HS_SUCCESS || rv == HS_SCAN_TERMINATED) {
-        size_t bytes = 0;
-        for (u32 i = 0; i < count; i++) {
-            bytes += length[i];
-        }
-        hs_fp_collector_record_scan(collector, bytes);
+        hs_fp_collector_record_scan(collector);
     }
     return rv;
 }

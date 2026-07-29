@@ -112,10 +112,6 @@ typedef struct hs_scratch hs_scratch_t;
 typedef struct hs_fp_fragment_info {
     /** Stable fragment key used to correlate report and feedback entries. */
     unsigned long long key;
-    /** Database-local fragment identifier. */
-    unsigned int fragment_id;
-    /** Number of Rose literals represented by this fragment. */
-    unsigned int literal_count;
     /** One of the HS_FP_TABLE_* values. */
     unsigned int table;
     /** One of the HS_FP_ENGINE_* values. */

@@ -190,13 +190,9 @@ hs_error_t hs_fp_feedback_clone(const hs_fp_feedback_t *src,
 
 hs_error_t hs_fp_feedback_create_from_fragments(
     const struct hs_fp_feedback_import_fragment *fragments, u32 fragment_count,
-    u64a scan_calls, u64a scan_bytes, u64a total_false_positive_count,
     hs_fp_feedback_t **feedback) {
     (void)fragments;
     (void)fragment_count;
-    (void)scan_calls;
-    (void)scan_bytes;
-    (void)total_false_positive_count;
     if (!feedback) {
         return HS_INVALID;
     }
@@ -253,9 +249,8 @@ hs_error_t hs_fp_collector_check_rose(const hs_fp_collector_t *collector,
     return HS_ARCH_ERROR;
 }
 
-void hs_fp_collector_record_scan(hs_fp_collector_t *collector, size_t bytes) {
+void hs_fp_collector_record_scan(hs_fp_collector_t *collector) {
     (void)collector;
-    (void)bytes;
 }
 
 void hs_fp_collector_flush(hs_fp_collector_t *collector) { (void)collector; }

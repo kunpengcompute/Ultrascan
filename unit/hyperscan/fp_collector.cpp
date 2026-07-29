@@ -383,25 +383,22 @@ TEST(FpCollector, FeedbackCreateFromFragmentsCopiesAndValidates) {
     unsigned char bytes[] = {'f', 'o', 'o'};
     hs_fp_feedback_import_fragment import = {};
     import.key = 0x12345678ULL;
-    import.fragment_id = 7;
-    import.literal_count = 1;
     import.table = HS_FP_TABLE_FLOATING;
     import.engine = HS_FP_ENGINE_FDR;
     import.bytes = bytes;
     import.length = sizeof(bytes);
     import.trigger_count = 100;
     import.true_trigger_count = 1;
-    import.final_report_count = 1;
     import.false_positive_count = 99;
 
     hs_fp_feedback_t *feedback = nullptr;
-    EXPECT_EQ(HS_INVALID, hs_fp_feedback_create_from_fragments(&import, 1, 1, 2,
-                                                               99, nullptr));
-    EXPECT_EQ(HS_INVALID, hs_fp_feedback_create_from_fragments(nullptr, 1, 1, 2,
-                                                               99, &feedback));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_create_from_fragments(&import, 1, nullptr));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_create_from_fragments(nullptr, 1, &feedback));
 
-    ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_create_from_fragments(&import, 1, 3, 9,
-                                                               99, &feedback));
+    ASSERT_EQ(HS_SUCCESS,
+              hs_fp_feedback_create_from_fragments(&import, 1, &feedback));
     ASSERT_NE(nullptr, feedback);
 
     bytes[0] = 'x';
@@ -417,8 +414,8 @@ TEST(FpCollector, FeedbackCreateFromFragmentsCopiesAndValidates) {
     ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(feedback));
 
     import.length = 0;
-    EXPECT_EQ(HS_INVALID, hs_fp_feedback_create_from_fragments(&import, 1, 3, 9,
-                                                               99, &feedback));
+    EXPECT_EQ(HS_INVALID,
+              hs_fp_feedback_create_from_fragments(&import, 1, &feedback));
 }
 
 TEST(FpCollector, FeedbackBuildExtThresholdParameters) {
@@ -643,28 +640,14 @@ TEST(FpCollector, BlockScanMatchesNormalScan) {
     ASSERT_NE(nullptr, report);
     hs_fp_report_summary_t summary = {};
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
-    EXPECT_EQ(1U, summary.scan_calls);
-    EXPECT_EQ(sizeof(data) - 1, summary.scan_bytes);
     EXPECT_GE(summary.trigger_count, 1U);
     EXPECT_EQ(1U, summary.true_trigger_count);
-    EXPECT_EQ(1U, summary.final_report_count);
     EXPECT_EQ(0U, summary.false_positive_count);
-    EXPECT_EQ(0U, summary.unknown_report_count);
-    EXPECT_EQ(0U, summary.unknown_no_active_trigger_count);
-    EXPECT_EQ(0U, summary.unknown_delayed_replay_count);
-    EXPECT_EQ(0U, summary.unknown_anchored_replay_count);
-    EXPECT_EQ(0U, summary.unknown_eod_or_boundary_count);
-    EXPECT_EQ(0U, summary.unknown_flush_combination_count);
-    EXPECT_EQ(0U, summary.unknown_mpv_or_nfa_queue_count);
-    EXPECT_EQ(0U, summary.unknown_counter_missing_count);
-    EXPECT_EQ(0U, summary.unknown_fragment_meta_missing_count);
-    EXPECT_EQ(0U, summary.dropped_trigger_count);
 
     FpReportEntry entry;
     ASSERT_TRUE(findEntryByBytes(report, "foo", &entry));
     EXPECT_NE(0U, entry.table);
     EXPECT_TRUE(isKnownEngine(entry.engine));
-    EXPECT_GE(entry.literal_count, 1U);
     EXPECT_GE(entry.trigger_count, 1U);
     EXPECT_EQ(1U, entry.true_trigger_count);
 
@@ -712,11 +695,8 @@ TEST(FpCollector, VectorScanWithCollectorMatchesNormalScan) {
     ASSERT_NE(nullptr, report);
     hs_fp_report_summary_t summary = {};
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
-    EXPECT_EQ(1U, summary.scan_calls);
-    EXPECT_EQ(7U, summary.scan_bytes);
     EXPECT_GE(summary.trigger_count, 1U);
     EXPECT_GE(summary.true_trigger_count, 1U);
-    EXPECT_GE(summary.final_report_count, 1U);
 
     hs_scratch_t *block_scratch = nullptr;
     hs_database_t *block_db =
@@ -817,11 +797,8 @@ TEST(FpCollector, StreamCollectorApisMatchNormalAndValidateArguments) {
     ASSERT_NE(nullptr, report);
     hs_fp_report_summary_t summary = {};
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
-    EXPECT_EQ(2U, summary.scan_calls);
-    EXPECT_EQ(6U, summary.scan_bytes);
     EXPECT_GE(summary.trigger_count, 1U);
     EXPECT_GE(summary.true_trigger_count, 1U);
-    EXPECT_GE(summary.final_report_count, 1U);
 
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(report));
     ASSERT_EQ(HS_SUCCESS, hs_fp_collector_free(other_collector));
@@ -998,27 +975,14 @@ TEST(FpCollector, BlockScanRecordsFalsePositiveTrigger) {
     ASSERT_NE(nullptr, report);
     hs_fp_report_summary_t summary = {};
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
-    EXPECT_EQ(1U, summary.scan_calls);
     EXPECT_GE(summary.trigger_count, 1U);
     EXPECT_EQ(0U, summary.true_trigger_count);
-    EXPECT_EQ(0U, summary.final_report_count);
     EXPECT_GE(summary.false_positive_count, 1U);
-    EXPECT_EQ(0U, summary.unknown_report_count);
-    EXPECT_EQ(0U, summary.unknown_no_active_trigger_count);
-    EXPECT_EQ(0U, summary.unknown_delayed_replay_count);
-    EXPECT_EQ(0U, summary.unknown_anchored_replay_count);
-    EXPECT_EQ(0U, summary.unknown_eod_or_boundary_count);
-    EXPECT_EQ(0U, summary.unknown_flush_combination_count);
-    EXPECT_EQ(0U, summary.unknown_mpv_or_nfa_queue_count);
-    EXPECT_EQ(0U, summary.unknown_counter_missing_count);
-    EXPECT_EQ(0U, summary.unknown_fragment_meta_missing_count);
-    EXPECT_EQ(0U, summary.dropped_trigger_count);
 
     FpReportEntry entry;
     ASSERT_TRUE(findEntryByBytes(report, "foo", &entry));
     EXPECT_NE(0U, entry.table);
     EXPECT_TRUE(isKnownEngine(entry.engine));
-    EXPECT_GE(entry.literal_count, 1U);
     EXPECT_GE(entry.trigger_count, 1U);
     EXPECT_EQ(0U, entry.true_trigger_count);
 
@@ -1074,14 +1038,9 @@ TEST(FpCollector, TriggerHistogramFlushesBatchedTriggers) {
 
     hs_fp_report_summary_t summary = {};
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
-    EXPECT_EQ(1U, summary.scan_calls);
-    EXPECT_EQ(data.size(), summary.scan_bytes);
     EXPECT_GE(summary.trigger_count, 8U);
     EXPECT_EQ(2U, summary.true_trigger_count);
-    EXPECT_EQ(2U, summary.final_report_count);
     EXPECT_GE(summary.false_positive_count, 6U);
-    EXPECT_EQ(0U, summary.unknown_report_count);
-    EXPECT_EQ(0U, summary.dropped_trigger_count);
 
     FpReportEntry entry;
     ASSERT_TRUE(findEntryByBytes(report, "foo", &entry));
@@ -1118,7 +1077,7 @@ TEST(FpCollector, FeedbackBuildIgnoresUnmappedRuntimeKeys) {
     hs_fp_report_summary_t report_summary = {};
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &report_summary));
     EXPECT_EQ(0U, report_summary.fragment_count);
-    EXPECT_EQ(1U, report_summary.trigger_count);
+    EXPECT_EQ(0U, report_summary.trigger_count);
     EXPECT_EQ(0U, report_summary.false_positive_count);
 
     hs_fp_fragment_info_t fragment = {};
@@ -1175,9 +1134,8 @@ TEST(FpCollector, UnmappedRuntimeKeysDoNotCreateReportFragments) {
     hs_fp_report_summary_t summary = {};
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
     EXPECT_EQ(0U, summary.fragment_count);
-    EXPECT_EQ(3U, summary.trigger_count);
+    EXPECT_EQ(0U, summary.trigger_count);
     EXPECT_EQ(0U, summary.false_positive_count);
-    EXPECT_EQ(0U, summary.dropped_trigger_count);
 
     hs_fp_fragment_info_t fragment = {};
     EXPECT_EQ(HS_INVALID, hs_fp_report_get_fragment(report, 0, &fragment));
@@ -1222,11 +1180,8 @@ TEST(FpCollector, MergeAggregatesTriggerSummary) {
     ASSERT_NE(nullptr, report);
     hs_fp_report_summary_t summary = {};
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_get_summary(report, &summary));
-    EXPECT_EQ(2U, summary.scan_calls);
     EXPECT_EQ(2U, summary.true_trigger_count);
-    EXPECT_EQ(2U, summary.final_report_count);
     EXPECT_EQ(0U, summary.false_positive_count);
-    EXPECT_EQ(0U, summary.dropped_trigger_count);
 
     FpReportEntry entry;
     ASSERT_TRUE(findEntryByBytes(report, "foo", &entry));
