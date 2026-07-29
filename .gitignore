@@ -84,3 +84,4 @@ documents/
 build_debug
 pcre
 \.*
+!.gitattributes

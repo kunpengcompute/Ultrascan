@@ -44,8 +44,7 @@
 #include "hs_common.h"
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 /**
@@ -64,6 +63,237 @@ struct hs_scratch;
  * A Hyperscan scratch space.
  */
 typedef struct hs_scratch hs_scratch_t;
+
+/** Values reported in @ref hs_fp_fragment_info_t::table. */
+#define HS_FP_TABLE_UNKNOWN 0U
+#define HS_FP_TABLE_FLOATING 1U
+#define HS_FP_TABLE_EOD_ANCHORED 2U
+#define HS_FP_TABLE_SMALL_BLOCK 3U
+#define HS_FP_TABLE_DELAY_REBUILD 4U
+#define HS_FP_TABLE_ANCHORED 5U
+
+/** Values reported in @ref hs_fp_fragment_info_t::engine. */
+#define HS_FP_ENGINE_UNKNOWN 0U
+#define HS_FP_ENGINE_NOODLE 1U
+#define HS_FP_ENGINE_FDR 2U
+#define HS_FP_ENGINE_NEO_FDR 3U
+#define HS_FP_ENGINE_HAO 4U
+#define HS_FP_ENGINE_TEDDY 5U
+
+/** Flags reported in @ref hs_fp_fragment_info_t::flags. */
+#define HS_FP_FRAGMENT_FLAG_NOCASE 0x01U
+#define HS_FP_FRAGMENT_FLAG_NORUNS 0x02U
+#define HS_FP_FRAGMENT_FLAG_MASKED 0x04U
+
+/** Scale used by false-positive feedback rate parameters. */
+#define HS_FP_FEEDBACK_RATE_SCALE 1000000000000ULL
+
+/** Default false-positive feedback thresholds. */
+#define HS_FP_FEEDBACK_DEFAULT_MIN_TRIGGER_COUNT 1000ULL
+#define HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_COUNT 1000ULL
+#define HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_RATE 990000000000ULL
+#define HS_FP_FEEDBACK_DEFAULT_MIN_WASTE_SHARE 50000000000ULL
+#define HS_FP_FEEDBACK_DEFAULT_MAX_BAD_FRAGMENTS 0U
+
+/** Flags for hs_fp_feedback_params_t::flags. */
+#define HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT 0x01U
+#define HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT 0x02U
+#define HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE 0x04U
+#define HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE 0x08U
+#define HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS 0x10U
+
+/**
+ * Read-only information for one report or feedback fragment.
+ *
+ * The bytes, mask and cmp pointers remain valid only for the duration of the
+ * API call or callback that produced them. They must not be modified or freed
+ * by the caller.
+ */
+typedef struct hs_fp_fragment_info {
+    /** Stable fragment key used to correlate report and feedback entries. */
+    unsigned long long key;
+    /** One of the HS_FP_TABLE_* values. */
+    unsigned int table;
+    /** One of the HS_FP_ENGINE_* values. */
+    unsigned int engine;
+    /** Bitmask of HS_FP_FRAGMENT_FLAG_* values. */
+    unsigned int flags;
+    /** Literal fragment bytes. */
+    const unsigned char *bytes;
+    /** Number of bytes in bytes. */
+    size_t length;
+    /** Optional HWLM mask bytes, or NULL when mask_length is zero. */
+    const unsigned char *mask;
+    /** Optional HWLM comparison bytes, or NULL when mask_length is zero. */
+    const unsigned char *cmp;
+    /** Number of bytes in mask and cmp. */
+    size_t mask_length;
+    /** Number of front-end triggers attributed to this fragment. */
+    unsigned long long trigger_count;
+    /** Number of triggers that directly produced at least one final report. */
+    unsigned long long true_trigger_count;
+    /** Number of triggers that did not directly produce a final report. */
+    unsigned long long false_positive_count;
+} hs_fp_fragment_info_t;
+
+/** Summary counters emitted by hs_fp_collector_to_feedback_with_dump(). */
+typedef struct hs_fp_feedback_dump_summary {
+    /** Number of known fragment entries emitted by the dump callback. */
+    unsigned int fragment_count;
+    /** Number of entries selected into feedback. */
+    unsigned int bad_fragment_count;
+    /** Total known front-end fragment triggers. */
+    unsigned long long trigger_count;
+    /** Known triggers that directly produced at least one final report. */
+    unsigned long long true_trigger_count;
+    /** Known triggers that did not directly produce a final report. */
+    unsigned long long false_positive_count;
+} hs_fp_feedback_dump_summary_t;
+
+/** Optional summary callback used by hs_fp_collector_to_feedback_with_dump().
+ */
+typedef void(HS_CDECL *hs_fp_feedback_dump_summary_handler)(
+    const hs_fp_feedback_dump_summary_t *summary, void *context);
+
+/**
+ * Optional fragment callback used by hs_fp_collector_to_feedback_with_dump().
+ *
+ * @param fragment
+ *      Read-only fragment statistics.
+ * @param selected
+ *      Non-zero if this fragment was selected into the generated feedback.
+ * @param context
+ *      Caller-provided context.
+ */
+typedef void(HS_CDECL *hs_fp_feedback_dump_fragment_handler)(
+    const hs_fp_fragment_info_t *fragment, unsigned int selected,
+    void *context);
+
+/** Dump callbacks for hs_fp_collector_to_feedback_with_dump(). */
+typedef struct hs_fp_feedback_dump_callbacks {
+    hs_fp_feedback_dump_summary_handler on_summary;
+    hs_fp_feedback_dump_fragment_handler on_fragment;
+} hs_fp_feedback_dump_callbacks_t;
+
+/**
+ * Parameters for @ref hs_fp_collector_to_feedback().
+ *
+ * Fields are only consumed when the corresponding
+ * HS_FP_FEEDBACK_PARAM_* bit is present in @ref flags. A zero-initialised
+ * structure therefore produces the same result as passing NULL parameters.
+ *
+ * Rate fields use @ref HS_FP_FEEDBACK_RATE_SCALE. For example,
+ * 990000000000 means 99.00% and 50000000000 means 5.00%.
+ */
+typedef struct hs_fp_feedback_params {
+    /** Bitmask of HS_FP_FEEDBACK_PARAM_* values. */
+    unsigned int flags;
+    /** Minimum total trigger count; zero disables this threshold. */
+    unsigned long long min_trigger_count;
+    /** Minimum false-positive trigger count; zero disables this threshold. */
+    unsigned long long min_false_positive_count;
+    /** Minimum false-positive rate, scaled by HS_FP_FEEDBACK_RATE_SCALE. */
+    unsigned long long min_false_positive_rate;
+    /** Minimum share of total false positives, scaled by the same factor. */
+    unsigned long long min_waste_share;
+    /** Maximum number of bad fragments to keep. */
+    unsigned int max_bad_fragments;
+} hs_fp_feedback_params_t;
+
+/**
+ * Create a false-positive feedback collector for a compiled database.
+ *
+ * The collector is intended to be passed to the explicit *_with_collector()
+ * scan APIs. It is not safe for concurrent writes by multiple scanning
+ * threads; use one collector per scanning thread and merge them afterwards.
+ *
+ * @param db
+ *      A compiled pattern database.
+ *
+ * @param collector
+ *      On success, a pointer to a newly allocated collector will be returned.
+ *
+ * @return
+ *      @ref HS_SUCCESS on success, other values on failure.
+ */
+hs_error_t HS_CDECL hs_fp_collector_create(const hs_database_t *db,
+                                           hs_fp_collector_t **collector);
+
+/**
+ * Reset a false-positive feedback collector, clearing accumulated runtime
+ * counters while preserving its database binding.
+ */
+hs_error_t HS_CDECL hs_fp_collector_reset(hs_fp_collector_t *collector);
+
+/**
+ * Merge a set of collectors for the same database into a new collector.
+ *
+ * Each input collector must have been created for the same database. On
+ * success, @p collector receives a new collector containing the summed
+ * counters. The caller owns it and must release it with
+ * @ref hs_fp_collector_free().
+ */
+hs_error_t HS_CDECL hs_fp_collector_merge(hs_fp_collector_t *const *collectors,
+                                          unsigned int count,
+                                          hs_fp_collector_t **collector);
+
+/**
+ * Free a false-positive feedback collector. NULL may also be safely provided.
+ */
+hs_error_t HS_CDECL hs_fp_collector_free(hs_fp_collector_t *collector);
+
+/**
+ * Build compile-time false-positive feedback from a collector.
+ *
+ * @param collector
+ *      A valid collector created for the database being optimized.
+ * @param params
+ *      Optional threshold parameters. NULL or a zero-initialised structure
+ *      uses the default thresholds.
+ * @param feedback
+ *      On success, a feedback object will be written here. The caller owns it
+ *      and must release it with @ref hs_fp_feedback_free().
+ * @return
+ *      @ref HS_SUCCESS on success, @ref HS_INVALID for invalid arguments or
+ *      invalid parameter values.
+ */
+hs_error_t HS_CDECL hs_fp_collector_to_feedback(
+    hs_fp_collector_t *collector, const hs_fp_feedback_params_t *params,
+    hs_fp_feedback_t **feedback);
+
+/**
+ * Build compile-time false-positive feedback from a collector and emit dump
+ * information for tools.
+ *
+ * The dump callbacks are optional. Fragment callbacks are invoked for known
+ * fragment entries only; unknown, non-feedbackable runtime events are not
+ * emitted.
+ *
+ * @param collector
+ *      A valid collector created for the database being optimized.
+ * @param params
+ *      Optional threshold parameters. NULL or a zero-initialised structure
+ *      uses the default thresholds.
+ * @param callbacks
+ *      Optional dump callbacks. NULL means no dump is emitted.
+ * @param context
+ *      User context passed to callbacks.
+ * @param feedback
+ *      On success, a feedback object will be written here. The caller owns it
+ *      and must release it with @ref hs_fp_feedback_free().
+ * @return
+ *      @ref HS_SUCCESS on success, @ref HS_INVALID for invalid arguments or
+ *      invalid parameter values.
+ */
+hs_error_t HS_CDECL hs_fp_collector_to_feedback_with_dump(
+    hs_fp_collector_t *collector, const hs_fp_feedback_params_t *params,
+    const hs_fp_feedback_dump_callbacks_t *callbacks, void *context,
+    hs_fp_feedback_t **feedback);
+
+/**
+ * Free false-positive feedback. NULL may also be safely provided.
+ */
+hs_error_t HS_CDECL hs_fp_feedback_free(hs_fp_feedback_t *feedback);
 
 /**
  * Definition of the match event callback function type.
@@ -122,11 +352,10 @@ typedef struct hs_scratch hs_scratch_t;
  *      subsequent calls to @ref hs_scan_stream() for that stream will
  *      immediately return with @ref HS_SCAN_TERMINATED.
  */
-typedef int (HS_CDECL *match_event_handler)(unsigned int id,
-                                            unsigned long long from,
-                                            unsigned long long to,
-                                            unsigned int flags,
-                                            void *context);
+typedef int(HS_CDECL *match_event_handler)(unsigned int id,
+                                           unsigned long long from,
+                                           unsigned long long to,
+                                           unsigned int flags, void *context);
 
 /**
  * Open and initialise a stream.
@@ -189,6 +418,18 @@ hs_error_t HS_CDECL hs_scan_stream(hs_stream_t *id, const char *data,
                                    unsigned int length, unsigned int flags,
                                    hs_scratch_t *scratch,
                                    match_event_handler onEvent, void *ctxt);
+
+/**
+ * The streaming regular expression scanner with false-positive feedback
+ * collection.
+ *
+ * This call has the same matching semantics and callback behaviour as
+ * @ref hs_scan_stream(), but additionally records data in @p collector.
+ */
+hs_error_t HS_CDECL hs_scan_stream_with_collector(
+    hs_stream_t *id, const char *data, unsigned int length, unsigned int flags,
+    hs_scratch_t *scratch, match_event_handler onEvent, void *ctxt,
+    hs_fp_collector_t *collector);
 
 /**
  * Close a stream.
@@ -482,6 +723,18 @@ hs_error_t HS_CDECL hs_scan(const hs_database_t *db, const char *data,
                             void *context);
 
 /**
+ * The block regular expression scanner with false-positive feedback
+ * collection.
+ *
+ * This call has the same matching semantics and callback behaviour as
+ * @ref hs_scan(), but additionally records data in @p collector.
+ */
+hs_error_t HS_CDECL hs_scan_with_collector(
+    const hs_database_t *db, const char *data, unsigned int length,
+    unsigned int flags, hs_scratch_t *scratch, match_event_handler onEvent,
+    void *context, hs_fp_collector_t *collector);
+
+/**
  * The vectored regular expression scanner.
  *
  * This is the function call in which the actual pattern matching takes place
@@ -525,6 +778,19 @@ hs_error_t HS_CDECL hs_scan_vector(const hs_database_t *db,
                                    unsigned int count, unsigned int flags,
                                    hs_scratch_t *scratch,
                                    match_event_handler onEvent, void *context);
+
+/**
+ * The vectored regular expression scanner with false-positive feedback
+ * collection.
+ *
+ * This call has the same matching semantics and callback behaviour as
+ * @ref hs_scan_vector(), but additionally records data in @p collector.
+ */
+hs_error_t HS_CDECL hs_scan_vector_with_collector(
+    const hs_database_t *db, const char *const *data,
+    const unsigned int *length, unsigned int count, unsigned int flags,
+    hs_scratch_t *scratch, match_event_handler onEvent, void *context,
+    hs_fp_collector_t *collector);
 
 /**
  * Allocate a "scratch" space for use by Hyperscan.
@@ -612,7 +878,7 @@ hs_error_t HS_CDECL hs_free_scratch(hs_scratch_t *scratch);
  * Callback 'from' return value, indicating that the start of this match was
  * too early to be tracked with the requested SOM_HORIZON precision.
  */
-#define HS_OFFSET_PAST_HORIZON    (~0ULL)
+#define HS_OFFSET_PAST_HORIZON (~0ULL)
 
 #ifdef __cplusplus
 } /* extern "C" */

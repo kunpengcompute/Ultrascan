@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Intel Corporation
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -9,7 +9,7 @@
  *  * Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- *  * Neither the name of Intel Corporation nor the names of its contributors
+ *  * Neither the name of Huawei Corporation nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -26,20 +26,37 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/** \file
- * \brief Global compile context, describes compile environment.
- */
-#include "compile_context.h"
-#include "grey.h"
+#ifndef FP_COLLECTOR_HIST_H
+#define FP_COLLECTOR_HIST_H
 
-namespace ue2 {
+#include "ue2common.h"
 
-CompileContext::CompileContext(
-    bool in_isStreaming, bool in_isVectored, const target_t &in_target_info,
-    const Grey &in_grey, const hs_fp_feedback_t *in_fp_feedback,
-    hs_compile_context_checkpoint_info_t *in_fp_checkpoint_info)
-    : streaming(in_isStreaming || in_isVectored), vectored(in_isVectored),
-      target_info(in_target_info), grey(in_grey), fp_feedback(in_fp_feedback),
-      fp_checkpoint_info(in_fp_checkpoint_info) {}
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-} // namespace ue2
+#define HS_FP_TRIGGER_HISTOGRAM_BATCH_SIZE 64U
+
+enum hs_fp_histogram_backend {
+    HS_FP_HISTOGRAM_BACKEND_NEON = 0,
+    HS_FP_HISTOGRAM_BACKEND_SVE2 = 1
+};
+
+typedef void (*hs_fp_histogram_emit_fn)(void *ctx, u32 key, u64a count);
+
+u8 hs_fp_histogram_select_backend(void);
+
+void hs_fp_histogram_count_batch(u8 backend, const u32 *keys, u32 count,
+                                 hs_fp_histogram_emit_fn emit, void *ctx);
+
+#if defined(ARCH_AARCH64) && defined(HS_BUILD_HAVE_SVE2_HISTCNT)
+void NEVER_INLINE hs_fp_histogram_count_batch_sve2(const u32 *keys, u32 count,
+                                                   hs_fp_histogram_emit_fn emit,
+                                                   void *ctx);
+#endif
+
+#ifdef __cplusplus
+} /* extern C */
+#endif
+
+#endif /* FP_COLLECTOR_HIST_H */

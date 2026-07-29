@@ -30,7 +30,7 @@
 #define HS_COMMON_H_
 
 #if defined(_WIN32)
-#define HS_CDECL    __cdecl
+#define HS_CDECL __cdecl
 #else
 #define HS_CDECL
 #endif
@@ -47,8 +47,7 @@
  */
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 struct hs_database;
@@ -64,6 +63,22 @@ struct fat_hs_database;
  */
 typedef struct hs_database hs_database_t;
 typedef struct fat_hs_database fat_hs_database_t;
+
+struct hs_fp_collector;
+struct hs_fp_feedback;
+
+/**
+ * A false-positive feedback collector used by the runtime collector scan
+ * APIs.
+ */
+typedef struct hs_fp_collector hs_fp_collector_t;
+
+/**
+ * False-positive feedback produced from a collector and consumed by
+ *
+ * compilation.
+ */
+typedef struct hs_fp_feedback hs_fp_feedback_t;
 
 /**
  * A type for errors returned by Hyperscan functions.
@@ -110,9 +125,8 @@ hs_error_t HS_CDECL fat_hs_free_database(fat_hs_database_t *db);
  */
 hs_error_t HS_CDECL hs_serialize_database(const hs_database_t *db, char **bytes,
                                           size_t *length);
-hs_error_t HS_CDECL fat_hs_serialize_database(const fat_hs_database_t *db, 
-                                              char **bytes,
-                                              size_t *length);
+hs_error_t HS_CDECL fat_hs_serialize_database(const fat_hs_database_t *db,
+                                              char **bytes, size_t *length);
 
 /**
  * Reconstruct a pattern database from a stream of bytes previously generated
@@ -214,7 +228,7 @@ hs_error_t HS_CDECL hs_stream_size(const hs_database_t *database,
  */
 hs_error_t HS_CDECL hs_database_size(const hs_database_t *database,
                                      size_t *database_size);
-hs_error_t HS_CDECL fat_hs_database_size(const fat_hs_database_t *db, 
+hs_error_t HS_CDECL fat_hs_database_size(const fat_hs_database_t *db,
                                          size_t *size);
 /**
  * Utility function for reporting the size that would be required by a
@@ -264,7 +278,7 @@ hs_error_t HS_CDECL fat_hs_serialized_database_size(const char *bytes,
  */
 hs_error_t HS_CDECL hs_database_info(const hs_database_t *database,
                                      char **info);
-hs_error_t HS_CDECL fat_hs_database_info(const fat_hs_database_t *db, 
+hs_error_t HS_CDECL fat_hs_database_info(const fat_hs_database_t *db,
                                          char **info);
 
 /**
@@ -311,7 +325,7 @@ typedef void *(HS_CDECL *hs_alloc_t)(size_t size);
  * @param ptr
  *      The region of memory to be freed.
  */
-typedef void (HS_CDECL *hs_free_t)(void *ptr);
+typedef void(HS_CDECL *hs_free_t)(void *ptr);
 
 /**
  * Set the allocate and free functions used by Hyperscan for allocating
@@ -464,7 +478,7 @@ hs_error_t HS_CDECL hs_set_stream_allocator(hs_alloc_t alloc_func,
  *      date of the build. It is allocated statically, so it does not need to
  *      be freed by the caller.
  */
-const char * HS_CDECL hs_version(void);
+const char *HS_CDECL hs_version(void);
 
 /**
  * Utility function to test the current system architecture.
@@ -492,7 +506,7 @@ hs_error_t HS_CDECL hs_valid_platform(void);
 /**
  * The engine completed normally.
  */
-#define HS_SUCCESS              0
+#define HS_SUCCESS 0
 
 /**
  * A parameter passed to this function was invalid.
@@ -501,12 +515,12 @@ hs_error_t HS_CDECL hs_valid_platform(void);
  * invalid parameter -- it cannot be relied upon to detect (for example)
  * pointers to freed memory or other invalid data.
  */
-#define HS_INVALID              (-1)
+#define HS_INVALID (-1)
 
 /**
  * A memory allocation failed.
  */
-#define HS_NOMEM                (-2)
+#define HS_NOMEM (-2)
 
 /**
  * The engine was terminated by callback.
@@ -515,42 +529,42 @@ hs_error_t HS_CDECL hs_valid_platform(void);
  * but that the callback function requested that scanning cease after a match
  * was located.
  */
-#define HS_SCAN_TERMINATED      (-3)
+#define HS_SCAN_TERMINATED (-3)
 
 /**
  * The pattern compiler failed, and the @ref hs_compile_error_t should be
  * inspected for more detail.
  */
-#define HS_COMPILER_ERROR       (-4)
+#define HS_COMPILER_ERROR (-4)
 
 /**
  * The given database was built for a different version of Hyperscan.
  */
-#define HS_DB_VERSION_ERROR     (-5)
+#define HS_DB_VERSION_ERROR (-5)
 
 /**
  * The given database was built for a different platform (i.e., CPU type).
  */
-#define HS_DB_PLATFORM_ERROR    (-6)
+#define HS_DB_PLATFORM_ERROR (-6)
 
 /**
  * The given database was built for a different mode of operation. This error
  * is returned when streaming calls are used with a block or vectored database
  * and vice versa.
  */
-#define HS_DB_MODE_ERROR        (-7)
+#define HS_DB_MODE_ERROR (-7)
 
 /**
  * A parameter passed to this function was not correctly aligned.
  */
-#define HS_BAD_ALIGN            (-8)
+#define HS_BAD_ALIGN (-8)
 
 /**
  * The memory allocator (either malloc() or the allocator set with @ref
  * hs_set_allocator()) did not correctly return memory suitably aligned for the
  * largest representable data type on this platform.
  */
-#define HS_BAD_ALLOC            (-9)
+#define HS_BAD_ALLOC (-9)
 
 /**
  * The scratch region was already in use.
@@ -569,7 +583,7 @@ hs_error_t HS_CDECL hs_valid_platform(void);
  * Note: Not all concurrent uses of scratch regions may be detected. This error
  * is intended as a best-effort debugging tool, not a guarantee.
  */
-#define HS_SCRATCH_IN_USE       (-10)
+#define HS_SCRATCH_IN_USE (-10)
 
 /**
  * Unsupported CPU architecture.
@@ -580,7 +594,7 @@ hs_error_t HS_CDECL hs_valid_platform(void);
  * At a minimum, Hyperscan requires Supplemental Streaming SIMD Extensions 3
  * (SSSE3).
  */
-#define HS_ARCH_ERROR           (-11)
+#define HS_ARCH_ERROR (-11)
 
 /**
  * Provided buffer was too small.
@@ -592,17 +606,17 @@ hs_error_t HS_CDECL hs_valid_platform(void);
  * returned in the same manner as the used space would have been returned if the
  * call was successful.
  */
-#define HS_INSUFFICIENT_SPACE   (-12)
+#define HS_INSUFFICIENT_SPACE (-12)
 
 /**
  * Unexpected internal error.
  *
  * This error indicates that there was unexpected matching behaviors. This
- * could be related to invalid usage of stream and scratch space or invalid memory
- * operations by users.
+ * could be related to invalid usage of stream and scratch space or invalid
+ * memory operations by users.
  *
  */
-#define HS_UNKNOWN_ERROR   (-13)
+#define HS_UNKNOWN_ERROR (-13)
 
 /** @} */
 

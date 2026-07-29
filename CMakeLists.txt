@@ -300,26 +300,65 @@ else()
     if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
         set(EXTRA_C_FLAGS "${EXTRA_C_FLAGS} -fsigned-char")
         set(EXTRA_CXX_FLAGS "${EXTRA_CXX_FLAGS} -fsigned-char")
-        set(HS_ARM_MARCH "" CACHE STRING
-            "AArch64 -march value used for this single-ISA build")
-        if (NOT HS_ARM_MARCH)
-            set(_HS_ARM_MARCH_DEFAULT "armv8.2-a+crc+sve")
-            if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND
-                EXISTS "/proc/cpuinfo")
-                file(READ "/proc/cpuinfo" _HS_ARM_CPUINFO)
-                if (_HS_ARM_CPUINFO MATCHES "(^|[ \n])svebitperm([ \n]|$)")
-                    set(_HS_ARM_MARCH_DEFAULT
-                        "armv8.6-a+crc+sve2+sve2-bitperm")
-                elseif (_HS_ARM_CPUINFO MATCHES "(^|[ \n])sve2([ \n]|$)")
-                    set(_HS_ARM_MARCH_DEFAULT "armv9-a+sve2")
-                endif()
-            endif()
-            set(HS_ARM_MARCH "${_HS_ARM_MARCH_DEFAULT}" CACHE STRING
-                "AArch64 -march value used for this single-ISA build" FORCE)
+        set(HS_ARM_MARCH "AUTO" CACHE STRING
+            "AArch64 target: AUTO, PORTABLE, native, or an explicit -march value")
+        set_property(CACHE HS_ARM_MARCH PROPERTY STRINGS
+            AUTO PORTABLE native armv8-a+crc armv8.2-a+crc+sve
+            armv9-a+sve2 armv8.6-a+crc+sve2+sve2-bitperm)
+
+        # Older builds generated armv8-a/armv8-a+crc as the implicit default
+        # and stored it in CMakeCache.txt.  Treat those cached defaults as AUTO
+        # so reconfiguring an existing build directory still follows the current
+        # build host.  Use -DHS_ARM_MARCH=PORTABLE for an intentional baseline
+        # armv8-a+crc build.
+        if (HS_ARM_MARCH STREQUAL "" OR HS_ARM_MARCH STREQUAL "armv8-a" OR
+            HS_ARM_MARCH STREQUAL "armv8-a+crc")
+            set(HS_ARM_MARCH "AUTO" CACHE STRING
+                "AArch64 target: AUTO, PORTABLE, native, or an explicit -march value"
+                FORCE)
         endif()
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=${HS_ARM_MARCH}")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=${HS_ARM_MARCH}")
-        message(STATUS "AARCH64 single-ISA build target: -march=${HS_ARM_MARCH}")
+
+        string(TOUPPER "${HS_ARM_MARCH}" _HS_ARM_MARCH_MODE)
+        set(_HS_ARM_ARCH_FLAGS "")
+        set(_HS_ARM_BUILD_MODE "")
+        if (_HS_ARM_MARCH_MODE STREQUAL "AUTO")
+            if (NOT CMAKE_CROSSCOMPILING)
+                set(_HS_ARM_NATIVE_FLAGS "-march=native -mtune=native")
+                unset(HS_ARM_NATIVE_C_FLAGS_OK CACHE)
+                unset(HS_ARM_NATIVE_CXX_FLAGS_OK CACHE)
+                CHECK_C_COMPILER_FLAG("${_HS_ARM_NATIVE_FLAGS}"
+                    HS_ARM_NATIVE_C_FLAGS_OK)
+                CHECK_CXX_COMPILER_FLAG("${_HS_ARM_NATIVE_FLAGS}"
+                    HS_ARM_NATIVE_CXX_FLAGS_OK)
+                if (HS_ARM_NATIVE_C_FLAGS_OK AND HS_ARM_NATIVE_CXX_FLAGS_OK)
+                    set(_HS_ARM_ARCH_FLAGS "${_HS_ARM_NATIVE_FLAGS}")
+                    set(_HS_ARM_BUILD_MODE "native auto")
+                else()
+                    set(_HS_ARM_ARCH_FLAGS "-march=armv8-a+crc")
+                    set(_HS_ARM_BUILD_MODE
+                        "portable fallback, native flags unsupported")
+                endif()
+            else()
+                set(_HS_ARM_ARCH_FLAGS "-march=armv8-a+crc")
+                set(_HS_ARM_BUILD_MODE "portable cross-build fallback")
+            endif()
+        elseif (_HS_ARM_MARCH_MODE STREQUAL "PORTABLE")
+            # crc32.c uses the AArch64 CRC32 instructions whenever NEON is
+            # enabled, so CRC is part of the minimum ISA required by the
+            # current runtime implementation.
+            set(_HS_ARM_ARCH_FLAGS "-march=armv8-a+crc")
+            set(_HS_ARM_BUILD_MODE "portable")
+        elseif (_HS_ARM_MARCH_MODE STREQUAL "NATIVE")
+            set(_HS_ARM_ARCH_FLAGS "-march=native -mtune=native")
+            set(_HS_ARM_BUILD_MODE "explicit native")
+        else()
+            set(_HS_ARM_ARCH_FLAGS "-march=${HS_ARM_MARCH}")
+            set(_HS_ARM_BUILD_MODE "explicit")
+        endif()
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_HS_ARM_ARCH_FLAGS}")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_HS_ARM_ARCH_FLAGS}")
+        message(STATUS "AARCH64 single-ISA build mode: ${_HS_ARM_BUILD_MODE}")
+        message(STATUS "AARCH64 single-ISA build flags: ${_HS_ARM_ARCH_FLAGS}")
     endif()
 
     if (NOT RELEASE_BUILD)
@@ -443,11 +482,94 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|i386")
 endif()
 
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+    set(HS_ARM_TARGET_HAVE_CRC FALSE)
+    set(HS_ARM_TARGET_HAVE_SVE FALSE)
+    set(HS_ARM_TARGET_HAVE_SVE2 FALSE)
+    set(HS_ARM_TARGET_HAVE_SVEBITPERM FALSE)
+
+    set(_HS_ARM_TARGET_FLAGS_SAVED "${CMAKE_REQUIRED_FLAGS}")
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_C_FLAGS} ${EXTRA_C_FLAGS} ${ARCH_C_FLAGS}")
+
+    unset(HS_ARM_TARGET_CRC_TEST CACHE)
+    unset(HS_ARM_TARGET_SVE_TEST CACHE)
+    unset(HS_ARM_TARGET_SVE2_TEST CACHE)
+    unset(HS_ARM_TARGET_SVEBITPERM_TEST CACHE)
+
+    CHECK_C_SOURCE_COMPILES(
+"#if !defined(__ARM_FEATURE_CRC32)
+#error no crc32
+#endif
+int main(void) { return 0; }"
+        HS_ARM_TARGET_CRC_TEST)
+    CHECK_C_SOURCE_COMPILES(
+"#include <arm_sve.h>
+#if !defined(__ARM_FEATURE_SVE)
+#error no sve
+#endif
+int main(void) { return 0; }"
+        HS_ARM_TARGET_SVE_TEST)
+    CHECK_C_SOURCE_COMPILES(
+"#include <arm_sve.h>
+#if !defined(__ARM_FEATURE_SVE2)
+#error no sve2
+#endif
+int main(void) { return 0; }"
+        HS_ARM_TARGET_SVE2_TEST)
+    CHECK_C_SOURCE_COMPILES(
+"#include <stdint.h>
+#include <arm_sve.h>
+#if !defined(__ARM_FEATURE_SVE2_BITPERM)
+#error no sve2 bitperm
+#endif
+int main(void) {
+    svbool_t pg = svptrue_b64();
+    svuint64_t data = svdup_n_u64(UINT64_C(0x123456789abcdef0));
+    svuint64_t out = svbext_n_u64(data, UINT64_C(0x0000ffff0000ffff));
+    uint64_t tmp[32] = {0};
+    svst1_u64(pg, tmp, out);
+    return (int)tmp[0];
+}"
+        HS_ARM_TARGET_SVEBITPERM_TEST)
+
+    set(CMAKE_REQUIRED_FLAGS "${_HS_ARM_TARGET_FLAGS_SAVED}")
+
+    if (HS_ARM_TARGET_CRC_TEST)
+        set(HS_ARM_TARGET_HAVE_CRC TRUE)
+    endif()
+    if (HS_ARM_TARGET_SVE_TEST)
+        set(HS_ARM_TARGET_HAVE_SVE TRUE)
+    endif()
+    if (HS_ARM_TARGET_SVE2_TEST)
+        set(HS_ARM_TARGET_HAVE_SVE2 TRUE)
+        set(HS_ARM_TARGET_HAVE_SVE TRUE)
+    endif()
+    if (HS_ARM_TARGET_SVEBITPERM_TEST)
+        set(HS_ARM_TARGET_HAVE_SVEBITPERM TRUE)
+        set(HS_ARM_TARGET_HAVE_SVE2 TRUE)
+        set(HS_ARM_TARGET_HAVE_SVE TRUE)
+    endif()
+
+    if (NOT HS_ARM_TARGET_HAVE_CRC)
+        message(FATAL_ERROR
+            "The selected AArch64 target flags (${_HS_ARM_ARCH_FLAGS}) do not "
+            "enable CRC32 instructions required by src/crc32.c. Use AUTO on a "
+            "CRC-capable host, PORTABLE, or an explicit -DHS_ARM_MARCH value "
+            "that includes +crc.")
+    endif()
+
+    message(STATUS "AARCH64 target features: "
+        "crc=${HS_ARM_TARGET_HAVE_CRC}, "
+        "sve=${HS_ARM_TARGET_HAVE_SVE}, "
+        "sve2=${HS_ARM_TARGET_HAVE_SVE2}, "
+        "sve2-bitperm=${HS_ARM_TARGET_HAVE_SVEBITPERM}")
+
     set(HS_BUILD_HAVE_SVE FALSE)
     set(HS_BUILD_HAVE_SVE2 FALSE)
+    set(HS_BUILD_HAVE_SVE2_HISTCNT FALSE)
     set(HS_BUILD_HAVE_SVEBITPERM FALSE)
     set(HS_SVE_C_FLAGS "")
     set(HS_SVE2_C_FLAGS "")
+    set(HS_SVE2_HISTCNT_C_FLAGS "")
     set(HS_SVEBITPERM_C_FLAGS "")
 
     set(_HS_ARM_REQUIRED_FLAGS_SAVED "${CMAKE_REQUIRED_FLAGS}")
@@ -461,6 +583,7 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
         "-march=armv9-a+sve2"
         "-march=armv8.6-a+sve2")
     set(_HS_SVEBITPERM_FLAG_CANDIDATES
+        "-march=armv8.6-a+crc+sve2+sve2-bitperm"
         "-march=armv9-a+sve2-bitperm"
         "-march=armv8.6-a+sve2-bitperm")
 
@@ -480,6 +603,18 @@ int main(void) {
 #endif
 int main(void) {
     return 0;
+}")
+
+    set(_HS_SVE2_HISTCNT_TEST_SOURCE
+"#include <arm_sve.h>
+#if !defined(__ARM_FEATURE_SVE2)
+#error no sve2
+#endif
+int main(void) {
+    svbool_t pg = svptrue_b32();
+    svuint32_t data = svdup_n_u32(1);
+    svuint32_t out = svhistcnt_u32_z(pg, data, data);
+    return (int)svlastb_u32(pg, out);
 }")
 
     set(_HS_SVEBITPERM_TEST_SOURCE
@@ -563,6 +698,18 @@ int main(void) {
         endforeach()
     endif()
 
+    if (HS_ARM_TARGET_HAVE_SVE2 AND HS_BUILD_HAVE_SVE2)
+        set(CMAKE_REQUIRED_FLAGS
+            "${_HS_ARM_REQUIRED_BASE_FLAGS} ${HS_SVE2_C_FLAGS}")
+        unset(HS_TOOLCHAIN_SVE2_HISTCNT_TEST CACHE)
+        CHECK_C_SOURCE_COMPILES("${_HS_SVE2_HISTCNT_TEST_SOURCE}"
+                                HS_TOOLCHAIN_SVE2_HISTCNT_TEST)
+        if (HS_TOOLCHAIN_SVE2_HISTCNT_TEST)
+            set(HS_BUILD_HAVE_SVE2_HISTCNT TRUE)
+            set(HS_SVE2_HISTCNT_C_FLAGS "${HS_SVE2_C_FLAGS}")
+        endif()
+    endif()
+
     set(CMAKE_REQUIRED_FLAGS "${_HS_ARM_REQUIRED_FLAGS_SAVED}")
 
     if (HS_BUILD_HAVE_SVE)
@@ -577,11 +724,55 @@ int main(void) {
         message(STATUS "ARM toolchain cannot compile SVE2 code paths")
     endif()
 
+    if (HS_BUILD_HAVE_SVE2_HISTCNT)
+        message(STATUS
+            "ARM SVE2 HISTCNT code paths enabled "
+            "(${HS_SVE2_HISTCNT_C_FLAGS})")
+    elseif (NOT HS_ARM_TARGET_HAVE_SVE2)
+        message(STATUS
+            "ARM SVE2 HISTCNT code paths disabled for selected target "
+            "(target lacks SVE2)")
+    elseif (NOT HS_BUILD_HAVE_SVE2)
+        message(STATUS
+            "ARM SVE2 HISTCNT code paths disabled; toolchain cannot compile "
+            "SVE2 code paths")
+    else()
+        message(STATUS
+            "ARM SVE2 HISTCNT code paths disabled; toolchain cannot compile "
+            "svhistcnt")
+    endif()
+
     if (HS_BUILD_HAVE_SVEBITPERM)
         message(STATUS "ARM toolchain can compile SVE2 BitPerm code paths (${HS_SVEBITPERM_C_FLAGS})")
     else()
         message(STATUS "ARM toolchain cannot compile SVE2 BitPerm code paths")
     endif()
+endif()
+
+set(HS_TARGET_AARCH64 FALSE)
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+    set(HS_TARGET_AARCH64 TRUE)
+endif()
+
+if (HS_TARGET_AARCH64)
+    set(HS_ENABLE_FP_FEEDBACK_DEFAULT ON)
+else()
+    set(HS_ENABLE_FP_FEEDBACK_DEFAULT OFF)
+endif()
+
+option(HS_ENABLE_FP_FEEDBACK
+    "Build false-positive feedback optimization support"
+    ${HS_ENABLE_FP_FEEDBACK_DEFAULT})
+
+if (HS_ENABLE_FP_FEEDBACK AND NOT HS_TARGET_AARCH64)
+    message(FATAL_ERROR
+        "False-positive feedback optimization is only supported on AArch64")
+endif()
+
+if (HS_ENABLE_FP_FEEDBACK)
+    message(STATUS "False-positive feedback optimization enabled")
+else()
+    message(STATUS "False-positive feedback optimization disabled")
 endif()
 
 # testing a builtin takes a little more work
@@ -853,7 +1044,24 @@ set (hs_exec_common_SRCS
     src/util/multibit.c
     src/fat_database.c
     src/fat_database.h
+    src/fp_collector.h
     )
+
+if (HS_ENABLE_FP_FEEDBACK)
+    list(APPEND hs_exec_common_SRCS
+        src/fp_collector.c
+        src/fp_collector_hist.c
+        src/fp_collector_hist.h
+        )
+
+    if (HS_TARGET_AARCH64 AND HS_BUILD_HAVE_SVE2_HISTCNT)
+        list(APPEND hs_exec_common_SRCS src/fp_collector_hist_sve2.c)
+        set_source_files_properties(src/fp_collector_hist_sve2.c PROPERTIES
+            COMPILE_FLAGS "${HS_SVE2_HISTCNT_C_FLAGS}")
+    endif()
+else()
+    list(APPEND hs_exec_common_SRCS src/fp_feedback_disabled.c)
+endif()
 
 set (hs_exec_SRCS
     ${hs_HEADERS}
@@ -1471,6 +1679,27 @@ set(hs_dump_SRCS
     src/util/dump_util.cpp
     src/util/dump_util.h
 )
+
+# HAO's BEXT fast path requires SVE2 BitPerm.  Do not force BitPerm, or even
+# plain SVE, into HAO sources when the selected AArch64 target does not support
+# it; those files should inherit the same target flags chosen for the current
+# build machine.  AUTO builds on BitPerm hosts will naturally compile HAO with
+# BitPerm through -march=native, while non-BitPerm hosts keep their native or
+# portable target flags.
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+    if (HS_ARM_TARGET_HAVE_SVEBITPERM)
+        message(STATUS
+            "HAO runtime inherits global AArch64 SVE2 BitPerm target flags")
+    elseif (HS_ARM_TARGET_HAVE_SVE)
+        message(STATUS
+            "HAO runtime inherits global AArch64 SVE target flags; "
+            "SVE2 BitPerm is not enabled for this target")
+    else()
+        message(STATUS
+            "HAO runtime inherits selected AArch64 target flags; SVE is not "
+            "enabled for this target")
+    endif()
+endif()
 
 if (DUMP_SUPPORT)
     set(hs_compile_SRCS ${hs_compile_SRCS} ${hs_dump_SRCS})

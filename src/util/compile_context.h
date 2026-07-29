@@ -33,16 +33,22 @@
 #ifndef COMPILE_CONTEXT_H
 #define COMPILE_CONTEXT_H
 
-#include "target_info.h"
+#include "fp_collector.h"
 #include "grey.h"
+#include "target_info.h"
+
+struct hs_fp_feedback;
+typedef struct hs_fp_feedback hs_fp_feedback_t;
 
 namespace ue2 {
 
 /** \brief Structure for describing the compile environment: grey box settings,
  * target arch, mode flags, etc. */
 struct CompileContext {
-    CompileContext(bool isStreaming, bool isVectored,
-                   const target_t &target_info, const Grey &grey);
+    CompileContext(
+        bool isStreaming, bool isVectored, const target_t &target_info,
+        const Grey &grey, const hs_fp_feedback_t *fp_feedback = nullptr,
+        hs_compile_context_checkpoint_info_t *fp_checkpoint_info = nullptr);
 
     const bool streaming; /* streaming or vectored mode */
     const bool vectored;
@@ -52,7 +58,40 @@ struct CompileContext {
 
     /** \brief Greybox structure, allows tuning of all sorts of behaviour. */
     const Grey grey;
+
+    /** \brief Optional false-positive feedback for compile-time decisions. */
+    const hs_fp_feedback_t *fp_feedback;
+
+    hs_compile_context_checkpoint_info_t *fp_checkpoint_info;
 };
+
+static inline void fpCompileRecordCheck(const CompileContext &cc,
+                                        unsigned int checkpoint) {
+    if (cc.fp_checkpoint_info && checkpoint < HS_FP_COMPILE_CHECKPOINT_COUNT) {
+        cc.fp_checkpoint_info[checkpoint].checked_count++;
+    }
+}
+
+static inline void fpCompileRecordHit(const CompileContext &cc,
+                                      unsigned int checkpoint) {
+    if (cc.fp_checkpoint_info && checkpoint < HS_FP_COMPILE_CHECKPOINT_COUNT) {
+        cc.fp_checkpoint_info[checkpoint].hit_count++;
+    }
+}
+
+static inline void fpCompileRecordBlocked(const CompileContext &cc,
+                                          unsigned int checkpoint) {
+    if (cc.fp_checkpoint_info && checkpoint < HS_FP_COMPILE_CHECKPOINT_COUNT) {
+        cc.fp_checkpoint_info[checkpoint].blocked_count++;
+    }
+}
+
+static inline void fpCompileRecordPassed(const CompileContext &cc,
+                                         unsigned int checkpoint) {
+    if (cc.fp_checkpoint_info && checkpoint < HS_FP_COMPILE_CHECKPOINT_COUNT) {
+        cc.fp_checkpoint_info[checkpoint].passed_count++;
+    }
+}
 
 } // namespace ue2
 

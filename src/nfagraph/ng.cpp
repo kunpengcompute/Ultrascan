@@ -31,7 +31,10 @@
  */
 #include "ng.h"
 
+#include "compiler/compiler.h"
+#include "fp_collector.h"
 #include "grey.h"
+#include "nfa/goughcompile.h"
 #include "ng_anchored_acyclic.h"
 #include "ng_anchored_dots.h"
 #include "ng_asserts.h"
@@ -48,9 +51,9 @@
 #include "ng_literal_decorated.h"
 #include "ng_literal_quality.h"
 #include "ng_misc_opt.h"
-#include "ng_puff.h"
 #include "ng_prefilter.h"
 #include "ng_prune.h"
+#include "ng_puff.h"
 #include "ng_redundancy.h"
 #include "ng_region.h"
 #include "ng_region_redundancy.h"
@@ -58,16 +61,16 @@
 #include "ng_sep.h"
 #include "ng_small_literal_set.h"
 #include "ng_som.h"
-#include "ng_vacuous.h"
-#include "ng_violet.h"
 #include "ng_utf8.h"
 #include "ng_util.h"
+#include "ng_vacuous.h"
+#include "ng_violet.h"
 #include "ng_width.h"
-#include "ue2common.h"
-#include "compiler/compiler.h"
-#include "nfa/goughcompile.h"
 #include "rose/rose_build.h"
+#include "rose/rose_build_impl.h"
 #include "smallwrite/smallwrite_build.h"
+#include "ue2common.h"
+#include "util/compile_context.h"
 #include "util/compile_error.h"
 #include "util/container.h"
 #include "util/depth.h"
@@ -82,14 +85,10 @@ namespace ue2 {
 NG::NG(const CompileContext &in_cc, size_t num_patterns,
        unsigned in_somPrecision)
     : maxSomRevHistoryAvailable(in_cc.grey.somMaxRevNfaLength),
-      minWidth(depth::infinity()),
-      rm(in_cc.grey),
-      ssm(in_somPrecision),
-      cc(in_cc),
-      smwr(makeSmallWriteBuilder(num_patterns, rm, cc)),
+      minWidth(depth::infinity()), rm(in_cc.grey), ssm(in_somPrecision),
+      cc(in_cc), smwr(makeSmallWriteBuilder(num_patterns, rm, cc)),
       rose(makeRoseBuilder(rm, ssm, *smwr, cc, boundary)),
-      allowLilyForTeddy(true) {
-}
+      allowLilyForTeddy(true) {}
 
 NG::~NG() {
     // empty
@@ -103,9 +102,8 @@ NG::~NG() {
  *
  * \throw CompileError if SOM cannot be supported for the component.
  */
-static
-bool addComponentSom(NG &ng, NGHolder &g, const ExpressionInfo &expr,
-                     const som_type som, const u32 comp_id) {
+static bool addComponentSom(NG &ng, NGHolder &g, const ExpressionInfo &expr,
+                            const som_type som, const u32 comp_id) {
     DEBUG_PRINTF("doing som\n");
     dumpComponent(g, "03_presom", expr.index, comp_id, ng.cc.grey);
     assert(hasCorrectlyNumberedVertices(g));
@@ -133,13 +131,13 @@ bool addComponentSom(NG &ng, NGHolder &g, const ExpressionInfo &expr,
     // If the previous approach could not support this pattern, we try treating
     // it monolithically, as a Haig outfix.
 
-    vector<vector<CharReach> > triggers; /* empty for outfix */
+    vector<vector<CharReach>> triggers; /* empty for outfix */
 
     assert(g.kind == NFA_OUTFIX);
     dumpComponent(g, "haig", expr.index, comp_id, ng.cc.grey);
     makeReportsSomPass(ng.rm, g);
-    auto haig = attemptToBuildHaig(g, som, ng.ssm.somPrecision(), triggers,
-                                   ng.cc.grey);
+    auto haig =
+        attemptToBuildHaig(g, som, ng.ssm.somPrecision(), triggers, ng.cc.grey);
     if (haig) {
         DEBUG_PRINTF("built haig outfix\n");
         ng.rose->addOutfix(g, *haig);
@@ -203,14 +201,13 @@ void reduceGraph(NGHolder &g, som_type som, bool utf8,
     }
 }
 
-static
-bool addComponent(NG &ng, NGHolder &g, const ExpressionInfo &expr,
-                  const som_type som, const u32 comp_id) {
+static bool addComponent(NG &ng, NGHolder &g, const ExpressionInfo &expr,
+                         const som_type som, const u32 comp_id) {
     const CompileContext &cc = ng.cc;
     assert(hasCorrectlyNumberedVertices(g));
 
-    DEBUG_PRINTF("expr=%u, comp=%u: %zu vertices, %zu edges\n",
-                 expr.index, comp_id, num_vertices(g), num_edges(g));
+    DEBUG_PRINTF("expr=%u, comp=%u: %zu vertices, %zu edges\n", expr.index,
+                 comp_id, num_vertices(g), num_edges(g));
 
     dumpComponent(g, "01_begin", expr.index, comp_id, ng.cc.grey);
 
@@ -254,8 +251,8 @@ bool addComponent(NG &ng, NGHolder &g, const ExpressionInfo &expr,
         return true;
     }
 
-    if (handleSmallLiteralSets(*ng.rose, g, cc)
-        || handleFixedWidth(*ng.rose, g, cc.grey)) {
+    if (handleSmallLiteralSets(*ng.rose, g, cc) ||
+        handleFixedWidth(*ng.rose, g, cc.grey)) {
         return true;
     }
 
@@ -271,8 +268,8 @@ bool addComponent(NG &ng, NGHolder &g, const ExpressionInfo &expr,
         return true;
     }
 
-    if (handleSmallLiteralSets(*ng.rose, g, cc)
-        || handleFixedWidth(*ng.rose, g, cc.grey)) {
+    if (handleSmallLiteralSets(*ng.rose, g, cc) ||
+        handleFixedWidth(*ng.rose, g, cc.grey)) {
         return true;
     }
 
@@ -294,10 +291,9 @@ bool addComponent(NG &ng, NGHolder &g, const ExpressionInfo &expr,
 }
 
 // Returns true if all components have been added.
-static
-bool processComponents(NG &ng, ExpressionInfo &expr,
-                       deque<unique_ptr<NGHolder>> &g_comp,
-                       const som_type som) {
+static bool processComponents(NG &ng, ExpressionInfo &expr,
+                              deque<unique_ptr<NGHolder>> &g_comp,
+                              const som_type som) {
     const u32 num_components = g_comp.size();
 
     u32 failed = 0;
@@ -334,7 +330,8 @@ bool NG::addGraph(ExpressionInfo &expr, unique_ptr<NGHolder> g_ptr) {
 
     som_type som = expr.som;
     if (som && isVacuous(g)) {
-        throw CompileError(expr.index, "Start of match is not "
+        throw CompileError(expr.index,
+                           "Start of match is not "
                            "currently supported for patterns which match an "
                            "empty buffer.");
     }
@@ -352,7 +349,8 @@ bool NG::addGraph(ExpressionInfo &expr, unique_ptr<NGHolder> g_ptr) {
     bool hamming = expr.hamm_distance > 0;
     u32 e_dist = hamming ? expr.hamm_distance : expr.edit_distance;
 
-    DEBUG_PRINTF("edit distance = %u hamming = %s\n", e_dist, hamming ? "true" : "false");
+    DEBUG_PRINTF("edit distance = %u hamming = %s\n", e_dist,
+                 hamming ? "true" : "false");
 
     // validate graph's suitability for fuzzing before resolving asserts
     validate_fuzzy_compile(g, e_dist, hamming, expr.utf8, cc.grey);
@@ -384,9 +382,8 @@ bool NG::addGraph(ExpressionInfo &expr, unique_ptr<NGHolder> g_ptr) {
                                        "expression.");
     }
 
-    if (any_of_in(all_reports(g), [&](ReportID id) {
-            return rm.getReport(id).minLength;
-        })) {
+    if (any_of_in(all_reports(g),
+                  [&](ReportID id) { return rm.getReport(id).minLength; })) {
         // We have at least one report with a minimum length constraint, which
         // we currently use SOM to satisfy.
         som = SOM_LEFT;
@@ -525,11 +522,11 @@ bool NG::addHolder(NGHolder &g) {
      * of the whole pattern - not a just a prefix of it. */
 
     bool prefilter = false;
-    //dumpDotComp(comp, g, *this, 20, "prefix_init");
+    // dumpDotComp(comp, g, *this, 20, "prefix_init");
 
     som_type som = SOM_NONE; /* the prefixes created by the SOM code do not
                                 themselves track som */
-    bool utf8 = false; // handling done earlier
+    bool utf8 = false;       // handling done earlier
     reduceGraph(g, som, utf8, cc);
 
     // There may be redundant regions that we can remove
@@ -549,8 +546,8 @@ bool NG::addHolder(NGHolder &g) {
         return true;
     }
 
-    if (handleSmallLiteralSets(*rose, g, cc)
-        || handleFixedWidth(*rose, g, cc.grey)) {
+    if (handleSmallLiteralSets(*rose, g, cc) ||
+        handleFixedWidth(*rose, g, cc.grey)) {
         return true;
     }
 
@@ -578,15 +575,43 @@ bool NG::addHolder(NGHolder &g) {
     return false;
 }
 
+static bool feedbackBlocksShortcutLiteral(const CompileContext &cc,
+                                          const ue2_literal &literal) {
+    if (!cc.fp_feedback) {
+        return false;
+    }
+
+    ue2_literal final_lit(literal);
+    if (final_lit.length() > ROSE_SHORT_LITERAL_LEN_MAX) {
+        final_lit.erase(0, final_lit.length() - ROSE_SHORT_LITERAL_LEN_MAX);
+    }
+
+    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
+
+    const string &s = final_lit.get_string();
+    if (!hs_fp_feedback_fragment_is_bad(cc.fp_feedback, s.data(), s.size(),
+                                        final_lit.any_nocase(), nullptr,
+                                        nullptr, 0)) {
+        return false;
+    }
+
+    DEBUG_PRINTF("skipping shortcut literal due to fp feedback: '%s'\n",
+                 escapeString(s).c_str());
+    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
+    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
+    return true;
+}
+
 bool NG::addLiteral(const ue2_literal &literal, u32 expr_index,
                     u32 external_report, bool highlander, som_type som,
                     bool quiet) {
     assert(!literal.empty());
 
-    if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(literal)) {
-        DEBUG_PRINTF("rejecting zero-dense NeoFDR literal\n");
+    if (cc.grey.allowNeoFdr && hasLongAllZeroNeoFdrTail(literal)) {
+        DEBUG_PRINTF("rejecting legacy zero-tail NeoFDR literal\n");
         return false;
     }
+
     if (!cc.grey.shortcutLiterals) {
         return false;
     }
@@ -599,6 +624,10 @@ bool NG::addLiteral(const ue2_literal &literal, u32 expr_index,
         return false;
     }
 
+    if (feedbackBlocksShortcutLiteral(cc, literal)) {
+        return false;
+    }
+
     // Register external report and validate highlander constraints.
     rm.registerExtReport(external_report,
                          external_report_info(highlander, expr_index));
@@ -606,12 +635,13 @@ bool NG::addLiteral(const ue2_literal &literal, u32 expr_index,
     ReportID id;
     if (som) {
         assert(!highlander); // not allowed, checked earlier.
-        Report r = makeSomRelativeCallback(external_report, 0, literal.length());
+        Report r =
+            makeSomRelativeCallback(external_report, 0, literal.length());
         id = rm.getInternalId(r);
         rose->setSom();
     } else {
-        u32 ekey = highlander ? rm.getExhaustibleKey(external_report)
-                              : INVALID_EKEY;
+        u32 ekey =
+            highlander ? rm.getExhaustibleKey(external_report) : INVALID_EKEY;
         Report r = makeECallback(external_report, 0, ekey, quiet);
         id = rm.getInternalId(r);
     }

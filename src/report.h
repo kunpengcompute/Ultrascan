@@ -33,31 +33,31 @@
 #ifndef REPORT_H
 #define REPORT_H
 
+#include "fp_collector.h"
 #include "hs_internal.h"
 #include "hs_runtime.h"
-#include "scratch.h"
-#include "ue2common.h"
+#include "khsel_runtime.h"
 #include "nfa/callback.h"
 #include "nfa/nfa_internal.h"
 #include "rose/runtime.h"
+#include "scratch.h"
 #include "som/som_runtime.h"
+#include "ue2common.h"
 #include "util/exhaust.h"
-#include "util/logical.h"
 #include "util/fatbit.h"
-#include "khsel_runtime.h"
+#include "util/logical.h"
 
 enum DedupeResult {
     DEDUPE_CONTINUE, //!< Continue with match, not a dupe.
-    DEDUPE_SKIP, //!< Don't report this match, dupe or delayed due to SOM.
-    DEDUPE_HALT //!< User instructed us to stop matching.
+    DEDUPE_SKIP,     //!< Don't report this match, dupe or delayed due to SOM.
+    DEDUPE_HALT      //!< User instructed us to stop matching.
 };
 
-static really_inline
-enum DedupeResult dedupeCatchup(const struct RoseEngine *rose,
-                                struct hs_scratch *scratch, u64a offset,
-                                u64a from_offset, u64a to_offset, u32 dkey,
-                                s32 offset_adjust, char is_external_report,
-                                char quash_som, const char do_som) {
+static really_inline enum DedupeResult
+dedupeCatchup(const struct RoseEngine *rose, struct hs_scratch *scratch,
+              u64a offset, u64a from_offset, u64a to_offset, u32 dkey,
+              s32 offset_adjust, char is_external_report, char quash_som,
+              const char do_som) {
     DEBUG_PRINTF("offset=%llu, match=[%llu,%llu], dkey=%u, do_som=%d\n", offset,
                  from_offset, to_offset, dkey, do_som);
 
@@ -119,8 +119,8 @@ enum DedupeResult dedupeCatchup(const struct RoseEngine *rose,
 
 /** \brief Test whether the given key (\a ekey) is set in the exhaustion vector
  * \a evec. */
-static really_inline
-int isExhausted(const struct RoseEngine *rose, const char *evec, u32 ekey) {
+static really_inline int isExhausted(const struct RoseEngine *rose,
+                                     const char *evec, u32 ekey) {
     DEBUG_PRINTF("checking exhaustion %p %u\n", evec, ekey);
     assert(ekey != INVALID_EKEY);
     assert(ekey < rose->ekeyCount);
@@ -128,8 +128,8 @@ int isExhausted(const struct RoseEngine *rose, const char *evec, u32 ekey) {
 }
 
 /** \brief Returns 1 if all exhaustion keys in the bitvector are on. */
-static really_inline
-int isAllExhausted(const struct RoseEngine *rose, const char *evec) {
+static really_inline int isAllExhausted(const struct RoseEngine *rose,
+                                        const char *evec) {
     if (!rose->canExhaust) {
         return 0; /* pattern set is inexhaustible */
     }
@@ -138,8 +138,8 @@ int isAllExhausted(const struct RoseEngine *rose, const char *evec) {
 }
 
 /** \brief Mark key \a ekey on in the exhaustion vector. */
-static really_inline
-void markAsMatched(const struct RoseEngine *rose, char *evec, u32 ekey) {
+static really_inline void markAsMatched(const struct RoseEngine *rose,
+                                        char *evec, u32 ekey) {
     DEBUG_PRINTF("marking as exhausted key %u\n", ekey);
     assert(ekey != INVALID_EKEY);
     assert(ekey < rose->ekeyCount);
@@ -147,16 +147,15 @@ void markAsMatched(const struct RoseEngine *rose, char *evec, u32 ekey) {
 }
 
 /** \brief Clear all keys in the exhaustion vector. */
-static really_inline
-void clearEvec(const struct RoseEngine *rose, char *evec) {
+static really_inline void clearEvec(const struct RoseEngine *rose, char *evec) {
     DEBUG_PRINTF("clearing evec %p %u\n", evec, rose->ekeyCount);
     mmbit_clear((u8 *)evec, rose->ekeyCount);
 }
 
 /** \brief Test whether the given key (\a lkey) is set in the logical vector
  * \a lvec. */
-static really_inline
-char getLogicalVal(const struct RoseEngine *rose, const char *lvec, u32 lkey) {
+static really_inline char getLogicalVal(const struct RoseEngine *rose,
+                                        const char *lvec, u32 lkey) {
     DEBUG_PRINTF("checking lkey matching %p %u\n", lvec, lkey);
     assert(lkey != INVALID_LKEY);
     assert(lkey < rose->lkeyCount + rose->lopCount);
@@ -165,9 +164,8 @@ char getLogicalVal(const struct RoseEngine *rose, const char *lvec, u32 lkey) {
 }
 
 /** \brief Mark key \a lkey on in the logical vector. */
-static really_inline
-void setLogicalVal(const struct RoseEngine *rose, char *lvec, u32 lkey,
-                   char val) {
+static really_inline void setLogicalVal(const struct RoseEngine *rose,
+                                        char *lvec, u32 lkey, char val) {
     DEBUG_PRINTF("marking as matched logical key %u\n", lkey);
     assert(lkey != INVALID_LKEY);
     assert(lkey < rose->lkeyCount + rose->lopCount);
@@ -182,8 +180,8 @@ void setLogicalVal(const struct RoseEngine *rose, char *lvec, u32 lkey,
 }
 
 /** \brief Mark key \a ckey on in the combination vector. */
-static really_inline
-void setCombinationActive(const struct RoseEngine *rose, char *cvec, u32 ckey) {
+static really_inline void setCombinationActive(const struct RoseEngine *rose,
+                                               char *cvec, u32 ckey) {
     DEBUG_PRINTF("marking as active combination key %u\n", ckey);
     assert(ckey != INVALID_CKEY);
     assert(ckey < rose->ckeyCount);
@@ -191,11 +189,12 @@ void setCombinationActive(const struct RoseEngine *rose, char *cvec, u32 ckey) {
 }
 
 /** \brief Returns 1 if compliant to all logical combinations. */
-static really_inline
-char isLogicalCombination(const struct RoseEngine *rose, char *lvec,
-                          u32 start, u32 result) {
-    const struct LogicalOp *logicalTree = (const struct LogicalOp *)
-        ((const char *)rose + rose->logicalTreeOffset);
+static really_inline char isLogicalCombination(const struct RoseEngine *rose,
+                                               char *lvec, u32 start,
+                                               u32 result) {
+    const struct LogicalOp *logicalTree =
+        (const struct LogicalOp *)((const char *)rose +
+                                   rose->logicalTreeOffset);
     assert(start >= rose->lkeyCount);
     assert(start <= result);
     assert(result < rose->lkeyCount + rose->lopCount);
@@ -211,12 +210,12 @@ char isLogicalCombination(const struct RoseEngine *rose, char *lvec,
         case LOGICAL_OP_AND:
             setLogicalVal(rose, lvec, op->id,
                           getLogicalVal(rose, lvec, op->lo) &
-                          getLogicalVal(rose, lvec, op->ro)); // &&
+                              getLogicalVal(rose, lvec, op->ro)); // &&
             break;
         case LOGICAL_OP_OR:
             setLogicalVal(rose, lvec, op->id,
                           getLogicalVal(rose, lvec, op->lo) |
-                          getLogicalVal(rose, lvec, op->ro)); // ||
+                              getLogicalVal(rose, lvec, op->ro)); // ||
             break;
         }
     }
@@ -224,11 +223,12 @@ char isLogicalCombination(const struct RoseEngine *rose, char *lvec,
 }
 
 /** \brief Returns 1 if combination matches when no sub-expression matches. */
-static really_inline
-char isPurelyNegativeMatch(const struct RoseEngine *rose, char *lvec,
-                           u32 start, u32 result) {
-    const struct LogicalOp *logicalTree = (const struct LogicalOp *)
-        ((const char *)rose + rose->logicalTreeOffset);
+static really_inline char isPurelyNegativeMatch(const struct RoseEngine *rose,
+                                                char *lvec, u32 start,
+                                                u32 result) {
+    const struct LogicalOp *logicalTree =
+        (const struct LogicalOp *)((const char *)rose +
+                                   rose->logicalTreeOffset);
     assert(start >= rose->lkeyCount);
     assert(start <= result);
     assert(result < rose->lkeyCount + rose->lopCount);
@@ -256,7 +256,7 @@ char isPurelyNegativeMatch(const struct RoseEngine *rose, char *lvec,
             }
             setLogicalVal(rose, lvec, op->id,
                           getLogicalVal(rose, lvec, op->lo) &
-                          getLogicalVal(rose, lvec, op->ro)); // &&
+                              getLogicalVal(rose, lvec, op->ro)); // &&
             break;
         case LOGICAL_OP_OR:
             if (((op->lo < rose->lkeyCount) &&
@@ -268,7 +268,7 @@ char isPurelyNegativeMatch(const struct RoseEngine *rose, char *lvec,
             }
             setLogicalVal(rose, lvec, op->id,
                           getLogicalVal(rose, lvec, op->lo) |
-                          getLogicalVal(rose, lvec, op->ro)); // ||
+                              getLogicalVal(rose, lvec, op->ro)); // ||
             break;
         }
     }
@@ -276,8 +276,8 @@ char isPurelyNegativeMatch(const struct RoseEngine *rose, char *lvec,
 }
 
 /** \brief Clear all keys in the logical vector. */
-static really_inline
-void clearLvec(const struct RoseEngine *rose, char *lvec, char *cvec) {
+static really_inline void clearLvec(const struct RoseEngine *rose, char *lvec,
+                                    char *cvec) {
     DEBUG_PRINTF("clearing lvec %p %u\n", lvec,
                  rose->lkeyCount + rose->lopCount);
     DEBUG_PRINTF("clearing cvec %p %u\n", cvec, rose->ckeyCount);
@@ -286,8 +286,7 @@ void clearLvec(const struct RoseEngine *rose, char *lvec, char *cvec) {
 }
 
 /** \brief Clear all keys in the combination vector. */
-static really_inline
-void clearCvec(const struct RoseEngine *rose, char *cvec) {
+static really_inline void clearCvec(const struct RoseEngine *rose, char *cvec) {
     DEBUG_PRINTF("clearing cvec %p %u\n", cvec, rose->ckeyCount);
     mmbit_clear((u8 *)cvec, rose->ckeyCount);
 }
@@ -298,9 +297,10 @@ void clearCvec(const struct RoseEngine *rose, char *cvec) {
  * Assumes all preconditions (bounds, exhaustion etc) have been checked and
  * that dedupe catchup has been done.
  */
-static really_inline
-int roseDeliverReport(u64a offset, ReportID onmatch, s32 offset_adjust,
-                      struct hs_scratch *scratch, u32 ekey) {
+static really_inline int roseDeliverReport(u64a offset, ReportID onmatch,
+                                           s32 offset_adjust,
+                                           struct hs_scratch *scratch,
+                                           u32 ekey) {
     assert(scratch);
     assert(scratch->magic == SCRATCH_MAGIC);
 
@@ -326,7 +326,8 @@ int roseDeliverReport(u64a offset, ReportID onmatch, s32 offset_adjust,
         int lily_halt = flushStoredLilyMatches(scratch, to_offset);
         // 若Lily上报触发终止，直接返回，不再执行后续上报
         if (lily_halt) {
-            DEBUG_PRINTF("Lily match reporting triggered termination, stopping other algorithm reporting\n");
+            DEBUG_PRINTF("Lily match reporting triggered termination, stopping "
+                         "other algorithm reporting\n");
             ci->status |= STATUS_TERMINATED;
             return MO_HALT_MATCHING;
         }
@@ -334,6 +335,8 @@ int roseDeliverReport(u64a offset, ReportID onmatch, s32 offset_adjust,
 #endif
     DEBUG_PRINTF(">> reporting match @[%llu,%llu] for sig %u ctxt %p <<\n",
                  from_offset, to_offset, onmatch, ci->userContext);
+
+    hs_fp_collector_record_final_report(scratch);
 
     int halt = ci->userCallback(onmatch, from_offset, to_offset, flags,
                                 ci->userContext);
@@ -357,10 +360,9 @@ int roseDeliverReport(u64a offset, ReportID onmatch, s32 offset_adjust,
  * Assumes all preconditions (bounds, exhaustion etc) have been checked and
  * that dedupe catchup has been done.
  */
-static really_inline
-int roseDeliverSomReport(u64a from_offset, u64a to_offset, ReportID onmatch,
-                         s32 offset_adjust, struct hs_scratch *scratch,
-                         u32 ekey) {
+static really_inline int
+roseDeliverSomReport(u64a from_offset, u64a to_offset, ReportID onmatch,
+                     s32 offset_adjust, struct hs_scratch *scratch, u32 ekey) {
     assert(scratch);
     assert(scratch->magic == SCRATCH_MAGIC);
 
@@ -383,6 +385,8 @@ int roseDeliverSomReport(u64a from_offset, u64a to_offset, ReportID onmatch,
 
     DEBUG_PRINTF(">> reporting match @[%llu,%llu] for sig %u ctxt %p <<\n",
                  from_offset, to_offset, onmatch, ci->userContext);
+
+    hs_fp_collector_record_final_report(scratch);
 
     int halt = ci->userCallback(onmatch, from_offset, to_offset, flags,
                                 ci->userContext);

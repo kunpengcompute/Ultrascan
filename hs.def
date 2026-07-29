@@ -8,7 +8,9 @@ EXPORTS
    hs_close_stream
    hs_compile
    hs_compile_ext_multi
+   hs_compile_ext_multi_with_feedback
    hs_compile_multi
+   hs_compile_multi_with_feedback
    hs_compress_stream
    hs_copy_stream
    hs_database_info
@@ -18,6 +20,13 @@ EXPORTS
    hs_expand_stream
    hs_expression_ext_info
    hs_expression_info
+   hs_fp_collector_create
+   hs_fp_collector_free
+   hs_fp_collector_merge
+   hs_fp_collector_reset
+   hs_fp_collector_to_feedback
+   hs_fp_collector_to_feedback_with_dump
+   hs_fp_feedback_free
    hs_free_compile_error
    hs_free_database
    hs_free_scratch
@@ -28,7 +37,10 @@ EXPORTS
    hs_reset_stream
    hs_scan
    hs_scan_stream
+   hs_scan_stream_with_collector
+   hs_scan_with_collector
    hs_scan_vector
+   hs_scan_vector_with_collector
    hs_scratch_size
    hs_serialize_database
    hs_serialized_database_info

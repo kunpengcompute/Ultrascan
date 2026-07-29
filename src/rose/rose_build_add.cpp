@@ -29,18 +29,15 @@
 #include "rose_build_add_internal.h"
 #include "rose_build_impl.h"
 
-#include "ue2common.h"
 #include "grey.h"
-#include "rose_build_anchored.h"
-#include "rose_in_util.h"
 #include "hwlm/hwlm_literal.h"
 #include "nfa/goughcompile.h"
 #include "nfa/nfa_api_queue.h"
 #include "nfagraph/ng_depth.h"
 #include "nfagraph/ng_dump.h"
 #include "nfagraph/ng_holder.h"
-#include "nfagraph/ng_literal_quality.h"
 #include "nfagraph/ng_limex.h"
+#include "nfagraph/ng_literal_quality.h"
 #include "nfagraph/ng_mcclellan.h"
 #include "nfagraph/ng_prefilter.h"
 #include "nfagraph/ng_prune.h"
@@ -49,6 +46,9 @@
 #include "nfagraph/ng_reports.h"
 #include "nfagraph/ng_util.h"
 #include "nfagraph/ng_width.h"
+#include "rose_build_anchored.h"
+#include "rose_in_util.h"
+#include "ue2common.h"
 #include "util/charreach.h"
 #include "util/charreach_util.h"
 #include "util/compare.h"
@@ -68,8 +68,8 @@
 #include <map>
 #include <set>
 #include <string>
-#include <vector>
 #include <utility>
+#include <vector>
 
 using namespace std;
 
@@ -93,8 +93,7 @@ struct RoseBuildData : noncopyable {
     bool som;
 };
 
-static
-ReportID findReportId(const NGHolder &g) {
+static ReportID findReportId(const NGHolder &g) {
     /* prefix/infix always have an edge to accept and only 1 reportid initially
      */
     assert(in_degree(g.accept, g));
@@ -103,9 +102,8 @@ ReportID findReportId(const NGHolder &g) {
     return *rep.begin();
 }
 
-static
-RoseVertex createVertex(RoseBuildImpl *build, u32 literalId, u32 min_offset,
-                        u32 max_offset) {
+static RoseVertex createVertex(RoseBuildImpl *build, u32 literalId,
+                               u32 min_offset, u32 max_offset) {
     RoseGraph &g = build->g;
     // add to tree
     RoseVertex v = add_vertex(g);
@@ -154,9 +152,8 @@ RoseVertex createVertex(RoseBuildImpl *build, const RoseVertex parent,
     return v;
 }
 
-static
-RoseVertex createAnchoredVertex(RoseBuildImpl *build, u32 literalId,
-                                u32 min_offset, u32 max_offset) {
+static RoseVertex createAnchoredVertex(RoseBuildImpl *build, u32 literalId,
+                                       u32 min_offset, u32 max_offset) {
     RoseGraph &g = build->g;
     RoseVertex v = createVertex(build, literalId, min_offset, max_offset);
 
@@ -170,8 +167,7 @@ RoseVertex createAnchoredVertex(RoseBuildImpl *build, u32 literalId,
     return v;
 }
 
-static
-RoseVertex duplicate(RoseBuildImpl *build, RoseVertex v) {
+static RoseVertex duplicate(RoseBuildImpl *build, RoseVertex v) {
     RoseGraph &g = build->g;
     RoseVertex w = add_vertex(g[v], g);
     DEBUG_PRINTF("added vertex %zu\n", g[w].index);
@@ -192,8 +188,7 @@ RoseVertex duplicate(RoseBuildImpl *build, RoseVertex v) {
 namespace {
 struct created_key {
     explicit created_key(const RoseInEdgeProps &trep)
-        : prefix(trep.graph.get()), lag(trep.graph_lag) {
-    }
+        : prefix(trep.graph.get()), lag(trep.graph_lag) {}
     bool operator<(const created_key &b) const {
         const created_key &a = *this;
         ORDER_CHECK(prefix);
@@ -203,16 +198,16 @@ struct created_key {
     NGHolder *prefix;
     u32 lag;
 };
-}
+} // namespace
 
-static
-bool isPureAnchored(const NGHolder &h) {
+static bool isPureAnchored(const NGHolder &h) {
     return !proper_out_degree(h.startDs, h);
 }
 
-static
-RoseRoleHistory selectHistory(const RoseBuildImpl &tbi, const RoseBuildData &bd,
-                              const RoseInEdge &rose_edge, const RoseEdge &e) {
+static RoseRoleHistory selectHistory(const RoseBuildImpl &tbi,
+                                     const RoseBuildData &bd,
+                                     const RoseInEdge &rose_edge,
+                                     const RoseEdge &e) {
     const RoseGraph &g = tbi.g;
     const RoseVertex u = source(e, g), v = target(e, g);
     const bool fixed_offset_src = g[u].fixedOffset();
@@ -241,8 +236,7 @@ RoseRoleHistory selectHistory(const RoseBuildImpl &tbi, const RoseBuildData &bd,
     return ROSE_ROLE_HISTORY_NONE;
 }
 
-static
-bool hasSuccessorLiterals(RoseInVertex iv, const RoseInGraph &ig) {
+static bool hasSuccessorLiterals(RoseInVertex iv, const RoseInGraph &ig) {
     for (auto v : adjacent_vertices_range(iv, ig)) {
         if (ig[v].type != RIV_ACCEPT) {
             return true;
@@ -251,12 +245,11 @@ bool hasSuccessorLiterals(RoseInVertex iv, const RoseInGraph &ig) {
     return false;
 }
 
-static
-void createVertices(RoseBuildImpl *tbi,
-                    map<RoseInVertex, vector<RoseVertex> > &vertex_map,
-                    const vector<pair<RoseVertex, RoseInEdge> > &parents,
-                    RoseInVertex iv, u32 min_offset, u32 max_offset,
-                    u32 literalId, u32 delay, const RoseBuildData &bd) {
+static void createVertices(RoseBuildImpl *tbi,
+                           map<RoseInVertex, vector<RoseVertex>> &vertex_map,
+                           const vector<pair<RoseVertex, RoseInEdge>> &parents,
+                           RoseInVertex iv, u32 min_offset, u32 max_offset,
+                           u32 literalId, u32 delay, const RoseBuildData &bd) {
     RoseGraph &g = tbi->g;
 
     DEBUG_PRINTF("vertex has %zu parents\n", parents.size());
@@ -313,8 +306,8 @@ void createVertices(RoseBuildImpl *tbi,
         DEBUG_PRINTF("adding edge (%u,%u) to parent\n", edge_props.minBound,
                      edge_props.maxBound);
         g[e].minBound = edge_props.minBound;
-        if (p != tbi->root && g[w].left.graph
-            && (!tbi->isAnyStart(p) || isPureAnchored(*g[w].left.graph))) {
+        if (p != tbi->root && g[w].left.graph &&
+            (!tbi->isAnyStart(p) || isPureAnchored(*g[w].left.graph))) {
             depth mw = findMaxWidth(*g[w].left.graph);
             if (mw.is_infinite()) {
                 g[e].maxBound = ROSE_BOUND_INF;
@@ -362,8 +355,7 @@ void createVertices(RoseBuildImpl *tbi,
 }
 
 /* ensure the holder does not accept any paths which do not end with lit */
-static
-void removeFalsePaths(NGHolder &g, const ue2_literal &lit) {
+static void removeFalsePaths(NGHolder &g, const ue2_literal &lit) {
     DEBUG_PRINTF("strip '%s'\n", dumpString(lit).c_str());
     set<NFAVertex> curr, next;
     curr.insert(g.accept);
@@ -414,10 +406,9 @@ void removeFalsePaths(NGHolder &g, const ue2_literal &lit) {
     DEBUG_PRINTF("graph has %zu vertices left\n", num_vertices(g));
 }
 
-static
-RoseVertex tryForAnchoredVertex(RoseBuildImpl *tbi,
-                                const RoseInVertexProps &iv_info,
-                                const RoseInEdgeProps &ep) {
+static RoseVertex tryForAnchoredVertex(RoseBuildImpl *tbi,
+                                       const RoseInVertexProps &iv_info,
+                                       const RoseInEdgeProps &ep) {
     if (ep.graph_lag && ep.graph_lag != iv_info.s.length()) {
         DEBUG_PRINTF("bad lag %u != %zu\n", ep.graph_lag, iv_info.s.length());
         return RoseGraph::null_vertex(); /* TODO: better */
@@ -449,9 +440,9 @@ RoseVertex tryForAnchoredVertex(RoseBuildImpl *tbi,
         } else {
             removeFalsePaths(h, iv_info.s);
         }
-    } else if (!ep.graph.get() && ep.maxBound < ROSE_BOUND_INF
-               && iv_info.s.length() + ep.maxBound
-               <= tbi->cc.grey.maxAnchoredRegion) {
+    } else if (!ep.graph.get() && ep.maxBound < ROSE_BOUND_INF &&
+               iv_info.s.length() + ep.maxBound <=
+                   tbi->cc.grey.maxAnchoredRegion) {
         if (ep.maxBound || ep.minBound) {
             /* TODO: handle, however these cases are not generated currently by
                ng_violet */
@@ -490,14 +481,13 @@ RoseVertex tryForAnchoredVertex(RoseBuildImpl *tbi,
 
     /* Note: bounds are end-to-end as anchored lits are considered
      * to have 0 length. */
-    RoseVertex v = createAnchoredVertex(tbi, anchored_exit_id, min_width,
-                                        max_width);
+    RoseVertex v =
+        createAnchoredVertex(tbi, anchored_exit_id, min_width, max_width);
     return v;
 }
 
-static
-u32 findRoseAnchorFloatingOverlap(const RoseInEdgeProps &ep,
-                                  const RoseInVertexProps &succ_vp) {
+static u32 findRoseAnchorFloatingOverlap(const RoseInEdgeProps &ep,
+                                         const RoseInVertexProps &succ_vp) {
     /* we need to ensure there is enough history to find the successor literal
      * when we enable its group.
      */
@@ -518,11 +508,11 @@ u32 findRoseAnchorFloatingOverlap(const RoseInEdgeProps &ep,
     return overlap;
 }
 
-static
-void findRoseLiteralMask(const NGHolder &h, const u32 lag, vector<u8> &msk,
-                         vector<u8> &cmp) {
+static void findRoseLiteralMask(const NGHolder &h, const u32 lag,
+                                vector<u8> &msk, vector<u8> &cmp) {
     if (lag >= HWLM_MASKLEN) {
-        msk.clear(); cmp.clear();
+        msk.clear();
+        cmp.clear();
         return;
     }
 
@@ -558,11 +548,11 @@ void findRoseLiteralMask(const NGHolder &h, const u32 lag, vector<u8> &msk,
     } while (i-- > 0);
 }
 
-static
-void doRoseLiteralVertex(RoseBuildImpl *tbi, bool use_eod_table,
-                         map<RoseInVertex, vector<RoseVertex> > &vertex_map,
-                         const vector<pair<RoseVertex, RoseInEdge> > &parents,
-                         RoseInVertex iv, const RoseBuildData &bd) {
+static void
+doRoseLiteralVertex(RoseBuildImpl *tbi, bool use_eod_table,
+                    map<RoseInVertex, vector<RoseVertex>> &vertex_map,
+                    const vector<pair<RoseVertex, RoseInEdge>> &parents,
+                    RoseInVertex iv, const RoseBuildData &bd) {
     const RoseInGraph &ig = bd.ig;
     const RoseInVertexProps &iv_info = ig[iv];
     assert(iv_info.type == RIV_LITERAL);
@@ -628,7 +618,8 @@ floating:
     }
 
     u32 delay = iv_info.delay;
-    rose_literal_table table = use_eod_table ? ROSE_EOD_ANCHORED : ROSE_FLOATING;
+    rose_literal_table table =
+        use_eod_table ? ROSE_EOD_ANCHORED : ROSE_FLOATING;
 
     u32 literalId = tbi->getLiteralId(iv_info.s, msk, cmp, delay, table);
 
@@ -640,9 +631,9 @@ floating:
                    iv_info.max_offset, literalId, delay, bd);
 }
 
-static
-unique_ptr<NGHolder> makeRoseEodPrefix(const NGHolder &h, RoseBuildImpl &build,
-                                   map<flat_set<ReportID>, ReportID> &remap) {
+static unique_ptr<NGHolder>
+makeRoseEodPrefix(const NGHolder &h, RoseBuildImpl &build,
+                  map<flat_set<ReportID>, ReportID> &remap) {
     assert(generates_callbacks(h));
     assert(!in_degree(h.accept, h));
     auto gg = cloneHolder(h);
@@ -663,15 +654,14 @@ unique_ptr<NGHolder> makeRoseEodPrefix(const NGHolder &h, RoseBuildImpl &build,
             remap[g[u].reports] = build.getNewNfaReport();
         }
 
-        g[u].reports = { remap[g[u].reports] };
+        g[u].reports = {remap[g[u].reports]};
     }
 
     remove_edges(dead, g);
     return gg;
 }
 
-static
-u32 getEodEventID(RoseBuildImpl &build) {
+static u32 getEodEventID(RoseBuildImpl &build) {
     // Allocate the EOD event if it hasn't been already.
     if (build.eod_event_literal_id == MO_INVALID_IDX) {
         build.eod_event_literal_id = build.getLiteralId({}, 0, ROSE_EVENT);
@@ -680,15 +670,14 @@ u32 getEodEventID(RoseBuildImpl &build) {
     return build.eod_event_literal_id;
 }
 
-static
-void makeEodEventLeftfix(RoseBuildImpl &build, RoseVertex u,
-                         const NGHolder &h) {
+static void makeEodEventLeftfix(RoseBuildImpl &build, RoseVertex u,
+                                const NGHolder &h) {
     assert(!build.isInETable(u));
 
     RoseGraph &g = build.g;
     map<flat_set<ReportID>, ReportID> report_remap;
-    shared_ptr<NGHolder> eod_leftfix
-        = makeRoseEodPrefix(h, build, report_remap);
+    shared_ptr<NGHolder> eod_leftfix =
+        makeRoseEodPrefix(h, build, report_remap);
 
     u32 eod_event = getEodEventID(build);
 
@@ -703,13 +692,13 @@ void makeEodEventLeftfix(RoseBuildImpl &build, RoseVertex u,
         RoseEdge e1 = add_edge(u, v, g);
         g[e1].minBound = 0;
         g[e1].maxBound = ROSE_BOUND_INF;
-        g[v].min_offset = add_rose_depth(g[u].min_offset,
-                                         findMinWidth(*g[v].left.graph));
+        g[v].min_offset =
+            add_rose_depth(g[u].min_offset, findMinWidth(*g[v].left.graph));
         g[v].max_offset = ROSE_BOUND_INF;
 
         depth max_width = findMaxWidth(*g[v].left.graph);
-        if (u != build.root && max_width.is_finite()
-            && (!build.isAnyStart(u) || isPureAnchored(*g[v].left.graph))) {
+        if (u != build.root && max_width.is_finite() &&
+            (!build.isAnyStart(u) || isPureAnchored(*g[v].left.graph))) {
             g[e1].maxBound = max_width;
             g[v].max_offset = add_rose_depth(g[u].max_offset, max_width);
         }
@@ -730,10 +719,10 @@ void makeEodEventLeftfix(RoseBuildImpl &build, RoseVertex u,
     }
 }
 
-static
-void doRoseAcceptVertex(RoseBuildImpl *tbi,
-                        const vector<pair<RoseVertex, RoseInEdge> > &parents,
-                        RoseInVertex iv, const RoseBuildData &bd) {
+static void
+doRoseAcceptVertex(RoseBuildImpl *tbi,
+                   const vector<pair<RoseVertex, RoseInEdge>> &parents,
+                   RoseInVertex iv, const RoseBuildData &bd) {
     const RoseInGraph &ig = bd.ig;
     assert(ig[iv].type == RIV_ACCEPT || ig[iv].type == RIV_ACCEPT_EOD);
 
@@ -754,10 +743,10 @@ void doRoseAcceptVertex(RoseBuildImpl *tbi,
          * incompatible with normal successors. As accepts are processed last we
          * do not need to worry about other normal successors being added later.
          */
-        if (g[u].suffix || !g[u].reports.empty()
-            || (ig[iv].type == RIV_ACCEPT_EOD && out_degree(u, g)
-                && !edge_props.graph)
-            || (!isLeafNode(u, g) && !tbi->isAnyStart(u))) {
+        if (g[u].suffix || !g[u].reports.empty() ||
+            (ig[iv].type == RIV_ACCEPT_EOD && out_degree(u, g) &&
+             !edge_props.graph) ||
+            (!isLeafNode(u, g) && !tbi->isAnyStart(u))) {
             DEBUG_PRINTF("duplicating for parent %zu\n", g[u].index);
             assert(!tbi->isAnyStart(u));
             u = duplicate(tbi, u);
@@ -822,9 +811,8 @@ void doRoseAcceptVertex(RoseBuildImpl *tbi,
     }
 }
 
-static
-bool suitableForEod(const RoseInGraph &ig, vector<RoseInVertex> topo,
-                    u32 *max_len, const CompileContext &cc) {
+static bool suitableForEod(const RoseInGraph &ig, vector<RoseInVertex> topo,
+                           u32 *max_len, const CompileContext &cc) {
     map<RoseInVertex, u32> max_depth_from_eod;
     *max_len = 0;
 
@@ -918,8 +906,8 @@ bool suitableForEod(const RoseInGraph &ig, vector<RoseInVertex> topo,
             ENSURE_AT_LEAST(&v_depth, (u32)max_width);
         }
 
-        if (v_depth == ROSE_BOUND_INF
-            || v_depth > cc.grey.maxHistoryAvailable) {
+        if (v_depth == ROSE_BOUND_INF ||
+            v_depth > cc.grey.maxHistoryAvailable) {
             DEBUG_PRINTF("not suitable for eod table %u\n", v_depth);
             return false;
         }
@@ -932,15 +920,13 @@ bool suitableForEod(const RoseInGraph &ig, vector<RoseInVertex> topo,
     return true;
 }
 
-static
-void shift_accepts_to_end(const RoseInGraph &ig,
-                          vector<RoseInVertex> &topo_order) {
+static void shift_accepts_to_end(const RoseInGraph &ig,
+                                 vector<RoseInVertex> &topo_order) {
     stable_partition(begin(topo_order), end(topo_order),
-                     [&](RoseInVertex v){ return !is_any_accept(v, ig); });
+                     [&](RoseInVertex v) { return !is_any_accept(v, ig); });
 }
 
-static
-void populateRoseGraph(RoseBuildImpl *tbi, RoseBuildData &bd) {
+static void populateRoseGraph(RoseBuildImpl *tbi, RoseBuildData &bd) {
     const RoseInGraph &ig = bd.ig;
 
     /* add the pattern in to the main rose graph */
@@ -948,20 +934,20 @@ void populateRoseGraph(RoseBuildImpl *tbi, RoseBuildData &bd) {
 
     /* Note: an input vertex may need to create several rose vertices. This is
      * primarily because a RoseVertex can only have 1 one leftfix */
-    map<RoseInVertex, vector<RoseVertex> > vertex_map;
+    map<RoseInVertex, vector<RoseVertex>> vertex_map;
 
     vector<RoseInVertex> v_order = topo_order(ig);
     shift_accepts_to_end(ig, v_order);
 
     u32 eod_space_required;
-    bool use_eod_table = suitableForEod(ig, v_order, &eod_space_required,
-                                        tbi->cc);
+    bool use_eod_table =
+        suitableForEod(ig, v_order, &eod_space_required, tbi->cc);
     if (use_eod_table) {
         ENSURE_AT_LEAST(&tbi->ematcher_region_size, eod_space_required);
     }
 
-    assert(ig[v_order.front()].type == RIV_START
-           || ig[v_order.front()].type == RIV_ANCHORED_START);
+    assert(ig[v_order.front()].type == RIV_START ||
+           ig[v_order.front()].type == RIV_ANCHORED_START);
 
     for (RoseInVertex iv : v_order) {
         DEBUG_PRINTF("vertex %zu\n", ig[iv].index);
@@ -976,19 +962,20 @@ void populateRoseGraph(RoseBuildImpl *tbi, RoseBuildData &bd) {
             continue;
         }
 
-        vector<pair<RoseVertex, RoseInEdge> > parents;
+        vector<pair<RoseVertex, RoseInEdge>> parents;
         for (const auto &e : in_edges_range(iv, ig)) {
             RoseInVertex u = source(e, ig);
             assert(contains(vertex_map, u));
             const vector<RoseVertex> &images = vertex_map[u];
 
             // We should have no dupes.
-            assert(set<RoseVertex>(images.begin(), images.end()).size()
-                   == images.size());
+            assert(set<RoseVertex>(images.begin(), images.end()).size() ==
+                   images.size());
 
             for (auto v_image : images) {
                 // v_image should NOT already be in our parents list.
-                assert(find_if(parents.begin(), parents.end(),
+                assert(
+                    find_if(parents.begin(), parents.end(),
                             [&v_image](const pair<RoseVertex, RoseInEdge> &p) {
                                 return p.first == v_image;
                             }) == parents.end());
@@ -1024,17 +1011,15 @@ void populateRoseGraph(RoseBuildImpl *tbi, RoseBuildData &bd) {
     DEBUG_PRINTF("done\n");
 }
 
-template<typename GraphT>
-static
-bool empty(const GraphT &g) {
+template <typename GraphT> static bool empty(const GraphT &g) {
     typename GraphT::vertex_iterator vi, ve;
     tie(vi, ve) = vertices(g);
     return vi == ve;
 }
 
-static
-bool canImplementGraph(NGHolder &h, bool prefilter, const ReportManager &rm,
-                       const CompileContext &cc) {
+static bool canImplementGraph(NGHolder &h, bool prefilter,
+                              const ReportManager &rm,
+                              const CompileContext &cc) {
     if (isImplementableNFA(h, &rm, cc)) {
         return true;
     }
@@ -1055,8 +1040,7 @@ bool canImplementGraph(NGHolder &h, bool prefilter, const ReportManager &rm,
     return false;
 }
 
-static
-bool predsAreDelaySensitive(const RoseInGraph &ig, RoseInVertex v) {
+static bool predsAreDelaySensitive(const RoseInGraph &ig, RoseInVertex v) {
     assert(in_degree(v, ig));
 
     for (const auto &e : in_edges_range(v, ig)) {
@@ -1086,8 +1070,8 @@ bool predsAreDelaySensitive(const RoseInGraph &ig, RoseInVertex v) {
     return false;
 }
 
-static
-u32 maxAvailableDelay(const ue2_literal &pred_key, const ue2_literal &lit_key) {
+static u32 maxAvailableDelay(const ue2_literal &pred_key,
+                             const ue2_literal &lit_key) {
     /* overly conservative if only part of the string is nocase */
     string pred = pred_key.get_string();
     string lit = lit_key.get_string();
@@ -1106,8 +1090,8 @@ u32 maxAvailableDelay(const ue2_literal &pred_key, const ue2_literal &lit_key) {
     return MIN(raw, MAX_DELAY);
 }
 
-static
-u32 findMaxSafeDelay(const RoseInGraph &ig, RoseInVertex u, RoseInVertex v) {
+static u32 findMaxSafeDelay(const RoseInGraph &ig, RoseInVertex u,
+                            RoseInVertex v) {
     // First, check the overlap constraints on (u,v).
     size_t max_delay;
     if (ig[v].type == RIV_LITERAL) {
@@ -1160,9 +1144,8 @@ u32 findMaxSafeDelay(const RoseInGraph &ig, RoseInVertex u, RoseInVertex v) {
     return max_delay;
 }
 
-static
-bool transformInfixToDelay(const RoseInGraph &ig, const RoseInEdge &e,
-                           const CompileContext &cc, u32 *delay_out) {
+static bool transformInfixToDelay(const RoseInGraph &ig, const RoseInEdge &e,
+                                  const CompileContext &cc, u32 *delay_out) {
     const u32 max_history =
         cc.streaming ? cc.grey.maxHistoryAvailable : ROSE_BOUND_INF;
 
@@ -1225,8 +1208,7 @@ bool transformInfixToDelay(const RoseInGraph &ig, const RoseInEdge &e,
     return true;
 }
 
-static
-void transformLiteralDelay(RoseInGraph &ig, const CompileContext &cc) {
+static void transformLiteralDelay(RoseInGraph &ig, const CompileContext &cc) {
     if (!cc.grey.roseTransformDelay) {
         return;
     }
@@ -1283,11 +1265,12 @@ void transformLiteralDelay(RoseInGraph &ig, const CompileContext &cc) {
     }
 }
 
-static
-bool transformInfixToAnchBounds(const RoseInGraph &ig, const RoseInEdge &e,
-                                const CompileContext &cc, DepthMinMax *bounds) {
-    const u32 max_history = cc.streaming ? cc.grey.maxHistoryAvailable
-                                         : ROSE_BOUND_INF;
+static bool transformInfixToAnchBounds(const RoseInGraph &ig,
+                                       const RoseInEdge &e,
+                                       const CompileContext &cc,
+                                       DepthMinMax *bounds) {
+    const u32 max_history =
+        cc.streaming ? cc.grey.maxHistoryAvailable : ROSE_BOUND_INF;
 
     const RoseInVertex v = target(e, ig);
     const u32 graph_lag = ig[e].graph_lag;
@@ -1336,9 +1319,8 @@ bool transformInfixToAnchBounds(const RoseInGraph &ig, const RoseInEdge &e,
     return true;
 }
 
-static
-void transformAnchoredLiteralOverlap(RoseInGraph &ig, RoseBuildData &bd,
-                                     const CompileContext &cc) {
+static void transformAnchoredLiteralOverlap(RoseInGraph &ig, RoseBuildData &bd,
+                                            const CompileContext &cc) {
     if (!cc.grey.roseTransformDelay) {
         return;
     }
@@ -1373,8 +1355,8 @@ void transformAnchoredLiteralOverlap(RoseInGraph &ig, RoseBuildData &bd,
         ig[e].graph_lag = 0;
         ig[e].graph.reset();
         ig[e].minBound = bounds.min;
-        ig[e].maxBound = bounds.max.is_finite() ? (u32)bounds.max
-                                                : ROSE_BOUND_INF;
+        ig[e].maxBound =
+            bounds.max.is_finite() ? (u32)bounds.max : ROSE_BOUND_INF;
         bd.anch_history_edges.insert(e);
     }
 }
@@ -1390,14 +1372,13 @@ void transformAnchoredLiteralOverlap(RoseInGraph &ig, RoseBuildData &bd,
  * appropriate. It doesn't handle complex cases where the literal has more than
  * one successor.
  */
-static
-void transformSuffixDelay(RoseInGraph &ig, const CompileContext &cc) {
+static void transformSuffixDelay(RoseInGraph &ig, const CompileContext &cc) {
     if (!cc.grey.roseTransformDelay) {
         return;
     }
 
-    const u32 max_history = cc.streaming ? cc.grey.maxHistoryAvailable
-                                         : ROSE_BOUND_INF;
+    const u32 max_history =
+        cc.streaming ? cc.grey.maxHistoryAvailable : ROSE_BOUND_INF;
 
     set<RoseInVertex> modified_accepts; // may be dead after transform
 
@@ -1427,7 +1408,7 @@ void transformSuffixDelay(RoseInGraph &ig, const CompileContext &cc) {
         }
 
         DEBUG_PRINTF("lit->accept edge with graph: lit='%s'\n",
-                      escapeString(ig[u].s).c_str());
+                     escapeString(ig[u].s).c_str());
 
         const NGHolder &h = *ig[e].graph;
         const set<ReportID> reports = all_reports(h);
@@ -1493,8 +1474,7 @@ void transformSuffixDelay(RoseInGraph &ig, const CompileContext &cc) {
 }
 
 #ifndef NDEBUG
-static
-bool validateKinds(const RoseInGraph &g) {
+static bool validateKinds(const RoseInGraph &g) {
     for (const auto &e : edges_range(g)) {
         if (g[e].graph && g[e].graph->kind != whatRoseIsThis(g, e)) {
             return false;
@@ -1568,8 +1548,8 @@ bool RoseBuildImpl::addRose(const RoseInGraph &ig, bool prefilter) {
         DEBUG_PRINTF("handling %p\n", &h);
         assert(allMatchStatesHaveReports(h));
 
-        if (!generates_callbacks(whatRoseIsThis(in, e))
-            && in[target(e, in)].type != RIV_ACCEPT_EOD) {
+        if (!generates_callbacks(whatRoseIsThis(in, e)) &&
+            in[target(e, in)].type != RIV_ACCEPT_EOD) {
             set_report(h, getNewNfaReport());
         }
     }
@@ -1640,11 +1620,12 @@ bool roseCheckRose(const RoseInGraph &ig, bool prefilter,
 void RoseBuildImpl::add(bool anchored, bool eod, const ue2_literal &lit,
                         const flat_set<ReportID> &reports) {
     assert(!reports.empty());
-    if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
-        DEBUG_PRINTF("rejecting low-quality NeoFDR literal '%s'\n",
+    if (cc.grey.allowNeoFdr && hasLongAllZeroNeoFdrTail(lit)) {
+        DEBUG_PRINTF("rejecting legacy zero-tail NeoFDR literal '%s'\n",
                      escapeString(lit).c_str());
         return;
     }
+
     if (cc.grey.floodAsPuffette && !anchored && !eod && is_flood(lit) &&
         lit.length() > 3) {
         DEBUG_PRINTF("adding as puffette\n");
@@ -1658,9 +1639,10 @@ void RoseBuildImpl::add(bool anchored, bool eod, const ue2_literal &lit,
 
     RoseInGraph ig;
     RoseInVertex start = add_vertex(RoseInVertexProps::makeStart(anchored), ig);
-    RoseInVertex accept = add_vertex(
-                    eod ? RoseInVertexProps::makeAcceptEod(set<ReportID>())
-                        : RoseInVertexProps::makeAccept(set<ReportID>()), ig);
+    RoseInVertex accept =
+        add_vertex(eod ? RoseInVertexProps::makeAcceptEod(set<ReportID>())
+                       : RoseInVertexProps::makeAccept(set<ReportID>()),
+                   ig);
     RoseInVertex v = add_vertex(RoseInVertexProps::makeLiteral(lit), ig);
 
     add_edge(start, v, RoseInEdgeProps(0U, anchored ? 0U : ROSE_BOUND_INF), ig);
@@ -1673,8 +1655,7 @@ void RoseBuildImpl::add(bool anchored, bool eod, const ue2_literal &lit,
     addRose(ig, false);
 }
 
-static
-u32 findMaxBAWidth(const NGHolder &h) {
+static u32 findMaxBAWidth(const NGHolder &h) {
     // Must be bi-anchored: no out-edges from startDs (other than its
     // self-loop), no in-edges to accept.
     if (out_degree(h.startDs, h) > 1 || in_degree(h.accept, h)) {
@@ -1689,9 +1670,8 @@ u32 findMaxBAWidth(const NGHolder &h) {
     return d;
 }
 
-static
-void populateOutfixInfo(OutfixInfo &outfix, const NGHolder &h,
-                        const RoseBuildImpl &tbi) {
+static void populateOutfixInfo(OutfixInfo &outfix, const NGHolder &h,
+                               const RoseBuildImpl &tbi) {
     outfix.maxBAWidth = findMaxBAWidth(h);
     outfix.minWidth = findMinWidth(h);
     outfix.maxWidth = findMaxWidth(h);
@@ -1699,11 +1679,10 @@ void populateOutfixInfo(OutfixInfo &outfix, const NGHolder &h,
     populateReverseAccelerationInfo(outfix.rev_info, h);
 }
 
-static
-bool addEodOutfix(RoseBuildImpl &build, const NGHolder &h) {
+static bool addEodOutfix(RoseBuildImpl &build, const NGHolder &h) {
     map<flat_set<ReportID>, ReportID> report_remap;
-    shared_ptr<NGHolder> eod_leftfix
-        = makeRoseEodPrefix(h, build, report_remap);
+    shared_ptr<NGHolder> eod_leftfix =
+        makeRoseEodPrefix(h, build, report_remap);
 
     bool nfa_ok = isImplementableNFA(h, &build.rm, build.cc);
 
@@ -1754,8 +1733,8 @@ bool addEodOutfix(RoseBuildImpl &build, const NGHolder &h) {
 }
 
 bool RoseBuildImpl::addChar(const ue2_literal &lit, u32 expr_index,
-                    u32 external_report, bool highlander, som_type som,
-                    bool quiet, NG& ng, unsigned flags) {
+                            u32 external_report, bool highlander, som_type som,
+                            bool quiet, NG &ng, unsigned flags) {
     assert(lit.length() == 1);
     // Register external report and validate highlander constraints.
     rm.registerExtReport(external_report,
@@ -1769,20 +1748,22 @@ bool RoseBuildImpl::addChar(const ue2_literal &lit, u32 expr_index,
         this->setSom();
         ekey = INVALID_EKEY;
     } else {
-        ekey = highlander ? rm.getExhaustibleKey(external_report)
-                              : INVALID_EKEY;
+        ekey =
+            highlander ? rm.getExhaustibleKey(external_report) : INVALID_EKEY;
         Report r = makeECallback(external_report, 0, ekey, quiet);
         id = rm.getInternalId(r);
     }
 
     // Set both internal and external report IDs for Lily
-    DEBUG_PRINTF("success: graph is literal '%s', internal report ID %u, external report ID %u\n",
+    DEBUG_PRINTF("success: graph is literal '%s', internal report ID %u, "
+                 "external report ID %u\n",
                  dumpString(lit).c_str(), id, external_report);
     ng.minWidth = depth(1);
     std::pair<ReportID, unsigned> p(id, flags);
     lilyReport report = {id, external_report, ekey, flags};
     if (this->lily.size() < 8) {
-        auto res = this->lily.insert(std::pair<char, lilyReport>(lit.get_string()[0], report));
+        auto res = this->lily.insert(
+            std::pair<char, lilyReport>(lit.get_string()[0], report));
         return (res.second);
     } else {
         return false;
@@ -1790,8 +1771,9 @@ bool RoseBuildImpl::addChar(const ue2_literal &lit, u32 expr_index,
 }
 
 bool RoseBuildImpl::addShortLit(const ue2_literal &lit, u32 expr_index,
-                                u32 external_report, bool highlander, som_type som,
-                                bool quiet, NG& ng, unsigned flags) {
+                                u32 external_report, bool highlander,
+                                som_type som, bool quiet, NG &ng,
+                                unsigned flags) {
     assert((lit.length() >= 2) && (lit.length() <= 4));
     // Register external report and validate highlander constraints.
     rm.registerExtReport(external_report,
@@ -1805,24 +1787,26 @@ bool RoseBuildImpl::addShortLit(const ue2_literal &lit, u32 expr_index,
         this->setSom();
         ekey = INVALID_EKEY;
     } else {
-        ekey = highlander ? rm.getExhaustibleKey(external_report)
-                              : INVALID_EKEY;
+        ekey =
+            highlander ? rm.getExhaustibleKey(external_report) : INVALID_EKEY;
         Report r = makeECallback(external_report, 0, ekey, quiet);
         id = rm.getInternalId(r);
     }
 
     // Set both internal and external report IDs for Lily
-    DEBUG_PRINTF("success: graph is literal '%s', internal report ID %u, external report ID %u\n",
-                dumpString(lit).c_str(), id, external_report);
+    DEBUG_PRINTF("success: graph is literal '%s', internal report ID %u, "
+                 "external report ID %u\n",
+                 dumpString(lit).c_str(), id, external_report);
     ng.minWidth = depth(1);
     lilyReport report = {id, external_report, ekey, flags};
     try {
         if (this->lilyForTeddyPQ.size() < 8) {
-            this->lilyForTeddyPQ.push(LilyForTeddyPair(lit.get_string(), report));
+            this->lilyForTeddyPQ.push(
+                LilyForTeddyPair(lit.get_string(), report));
         } else {
             return false;
         }
-    } catch(const std::exception& e) {
+    } catch (const std::exception &e) {
         return false;
     }
     return true;
@@ -1832,9 +1816,8 @@ bool RoseBuildImpl::addOutfix(const NGHolder &h) {
     DEBUG_PRINTF("%zu vertices, %zu edges\n", num_vertices(h), num_edges(h));
 
     /* TODO: handle more than one report */
-    if (!in_degree(h.accept, h)
-        && all_reports(h).size() == 1
-        && addEodOutfix(*this, h)) {
+    if (!in_degree(h.accept, h) && all_reports(h).size() == 1 &&
+        addEodOutfix(*this, h)) {
         return true;
     }
 
@@ -1846,7 +1829,7 @@ bool RoseBuildImpl::addOutfix(const NGHolder &h) {
     }
 
     bool dfa_cand = !nfa_states || nfa_states > 128 /* slow model */
-                    || can_exhaust(h, rm); /* can be pruned */
+                    || can_exhaust(h, rm);          /* can be pruned */
 
     unique_ptr<raw_dfa> rdfa;
 
@@ -1892,8 +1875,8 @@ bool RoseBuildImpl::addOutfix(const raw_puff &rp) {
     mpv_outfix->maxBAWidth = ROSE_BOUND_INF; /* not ba */
     mpv_outfix->minWidth = min(mpv_outfix->minWidth, depth(rp.repeats));
     mpv_outfix->maxWidth = rp.unbounded
-                              ? depth::infinity()
-                              : max(mpv_outfix->maxWidth, depth(rp.repeats));
+                               ? depth::infinity()
+                               : max(mpv_outfix->maxWidth, depth(rp.repeats));
 
     if (mpv_outfix->maxOffset == ROSE_BOUND_INF || rp.unbounded) {
         mpv_outfix->maxOffset = ROSE_BOUND_INF;
@@ -1917,11 +1900,11 @@ bool RoseBuildImpl::addChainTail(const raw_puff &rp, u32 *queue_out,
     mpv_outfix->maxBAWidth = ROSE_BOUND_INF; /* not ba */
     mpv_outfix->minWidth = min(mpv_outfix->minWidth, depth(rp.repeats));
     mpv_outfix->maxWidth = rp.unbounded
-                              ? depth::infinity()
-                              : max(mpv_outfix->maxWidth, depth(rp.repeats));
+                               ? depth::infinity()
+                               : max(mpv_outfix->maxWidth, depth(rp.repeats));
 
-    mpv_outfix->maxOffset = ROSE_BOUND_INF; /* TODO: we could get information from
-                                            * the caller */
+    mpv_outfix->maxOffset = ROSE_BOUND_INF; /* TODO: we could get information
+                                             * from the caller */
 
     *queue_out = mpv_outfix->get_queue(qif);
     *event_out = MQE_TOP_FIRST + mpv->triggered_puffettes.size() - 1;
@@ -1929,14 +1912,13 @@ bool RoseBuildImpl::addChainTail(const raw_puff &rp, u32 *queue_out,
     return true; /* failure is not yet an option */
 }
 
-static
-bool prepAcceptForAddAnchoredNFA(RoseBuildImpl &tbi, const NGHolder &w,
-                                 NFAVertex u,
-                                 const vector<DepthMinMax> &vertexDepths,
-                                 map<u32, DepthMinMax> &depthMap,
-                                 map<NFAVertex, set<u32>> &reportMap,
-                                 map<ReportID, u32> &allocated_reports,
-                                 flat_set<u32> &added_lit_ids) {
+static bool prepAcceptForAddAnchoredNFA(RoseBuildImpl &tbi, const NGHolder &w,
+                                        NFAVertex u,
+                                        const vector<DepthMinMax> &vertexDepths,
+                                        map<u32, DepthMinMax> &depthMap,
+                                        map<NFAVertex, set<u32>> &reportMap,
+                                        map<ReportID, u32> &allocated_reports,
+                                        flat_set<u32> &added_lit_ids) {
     const depth max_anchored_depth(tbi.cc.grey.maxAnchoredRegion);
     const size_t index = w[u].index;
     assert(index < vertexDepths.size());
@@ -1976,8 +1958,8 @@ bool prepAcceptForAddAnchoredNFA(RoseBuildImpl &tbi, const NGHolder &w,
 // Failure path for addAnchoredAcyclic: removes the literal IDs that have been
 // added to support anchored NFAs. Assumes that they are a contiguous range at
 // the end of the RoseBuildImpl::literal_info vector.
-static
-void removeAddedLiterals(RoseBuildImpl &tbi, const flat_set<u32> &lit_ids) {
+static void removeAddedLiterals(RoseBuildImpl &tbi,
+                                const flat_set<u32> &lit_ids) {
     if (lit_ids.empty()) {
         return;
     }
@@ -2005,7 +1987,7 @@ void removeAddedLiterals(RoseBuildImpl &tbi, const flat_set<u32> &lit_ids) {
 bool RoseBuildImpl::addAnchoredAcyclic(const NGHolder &h) {
     auto vertexDepths = calcDepthsFrom(h, h.start);
 
-    map<NFAVertex, set<u32> > reportMap;  /* NFAVertex -> literal ids */
+    map<NFAVertex, set<u32>> reportMap;   /* NFAVertex -> literal ids */
     map<u32, DepthMinMax> depthMap;       /* literal id -> min/max depth */
     map<ReportID, u32> allocated_reports; /* report -> literal id */
     flat_set<u32> added_lit_ids;          /* literal ids added for this NFA */
@@ -2046,8 +2028,8 @@ bool RoseBuildImpl::addAnchoredAcyclic(const NGHolder &h) {
             assert(depthMap[lit_id].max.is_finite());
             u32 minBound = depthMap[lit_id].min;
             u32 maxBound = depthMap[lit_id].max;
-            RoseVertex v
-                = createAnchoredVertex(this, lit_id, minBound, maxBound);
+            RoseVertex v =
+                createAnchoredVertex(this, lit_id, minBound, maxBound);
             g[v].reports.insert(report);
         }
 
@@ -2057,8 +2039,8 @@ bool RoseBuildImpl::addAnchoredAcyclic(const NGHolder &h) {
             assert(depthMap[lit_id].max.is_finite());
             u32 minBound = depthMap[lit_id].min;
             u32 maxBound = depthMap[lit_id].max;
-            RoseVertex v
-                = createAnchoredVertex(this, lit_id, minBound, maxBound);
+            RoseVertex v =
+                createAnchoredVertex(this, lit_id, minBound, maxBound);
             RoseVertex eod = add_vertex(g);
             g[eod].eod_accept = true;
             g[eod].reports.insert(report);

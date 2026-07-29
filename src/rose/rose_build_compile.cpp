@@ -30,21 +30,11 @@
 
 #include "grey.h"
 #include "hs_internal.h"
-#include "rose_build_anchored.h"
-#include "rose_build_castle.h"
-#include "rose_build_convert.h"
-#include "rose_build_dump.h"
-#include "rose_build_groups.h"
-#include "rose_build_matchers.h"
-#include "rose_build_merge.h"
-#include "rose_build_role_aliasing.h"
-#include "rose_build_util.h"
-#include "ue2common.h"
 #include "hwlm/hwlm_literal.h"
 #include "nfa/nfa_internal.h"
 #include "nfa/rdfa.h"
-#include "nfagraph/ng_holder.h"
 #include "nfagraph/ng_execute.h"
+#include "nfagraph/ng_holder.h"
 #include "nfagraph/ng_is_equal.h"
 #include "nfagraph/ng_limex.h"
 #include "nfagraph/ng_mcclellan.h"
@@ -54,6 +44,17 @@
 #include "nfagraph/ng_stop.h"
 #include "nfagraph/ng_util.h"
 #include "nfagraph/ng_width.h"
+#include "rose_build_anchored.h"
+#include "rose_build_castle.h"
+#include "rose_build_convert.h"
+#include "rose_build_dump.h"
+#include "rose_build_fp_feedback.h"
+#include "rose_build_groups.h"
+#include "rose_build_matchers.h"
+#include "rose_build_merge.h"
+#include "rose_build_role_aliasing.h"
+#include "rose_build_util.h"
+#include "ue2common.h"
 #include "util/bitutils.h"
 #include "util/charreach.h"
 #include "util/charreach_util.h"
@@ -73,8 +74,8 @@
 #include <map>
 #include <set>
 #include <string>
-#include <vector>
 #include <utility>
+#include <vector>
 
 #include <boost/range/adaptor/map.hpp>
 
@@ -90,8 +91,7 @@ namespace ue2 {
 #define ANCHORED_REHOME_SHORT_LEN 3
 
 #define MAX_EXPLOSION_NC 3
-static
-bool limited_explosion(const ue2_literal &s) {
+static bool limited_explosion(const ue2_literal &s) {
     u32 nc_count = 0;
 
     for (const auto &e : s) {
@@ -103,8 +103,7 @@ bool limited_explosion(const ue2_literal &s) {
     return nc_count <= MAX_EXPLOSION_NC;
 }
 
-static
-void removeLiteralFromGraph(RoseBuildImpl &build, u32 id) {
+static void removeLiteralFromGraph(RoseBuildImpl &build, u32 id) {
     assert(id < build.literal_info.size());
     auto &info = build.literal_info.at(id);
     for (const auto &v : info.vertices) {
@@ -117,12 +116,11 @@ void removeLiteralFromGraph(RoseBuildImpl &build, u32 id) {
  * \brief Replace the given mixed-case literal with the set of its caseless
  * variants.
  */
-static
-void explodeLiteral(RoseBuildImpl &build, u32 id) {
+static void explodeLiteral(RoseBuildImpl &build, u32 id) {
     const auto &lit = build.literals.at(id);
     auto &info = build.literal_info[id];
 
-    assert(!info.group_mask); // not set yet
+    assert(!info.group_mask);        // not set yet
     assert(info.undelayed_id == id); // we do not explode delayed literals
 
     for (auto it = caseIterateBegin(lit.s); it != caseIterateEnd(); ++it) {
@@ -207,8 +205,7 @@ void RoseBuildImpl::handleMixedSensitivity(void) {
 
 // Returns the length of the longest prefix of s that is (a) also a suffix of s
 // and (b) not s itself.
-static
-size_t maxPeriod(const ue2_literal &s) {
+static size_t maxPeriod(const ue2_literal &s) {
     /* overly conservative if only part of the string is nocase */
     if (s.empty()) {
         return 0;
@@ -276,8 +273,7 @@ bool RoseBuildImpl::hasOnlyPseudoStarInEdges(RoseVertex v) const {
     return true;
 }
 
-static
-size_t trailerDueToSelf(const rose_literal_id &lit) {
+static size_t trailerDueToSelf(const rose_literal_id &lit) {
     size_t trailer = lit.s.length() - maxPeriod(lit.s);
     if (trailer > 255) {
         return 255;
@@ -288,8 +284,8 @@ size_t trailerDueToSelf(const rose_literal_id &lit) {
     return trailer;
 }
 
-static
-RoseRoleHistory findHistoryScheme(const RoseBuildImpl &tbi, const RoseEdge &e) {
+static RoseRoleHistory findHistoryScheme(const RoseBuildImpl &tbi,
+                                         const RoseEdge &e) {
     const RoseGraph &g = tbi.g;
     const RoseVertex u = source(e, g); /* pred role */
     const RoseVertex v = target(e, g); /* current role */
@@ -347,8 +343,8 @@ RoseRoleHistory findHistoryScheme(const RoseBuildImpl &tbi, const RoseEdge &e) {
 
     // Non-EOD cases.
 
-    DEBUG_PRINTF("examining edge [%zu,%zu] with bounds {%u,%u}\n",
-                 g[u].index, g[v].index, g[e].minBound, g[e].maxBound);
+    DEBUG_PRINTF("examining edge [%zu,%zu] with bounds {%u,%u}\n", g[u].index,
+                 g[v].index, g[e].minBound, g[e].maxBound);
 
     if (tbi.isAnchored(v)) {
         // Matches for literals in the anchored table will always arrive at the
@@ -367,8 +363,7 @@ RoseRoleHistory findHistoryScheme(const RoseBuildImpl &tbi, const RoseEdge &e) {
     return ROSE_ROLE_HISTORY_NONE;
 }
 
-static
-void assignHistories(RoseBuildImpl &tbi) {
+static void assignHistories(RoseBuildImpl &tbi) {
     for (const auto &e : edges_range(tbi.g)) {
         if (tbi.g[e].history == ROSE_ROLE_HISTORY_INVALID) {
             tbi.g[e].history = findHistoryScheme(tbi, e);
@@ -385,7 +380,7 @@ bool RoseBuildImpl::isDirectReport(u32 id) const {
         return false;
     }
 
-    if (!info.delayed_ids.empty() /* dr's don't set groups */
+    if (!info.delayed_ids.empty()    /* dr's don't set groups */
         || info.requires_benefits) { /* dr's don't require confirm */
         return false;
     }
@@ -404,10 +399,8 @@ bool RoseBuildImpl::isDirectReport(u32 id) const {
     for (auto v : info.vertices) {
         assert(contains(g[v].literals, id));
 
-        if (g[v].reports.empty() ||
-            g[v].eod_accept || // no accept EOD
-            !g[v].isBoring() ||
-            !isLeafNode(v, g) || // Must have no out-edges
+        if (g[v].reports.empty() || g[v].eod_accept || // no accept EOD
+            !g[v].isBoring() || !isLeafNode(v, g) ||   // Must have no out-edges
             in_degree(v, g) != 1) { // Role must have exactly one in-edge
             return false;
         }
@@ -443,14 +436,12 @@ bool RoseBuildImpl::isDirectReport(u32 id) const {
     return true;
 }
 
-
 /* If we have prefixes that can squash all the floating roots, we can have a
  * somewhat-conditional floating table. As we can't yet look at squash_masks, we
  * have to make some guess as to if we are in this case but the win for not
  * running a floating table over a large portion of the stream is significantly
  * larger than avoiding running an eod table over the last N bytes. */
-static
-bool checkFloatingKillableByPrefixes(const RoseBuildImpl &tbi) {
+static bool checkFloatingKillableByPrefixes(const RoseBuildImpl &tbi) {
     for (auto v : vertices_range(tbi.g)) {
         if (!tbi.isRootSuccessor(v)) {
             continue;
@@ -482,11 +473,10 @@ bool checkFloatingKillableByPrefixes(const RoseBuildImpl &tbi) {
     return true;
 }
 
-static
-bool checkEodStealFloating(const RoseBuildImpl &build,
-                           const vector<u32> &eodLiteralsForFloating,
-                           u32 numFloatingLiterals,
-                           size_t shortestFloatingLen) {
+static bool checkEodStealFloating(const RoseBuildImpl &build,
+                                  const vector<u32> &eodLiteralsForFloating,
+                                  u32 numFloatingLiterals,
+                                  size_t shortestFloatingLen) {
     if (eodLiteralsForFloating.empty()) {
         DEBUG_PRINTF("no eod literals\n");
         return true;
@@ -504,8 +494,8 @@ bool checkEodStealFloating(const RoseBuildImpl &build,
     }
 
     if (checkFloatingKillableByPrefixes(build)) {
-         DEBUG_PRINTF("skipping as prefixes may make ftable conditional\n");
-         return false;
+        DEBUG_PRINTF("skipping as prefixes may make ftable conditional\n");
+        return false;
     }
 
     // Collect a set of all floating literals.
@@ -530,6 +520,10 @@ bool checkEodStealFloating(const RoseBuildImpl &build,
             continue;
         }
 
+        fpFeedbackObservesRoseFragment(
+            build.cc, lit.s, &lit.msk, &lit.cmp,
+            HS_FP_COMPILE_CHECKPOINT_REWRITE_EOD_TO_FLOATING);
+
         // Don't want to make the shortest floating literal shorter/worse.
         if (trailerDueToSelf(lit) < 4 || lit.s.length() < shortestFloatingLen) {
             DEBUG_PRINTF("len=%zu, selfOverlap=%zu\n", lit.s.length(),
@@ -541,12 +535,12 @@ bool checkEodStealFloating(const RoseBuildImpl &build,
         new_floating_lits++;
     }
     DEBUG_PRINTF("..would require %u new floating literals\n",
-                  new_floating_lits);
+                 new_floating_lits);
 
     // Magic number thresholds: we only want to get rid of our EOD table if it
     // would make no real difference to the FDR.
-    if (numFloatingLiterals / 8 < new_floating_lits
-        && (new_floating_lits > 3 || numFloatingLiterals <= 2)) {
+    if (numFloatingLiterals / 8 < new_floating_lits &&
+        (new_floating_lits > 3 || numFloatingLiterals <= 2)) {
         DEBUG_PRINTF("leaving eod table alone.\n");
         return false;
     }
@@ -554,16 +548,16 @@ bool checkEodStealFloating(const RoseBuildImpl &build,
     return true;
 }
 
-static
-void promoteEodToFloating(RoseBuildImpl &tbi, const vector<u32> &eodLiterals) {
+static void promoteEodToFloating(RoseBuildImpl &tbi,
+                                 const vector<u32> &eodLiterals) {
     DEBUG_PRINTF("promoting %zu eod literals to floating table\n",
                  eodLiterals.size());
 
     for (u32 eod_id : eodLiterals) {
         const rose_literal_id &lit = tbi.literals.at(eod_id);
         DEBUG_PRINTF("eod_id=%u, lit=%s\n", eod_id, dumpString(lit.s).c_str());
-        u32 floating_id = tbi.getLiteralId(lit.s, lit.msk, lit.cmp, lit.delay,
-                                           ROSE_FLOATING);
+        u32 floating_id =
+            tbi.getLiteralId(lit.s, lit.msk, lit.cmp, lit.delay, ROSE_FLOATING);
         DEBUG_PRINTF("floating_id=%u, lit=%s\n", floating_id,
                      dumpString(tbi.literals.at(floating_id).s).c_str());
         auto &float_verts = tbi.literal_info[floating_id].vertices;
@@ -579,13 +573,13 @@ void promoteEodToFloating(RoseBuildImpl &tbi, const vector<u32> &eodLiterals) {
             tbi.g[v].literals.insert(floating_id);
         }
 
-        tbi.literal_info[floating_id].requires_benefits
-            = tbi.literal_info[eod_id].requires_benefits;
+        tbi.literal_info[floating_id].requires_benefits =
+            tbi.literal_info[eod_id].requires_benefits;
     }
 }
 
-static
-bool promoteEodToAnchored(RoseBuildImpl &tbi, const vector<u32> &eodLiterals) {
+static bool promoteEodToAnchored(RoseBuildImpl &tbi,
+                                 const vector<u32> &eodLiterals) {
     DEBUG_PRINTF("promoting eod literals to anchored table\n");
     bool rv = true;
 
@@ -641,9 +635,9 @@ bool promoteEodToAnchored(RoseBuildImpl &tbi, const vector<u32> &eodLiterals) {
     return rv;
 }
 
-static
-bool suitableForAnchored(const RoseBuildImpl &tbi, const rose_literal_id &l_id,
-                         const rose_literal_info &lit) {
+static bool suitableForAnchored(const RoseBuildImpl &tbi,
+                                const rose_literal_id &l_id,
+                                const rose_literal_info &lit) {
     const RoseGraph &g = tbi.g;
 
     bool seen = false;
@@ -694,7 +688,7 @@ bool suitableForAnchored(const RoseBuildImpl &tbi, const rose_literal_id &l_id,
 
         if (max_offset != l_id.s.length() || min_offset != l_id.s.length()) {
             DEBUG_PRINTF("|%zu| (%u,%u):(\n", l_id.s.length(), min_offset,
-                          max_offset);
+                         max_offset);
             /* TODO: handle cases with small bounds */
             return false;
         }
@@ -715,8 +709,7 @@ bool suitableForAnchored(const RoseBuildImpl &tbi, const rose_literal_id &l_id,
 // replacing with an elegant reverse DFA.
 /* We do not want to do this if we would otherwise avoid running the floating
  * table altogether. */
-static
-void stealEodVertices(RoseBuildImpl &tbi) {
+static void stealEodVertices(RoseBuildImpl &tbi) {
     u32 numFloatingLiterals = 0;
     u32 numAnchoredLiterals = 0;
     size_t shortestFloatingLen = SIZE_MAX;
@@ -857,8 +850,8 @@ void RoseBuildImpl::findTransientLeftfixes(void) {
 }
 
 /** Find all the different roses and their associated literals. */
-static
-map<left_id, vector<RoseVertex>> findLeftSucc(const RoseBuildImpl &build) {
+static map<left_id, vector<RoseVertex>>
+findLeftSucc(const RoseBuildImpl &build) {
     map<left_id, vector<RoseVertex>> leftfixes;
     for (auto v : vertices_range(build.g)) {
         if (build.g[v].left) {
@@ -874,10 +867,10 @@ struct infix_info {
     set<RoseVertex> preds;
     set<RoseVertex> succs;
 };
-}
+} // namespace
 
-static
-map<NGHolder *, infix_info> findInfixGraphInfo(const RoseBuildImpl &build) {
+static map<NGHolder *, infix_info>
+findInfixGraphInfo(const RoseBuildImpl &build) {
     map<NGHolder *, infix_info> rv;
 
     for (auto v : vertices_range(build.g)) {
@@ -907,8 +900,7 @@ map<NGHolder *, infix_info> findInfixGraphInfo(const RoseBuildImpl &build) {
     return rv;
 }
 
-static
-map<u32, flat_set<NFAEdge>> getTopInfo(const NGHolder &h) {
+static map<u32, flat_set<NFAEdge>> getTopInfo(const NGHolder &h) {
     map<u32, flat_set<NFAEdge>> rv;
     for (NFAEdge e : out_edges_range(h.start, h)) {
         for (u32 t : h[e].tops) {
@@ -918,8 +910,7 @@ map<u32, flat_set<NFAEdge>> getTopInfo(const NGHolder &h) {
     return rv;
 }
 
-static
-u32 findUnusedTop(const map<u32, flat_set<NFAEdge>> &tops) {
+static u32 findUnusedTop(const map<u32, flat_set<NFAEdge>> &tops) {
     u32 i = 0;
     while (contains(tops, i)) {
         i++;
@@ -927,8 +918,8 @@ u32 findUnusedTop(const map<u32, flat_set<NFAEdge>> &tops) {
     return i;
 }
 
-static
-bool reduceTopTriggerLoad(RoseBuildImpl &build, NGHolder &h, RoseVertex u) {
+static bool reduceTopTriggerLoad(RoseBuildImpl &build, NGHolder &h,
+                                 RoseVertex u) {
     RoseGraph &g = build.g;
 
     set<u32> tops; /* tops triggered by u */
@@ -987,7 +978,7 @@ bool reduceTopTriggerLoad(RoseBuildImpl &build, NGHolder &h, RoseVertex u) {
 
     DEBUG_PRINTF("using new merged top %u\n", new_top);
     assert(new_top != ~0U);
-    for (RoseEdge e: out_edges_range(u, g)) {
+    for (RoseEdge e : out_edges_range(u, g)) {
         RoseVertex v = target(e, g);
         if (g[v].left.graph.get() != &h) {
             continue;
@@ -998,9 +989,8 @@ bool reduceTopTriggerLoad(RoseBuildImpl &build, NGHolder &h, RoseVertex u) {
     return true;
 }
 
-static
-void packInfixTops(NGHolder &h, RoseGraph &g,
-                   const set<RoseVertex> &verts) {
+static void packInfixTops(NGHolder &h, RoseGraph &g,
+                          const set<RoseVertex> &verts) {
     if (!is_triggered(h)) {
         DEBUG_PRINTF("not triggered, no tops\n");
         return;
@@ -1059,8 +1049,7 @@ void packInfixTops(NGHolder &h, RoseGraph &g,
     clearReports(h); // As we may have removed vacuous edges.
 }
 
-static
-void reduceTopTriggerLoad(RoseBuildImpl &build) {
+static void reduceTopTriggerLoad(RoseBuildImpl &build) {
     auto infixes = findInfixGraphInfo(build);
 
     for (auto &p : infixes) {
@@ -1080,10 +1069,10 @@ void reduceTopTriggerLoad(RoseBuildImpl &build) {
     }
 }
 
-static
-bool triggerKillsRoseGraph(const RoseBuildImpl &build, const left_id &left,
-                           const set<ue2_literal> &all_lits,
-                           const RoseEdge &e) {
+static bool triggerKillsRoseGraph(const RoseBuildImpl &build,
+                                  const left_id &left,
+                                  const set<ue2_literal> &all_lits,
+                                  const RoseEdge &e) {
     assert(left.graph());
     const NGHolder &h = *left.graph();
 
@@ -1113,9 +1102,9 @@ bool triggerKillsRoseGraph(const RoseBuildImpl &build, const left_id &left,
     return true;
 }
 
-static
-bool triggerKillsRose(const RoseBuildImpl &build, const left_id &left,
-                      const set<ue2_literal> &all_lits, const RoseEdge &e) {
+static bool triggerKillsRose(const RoseBuildImpl &build, const left_id &left,
+                             const set<ue2_literal> &all_lits,
+                             const RoseEdge &e) {
     if (left.haig()) {
         /* TODO: To allow this for som-based engines we would also need to
          * ensure as well that no other triggers can occur at the same location
@@ -1138,8 +1127,7 @@ bool triggerKillsRose(const RoseBuildImpl &build, const left_id &left,
  * be dead at that time. In the case of multiple trigger literals, we can only
  * base our decision on that portion of literal after any overlapping literals.
  */
-static
-void findTopTriggerCancels(RoseBuildImpl &build) {
+static void findTopTriggerCancels(RoseBuildImpl &build) {
     auto left_succ = findLeftSucc(build); /* leftfixes -> succ verts */
 
     for (const auto &r : left_succ) {
@@ -1193,15 +1181,13 @@ void findTopTriggerCancels(RoseBuildImpl &build) {
     }
 }
 
-static
-void optimiseRoseTops(RoseBuildImpl &build) {
+static void optimiseRoseTops(RoseBuildImpl &build) {
     reduceTopTriggerLoad(build);
     /* prune unused tops ? */
     findTopTriggerCancels(build);
 }
 
-static
-void buildRoseSquashMasks(RoseBuildImpl &tbi) {
+static void buildRoseSquashMasks(RoseBuildImpl &tbi) {
     /* Rose nfa squash masks are applied to the groups when the nfa can no
      * longer match */
 
@@ -1237,7 +1223,7 @@ void buildRoseSquashMasks(RoseBuildImpl &tbi) {
                 }
             }
             if (min_off != max_off) {
-                 /* leave all groups alone */
+                /* leave all groups alone */
                 tbi.rose_squash_masks[left] = ~0ULL;
                 continue;
             }
@@ -1247,10 +1233,10 @@ void buildRoseSquashMasks(RoseBuildImpl &tbi) {
 
         for (u32 lit_id : lit_ids) {
             const rose_literal_info &info = tbi.literal_info[lit_id];
-            if (!info.delayed_ids.empty()
-                || !all_of_in(info.vertices,
-                              [&](RoseVertex v) {
-                                  return left == tbi.g[v].left; })) {
+            if (!info.delayed_ids.empty() ||
+                !all_of_in(info.vertices, [&](RoseVertex v) {
+                    return left == tbi.g[v].left;
+                })) {
                 DEBUG_PRINTF("group %llu is unsquashable\n", info.group_mask);
                 unsquashable |= info.group_mask;
             }
@@ -1268,9 +1254,8 @@ void buildRoseSquashMasks(RoseBuildImpl &tbi) {
     }
 }
 
-static
-void countFloatingLiterals(const RoseBuildImpl &tbi, u32 *total_count,
-                           u32 *short_count) {
+static void countFloatingLiterals(const RoseBuildImpl &tbi, u32 *total_count,
+                                  u32 *short_count) {
     *total_count = 0;
     *short_count = 0;
     for (const rose_literal_id &lit : tbi.literals) {
@@ -1289,13 +1274,13 @@ void countFloatingLiterals(const RoseBuildImpl &tbi, u32 *total_count,
     }
 }
 
-static
-void rehomeAnchoredLiteral(RoseBuildImpl &tbi, const simple_anchored_info &sai,
-                           const set<u32> &lit_ids) {
+static void rehomeAnchoredLiteral(RoseBuildImpl &tbi,
+                                  const simple_anchored_info &sai,
+                                  const set<u32> &lit_ids) {
     /* TODO: verify that vertices only have a single literal at the moment */
 
     DEBUG_PRINTF("rehoming ^.{%u,%u}%s\n", sai.min_bound, sai.max_bound,
-                  dumpString(sai.literal).c_str());
+                 dumpString(sai.literal).c_str());
 
     /* Get a floating literal corresponding to the anchored literal */
     u32 new_literal_id = tbi.getLiteralId(sai.literal, 0, ROSE_FLOATING);
@@ -1327,8 +1312,7 @@ void rehomeAnchoredLiteral(RoseBuildImpl &tbi, const simple_anchored_info &sai,
     }
 }
 
-static
-void rehomeAnchoredLiterals(RoseBuildImpl &tbi) {
+static void rehomeAnchoredLiterals(RoseBuildImpl &tbi) {
     /* if we have many literals in the floating table, we want to push
      * literals which are anchored but deep into the floating table as they
      * are unlikely to reduce the performance of the floating table. */
@@ -1338,8 +1322,8 @@ void rehomeAnchoredLiterals(RoseBuildImpl &tbi) {
 
     DEBUG_PRINTF("considering rehoming options\n");
 
-    if (total_count < ANCHORED_REHOME_MIN_FLOATING
-        && short_count < ANCHORED_REHOME_MIN_FLOATING_SHORT) {
+    if (total_count < ANCHORED_REHOME_MIN_FLOATING &&
+        short_count < ANCHORED_REHOME_MIN_FLOATING_SHORT) {
         DEBUG_PRINTF("not a heavy case %u %u\n", total_count, short_count);
         return;
     }
@@ -1349,14 +1333,18 @@ void rehomeAnchoredLiterals(RoseBuildImpl &tbi) {
         min_rehome_len--;
     }
 
-    for (map<simple_anchored_info, set<u32> >::iterator it
-             = tbi.anchored_simple.begin();
+    for (map<simple_anchored_info, set<u32>>::iterator it =
+             tbi.anchored_simple.begin();
          it != tbi.anchored_simple.end();) {
-        if (it->first.max_bound < ANCHORED_REHOME_DEEP
-            || it->first.literal.length() < min_rehome_len) {
+        if (it->first.max_bound < ANCHORED_REHOME_DEEP ||
+            it->first.literal.length() < min_rehome_len) {
             ++it;
             continue;
         }
+
+        fpFeedbackObservesRoseLiteral(
+            tbi.cc, it->first.literal,
+            HS_FP_COMPILE_CHECKPOINT_REWRITE_ANCHORED_REHOME);
 
         rehomeAnchoredLiteral(tbi, it->first, it->second);
         tbi.anchored_simple.erase(it++);
@@ -1367,9 +1355,9 @@ void rehomeAnchoredLiterals(RoseBuildImpl &tbi) {
  * table. */
 static const size_t MAX_1BYTE_SMALL_BLOCK_LITERALS = 20;
 
-static
-void addSmallBlockLiteral(RoseBuildImpl &tbi, const simple_anchored_info &sai,
-                          const set<u32> &lit_ids) {
+static void addSmallBlockLiteral(RoseBuildImpl &tbi,
+                                 const simple_anchored_info &sai,
+                                 const set<u32> &lit_ids) {
     DEBUG_PRINTF("anchored ^.{%u,%u}%s\n", sai.min_bound, sai.max_bound,
                  dumpString(sai.literal).c_str());
 
@@ -1400,9 +1388,8 @@ void addSmallBlockLiteral(RoseBuildImpl &tbi, const simple_anchored_info &sai,
     }
 }
 
-static
-void addSmallBlockLiteral(RoseBuildImpl &tbi, const ue2_literal &lit,
-                          const flat_set<ReportID> &reports) {
+static void addSmallBlockLiteral(RoseBuildImpl &tbi, const ue2_literal &lit,
+                                 const flat_set<ReportID> &reports) {
     DEBUG_PRINTF("lit %s, reports: %s\n", dumpString(lit).c_str(),
                  as_string_list(reports).c_str());
     assert(!reports.empty());
@@ -1425,9 +1412,8 @@ void addSmallBlockLiteral(RoseBuildImpl &tbi, const ue2_literal &lit,
     lit_info.vertices.insert(v);
 }
 
-static
-bool stateIsSEPLiteral(const dstate_id_t &s, const symbol_t &sym,
-                       const raw_dfa &rdfa) {
+static bool stateIsSEPLiteral(const dstate_id_t &s, const symbol_t &sym,
+                              const raw_dfa &rdfa) {
     const dstate &ds = rdfa.states[s];
     if (!ds.reports_eod.empty() || ds.reports.empty()) {
         DEBUG_PRINTF("badly formed reports\n");
@@ -1455,9 +1441,8 @@ bool stateIsSEPLiteral(const dstate_id_t &s, const symbol_t &sym,
     return true;
 }
 
-static
-bool extractSEPLiterals(const raw_dfa &rdfa,
-                        map<ue2_literal, flat_set<ReportID>> &lits_out) {
+static bool extractSEPLiterals(const raw_dfa &rdfa,
+                               map<ue2_literal, flat_set<ReportID>> &lits_out) {
     if (rdfa.start_floating == DEAD_STATE) {
         DEBUG_PRINTF("not floating?\n");
         return false;
@@ -1514,9 +1499,9 @@ bool extractSEPLiterals(const raw_dfa &rdfa,
     return true;
 }
 
-static
-bool extractSEPLiterals(const OutfixInfo &outfix, const ReportManager &rm,
-                        map<ue2_literal, flat_set<ReportID>> &lits_out) {
+static bool extractSEPLiterals(const OutfixInfo &outfix,
+                               const ReportManager &rm,
+                               map<ue2_literal, flat_set<ReportID>> &lits_out) {
     if (outfix.minWidth != depth(1) || outfix.maxWidth != depth(1)) {
         DEBUG_PRINTF("outfix must be fixed width of one\n");
         return false;
@@ -1541,8 +1526,7 @@ bool extractSEPLiterals(const OutfixInfo &outfix, const ReportManager &rm,
     return false;
 }
 
-static
-void addAnchoredSmallBlockLiterals(RoseBuildImpl &tbi) {
+static void addAnchoredSmallBlockLiterals(RoseBuildImpl &tbi) {
     if (tbi.cc.streaming) {
         DEBUG_PRINTF("not block mode\n");
         return;
@@ -1563,7 +1547,7 @@ void addAnchoredSmallBlockLiterals(RoseBuildImpl &tbi) {
         }
     }
 
-    vector<pair<simple_anchored_info, set<u32> > > anchored_lits;
+    vector<pair<simple_anchored_info, set<u32>>> anchored_lits;
     vector<OutfixInfo *> sep_outfixes;
     size_t oneByteLiterals = 0;
 
@@ -1600,6 +1584,17 @@ void addAnchoredSmallBlockLiterals(RoseBuildImpl &tbi) {
         return;
     }
 
+    for (const auto &e : anchored_lits) {
+        const simple_anchored_info &sai = e.first;
+        fpFeedbackObservesRoseLiteral(
+            tbi.cc, sai.literal, HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
+    }
+
+    for (const auto &m : sep_literals) {
+        fpFeedbackObservesRoseLiteral(
+            tbi.cc, m.first, HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
+    }
+
     for (const auto &e : tbi.anchored_simple) {
         const simple_anchored_info &sai = e.first;
         const set<u32> &lit_ids = e.second;
@@ -1618,8 +1613,7 @@ void addAnchoredSmallBlockLiterals(RoseBuildImpl &tbi) {
 }
 
 #ifndef NDEBUG
-static
-bool historiesAreValid(const RoseGraph &g) {
+static bool historiesAreValid(const RoseGraph &g) {
     for (const auto &e : edges_range(g)) {
         if (g[e].history == ROSE_ROLE_HISTORY_INVALID) {
             DEBUG_PRINTF("edge [%zu,%zu] has invalid history\n",
@@ -1635,8 +1629,7 @@ bool historiesAreValid(const RoseGraph &g) {
  * Assertion: Returns true if we have a reference hanging around to a vertex
  * that no longer exists in the graph.
  */
-static
-bool danglingVertexRef(RoseBuildImpl &tbi) {
+static bool danglingVertexRef(RoseBuildImpl &tbi) {
     RoseGraph::vertex_iterator vi, ve;
     tie(vi, ve) = vertices(tbi.g);
     const unordered_set<RoseVertex> valid_vertices(vi, ve);
@@ -1663,8 +1656,7 @@ bool danglingVertexRef(RoseBuildImpl &tbi) {
     return false;
 }
 
-static
-bool roleOffsetsAreValid(const RoseGraph &g) {
+static bool roleOffsetsAreValid(const RoseGraph &g) {
     for (auto v : vertices_range(g)) {
         if (g[v].min_offset >= ROSE_BOUND_INF) {
             DEBUG_PRINTF("invalid min_offset for role %zu\n", g[v].index);
@@ -1798,7 +1790,6 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildRose(u32 minWidth) {
 
     return arm_buildFinalEngine(minWidth);
 }
-
 
 bytecode_ptr<x86_RoseEngine> RoseBuildImpl::x86_buildRose(u32 minWidth) {
     dumpRoseGraph(*this, "rose_early.dot");

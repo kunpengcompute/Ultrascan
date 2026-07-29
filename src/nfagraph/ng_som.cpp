@@ -33,6 +33,10 @@
 
 #include "ng_som.h"
 
+#include "compiler/compiler.h"
+#include "grey.h"
+#include "nfa/goughcompile.h"
+#include "nfa/nfa_internal.h" // for MO_INVALID_IDX
 #include "ng.h"
 #include "ng_dump.h"
 #include "ng_equivalence.h"
@@ -50,15 +54,12 @@
 #include "ng_util.h"
 #include "ng_violet.h"
 #include "ng_width.h"
-#include "grey.h"
-#include "ue2common.h"
-#include "compiler/compiler.h"
-#include "nfa/goughcompile.h"
-#include "nfa/nfa_internal.h" // for MO_INVALID_IDX
 #include "parser/position.h"
-#include "som/som.h"
 #include "rose/rose_build.h"
+#include "rose/rose_build_fp_feedback.h"
 #include "rose/rose_in_util.h"
+#include "som/som.h"
+#include "ue2common.h"
 #include "util/alloc.h"
 #include "util/compare.h"
 #include "util/compile_error.h"
@@ -82,11 +83,18 @@ static const size_t MAX_SOMBE_CHAIN_VERTICES = 4000;
 
 #define MAX_REV_NFA_PREFIX 80
 
+static bool fpFeedbackSombeLiteralIsBad(const CompileContext &cc,
+                                        const ue2_literal &lit) {
+    return fpFeedbackBlocksRoseLiteral(cc, lit,
+                                       HS_FP_COMPILE_CHECKPOINT_SOMBE_LITERAL);
+}
+
 namespace {
 struct som_plan {
     som_plan(const shared_ptr<NGHolder> &p, const CharReach &e, bool i,
-             u32 parent_in) : prefix(p), escapes(e), is_reset(i),
-                              no_implement(false), parent(parent_in) { }
+             u32 parent_in)
+        : prefix(p), escapes(e), is_reset(i), no_implement(false),
+          parent(parent_in) {}
     shared_ptr<NGHolder> prefix;
     CharReach escapes;
     bool is_reset;
@@ -101,15 +109,14 @@ struct som_plan {
     // Similar, but these report the som_loc_in.
     vector<NFAVertex> reporters_in;
 };
-}
+} // namespace
 
-static
-bool regionCanEstablishSom(const NGHolder &g,
-                           const unordered_map<NFAVertex, u32> &regions,
-                           const u32 region, const vector<NFAVertex> &r_exits,
-                           const vector<DepthMinMax> &depths) {
-    if (region == regions.at(g.accept) ||
-        region == regions.at(g.acceptEod)) {
+static bool regionCanEstablishSom(const NGHolder &g,
+                                  const unordered_map<NFAVertex, u32> &regions,
+                                  const u32 region,
+                                  const vector<NFAVertex> &r_exits,
+                                  const vector<DepthMinMax> &depths) {
+    if (region == regions.at(g.accept) || region == regions.at(g.acceptEod)) {
         DEBUG_PRINTF("accept in region\n");
         return false;
     }
@@ -144,16 +151,15 @@ struct region_info {
     vector<NFAVertex> exits;
     vector<NFAVertex> full;
     bool optional; /* skip edges around region */
-    bool dag; /* completely acyclic */
+    bool dag;      /* completely acyclic */
 };
 
-}
+} // namespace
 
-static
-void buildRegionMapping(const NGHolder &g,
-                        const unordered_map<NFAVertex, u32> &regions,
-                        map<u32, region_info> &info,
-                        bool include_region_0 = false) {
+static void buildRegionMapping(const NGHolder &g,
+                               const unordered_map<NFAVertex, u32> &regions,
+                               map<u32, region_info> &info,
+                               bool include_region_0 = false) {
     for (auto v : vertices_range(g)) {
         u32 region = regions.at(v);
         if (!include_region_0 && (is_any_start(v, g) || region == 0)) {
@@ -175,15 +181,15 @@ void buildRegionMapping(const NGHolder &g,
     }
 
     for (auto &m : info) {
-        if (!m.second.enters.empty()
-            && isOptionalRegion(g, m.second.enters.front(), regions)) {
+        if (!m.second.enters.empty() &&
+            isOptionalRegion(g, m.second.enters.front(), regions)) {
             m.second.optional = true;
         }
         m.second.dag = true; /* will be cleared for cyclic regions later */
     }
 
     set<NFAEdge> be;
-    BackEdges<set<NFAEdge> > backEdgeVisitor(be);
+    BackEdges<set<NFAEdge>> backEdgeVisitor(be);
     boost::depth_first_search(g, visitor(backEdgeVisitor).root_vertex(g.start));
 
     for (const auto &e : be) {
@@ -202,12 +208,11 @@ void buildRegionMapping(const NGHolder &g,
         info[0].dag = false;
     }
 
-    #ifdef DEBUG
+#ifdef DEBUG
     for (const auto &m : info) {
         u32 r = m.first;
         const region_info &r_i = m.second;
-        DEBUG_PRINTF("region %u:%s%s\n", r,
-                     r_i.dag ? " (dag)" : "",
+        DEBUG_PRINTF("region %u:%s%s\n", r, r_i.dag ? " (dag)" : "",
                      r_i.optional ? " (optional)" : "");
         DEBUG_PRINTF("  enters:");
         for (u32 i = 0; i < r_i.enters.size(); i++) {
@@ -225,13 +230,13 @@ void buildRegionMapping(const NGHolder &g,
         }
         printf("\n");
     }
-    #endif
+#endif
 }
 
-static
-bool validateXSL(const NGHolder &g,
-                 const unordered_map<NFAVertex, u32> &regions,
-                 const u32 region, const CharReach &escapes, u32 *bad_region) {
+static bool validateXSL(const NGHolder &g,
+                        const unordered_map<NFAVertex, u32> &regions,
+                        const u32 region, const CharReach &escapes,
+                        u32 *bad_region) {
     /* need to check that the escapes escape all of the graph past region */
     u32 first_bad_region = ~0U;
     for (auto v : vertices_range(g)) {
@@ -251,11 +256,10 @@ bool validateXSL(const NGHolder &g,
     return true;
 }
 
-static
-bool validateEXSL(const NGHolder &g,
-                  const unordered_map<NFAVertex, u32> &regions,
-                  const u32 region, const CharReach &escapes,
-                  const NGHolder &prefix, u32 *bad_region) {
+static bool validateEXSL(const NGHolder &g,
+                         const unordered_map<NFAVertex, u32> &regions,
+                         const u32 region, const CharReach &escapes,
+                         const NGHolder &prefix, u32 *bad_region) {
     /* EXSL: To be a valid EXSL with escapes e, we require that all states
      * go dead after /[e][^e]*{subsequent prefix match}/.
      */
@@ -292,7 +296,8 @@ bool validateEXSL(const NGHolder &g,
      * already */
     flat_set<NFAVertex> prefix_start_states;
     for (auto v : vertices_range(prefix)) {
-        if (v != prefix.accept && v != prefix.acceptEod
+        if (v != prefix.accept &&
+            v != prefix.acceptEod
             /* and as we have already made it past the prefix once */
             && v != prefix.start) {
             prefix_start_states.insert(v);
@@ -321,11 +326,10 @@ bool validateEXSL(const NGHolder &g,
     return true;
 }
 
-static
-bool isPossibleLock(const NGHolder &g,
-                    map<u32, region_info>::const_iterator region,
-                    const map<u32, region_info> &info,
-                    CharReach *escapes_out) {
+static bool isPossibleLock(const NGHolder &g,
+                           map<u32, region_info>::const_iterator region,
+                           const map<u32, region_info> &info,
+                           CharReach *escapes_out) {
     /* TODO: we could also check for self-loops on curr region */
 
     /* TODO: some straw-walking logic. lowish priority has we know there can
@@ -346,15 +350,14 @@ bool isPossibleLock(const NGHolder &g,
     }
 
     if (next_info.full.size() == 1 && !next_info.dag) {
-       *escapes_out = ~g[next_info.full.front()].char_reach;
-       return true;
+        *escapes_out = ~g[next_info.full.front()].char_reach;
+        return true;
     }
 
     return false;
 }
 
-static
-unique_ptr<NGHolder>
+static unique_ptr<NGHolder>
 makePrefix(const NGHolder &g, const unordered_map<NFAVertex, u32> &regions,
            const region_info &curr, const region_info &next,
            bool renumber = true) {
@@ -425,8 +428,7 @@ makePrefix(const NGHolder &g, const unordered_map<NFAVertex, u32> &regions,
     return prefix_ptr;
 }
 
-static
-void replaceTempSomSlot(ReportManager &rm, NGHolder &g, u32 real_slot) {
+static void replaceTempSomSlot(ReportManager &rm, NGHolder &g, u32 real_slot) {
     const u32 temp_slot = UINT32_MAX;
     /* update the som slot on the prefix report */
     for (auto v : inv_adjacent_vertices_range(g.accept, g)) {
@@ -445,10 +447,9 @@ void replaceTempSomSlot(ReportManager &rm, NGHolder &g, u32 real_slot) {
     }
 }
 
-static
-void setPrefixReports(ReportManager &rm, NGHolder &g, ReportType ir_type,
-                      u32 som_loc, const vector<DepthMinMax> &depths,
-                      bool prefix_by_rev) {
+static void setPrefixReports(ReportManager &rm, NGHolder &g, ReportType ir_type,
+                             u32 som_loc, const vector<DepthMinMax> &depths,
+                             bool prefix_by_rev) {
     Report ir = makeCallback(0U, 0);
     ir.type = ir_type;
     ir.onmatch = som_loc;
@@ -471,8 +472,8 @@ void setPrefixReports(ReportManager &rm, NGHolder &g, ReportType ir_type,
     }
 }
 
-static
-void updatePrefixReports(ReportManager &rm, NGHolder &g, ReportType ir_type) {
+static void updatePrefixReports(ReportManager &rm, NGHolder &g,
+                                ReportType ir_type) {
     /* update the som action on the prefix report */
     for (auto v : inv_adjacent_vertices_range(g.accept, g)) {
         auto &reports = g[v].reports;
@@ -487,9 +488,8 @@ void updatePrefixReports(ReportManager &rm, NGHolder &g, ReportType ir_type) {
     }
 }
 
-static
-void updatePrefixReportsRevNFA(ReportManager &rm, NGHolder &g,
-                               u32 rev_comp_id) {
+static void updatePrefixReportsRevNFA(ReportManager &rm, NGHolder &g,
+                                      u32 rev_comp_id) {
     /* update the action on the prefix report, to refer to a reverse nfa,
      * report type is also adjusted. */
     for (auto v : inv_adjacent_vertices_range(g.accept, g)) {
@@ -520,9 +520,8 @@ void updatePrefixReportsRevNFA(ReportManager &rm, NGHolder &g,
     }
 }
 
-static
-void setMidfixReports(ReportManager &rm, const som_plan &item,
-                      const u32 som_slot_in, const u32 som_slot_out) {
+static void setMidfixReports(ReportManager &rm, const som_plan &item,
+                             const u32 som_slot_in, const u32 som_slot_out) {
     assert(item.prefix);
     NGHolder &g = *item.prefix;
 
@@ -541,10 +540,9 @@ void setMidfixReports(ReportManager &rm, const som_plan &item,
     }
 }
 
-static
-bool finalRegion(const NGHolder &g,
-                 const unordered_map<NFAVertex, u32> &regions,
-                 NFAVertex v) {
+static bool finalRegion(const NGHolder &g,
+                        const unordered_map<NFAVertex, u32> &regions,
+                        NFAVertex v) {
     u32 region = regions.at(v);
     for (auto w : adjacent_vertices_range(v, g)) {
         if (w != g.accept && w != g.acceptEod && regions.at(w) != region) {
@@ -555,10 +553,9 @@ bool finalRegion(const NGHolder &g,
     return true;
 }
 
-static
-void replaceExternalReportsWithSomRep(ReportManager &rm, NGHolder &g,
-                                      NFAVertex v, ReportType ir_type,
-                                      u64a param) {
+static void replaceExternalReportsWithSomRep(ReportManager &rm, NGHolder &g,
+                                             NFAVertex v, ReportType ir_type,
+                                             u64a param) {
     assert(!g[v].reports.empty());
 
     flat_set<ReportID> r_new;
@@ -585,9 +582,8 @@ void replaceExternalReportsWithSomRep(ReportManager &rm, NGHolder &g,
 }
 
 /* updates the reports on all vertices leading to the sink */
-static
-void makeSomRelReports(ReportManager &rm, NGHolder &g, NFAVertex sink,
-                       const vector<DepthMinMax> &depths) {
+static void makeSomRelReports(ReportManager &rm, NGHolder &g, NFAVertex sink,
+                              const vector<DepthMinMax> &depths) {
     for (auto v : inv_adjacent_vertices_range(sink, g)) {
         if (v == g.accept) {
             continue;
@@ -601,10 +597,9 @@ void makeSomRelReports(ReportManager &rm, NGHolder &g, NFAVertex sink,
 }
 
 /* updates the reports on all the provided vertices */
-static
-void makeSomRelReports(ReportManager &rm, NGHolder &g,
-                       const vector<NFAVertex> &to_update,
-                       const vector<DepthMinMax> &depths) {
+static void makeSomRelReports(ReportManager &rm, NGHolder &g,
+                              const vector<NFAVertex> &to_update,
+                              const vector<DepthMinMax> &depths) {
     for (auto v : to_update) {
         const DepthMinMax &d = depths.at(g[v].index);
         assert(d.min == d.max);
@@ -613,8 +608,7 @@ void makeSomRelReports(ReportManager &rm, NGHolder &g,
     }
 }
 
-static
-void makeSomAbsReports(ReportManager &rm, NGHolder &g, NFAVertex sink) {
+static void makeSomAbsReports(ReportManager &rm, NGHolder &g, NFAVertex sink) {
     for (auto v : inv_adjacent_vertices_range(sink, g)) {
         if (v == g.accept) {
             continue;
@@ -624,8 +618,8 @@ void makeSomAbsReports(ReportManager &rm, NGHolder &g, NFAVertex sink) {
     }
 }
 
-static
-void updateReportToUseRecordedSom(ReportManager &rm, NGHolder &g, u32 som_loc) {
+static void updateReportToUseRecordedSom(ReportManager &rm, NGHolder &g,
+                                         u32 som_loc) {
     for (auto v : inv_adjacent_vertices_range(g.accept, g)) {
         replaceExternalReportsWithSomRep(rm, g, v, EXTERNAL_CALLBACK_SOM_STORED,
                                          som_loc);
@@ -639,19 +633,17 @@ void updateReportToUseRecordedSom(ReportManager &rm, NGHolder &g, u32 som_loc) {
     }
 }
 
-static
-void updateReportToUseRecordedSom(ReportManager &rm, NGHolder &g,
-                                  const vector<NFAVertex> &to_update,
-                                  u32 som_loc) {
+static void updateReportToUseRecordedSom(ReportManager &rm, NGHolder &g,
+                                         const vector<NFAVertex> &to_update,
+                                         u32 som_loc) {
     for (auto v : to_update) {
         replaceExternalReportsWithSomRep(rm, g, v, EXTERNAL_CALLBACK_SOM_STORED,
                                          som_loc);
     }
 }
 
-static
-bool createEscaper(NG &ng, const NGHolder &prefix, const CharReach &escapes,
-                   u32 som_loc) {
+static bool createEscaper(NG &ng, const NGHolder &prefix,
+                          const CharReach &escapes, u32 som_loc) {
     ReportManager &rm = ng.rm;
 
     /* escaper = /prefix[^escapes]*[escapes]/ */
@@ -685,10 +677,10 @@ bool createEscaper(NG &ng, const NGHolder &prefix, const CharReach &escapes,
     return ng.addHolder(h);
 }
 
-static
-void fillHolderForLockCheck(NGHolder *out, const NGHolder &g,
-                            const map<u32, region_info> &info,
-                            map<u32, region_info>::const_iterator picked) {
+static void
+fillHolderForLockCheck(NGHolder *out, const NGHolder &g,
+                       const map<u32, region_info> &info,
+                       map<u32, region_info>::const_iterator picked) {
     /* NOTE: This is appropriate for firstMatchIsFirst */
     DEBUG_PRINTF("prepping for lock check\n");
 
@@ -705,7 +697,7 @@ void fillHolderForLockCheck(NGHolder *out, const NGHolder &g,
     assert(!graph_last->second.dag);
     assert(graph_last->second.full.size() == 1);
 
-    for (auto jt = graph_last; ; --jt) {
+    for (auto jt = graph_last;; --jt) {
         DEBUG_PRINTF("adding r %u to midfix\n", jt->first);
 
         /* add all vertices in region, create mapping */
@@ -749,7 +741,7 @@ void fillHolderForLockCheck(NGHolder *out, const NGHolder &g,
 
     /* add edges from startds to the enters of all the initial optional
      * regions and the first mandatory region. */
-    for (auto jt = info.begin(); ; ++jt) {
+    for (auto jt = info.begin();; ++jt) {
         for (auto enter : jt->second.enters) {
             assert(contains(v_map, enter));
             NFAVertex v = v_map[enter];
@@ -771,11 +763,10 @@ void fillHolderForLockCheck(NGHolder *out, const NGHolder &g,
     renumber_vertices(midfix);
 }
 
-static
-void fillRoughMidfix(NGHolder *out, const NGHolder &g,
-                     const unordered_map<NFAVertex, u32> &regions,
-                     const map<u32, region_info> &info,
-                     map<u32, region_info>::const_iterator picked) {
+static void fillRoughMidfix(NGHolder *out, const NGHolder &g,
+                            const unordered_map<NFAVertex, u32> &regions,
+                            const map<u32, region_info> &info,
+                            map<u32, region_info>::const_iterator picked) {
     /* as we are not the first prefix, we are probably not acyclic. We need to
      * generate an acyclic holder to acts a fake prefix to sentClearsTail.
      * This will result in a more conservative estimate. */
@@ -847,8 +838,8 @@ void fillRoughMidfix(NGHolder *out, const NGHolder &g,
             for (auto v : jt->second.exits) {
                 NFAVertex u = v_map[v];
                 for (auto w : adjacent_vertices_range(v, g)) {
-                    if (w == g.accept || w == g.acceptEod
-                        || regions.at(w) <= first_early_region) {
+                    if (w == g.accept || w == g.acceptEod ||
+                        regions.at(w) <= first_early_region) {
                         continue;
                     }
                     if (!contains(v_map, w)) {
@@ -870,8 +861,7 @@ void fillRoughMidfix(NGHolder *out, const NGHolder &g,
     }
 }
 
-static
-bool beginsWithDotStar(const NGHolder &g) {
+static bool beginsWithDotStar(const NGHolder &g) {
     bool hasDot = false;
 
     // We can ignore the successors of start, as matches that begin there will
@@ -883,8 +873,7 @@ bool beginsWithDotStar(const NGHolder &g) {
 
     for (auto v : succ) {
         // We want 'dot' states that aren't virtual starts.
-        if (g[v].char_reach.all() &&
-                !g[v].assert_flags) {
+        if (g[v].char_reach.all() && !g[v].assert_flags) {
             hasDot = true;
             set<NFAVertex> dotsucc;
             insert(&dotsucc, adjacent_vertices(v, g));
@@ -901,9 +890,8 @@ bool beginsWithDotStar(const NGHolder &g) {
     return hasDot;
 }
 
-static
-bool buildMidfix(NG &ng, const som_plan &item, const u32 som_slot_in,
-                 const u32 som_slot_out) {
+static bool buildMidfix(NG &ng, const som_plan &item, const u32 som_slot_in,
+                        const u32 som_slot_out) {
     assert(item.prefix);
     assert(hasCorrectlyNumberedVertices(*item.prefix));
 
@@ -926,9 +914,8 @@ bool buildMidfix(NG &ng, const som_plan &item, const u32 som_slot_in,
     return true;
 }
 
-static
-bool isMandRegionBetween(map<u32, region_info>::const_iterator a,
-                         map<u32, region_info>::const_iterator b) {
+static bool isMandRegionBetween(map<u32, region_info>::const_iterator a,
+                                map<u32, region_info>::const_iterator b) {
     while (b != a) {
         if (!b->second.optional) {
             return true;
@@ -941,15 +928,13 @@ bool isMandRegionBetween(map<u32, region_info>::const_iterator a,
 
 // Attempts to advance the current plan. Returns true if we advance to the end
 // (woot!); updates picked, plan and bad_region.
-static
-bool advancePlan(const NGHolder &g,
-                 const unordered_map<NFAVertex, u32> &regions,
-                 const NGHolder &prefix, bool stuck,
-                 map<u32, region_info>::const_iterator &picked,
-                 const map<u32, region_info>::const_iterator furthest,
-                 const map<u32, region_info>::const_iterator furthest_lock,
-                 const CharReach &next_escapes, som_plan &plan,
-                 u32 *bad_region) {
+static bool
+advancePlan(const NGHolder &g, const unordered_map<NFAVertex, u32> &regions,
+            const NGHolder &prefix, bool stuck,
+            map<u32, region_info>::const_iterator &picked,
+            const map<u32, region_info>::const_iterator furthest,
+            const map<u32, region_info>::const_iterator furthest_lock,
+            const CharReach &next_escapes, som_plan &plan, u32 *bad_region) {
     u32 bad_region_r = 0;
     u32 bad_region_x = 0;
     u32 bad_region_e = 0;
@@ -1005,10 +990,8 @@ bool advancePlan(const NGHolder &g,
     return false;
 }
 
-static
-bool addPlan(vector<som_plan> &plan, u32 parent) {
-    DEBUG_PRINTF("adding plan %zu with parent %u\n", plan.size(),
-                 parent);
+static bool addPlan(vector<som_plan> &plan, u32 parent) {
+    DEBUG_PRINTF("adding plan %zu with parent %u\n", plan.size(), parent);
 
     if (plan.size() >= MAX_SOM_PLANS) {
         DEBUG_PRINTF("too many plans!\n");
@@ -1020,8 +1003,8 @@ bool addPlan(vector<som_plan> &plan, u32 parent) {
 }
 
 // Fetches all preds of {accept, acceptEod} for this graph.
-static
-void addReporterVertices(const NGHolder &g, vector<NFAVertex> &reporters) {
+static void addReporterVertices(const NGHolder &g,
+                                vector<NFAVertex> &reporters) {
     set<NFAVertex> tmp;
     insert(&tmp, inv_adjacent_vertices(g.accept, g));
     insert(&tmp, inv_adjacent_vertices(g.acceptEod, g));
@@ -1039,9 +1022,8 @@ void addReporterVertices(const NGHolder &g, vector<NFAVertex> &reporters) {
 }
 
 // Fetches all preds of {accept, acceptEod} in this region.
-static
-void addReporterVertices(const region_info &r, const NGHolder &g,
-                         vector<NFAVertex> &reporters) {
+static void addReporterVertices(const region_info &r, const NGHolder &g,
+                                vector<NFAVertex> &reporters) {
     for (auto v : r.exits) {
         if (edge(v, g.accept, g).second || edge(v, g.acceptEod, g).second) {
             DEBUG_PRINTF("add reporter %zu\n", g[v].index);
@@ -1051,10 +1033,10 @@ void addReporterVertices(const region_info &r, const NGHolder &g,
 }
 
 // Fetches the mappings of all preds of {accept, acceptEod} in this region.
-static
-void addMappedReporterVertices(const region_info &r, const NGHolder &g,
-                        const unordered_map<NFAVertex, NFAVertex> &mapping,
-                        vector<NFAVertex> &reporters) {
+static void
+addMappedReporterVertices(const region_info &r, const NGHolder &g,
+                          const unordered_map<NFAVertex, NFAVertex> &mapping,
+                          vector<NFAVertex> &reporters) {
     for (auto v : r.exits) {
         if (edge(v, g.accept, g).second || edge(v, g.acceptEod, g).second) {
             DEBUG_PRINTF("adding v=%zu\n", g[v].index);
@@ -1067,8 +1049,8 @@ void addMappedReporterVertices(const region_info &r, const NGHolder &g,
 
 // Clone a version of the graph, but only including the in-edges of `enter'
 // from earlier regions.
-static
-void cloneGraphWithOneEntry(NGHolder &out, const NGHolder &g,
+static void
+cloneGraphWithOneEntry(NGHolder &out, const NGHolder &g,
                        const unordered_map<NFAVertex, u32> &regions,
                        NFAVertex entry, const vector<NFAVertex> &enters,
                        unordered_map<NFAVertex, NFAVertex> &orig_to_copy) {
@@ -1095,9 +1077,8 @@ void cloneGraphWithOneEntry(NGHolder &out, const NGHolder &g,
     pruneUseless(out);
 }
 
-static
-void expandGraph(NGHolder &g, unordered_map<NFAVertex, u32> &regions,
-                 vector<NFAVertex> &enters) {
+static void expandGraph(NGHolder &g, unordered_map<NFAVertex, u32> &regions,
+                        vector<NFAVertex> &enters) {
     assert(!enters.empty());
     const u32 split_region = regions.at(enters.front());
 
@@ -1149,7 +1130,6 @@ void expandGraph(NGHolder &g, unordered_map<NFAVertex, u32> &regions,
                 }
                 add_edge_if_not_present(u, v2, g[e], g);
             }
-
         }
 
         // Clear the in-edges from earlier regions of the OTHER enters for this
@@ -1159,11 +1139,13 @@ void expandGraph(NGHolder &g, unordered_map<NFAVertex, u32> &regions,
                 continue;
             }
 
-            remove_in_edge_if(orig_to_copy[v],
-                              [&](const NFAEdge &e) {
-                                    NFAVertex u = source(e, g);
-                                    return regions.at(u) < split_region;
-                              }, g);
+            remove_in_edge_if(
+                orig_to_copy[v],
+                [&](const NFAEdge &e) {
+                    NFAVertex u = source(e, g);
+                    return regions.at(u) < split_region;
+                },
+                g);
         }
 
         new_enters.push_back(orig_to_copy[enter]);
@@ -1177,14 +1159,13 @@ void expandGraph(NGHolder &g, unordered_map<NFAVertex, u32> &regions,
     enters.swap(new_enters);
 }
 
-static
-bool doTreePlanningIntl(NGHolder &g,
-            const unordered_map<NFAVertex, u32> &regions,
-            const map<u32, region_info> &info,
-            map<u32, region_info>::const_iterator picked, u32 bad_region,
-            u32 parent_plan,
-            const unordered_map<NFAVertex, NFAVertex> &copy_to_orig,
-            vector<som_plan> &plan, const Grey &grey) {
+static bool
+doTreePlanningIntl(NGHolder &g, const unordered_map<NFAVertex, u32> &regions,
+                   const map<u32, region_info> &info,
+                   map<u32, region_info>::const_iterator picked, u32 bad_region,
+                   u32 parent_plan,
+                   const unordered_map<NFAVertex, NFAVertex> &copy_to_orig,
+                   vector<som_plan> &plan, const Grey &grey) {
     assert(picked != info.end());
 
     DEBUG_PRINTF("picked=%u\n", picked->first);
@@ -1217,8 +1198,7 @@ bool doTreePlanningIntl(NGHolder &g,
          * must have a reach that is a subset of the last plan's lock. If the
          * last plan is a resetting plan ..., ?is this true? */
         do {
-            lock_found = isPossibleLock(g, furthest_lock, info,
-                                          &next_escapes);
+            lock_found = isPossibleLock(g, furthest_lock, info, &next_escapes);
         } while (!lock_found && (--furthest_lock)->first > picked->first);
         DEBUG_PRINTF("lock possible? %d\n", (int)lock_found);
 
@@ -1263,26 +1243,27 @@ bool doTreePlanningIntl(NGHolder &g,
             to_end = advancePlan(g, regions, conservative_midfix, lock_found,
                                  picked, furthest, furthest_lock, next_escapes,
                                  plan.back(), &bad_region);
-            if (!to_end
-                && bad_region <= old_bad_region) { /* we failed to progress */
+            if (!to_end &&
+                bad_region <= old_bad_region) { /* we failed to progress */
                 DEBUG_PRINTF("failed to make any progress\n");
                 return false;
             }
         }
 
         /* handle direct edge to accepts from region */
-        if (edge(furthest->second.exits.front(), g.accept, g).second
-                || edge(furthest->second.exits.front(), g.acceptEod, g).second) {
+        if (edge(furthest->second.exits.front(), g.accept, g).second ||
+            edge(furthest->second.exits.front(), g.acceptEod, g).second) {
             map<u32, region_info>::const_iterator it = furthest;
             do {
                 addMappedReporterVertices(it->second, g, copy_to_orig,
                                           plan.back().reporters_in);
-            } while (it != info.begin() && it->second.optional && (it--)->first);
+            } while (it != info.begin() && it->second.optional &&
+                     (it--)->first);
         }
 
         /* create second prefix */
-        plan.back().prefix = makePrefix(g, regions, furthest->second,
-                                        next(furthest)->second);
+        plan.back().prefix =
+            makePrefix(g, regions, furthest->second, next(furthest)->second);
         parent_plan = plan.size() - 1;
     }
 
@@ -1299,11 +1280,10 @@ bool doTreePlanningIntl(NGHolder &g,
     return true;
 }
 
-static
-bool doTreePlanning(NGHolder &g,
-                    map<u32, region_info>::const_iterator presplit,
-                    map<u32, region_info>::const_iterator picked,
-                    vector<som_plan> &plan, const Grey &grey) {
+static bool doTreePlanning(NGHolder &g,
+                           map<u32, region_info>::const_iterator presplit,
+                           map<u32, region_info>::const_iterator picked,
+                           vector<som_plan> &plan, const Grey &grey) {
     DEBUG_PRINTF("picked is %u\n", picked->first);
     DEBUG_PRINTF("presplit is %u\n", presplit->first);
 
@@ -1382,8 +1362,8 @@ bool doTreePlanning(NGHolder &g,
         }
 
         bool to_end = doTreePlanningIntl(g_path, regions, path_info, path_pick,
-                                         bad_region, parent_plan,
-                                         copy_to_orig, plan, grey);
+                                         bad_region, parent_plan, copy_to_orig,
+                                         plan, grey);
         if (!to_end) {
             return false;
         }
@@ -1397,14 +1377,12 @@ enum dsp_behaviour {
     DISALLOW_MODIFY_HOLDER /* say no to tree planning */
 };
 
-static
-bool doSomPlanning(NGHolder &g, bool stuck_in,
-                   const unordered_map<NFAVertex, u32> &regions,
-                   const map<u32, region_info> &info,
-                   map<u32, region_info>::const_iterator picked,
-                   vector<som_plan> &plan,
-                   const Grey &grey,
-                   dsp_behaviour behaviour = ALLOW_MODIFY_HOLDER) {
+static bool doSomPlanning(NGHolder &g, bool stuck_in,
+                          const unordered_map<NFAVertex, u32> &regions,
+                          const map<u32, region_info> &info,
+                          map<u32, region_info>::const_iterator picked,
+                          vector<som_plan> &plan, const Grey &grey,
+                          dsp_behaviour behaviour = ALLOW_MODIFY_HOLDER) {
     DEBUG_PRINTF("in picked is %u\n", picked->first);
 
     /* Need to verify how far the lock covers */
@@ -1416,9 +1394,9 @@ bool doSomPlanning(NGHolder &g, bool stuck_in,
         ap_pref = &ap_temp;
     }
 
-    bool to_end = advancePlan(g, regions, *ap_pref, stuck_in, picked,
-                              picked, picked, plan.back().escapes,
-                              plan.back(), &bad_region);
+    bool to_end =
+        advancePlan(g, regions, *ap_pref, stuck_in, picked, picked, picked,
+                    plan.back().escapes, plan.back(), &bad_region);
 
     if (to_end) {
         DEBUG_PRINTF("advanced through the whole graph in one go!\n");
@@ -1521,27 +1499,27 @@ bool doSomPlanning(NGHolder &g, bool stuck_in,
                                  furthest, furthest_lock, next_escapes,
                                  plan.back(), &bad_region);
 
-            if (!to_end
-                && bad_region <= old_bad_region) { /* we failed to progress */
+            if (!to_end &&
+                bad_region <= old_bad_region) { /* we failed to progress */
                 goto do_tree;
             }
         }
 
         /* handle direct edge to accepts from region */
-        if (edge(furthest->second.exits.front(), g.accept, g).second
-            || edge(furthest->second.exits.front(), g.acceptEod, g).second) {
+        if (edge(furthest->second.exits.front(), g.accept, g).second ||
+            edge(furthest->second.exits.front(), g.acceptEod, g).second) {
             map<u32, region_info>::const_iterator it = furthest;
             do {
                 DEBUG_PRINTF("direct edge to accept from region %u\n",
                              it->first);
                 addReporterVertices(it->second, g, plan.back().reporters_in);
-            } while (it != info.begin() && it->second.optional
-                     && (it--)->first);
+            } while (it != info.begin() && it->second.optional &&
+                     (it--)->first);
         }
 
         /* create second prefix */
-        plan.back().prefix = makePrefix(g, regions, furthest->second,
-                                        next(furthest)->second);
+        plan.back().prefix =
+            makePrefix(g, regions, furthest->second, next(furthest)->second);
     }
     DEBUG_PRINTF("(final) picked is %u\n", picked->first);
 
@@ -1559,15 +1537,14 @@ bool doSomPlanning(NGHolder &g, bool stuck_in,
     return true;
 }
 
-static
-void dumpSomPlan(UNUSED const NGHolder &g, UNUSED const som_plan &p,
-                 UNUSED size_t num) {
+static void dumpSomPlan(UNUSED const NGHolder &g, UNUSED const som_plan &p,
+                        UNUSED size_t num) {
 #if defined(DEBUG) || defined(DUMP_PLANS)
     DEBUG_PRINTF("plan %zu: prefix=%p, escapes=%s, is_reset=%d, "
                  "parent=%u\n",
                  num, p.prefix.get(),
-                 describeClass(p.escapes, 20, CC_OUT_TEXT).c_str(),
-                 p.is_reset, p.parent);
+                 describeClass(p.escapes, 20, CC_OUT_TEXT).c_str(), p.is_reset,
+                 p.parent);
     printf("  reporters:");
     for (auto v : p.reporters) {
         printf(" %zu", g[v].index);
@@ -1588,10 +1565,9 @@ void dumpSomPlan(UNUSED const NGHolder &g, UNUSED const som_plan &p,
  * if the head of a pattern cannot be implemented we are generally unable to
  * implement the full pattern.
  */
-static
-void implementSomPlan(NG &ng, const ExpressionInfo &expr, u32 comp_id,
-                      NGHolder &g, vector<som_plan> &plan,
-                      const u32 first_som_slot) {
+static void implementSomPlan(NG &ng, const ExpressionInfo &expr, u32 comp_id,
+                             NGHolder &g, vector<som_plan> &plan,
+                             const u32 first_som_slot) {
     ReportManager &rm = ng.rm;
     SomSlotManager &ssm = ng.ssm;
 
@@ -1628,8 +1604,8 @@ void implementSomPlan(NG &ng, const ExpressionInfo &expr, u32 comp_id,
 
         assert(it->parent < plan_num);
         u32 som_slot_in = som_slots[it->parent];
-        u32 som_slot_out = ssm.getSomSlot(*it->prefix, it->escapes,
-                                          it->is_reset, som_slot_in);
+        u32 som_slot_out =
+            ssm.getSomSlot(*it->prefix, it->escapes, it->is_reset, som_slot_in);
         som_slots[plan_num] = som_slot_out;
 
         assert(!it->no_implement);
@@ -1650,8 +1626,7 @@ void implementSomPlan(NG &ng, const ExpressionInfo &expr, u32 comp_id,
     }
 }
 
-static
-void anchorStarts(NGHolder &g) {
+static void anchorStarts(NGHolder &g) {
     vector<NFAEdge> dead;
     for (const auto &e : out_edges_range(g.startDs, g)) {
         NFAVertex v = target(e, g);
@@ -1664,8 +1639,7 @@ void anchorStarts(NGHolder &g) {
     remove_edges(dead, g);
 }
 
-static
-void setZeroReports(NGHolder &g) {
+static void setZeroReports(NGHolder &g) {
     set<NFAVertex> acceptors;
     insert(&acceptors, inv_adjacent_vertices(g.accept, g));
     insert(&acceptors, inv_adjacent_vertices(g.acceptEod, g));
@@ -1691,9 +1665,8 @@ void setZeroReports(NGHolder &g) {
 }
 
 /* updates the reports on all vertices leading to the sink */
-static
-void makeSomRevNfaReports(ReportManager &rm, NGHolder &g, NFAVertex sink,
-                          const ReportID report, const u32 comp_id) {
+static void makeSomRevNfaReports(ReportManager &rm, NGHolder &g, NFAVertex sink,
+                                 const ReportID report, const u32 comp_id) {
     // Construct replacement report.
     Report ir = rm.getReport(report);
     ir.type = EXTERNAL_CALLBACK_SOM_REV_NFA;
@@ -1713,8 +1686,7 @@ void makeSomRevNfaReports(ReportManager &rm, NGHolder &g, NFAVertex sink,
     }
 }
 
-static
-void clearProperInEdges(NGHolder &g, const NFAVertex sink) {
+static void clearProperInEdges(NGHolder &g, const NFAVertex sink) {
     vector<NFAEdge> dead;
     for (const auto &e : in_edges_range(sink, g)) {
         if (source(e, g) == g.accept) {
@@ -1739,11 +1711,10 @@ struct SomRevNfa {
     ReportID report;
     bytecode_ptr<NFA> nfa;
 };
-}
+} // namespace
 
-static
-bytecode_ptr<NFA> makeBareSomRevNfa(const NGHolder &g,
-                                    const CompileContext &cc) {
+static bytecode_ptr<NFA> makeBareSomRevNfa(const NGHolder &g,
+                                           const CompileContext &cc) {
     // Create a reversed anchored version of this NFA which fires a zero report
     // ID on accept.
     NGHolder g_rev;
@@ -1777,10 +1748,9 @@ bytecode_ptr<NFA> makeBareSomRevNfa(const NGHolder &g,
     return nfa;
 }
 
-static
-bool makeSomRevNfa(vector<SomRevNfa> &som_nfas, const NGHolder &g,
-                   const ReportID report, const NFAVertex sink,
-                   const CompileContext &cc) {
+static bool makeSomRevNfa(vector<SomRevNfa> &som_nfas, const NGHolder &g,
+                          const ReportID report, const NFAVertex sink,
+                          const CompileContext &cc) {
     // Clone the graph with ONLY the given report vertices on the given sink.
     NGHolder g2;
     cloneHolder(g2, g);
@@ -1804,8 +1774,7 @@ bool makeSomRevNfa(vector<SomRevNfa> &som_nfas, const NGHolder &g,
     return true;
 }
 
-static
-bool doSomRevNfa(NG &ng, NGHolder &g, const CompileContext &cc) {
+static bool doSomRevNfa(NG &ng, NGHolder &g, const CompileContext &cc) {
     ReportManager &rm = ng.rm;
 
     // FIXME might want to work on a graph without extra redundancy?
@@ -1855,9 +1824,8 @@ bool doSomRevNfa(NG &ng, NGHolder &g, const CompileContext &cc) {
     return true;
 }
 
-static
-u32 doSomRevNfaPrefix(NG &ng, const ExpressionInfo &expr, NGHolder &g,
-                      const CompileContext &cc) {
+static u32 doSomRevNfaPrefix(NG &ng, const ExpressionInfo &expr, NGHolder &g,
+                             const CompileContext &cc) {
     depth maxWidth = findMaxWidth(g);
 
     assert(maxWidth <= depth(ng.maxSomRevHistoryAvailable));
@@ -1876,23 +1844,20 @@ u32 doSomRevNfaPrefix(NG &ng, const ExpressionInfo &expr, NGHolder &g,
     return ng.ssm.addRevNfa(move(nfa), maxWidth);
 }
 
-static
-bool is_literable(const NGHolder &g, NFAVertex v) {
+static bool is_literable(const NGHolder &g, NFAVertex v) {
     const CharReach &cr = g[v].char_reach;
     return cr.count() == 1 || cr.isCaselessChar();
 }
 
-static
-void append(ue2_literal &s, const CharReach &cr) {
+static void append(ue2_literal &s, const CharReach &cr) {
     assert(cr.count() == 1 || cr.isCaselessChar());
     s.push_back(cr.find_first(), cr.isCaselessChar());
 }
 
-static
-map<u32, region_info>::const_iterator findLaterLiteral(const NGHolder &g,
-                            const map<u32, region_info> &info,
-                            map<u32, region_info>::const_iterator lower_bound,
-                            ue2_literal &s_out, const Grey &grey) {
+static map<u32, region_info>::const_iterator
+findLaterLiteral(const NGHolder &g, const map<u32, region_info> &info,
+                 map<u32, region_info>::const_iterator lower_bound,
+                 ue2_literal &s_out, const Grey &grey) {
 #define MIN_LITERAL_LENGTH 3
     s_out.clear();
     bool past_lower = false;
@@ -1902,17 +1867,17 @@ map<u32, region_info>::const_iterator findLaterLiteral(const NGHolder &g,
         if (it == lower_bound) {
             past_lower = true;
         }
-        if (!it->second.optional && it->second.dag
-            && it->second.full.size() == 1
-            && is_literable(g, it->second.full.front())) {
+        if (!it->second.optional && it->second.dag &&
+            it->second.full.size() == 1 &&
+            is_literable(g, it->second.full.front())) {
             append(s, g[it->second.full.front()].char_reach);
 
             if (s.length() >= grey.maxHistoryAvailable && past_lower) {
                 goto exit;
             }
         } else {
-            if (past_lower && it != lower_bound
-                && s.length() >= MIN_LITERAL_LENGTH) {
+            if (past_lower && it != lower_bound &&
+                s.length() >= MIN_LITERAL_LENGTH) {
                 --it;
                 goto exit;
             }
@@ -1925,7 +1890,7 @@ map<u32, region_info>::const_iterator findLaterLiteral(const NGHolder &g,
         s_out = s;
         return it;
     }
- exit:
+exit:
     if (s.length() > grey.maxHistoryAvailable) {
         ue2_literal::const_iterator jt = s.end() - grey.maxHistoryAvailable;
         for (; jt != s.end(); ++jt) {
@@ -1937,18 +1902,17 @@ map<u32, region_info>::const_iterator findLaterLiteral(const NGHolder &g,
     return it;
 }
 
-static
-bool attemptToBuildChainAfterSombe(SomSlotManager &ssm, NGHolder &g,
-                  const unordered_map<NFAVertex, u32> &regions,
-                  const map<u32, region_info> &info,
-                  map<u32, region_info>::const_iterator picked,
-                  const Grey &grey,
-                  vector<som_plan> *plan) {
+static bool
+attemptToBuildChainAfterSombe(SomSlotManager &ssm, NGHolder &g,
+                              const unordered_map<NFAVertex, u32> &regions,
+                              const map<u32, region_info> &info,
+                              map<u32, region_info>::const_iterator picked,
+                              const Grey &grey, vector<som_plan> *plan) {
     DEBUG_PRINTF("trying to chain from %u\n", picked->first);
     const u32 numSomLocsBefore = ssm.numSomSlots(); /* for rollback */
 
-    shared_ptr<NGHolder> prefix = makePrefix(g, regions, picked->second,
-                                             next(picked)->second);
+    shared_ptr<NGHolder> prefix =
+        makePrefix(g, regions, picked->second, next(picked)->second);
 
     // Quick check to stop us from trying this on huge graphs, which causes us
     // to spend forever in ng_execute looking at cases that will most like
@@ -1999,8 +1963,7 @@ bool attemptToBuildChainAfterSombe(SomSlotManager &ssm, NGHolder &g,
     return true;
 }
 
-static
-void setReportOnHaigPrefix(RoseBuild &rose, NGHolder &h) {
+static void setReportOnHaigPrefix(RoseBuild &rose, NGHolder &h) {
     ReportID haig_report_id = rose.getNewNfaReport();
     DEBUG_PRINTF("setting report id of %u\n", haig_report_id);
 
@@ -2011,20 +1974,19 @@ void setReportOnHaigPrefix(RoseBuild &rose, NGHolder &h) {
     }
 }
 
-static
-bool tryHaig(RoseBuild &rose, NGHolder &g,
-             const unordered_map<NFAVertex, u32> &regions,
-             som_type som, u32 somPrecision,
-             map<u32, region_info>::const_iterator picked,
-             shared_ptr<raw_som_dfa> *haig, shared_ptr<NGHolder> *haig_prefix,
-             const Grey &grey) {
+static bool tryHaig(RoseBuild &rose, NGHolder &g,
+                    const unordered_map<NFAVertex, u32> &regions, som_type som,
+                    u32 somPrecision,
+                    map<u32, region_info>::const_iterator picked,
+                    shared_ptr<raw_som_dfa> *haig,
+                    shared_ptr<NGHolder> *haig_prefix, const Grey &grey) {
     DEBUG_PRINTF("trying to build a haig\n");
-    shared_ptr<NGHolder> prefix = makePrefix(g, regions, picked->second,
-                                             next(picked)->second);
+    shared_ptr<NGHolder> prefix =
+        makePrefix(g, regions, picked->second, next(picked)->second);
     prefix->kind = NFA_PREFIX;
     setReportOnHaigPrefix(rose, *prefix);
     dumpHolder(*prefix, 0, "haig_prefix", grey);
-    vector<vector<CharReach> > triggers; /* empty for prefix */
+    vector<vector<CharReach>> triggers; /* empty for prefix */
     *haig = attemptToBuildHaig(*prefix, som, somPrecision, triggers, grey);
     if (!*haig) {
         DEBUG_PRINTF("failed to haig\n");
@@ -2034,10 +1996,11 @@ bool tryHaig(RoseBuild &rose, NGHolder &g,
     return true;
 }
 
-static
-void roseAddHaigLiteral(RoseBuild &tb, const shared_ptr<NGHolder> &prefix,
-                        const shared_ptr<raw_som_dfa> &haig,
-                        const ue2_literal &lit, const set<ReportID> &reports) {
+static void roseAddHaigLiteral(RoseBuild &tb,
+                               const shared_ptr<NGHolder> &prefix,
+                               const shared_ptr<raw_som_dfa> &haig,
+                               const ue2_literal &lit,
+                               const set<ReportID> &reports) {
     assert(prefix && haig);
 
     DEBUG_PRINTF("trying to build a sombe from %s\n", dumpString(lit).c_str());
@@ -2058,12 +2021,11 @@ void roseAddHaigLiteral(RoseBuild &tb, const shared_ptr<NGHolder> &prefix,
     assert(rv); // TODO: recover from addRose failure
 }
 
-static
-sombe_rv doHaigLitSom(NG &ng, NGHolder &g, const ExpressionInfo &expr,
-                      u32 comp_id, som_type som,
-                      const unordered_map<NFAVertex, u32> &regions,
-                      const map<u32, region_info> &info,
-                      map<u32, region_info>::const_iterator lower_bound) {
+static sombe_rv
+doHaigLitSom(NG &ng, NGHolder &g, const ExpressionInfo &expr, u32 comp_id,
+             som_type som, const unordered_map<NFAVertex, u32> &regions,
+             const map<u32, region_info> &info,
+             map<u32, region_info>::const_iterator lower_bound) {
     DEBUG_PRINTF("entry\n");
     assert(g.kind == NFA_OUTFIX);
     const CompileContext &cc = ng.cc;
@@ -2087,8 +2049,8 @@ sombe_rv doHaigLitSom(NG &ng, NGHolder &g, const ExpressionInfo &expr,
     while (1) {
         DEBUG_PRINTF("lower bound is %u\n", lower_bound->first);
         ue2_literal s;
-        map<u32, region_info>::const_iterator lit
-            = findLaterLiteral(g, info, lower_bound, s, cc.grey);
+        map<u32, region_info>::const_iterator lit =
+            findLaterLiteral(g, info, lower_bound, s, cc.grey);
         if (lit == info.end()) {
             DEBUG_PRINTF("failed to find literal\n");
             ssm.rollbackSomTo(numSomLocsBefore);
@@ -2099,6 +2061,12 @@ sombe_rv doHaigLitSom(NG &ng, NGHolder &g, const ExpressionInfo &expr,
 
         if (s.length() > MAX_MASK2_WIDTH && mixed_sensitivity(s)) {
             DEBUG_PRINTF("long & mixed-sensitivity, Rose can't handle this\n");
+            lower_bound = lit;
+            ++lower_bound;
+            continue;
+        }
+
+        if (fpFeedbackSombeLiteralIsBad(cc, s)) {
             lower_bound = lit;
             ++lower_bound;
             continue;
@@ -2169,8 +2137,8 @@ sombe_rv doHaigLitSom(NG &ng, NGHolder &g, const ExpressionInfo &expr,
             rep.insert(rm.getInternalId(ir));
         } else {
             /* terminal literal */
-            ok = tryHaig(*ng.rose, g, regions, som, ssm.somPrecision(), haig_reg,
-                         &haig, &haig_prefix, cc.grey);
+            ok = tryHaig(*ng.rose, g, regions, som, ssm.somPrecision(),
+                         haig_reg, &haig, &haig_prefix, cc.grey);
 
             /* find report */
             insert(&rep, g[lit->second.exits.front()].reports);
@@ -2187,7 +2155,7 @@ sombe_rv doHaigLitSom(NG &ng, NGHolder &g, const ExpressionInfo &expr,
                 return SOMBE_HANDLED_ALL;
             }
         }
-next_try:
+    next_try:
         lower_bound = lit;
         ++lower_bound;
     }
@@ -2195,9 +2163,8 @@ next_try:
     return SOMBE_FAIL;
 }
 
-static
-bool leadingLiterals(const NGHolder &g, set<ue2_literal> *lits,
-                     set<NFAVertex> *terminals) {
+static bool leadingLiterals(const NGHolder &g, set<ue2_literal> *lits,
+                            set<NFAVertex> *terminals) {
     /* TODO: smarter (topo) */
 #define MAX_LEADING_LITERALS 20
     set<NFAVertex> s_succ;
@@ -2213,11 +2180,11 @@ bool leadingLiterals(const NGHolder &g, set<ue2_literal> *lits,
 
     sds_succ.erase(g.startDs);
 
-    map<NFAVertex, vector<ue2_literal> > curr;
+    map<NFAVertex, vector<ue2_literal>> curr;
     curr[g.startDs].push_back(ue2_literal());
 
-    map<NFAVertex, set<NFAVertex> > seen;
-    map<NFAVertex, vector<ue2_literal> > next;
+    map<NFAVertex, set<NFAVertex>> seen;
+    map<NFAVertex, vector<ue2_literal>> next;
 
     bool did_expansion = true;
     while (did_expansion) {
@@ -2260,8 +2227,8 @@ bool leadingLiterals(const NGHolder &g, set<ue2_literal> *lits,
                              cr.count());
                 for (size_t c = cr.find_first(); c != CharReach::npos;
                      c = cr.find_next(c)) {
-                    bool nocase = ourisalpha(c) && cr.test(mytoupper(c))
-                        && cr.test(mytolower(c));
+                    bool nocase = ourisalpha(c) && cr.test(mytoupper(c)) &&
+                                  cr.test(mytolower(c));
 
                     if (nocase && (char)c == mytolower(c)) {
                         continue; /* uppercase already handled us */
@@ -2276,11 +2243,10 @@ bool leadingLiterals(const NGHolder &g, set<ue2_literal> *lits,
                         out.push_back(lit);
                         out.back().push_back(c, nocase);
                         count++;
-                        if (out.back().length() > MAX_MASK2_WIDTH
-                            && mixed_sensitivity(out.back())) {
+                        if (out.back().length() > MAX_MASK2_WIDTH &&
+                            mixed_sensitivity(out.back())) {
                             goto exit;
                         }
-
                     }
                 }
             }
@@ -2298,7 +2264,7 @@ bool leadingLiterals(const NGHolder &g, set<ue2_literal> *lits,
         curr.swap(next);
         next.clear();
     };
- exit:;
+exit:;
     for (const auto &m : curr) {
         NFAVertex t = m.first;
         if (t == g.startDs) {
@@ -2313,9 +2279,8 @@ bool leadingLiterals(const NGHolder &g, set<ue2_literal> *lits,
     return !lits->empty();
 }
 
-static
-bool splitOffLeadingLiterals(const NGHolder &g, set<ue2_literal> *lit_out,
-                             NGHolder *rhs) {
+static bool splitOffLeadingLiterals(const NGHolder &g,
+                                    set<ue2_literal> *lit_out, NGHolder *rhs) {
     DEBUG_PRINTF("looking for a leading literals\n");
 
     set<NFAVertex> terms;
@@ -2351,11 +2316,10 @@ bool splitOffLeadingLiterals(const NGHolder &g, set<ue2_literal> *lit_out,
     return true;
 }
 
-static
-void findBestLiteral(const NGHolder &g,
-                     const unordered_map<NFAVertex, u32> &regions,
-                     ue2_literal *lit_out, NFAVertex *v,
-                     const CompileContext &cc) {
+static void findBestLiteral(const NGHolder &g,
+                            const unordered_map<NFAVertex, u32> &regions,
+                            ue2_literal *lit_out, NFAVertex *v,
+                            const CompileContext &cc) {
     map<u32, region_info> info;
     buildRegionMapping(g, regions, info, false);
 
@@ -2391,11 +2355,10 @@ void findBestLiteral(const NGHolder &g,
     *v = best_v;
 }
 
-static
-bool splitOffBestLiteral(const NGHolder &g,
-                         const unordered_map<NFAVertex, u32> &regions,
-                         ue2_literal *lit_out, NGHolder *lhs, NGHolder *rhs,
-                         const CompileContext &cc) {
+static bool splitOffBestLiteral(const NGHolder &g,
+                                const unordered_map<NFAVertex, u32> &regions,
+                                ue2_literal *lit_out, NGHolder *lhs,
+                                NGHolder *rhs, const CompileContext &cc) {
     NFAVertex v = NGHolder::null_vertex();
 
     findBestLiteral(g, regions, lit_out, &v, cc);
@@ -2442,8 +2405,7 @@ void makeReportsSomPass(ReportManager &rm, NGHolder &g) {
     }
 }
 
-static
-bool doLitHaigSom(NG &ng, NGHolder &g, som_type som) {
+static bool doLitHaigSom(NG &ng, NGHolder &g, som_type som) {
     ue2_literal lit;
     shared_ptr<NGHolder> rhs = make_shared<NGHolder>();
     if (!rhs) {
@@ -2468,17 +2430,21 @@ bool doLitHaigSom(NG &ng, NGHolder &g, som_type som) {
 
     assert(lit.length() <= MAX_MASK2_WIDTH || !mixed_sensitivity(lit));
 
+    if (fpFeedbackSombeLiteralIsBad(ng.cc, lit)) {
+        return false;
+    }
+
     makeReportsSomPass(ng.rm, *rhs);
 
     dumpHolder(*rhs, 91, "lithaig_rhs", ng.cc.grey);
 
-    vector<vector<CharReach> > triggers;
+    vector<vector<CharReach>> triggers;
     triggers.push_back(as_cr_seq(lit));
 
     assert(rhs->kind == NFA_SUFFIX);
-    shared_ptr<raw_som_dfa> haig
-        = attemptToBuildHaig(*rhs, som, ng.ssm.somPrecision(), triggers,
-                             ng.cc.grey, false /* lit implies adv som */);
+    shared_ptr<raw_som_dfa> haig =
+        attemptToBuildHaig(*rhs, som, ng.ssm.somPrecision(), triggers,
+                           ng.cc.grey, false /* lit implies adv som */);
     if (!haig) {
         DEBUG_PRINTF("failed to haig\n");
         return false;
@@ -2490,8 +2456,8 @@ bool doLitHaigSom(NG &ng, NGHolder &g, som_type som) {
     RoseInVertex v = add_vertex(RoseInVertexProps::makeLiteral(lit), ig);
     add_edge(s, v, RoseInEdgeProps(0, ROSE_BOUND_INF), ig);
 
-    RoseInVertex a
-        = add_vertex(RoseInVertexProps::makeAccept(set<ReportID>()), ig);
+    RoseInVertex a =
+        add_vertex(RoseInVertexProps::makeAccept(set<ReportID>()), ig);
     add_edge(v, a, RoseInEdgeProps(haig), ig);
 
     calcVertexOffsets(ig);
@@ -2499,10 +2465,9 @@ bool doLitHaigSom(NG &ng, NGHolder &g, som_type som) {
     return ng.rose->addSombeRose(ig);
 }
 
-static
-bool doHaigLitHaigSom(NG &ng, NGHolder &g,
-                      const unordered_map<NFAVertex, u32> &regions,
-                      som_type som) {
+static bool doHaigLitHaigSom(NG &ng, NGHolder &g,
+                             const unordered_map<NFAVertex, u32> &regions,
+                             som_type som) {
     if (!ng.cc.grey.allowLitHaig) {
         return false;
     }
@@ -2533,6 +2498,10 @@ bool doHaigLitHaigSom(NG &ng, NGHolder &g,
 
     assert(lit.length() <= MAX_MASK2_WIDTH || !mixed_sensitivity(lit));
 
+    if (fpFeedbackSombeLiteralIsBad(ng.cc, lit)) {
+        return false;
+    }
+
     if (edge(rhs->start, rhs->acceptEod, *rhs).second) {
         return false; /* TODO: handle */
     }
@@ -2545,8 +2514,7 @@ bool doHaigLitHaigSom(NG &ng, NGHolder &g,
     u32 delay = removeTrailingLiteralStates(*lhs, lit, max_delay);
 
     RoseInGraph ig;
-    RoseInVertex s
-        = add_vertex(RoseInVertexProps::makeStart(false), ig);
+    RoseInVertex s = add_vertex(RoseInVertexProps::makeStart(false), ig);
     RoseInVertex v = add_vertex(RoseInVertexProps::makeLiteral(lit), ig);
 
     bool lhs_all_vac = true;
@@ -2570,11 +2538,10 @@ bool doHaigLitHaigSom(NG &ng, NGHolder &g,
     } else {
         assert(delay == lit.length());
         setReportOnHaigPrefix(*ng.rose, *lhs);
-        vector<vector<CharReach> > prefix_triggers; /* empty for prefix */
+        vector<vector<CharReach>> prefix_triggers; /* empty for prefix */
         assert(lhs->kind == NFA_PREFIX);
-        shared_ptr<raw_som_dfa> l_haig
-            = attemptToBuildHaig(*lhs, som, ng.ssm.somPrecision(),
-                                 prefix_triggers, ng.cc.grey);
+        shared_ptr<raw_som_dfa> l_haig = attemptToBuildHaig(
+            *lhs, som, ng.ssm.somPrecision(), prefix_triggers, ng.cc.grey);
         if (!l_haig) {
             DEBUG_PRINTF("failed to haig\n");
             return false;
@@ -2587,13 +2554,14 @@ bool doHaigLitHaigSom(NG &ng, NGHolder &g,
     if (!edge(rhs->start, rhs->accept, *rhs).second) {
         assert(rhs->kind == NFA_SUFFIX);
 
-        vector<vector<CharReach> > triggers;
+        vector<vector<CharReach>> triggers;
         triggers.push_back(as_cr_seq(lit));
 
         ue2_literal lit2;
-        if (getTrailingLiteral(g, &lit2)
-            && lit2.length() >= ng.cc.grey.minRoseLiteralLength
-            && minStringPeriod(lit2) >= 2) {
+        if (getTrailingLiteral(g, &lit2) &&
+            lit2.length() >= ng.cc.grey.minRoseLiteralLength &&
+            minStringPeriod(lit2) >= 2 &&
+            !fpFeedbackSombeLiteralIsBad(ng.cc, lit2)) {
 
             /* TODO: handle delay */
             size_t overlap = maxOverlap(lit, lit2, 0);
@@ -2603,17 +2571,16 @@ bool doHaigLitHaigSom(NG &ng, NGHolder &g,
             assert(delay2 <= lit2.length());
             setReportOnHaigPrefix(*ng.rose, *rhs);
 
-            shared_ptr<raw_som_dfa> m_haig
-                = attemptToBuildHaig(*rhs, som, ng.ssm.somPrecision(),
-                                     triggers, ng.cc.grey, true);
+            shared_ptr<raw_som_dfa> m_haig = attemptToBuildHaig(
+                *rhs, som, ng.ssm.somPrecision(), triggers, ng.cc.grey, true);
             DEBUG_PRINTF("mhs haig %p\n", m_haig.get());
             if (!m_haig) {
                 DEBUG_PRINTF("failed to haig\n");
                 return false;
             }
 
-            RoseInVertex w
-                = add_vertex(RoseInVertexProps::makeLiteral(lit2), ig);
+            RoseInVertex w =
+                add_vertex(RoseInVertexProps::makeLiteral(lit2), ig);
             add_edge(v, w, RoseInEdgeProps(rhs, m_haig, delay2), ig);
 
             NFAVertex reporter = getSoleSourceVertex(g, g.accept);
@@ -2624,17 +2591,15 @@ bool doHaigLitHaigSom(NG &ng, NGHolder &g,
             add_edge(w, a, RoseInEdgeProps(0U, 0U), ig);
         } else {
             /* TODO: analysis to see if som is in fact always increasing */
-            shared_ptr<raw_som_dfa> r_haig
-                = attemptToBuildHaig(*rhs, som, ng.ssm.somPrecision(),
-                                     triggers, ng.cc.grey, true);
+            shared_ptr<raw_som_dfa> r_haig = attemptToBuildHaig(
+                *rhs, som, ng.ssm.somPrecision(), triggers, ng.cc.grey, true);
             DEBUG_PRINTF("rhs haig %p\n", r_haig.get());
             if (!r_haig) {
                 DEBUG_PRINTF("failed to haig\n");
                 return false;
             }
-            RoseInVertex a
-                = add_vertex(RoseInVertexProps::makeAccept(set<ReportID>()),
-                             ig);
+            RoseInVertex a =
+                add_vertex(RoseInVertexProps::makeAccept(set<ReportID>()), ig);
             add_edge(v, a, RoseInEdgeProps(r_haig), ig);
         }
     } else {
@@ -2649,8 +2614,7 @@ bool doHaigLitHaigSom(NG &ng, NGHolder &g,
         }
         const auto &reports = g[reporter].reports;
         assert(!reports.empty());
-        RoseInVertex a =
-            add_vertex(RoseInVertexProps::makeAccept(reports), ig);
+        RoseInVertex a = add_vertex(RoseInVertexProps::makeAccept(reports), ig);
         add_edge(v, a, RoseInEdgeProps(0U, 0U), ig);
     }
 
@@ -2659,8 +2623,7 @@ bool doHaigLitHaigSom(NG &ng, NGHolder &g,
     return ng.rose->addSombeRose(ig);
 }
 
-static
-bool doMultiLitHaigSom(NG &ng, NGHolder &g, som_type som) {
+static bool doMultiLitHaigSom(NG &ng, NGHolder &g, som_type som) {
     set<ue2_literal> lits;
     shared_ptr<NGHolder> rhs = make_shared<NGHolder>();
     if (!ng.cc.grey.allowLitHaig) {
@@ -2680,6 +2643,10 @@ bool doMultiLitHaigSom(NG &ng, NGHolder &g, som_type som) {
 
     vector<vector<CharReach>> triggers;
     for (const auto &lit : lits) {
+        if (fpFeedbackSombeLiteralIsBad(ng.cc, lit)) {
+            return false;
+        }
+
         if (lit.length() < ng.cc.grey.minRoseLiteralLength) {
             DEBUG_PRINTF("lit too short\n");
             return false;
@@ -2693,9 +2660,9 @@ bool doMultiLitHaigSom(NG &ng, NGHolder &g, som_type som) {
                                          * we can promise ordering */
 
     assert(rhs->kind == NFA_SUFFIX);
-    shared_ptr<raw_som_dfa> haig
-        = attemptToBuildHaig(*rhs, som, ng.ssm.somPrecision(), triggers,
-                             ng.cc.grey, unordered_som_triggers);
+    shared_ptr<raw_som_dfa> haig =
+        attemptToBuildHaig(*rhs, som, ng.ssm.somPrecision(), triggers,
+                           ng.cc.grey, unordered_som_triggers);
     if (!haig) {
         DEBUG_PRINTF("failed to haig\n");
         return false;
@@ -2705,8 +2672,8 @@ bool doMultiLitHaigSom(NG &ng, NGHolder &g, som_type som) {
     RoseInGraph ig;
     RoseInVertex s = add_vertex(RoseInVertexProps::makeStart(false), ig);
 
-    RoseInVertex a
-        = add_vertex(RoseInVertexProps::makeAccept(set<ReportID>()), ig);
+    RoseInVertex a =
+        add_vertex(RoseInVertexProps::makeAccept(set<ReportID>()), ig);
 
     for (const auto &lit : lits) {
         RoseInVertex v = add_vertex(RoseInVertexProps::makeLiteral(lit), ig);
@@ -2719,8 +2686,7 @@ bool doMultiLitHaigSom(NG &ng, NGHolder &g, som_type som) {
     return ng.rose->addSombeRose(ig);
 }
 
-static
-bool trySombe(NG &ng, NGHolder &g, som_type som) {
+static bool trySombe(NG &ng, NGHolder &g, som_type som) {
     if (doLitHaigSom(ng, g, som)) {
         return true;
     }
@@ -2738,11 +2704,9 @@ bool trySombe(NG &ng, NGHolder &g, som_type som) {
     return false;
 }
 
-static
-map<u32, region_info>::const_iterator pickInitialSomCut(const NGHolder &g,
-                        const unordered_map<NFAVertex, u32> &regions,
-                        const map<u32, region_info> &info,
-                        const vector<DepthMinMax> &depths) {
+static map<u32, region_info>::const_iterator pickInitialSomCut(
+    const NGHolder &g, const unordered_map<NFAVertex, u32> &regions,
+    const map<u32, region_info> &info, const vector<DepthMinMax> &depths) {
     map<u32, region_info>::const_iterator picked = info.end();
     for (map<u32, region_info>::const_iterator it = info.begin();
          it != info.end(); ++it) {
@@ -2763,13 +2727,11 @@ map<u32, region_info>::const_iterator pickInitialSomCut(const NGHolder &g,
     return picked;
 }
 
-static
-map<u32, region_info>::const_iterator tryForLaterRevNfaCut(const NGHolder &g,
-                              const unordered_map<NFAVertex, u32> &regions,
-                              const map<u32, region_info> &info,
-                              const vector<DepthMinMax> &depths,
-                              const map<u32, region_info>::const_iterator &orig,
-                              const CompileContext &cc) {
+static map<u32, region_info>::const_iterator tryForLaterRevNfaCut(
+    const NGHolder &g, const unordered_map<NFAVertex, u32> &regions,
+    const map<u32, region_info> &info, const vector<DepthMinMax> &depths,
+    const map<u32, region_info>::const_iterator &orig,
+    const CompileContext &cc) {
     DEBUG_PRINTF("trying for later rev nfa cut\n");
     assert(orig != info.end());
 
@@ -2821,14 +2783,14 @@ map<u32, region_info>::const_iterator tryForLaterRevNfaCut(const NGHolder &g,
             }
         }
 
-        if (rv->second.enters.empty()
-            || find(rv->second.full.begin(), rv->second.full.end(), g.startDs)
-                    != rv->second.full.end()) {
+        if (rv->second.enters.empty() ||
+            find(rv->second.full.begin(), rv->second.full.end(), g.startDs) !=
+                rv->second.full.end()) {
             continue;
         }
 
-        if (!isMandRegionBetween(info.begin(), rv)
-            && info.begin()->second.optional) {
+        if (!isMandRegionBetween(info.begin(), rv) &&
+            info.begin()->second.optional) {
             continue;
         }
 
@@ -2855,13 +2817,12 @@ map<u32, region_info>::const_iterator tryForLaterRevNfaCut(const NGHolder &g,
     return info.end();
 }
 
-static
-unique_ptr<NGHolder> makePrefixForChain(NGHolder &g,
-                         const unordered_map<NFAVertex, u32> &regions,
-                         const map<u32, region_info> &info,
-                         const map<u32, region_info>::const_iterator &picked,
-                         vector<DepthMinMax> *depths, bool prefix_by_rev,
-                         ReportManager &rm) {
+static unique_ptr<NGHolder>
+makePrefixForChain(NGHolder &g, const unordered_map<NFAVertex, u32> &regions,
+                   const map<u32, region_info> &info,
+                   const map<u32, region_info>::const_iterator &picked,
+                   vector<DepthMinMax> *depths, bool prefix_by_rev,
+                   ReportManager &rm) {
     DEBUG_PRINTF("making prefix for chain attempt\n");
     auto prefix =
         makePrefix(g, regions, picked->second, next(picked)->second, false);
@@ -2875,8 +2836,8 @@ unique_ptr<NGHolder> makePrefixForChain(NGHolder &g,
                      temp_som_loc, *depths, prefix_by_rev);
 
     /* handle direct edge to accepts from region */
-    if (edge(picked->second.exits.front(), g.accept, g).second
-            || edge(picked->second.exits.front(), g.acceptEod, g).second) {
+    if (edge(picked->second.exits.front(), g.accept, g).second ||
+        edge(picked->second.exits.front(), g.acceptEod, g).second) {
         map<u32, region_info>::const_iterator it = picked;
         do {
             makeSomRelReports(rm, g, it->second.exits, *depths);
@@ -2930,8 +2891,8 @@ sombe_rv doSom(NG &ng, NGHolder &g, const ExpressionInfo &expr, u32 comp_id,
     map<u32, region_info> info;
     buildRegionMapping(g, regions, info);
 
-    map<u32, region_info>::const_iterator picked
-        = pickInitialSomCut(g, regions, info, depths);
+    map<u32, region_info>::const_iterator picked =
+        pickInitialSomCut(g, regions, info, depths);
     DEBUG_PRINTF("picked %u\n", picked->first);
     if (picked == info.end() || picked->second.exits.empty()) {
         DEBUG_PRINTF("no regions/no progress possible\n");
@@ -2958,8 +2919,8 @@ sombe_rv doSom(NG &ng, NGHolder &g, const ExpressionInfo &expr, u32 comp_id,
 
     bool prefix_by_rev = false;
     map<u32, region_info>::const_iterator picked_old = picked;
-    map<u32, region_info>::const_iterator rev_pick
-        = tryForLaterRevNfaCut(g, regions, info, depths, picked, cc);
+    map<u32, region_info>::const_iterator rev_pick =
+        tryForLaterRevNfaCut(g, regions, info, depths, picked, cc);
     if (rev_pick != info.end()) {
         DEBUG_PRINTF("found later rev prefix cut point\n");
         assert(rev_pick != picked);
@@ -2968,16 +2929,16 @@ sombe_rv doSom(NG &ng, NGHolder &g, const ExpressionInfo &expr, u32 comp_id,
     } else {
         /* sanity checks for picked region, these checks have already been done
          * if we are using a prefix reverse nfa. */
-        if (picked->second.enters.empty()
-            || find(picked->second.full.begin(), picked->second.full.end(),
-                    g.startDs) != picked->second.full.end()) {
+        if (picked->second.enters.empty() ||
+            find(picked->second.full.begin(), picked->second.full.end(),
+                 g.startDs) != picked->second.full.end()) {
             clear_graph(g);
             cloneHolder(g, g_pristine);
             return SOMBE_FAIL;
         }
 
-        if (!isMandRegionBetween(info.begin(), picked)
-            && info.begin()->second.optional) {
+        if (!isMandRegionBetween(info.begin(), picked) &&
+            info.begin()->second.optional) {
             clear_graph(g);
             cloneHolder(g, g_pristine);
             return SOMBE_FAIL;
@@ -3004,8 +2965,8 @@ sombe_rv doSom(NG &ng, NGHolder &g, const ExpressionInfo &expr, u32 comp_id,
     if (stuck && escapes.none()) {
         /* leads directly to .* --> woot */
         DEBUG_PRINTF("initial slot is full lock\n");
-        u32 som_loc = ssm.getSomSlot(*prefix, escapes, false,
-                                     SomSlotManager::NO_PARENT);
+        u32 som_loc =
+            ssm.getSomSlot(*prefix, escapes, false, SomSlotManager::NO_PARENT);
         replaceTempSomSlot(rm, *prefix, som_loc);
 
         /* update all reports on g to report the som_loc's som */
@@ -3030,7 +2991,7 @@ sombe_rv doSom(NG &ng, NGHolder &g, const ExpressionInfo &expr, u32 comp_id,
     }
 
     vector<som_plan> plan;
- retry:
+retry:
     // Note: no-one should ever pay attention to the root plan's parent.
     plan.push_back(som_plan(prefix, escapes, false, 0));
     dumpHolder(*plan.back().prefix, 12, "som_prefix", cc.grey);
@@ -3084,11 +3045,11 @@ sombe_rv doSom(NG &ng, NGHolder &g, const ExpressionInfo &expr, u32 comp_id,
     DEBUG_PRINTF("-- get slot for initial plan\n");
     u32 som_loc;
     if (plan[0].is_reset) {
-        som_loc = ssm.getInitialResetSomSlot(*prefix, g, regions,
-                                picked->first, &plan[0].no_implement);
+        som_loc = ssm.getInitialResetSomSlot(*prefix, g, regions, picked->first,
+                                             &plan[0].no_implement);
     } else {
-        som_loc = ssm.getSomSlot(*prefix, escapes, false,
-                                 SomSlotManager::NO_PARENT);
+        som_loc =
+            ssm.getSomSlot(*prefix, escapes, false, SomSlotManager::NO_PARENT);
     }
 
     replaceTempSomSlot(rm, *prefix, som_loc);

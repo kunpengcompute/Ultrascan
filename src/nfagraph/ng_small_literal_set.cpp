@@ -32,22 +32,23 @@
  */
 #include "ng_small_literal_set.h"
 
+#include "fp_collector.h"
 #include "grey.h"
 #include "ng_holder.h"
 #include "ng_util.h"
 #include "rose/rose_build.h"
+#include "ue2common.h"
 #include "util/compare.h"
 #include "util/compile_context.h"
 #include "util/container.h"
 #include "util/graph_range.h"
 #include "util/order_check.h"
 #include "util/ue2string.h"
-#include "ue2common.h"
 
+#include <boost/range/adaptor/map.hpp>
 #include <map>
 #include <set>
 #include <vector>
-#include <boost/range/adaptor/map.hpp>
 
 using namespace std;
 using boost::adaptors::map_keys;
@@ -87,8 +88,7 @@ struct sls_literal {
     }
 };
 
-static
-bool operator<(const sls_literal &a, const sls_literal &b) {
+static bool operator<(const sls_literal &a, const sls_literal &b) {
     ORDER_CHECK(anchored);
     ORDER_CHECK(eod);
     ORDER_CHECK(s);
@@ -98,9 +98,40 @@ bool operator<(const sls_literal &a, const sls_literal &b) {
 
 } // namespace
 
-static
-bool checkLongMixedSensitivityLiterals(
-        const map<sls_literal, flat_set<ReportID>> &literals) {
+static bool fpFeedbackLiteralIsBad(const CompileContext &cc,
+                                   const ue2_literal &lit) {
+    if (!cc.fp_feedback) {
+        return false;
+    }
+
+    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
+
+    if (!hs_fp_feedback_literal_is_bad(cc.fp_feedback, lit.c_str(),
+                                       lit.length(), lit.any_nocase())) {
+        return false;
+    }
+
+    DEBUG_PRINTF("rejecting small literal set due to fp feedback: '%s'\n",
+                 dumpString(lit).c_str());
+    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
+    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
+    return true;
+}
+
+static bool fpFeedbackLiteralSetHasBad(
+    const CompileContext &cc,
+    const map<sls_literal, flat_set<ReportID>> &literals) {
+    for (const auto &m : literals) {
+        if (fpFeedbackLiteralIsBad(cc, m.first.s)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool checkLongMixedSensitivityLiterals(
+    const map<sls_literal, flat_set<ReportID>> &literals) {
     const size_t len = MAX_MASK2_WIDTH;
 
     for (const sls_literal &lit : literals | map_keys) {
@@ -112,9 +143,8 @@ bool checkLongMixedSensitivityLiterals(
     return true;
 }
 
-static
-bool findLiterals(const NGHolder &g,
-                  map<sls_literal, flat_set<ReportID>> *literals) {
+static bool findLiterals(const NGHolder &g,
+                         map<sls_literal, flat_set<ReportID>> *literals) {
     vector<NFAVertex> order = getTopoOrdering(g);
 
     vector<set<sls_literal>> built(num_vertices(g));
@@ -126,7 +156,7 @@ bool findLiterals(const NGHolder &g,
         read_count[g[v].index] = out_degree(v, g);
 
         DEBUG_PRINTF("setting read_count to %zu for %zu\n",
-                      read_count[g[v].index], g[v].index);
+                     read_count[g[v].index], g[v].index);
 
         assert(out.empty());
         if (v == g.start) {
@@ -154,8 +184,8 @@ bool findLiterals(const NGHolder &g,
             }
 
             set<sls_literal> &in = built[g[u].index];
-            DEBUG_PRINTF("getting from %zu (%zu reads to go)\n",
-                          g[u].index, read_count[g[u].index]);
+            DEBUG_PRINTF("getting from %zu (%zu reads to go)\n", g[u].index,
+                         read_count[g[u].index]);
             assert(!in.empty());
             assert(read_count[g[u].index]);
 
@@ -169,8 +199,8 @@ bool findLiterals(const NGHolder &g,
 
                 for (size_t c = cr.find_first(); c != cr.npos;
                      c = cr.find_next(c)) {
-                    bool nocase = ourisalpha(c) && cr.test(mytoupper(c))
-                        && cr.test(mytolower(c));
+                    bool nocase = ourisalpha(c) && cr.test(mytoupper(c)) &&
+                                  cr.test(mytolower(c));
 
                     if (nocase && (char)c == mytolower(c)) {
                         continue; /* uppercase already handled us */
@@ -180,7 +210,7 @@ bool findLiterals(const NGHolder &g,
 
                     if (out.size() + literals->size() > MAX_LITERAL_SET_SIZE) {
                         DEBUG_PRINTF("too big %zu + %zu\n", out.size(),
-                                      literals->size());
+                                     literals->size());
                         return false;
                     }
                 }
@@ -197,8 +227,7 @@ bool findLiterals(const NGHolder &g,
     return true;
 }
 
-static
-size_t min_period(const map<sls_literal, flat_set<ReportID>> &literals) {
+static size_t min_period(const map<sls_literal, flat_set<ReportID>> &literals) {
     size_t rv = SIZE_MAX;
 
     for (const sls_literal &lit : literals | map_keys) {
@@ -252,6 +281,10 @@ bool handleSmallLiteralSets(RoseBuild &rose, const NGHolder &g,
 
     if (!checkLongMixedSensitivityLiterals(literals)) {
         DEBUG_PRINTF("long mixed\n");
+        return false;
+    }
+
+    if (fpFeedbackLiteralSetHasBad(cc, literals)) {
         return false;
     }
 

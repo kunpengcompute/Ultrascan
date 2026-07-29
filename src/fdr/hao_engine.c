@@ -12,6 +12,8 @@
 #include "util/simd_utils.h"
 
 #include <stdint.h>
+
+#if defined(__ARM_FEATURE_SVE)
 #include <arm_sve.h>
 
 #if defined(__ARM_FEATURE_SVE2)
@@ -41,8 +43,8 @@ struct HAOHashRuntime {
     u16 dotVector[HAO_RUNTIME_DOT_VECTOR_LANES];
 };
 
-static really_inline
-u32 haoL2MetaRuleCount(const struct HAORuntimeL2Meta *meta) {
+static really_inline u32
+haoL2MetaRuleCount(const struct HAORuntimeL2Meta *meta) {
     u32 slot;
     u32 count = 0;
 
@@ -55,9 +57,9 @@ u32 haoL2MetaRuleCount(const struct HAORuntimeL2Meta *meta) {
     return count;
 }
 
-static really_inline
-void haoBuildHashRuntime(const struct HAORuntimeHeader *hdr,
-                         struct HAOHashRuntime *hash) {
+static really_inline void
+haoBuildHashRuntime(const struct HAORuntimeHeader *hdr,
+                    struct HAOHashRuntime *hash) {
     u32 i;
 
     hash->mode = haoRuntimeHeaderHashMode(hdr);
@@ -69,9 +71,8 @@ void haoBuildHashRuntime(const struct HAORuntimeHeader *hdr,
     }
 }
 
-static really_inline
-u32 haoL2ValidSlots(u32 careBits, u32 validMask32,
-                    u32 matchMask) {
+static really_inline u32 haoL2ValidSlots(u32 careBits, u32 validMask32,
+                                         u32 matchMask) {
     u32 slot;
     u32 out = matchMask;
     const u32 invalidCare = careBits & ~validMask32;
@@ -81,8 +82,7 @@ u32 haoL2ValidSlots(u32 careBits, u32 validMask32,
     }
 
     for (slot = 0; slot < HAO_RUNTIME_RULE_SLOTS_PER_ENTRY; slot++) {
-        const u32 slotBits =
-            0xffU << (slot * HAO_RUNTIME_BYTES_PER_RULE_SLOT);
+        const u32 slotBits = 0xffU << (slot * HAO_RUNTIME_BYTES_PER_RULE_SLOT);
 
         if (invalidCare & slotBits) {
             out &= ~(1U << slot);
@@ -91,45 +91,40 @@ u32 haoL2ValidSlots(u32 careBits, u32 validMask32,
     return out;
 }
 
-static really_inline
-u32 haoL2MatchSve(const struct HAORuntimeL2Check *check,
-                  const struct HAORuntimeL2Meta *meta,
-                  const struct HAOPositionContext *ctx,
-                  svuint64_t laneData, svuint64_t vslotBits) {
+static really_inline u32 haoL2MatchSve(const struct HAORuntimeL2Check *check,
+                                       const struct HAORuntimeL2Meta *meta,
+                                       const struct HAOPositionContext *ctx,
+                                       svuint64_t laneData,
+                                       svuint64_t vslotBits) {
     const svbool_t pg = svwhilelt_b64((u32)0, HAO_RUNTIME_RULE_SLOTS_PER_ENTRY);
     const svuint64_t rule = svld1_u64(pg, (const uint64_t *)check->rule);
     const svuint64_t mask = svld1_u64(pg, (const uint64_t *)check->mask);
-    const svbool_t hit =
-        svcmpeq_u64(pg, svand_u64_x(pg, laneData, mask), rule);
-    u32 laneMask = (u32)svorv_u64(
-        pg, svsel_u64(hit, vslotBits, svdup_n_u64(0U)));
+    const svbool_t hit = svcmpeq_u64(pg, svand_u64_x(pg, laneData, mask), rule);
+    u32 laneMask =
+        (u32)svorv_u64(pg, svsel_u64(hit, vslotBits, svdup_n_u64(0U)));
 
     if (unlikely(ctx->validMask32 != 0xffffffffU)) {
-        laneMask = haoL2ValidSlots(
-            meta->careBits, ctx->validMask32, laneMask);
+        laneMask = haoL2ValidSlots(meta->careBits, ctx->validMask32, laneMask);
     }
     return laneMask;
 }
 
-static really_inline
-int haoProcessL2Entry(
+static really_inline int haoProcessL2Entry(
     const struct HAORuntimeL2Check *check, const struct HAORuntimeL2Meta *meta,
-    const struct HAORuntimeRuleMeta *ruleMeta,
-    const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, struct HAOPositionContext *ctx,
-    svuint64_t laneData, svuint64_t vslotBits, u32 *lastMatchId
+    const struct HAORuntimeRuleMeta *ruleMeta, const struct FDR_Runtime_Args *a,
+    hwlm_group_t *control, struct HAOPositionContext *ctx, svuint64_t laneData,
+    svuint64_t vslotBits, u32 *lastMatchId
 #if HAO_ENABLE_RUNTIME_STATS
     ,
     const struct HAORuntimeL2Check *l2CheckTable,
-    const struct HAORuntimeL2Meta *l2MetaTable, u32 l2Offset,
-    int *anyReport
+    const struct HAORuntimeL2Meta *l2MetaTable, u32 l2Offset, int *anyReport
 #endif
-    ) {
+) {
     HAO_STATS_ADD(verifierCalls, 1);
     u32 matchMask = haoL2MatchSve(check, meta, ctx, laneData, vslotBits);
 #if HAO_ENABLE_RUNTIME_STATS
-    haoStatsObserveL2Entry(l2CheckTable, l2MetaTable, ruleMeta,
-                           l2Offset, matchMask);
+    haoStatsObserveL2Entry(l2CheckTable, l2MetaTable, ruleMeta, l2Offset,
+                           matchMask);
 #endif
     if (likely(!matchMask)) {
         return HWLM_SUCCESS;
@@ -170,15 +165,13 @@ int haoProcessL2Entry(
     return HWLM_SUCCESS;
 }
 
-static really_inline
-int haoRunL2Range(
-    u32 l2EntryCount,
-    const struct HAORuntimeL2Check *l2CheckTable,
-    const struct HAORuntimeL2Meta *l2MetaTable,
-    const struct HAORuntimeRuleMeta *ruleMeta,
-    const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, struct HAOPositionContext *ctx,
-    svuint64_t laneData, svuint64_t vslotBits, u32 encoded) {
+static really_inline int
+haoRunL2Range(u32 l2EntryCount, const struct HAORuntimeL2Check *l2CheckTable,
+              const struct HAORuntimeL2Meta *l2MetaTable,
+              const struct HAORuntimeRuleMeta *ruleMeta,
+              const struct FDR_Runtime_Args *a, hwlm_group_t *control,
+              struct HAOPositionContext *ctx, svuint64_t laneData,
+              svuint64_t vslotBits, u32 encoded) {
     u32 offset = encoded & HAO_RUNTIME_L1_OFFSET_MASK;
     u32 count = encoded >> HAO_RUNTIME_L1_COUNT_SHIFT;
     u32 lastMatchId = HAO_RUNTIME_INVALID_RULE_INDEX;
@@ -187,9 +180,9 @@ int haoRunL2Range(
     (void)l2EntryCount;
     if (likely(count == 1U)) {
         HAO_STATS_ADD(encodedRangeCalls, 1);
-        return haoProcessL2Entry(
-            &l2CheckTable[offset], &l2MetaTable[offset], ruleMeta, a, control,
-            ctx, laneData, vslotBits, &lastMatchId);
+        return haoProcessL2Entry(&l2CheckTable[offset], &l2MetaTable[offset],
+                                 ruleMeta, a, control, ctx, laneData, vslotBits,
+                                 &lastMatchId);
     }
 
     HAO_STATS_ADD(encodedRangeCalls, 1);
@@ -197,9 +190,9 @@ int haoRunL2Range(
         const u32 off = offset + n;
         int rv;
 
-        rv = haoProcessL2Entry(
-            &l2CheckTable[off], &l2MetaTable[off], ruleMeta, a, control, ctx,
-            laneData, vslotBits, &lastMatchId);
+        rv = haoProcessL2Entry(&l2CheckTable[off], &l2MetaTable[off], ruleMeta,
+                               a, control, ctx, laneData, vslotBits,
+                               &lastMatchId);
         if (rv == HWLM_TERMINATED) {
             return HWLM_TERMINATED;
         }
@@ -225,13 +218,12 @@ int haoRunL2Range(
         });
         HAO_STATS_ADD(encodedEntriesVisited, 1);
 
-        rv = haoProcessL2Entry(
-            &l2CheckTable[offset], &l2MetaTable[offset], ruleMeta,
-            a, control, ctx, laneData, vslotBits, &lastMatchId,
-            l2CheckTable, l2MetaTable, offset,
-            &anyReport);
-        haoStatsObserveL2Bucket(l2CheckTable, l2MetaTable, ruleMeta,
-                                offset, count, visitedCount, anyReport);
+        rv = haoProcessL2Entry(&l2CheckTable[offset], &l2MetaTable[offset],
+                               ruleMeta, a, control, ctx, laneData, vslotBits,
+                               &lastMatchId, l2CheckTable, l2MetaTable, offset,
+                               &anyReport);
+        haoStatsObserveL2Bucket(l2CheckTable, l2MetaTable, ruleMeta, offset,
+                                count, visitedCount, anyReport);
         haoStatsObserveRangeShape(visitedCount, bucketRuleCount);
         HAO_STATS_ADD(encodedRangeReportCalls, anyReport ? 1 : 0);
         return rv;
@@ -256,13 +248,13 @@ int haoRunL2Range(
         });
         HAO_STATS_ADD(encodedEntriesVisited, 1);
 
-        rv = haoProcessL2Entry(
-            &l2CheckTable[off], &l2MetaTable[off], ruleMeta, a, control, ctx,
-            laneData, vslotBits, &lastMatchId,
-            l2CheckTable, l2MetaTable, off, &anyReport);
+        rv = haoProcessL2Entry(&l2CheckTable[off], &l2MetaTable[off], ruleMeta,
+                               a, control, ctx, laneData, vslotBits,
+                               &lastMatchId, l2CheckTable, l2MetaTable, off,
+                               &anyReport);
         if (rv == HWLM_TERMINATED) {
-            haoStatsObserveL2Bucket(l2CheckTable, l2MetaTable, ruleMeta,
-                                    offset, count, visitedCount, 1);
+            haoStatsObserveL2Bucket(l2CheckTable, l2MetaTable, ruleMeta, offset,
+                                    count, visitedCount, 1);
             haoStatsObserveRangeShape(visitedCount, bucketRuleCount);
             HAO_STATS_ADD(encodedRangeReportCalls, 1);
             return HWLM_TERMINATED;
@@ -270,8 +262,8 @@ int haoRunL2Range(
     }
 
     if (rangeCounted) {
-        haoStatsObserveL2Bucket(l2CheckTable, l2MetaTable, ruleMeta,
-                                offset, count, visitedCount, anyReport);
+        haoStatsObserveL2Bucket(l2CheckTable, l2MetaTable, ruleMeta, offset,
+                                count, visitedCount, anyReport);
         haoStatsObserveRangeShape(visitedCount, bucketRuleCount);
         HAO_STATS_ADD(encodedRangeReportCalls, anyReport ? 1 : 0);
     }
@@ -287,52 +279,37 @@ int haoRunL2Range(
 #define HAO_SVE_BATCH32_U32_LANES (HAO_SVE_BATCH32_BYTES / 4U)
 #define HAO_SVE_BATCH64_U32_LANES (HAO_SVE_BATCH64_BYTES / 4U)
 
-static really_inline
-svbool_t haoPgB8_32(void) {
-    return svptrue_b8();
-}
+static really_inline svbool_t haoPgB8_32(void) { return svptrue_b8(); }
 
-static really_inline
-svbool_t haoPgB16_16(void) {
-    return svptrue_b16();
-}
+static really_inline svbool_t haoPgB16_16(void) { return svptrue_b16(); }
 
-static really_inline
-svbool_t haoPgB32_8(void) {
-    return svptrue_b32();
-}
+static really_inline svbool_t haoPgB32_8(void) { return svptrue_b32(); }
 
-static really_inline
-svbool_t haoPgB8_64(void) {
+static really_inline svbool_t haoPgB8_64(void) {
     return svwhilelt_b8((u32)0, HAO_SVE_BATCH64_BYTES);
 }
 
-static really_inline
-svbool_t haoPgB16_32(void) {
+static really_inline svbool_t haoPgB16_32(void) {
     return svwhilelt_b16((u32)0, HAO_SVE_BATCH64_BYTES / 2U);
 }
 
-static really_inline
-svbool_t haoPgB32_16(void) {
+static really_inline svbool_t haoPgB32_16(void) {
     return svwhilelt_b32((u32)0, HAO_SVE_BATCH64_U32_LANES);
 }
 
-static really_inline
-u32 haoLaneForPairIndex(u32 pair, u32 pairIdx) {
+static really_inline u32 haoLaneForPairIndex(u32 pair, u32 pairIdx) {
     return ((pairIdx >> 1U) << 3U) | (pair << 1U) | (pairIdx & 1U);
 }
 
-static really_inline
-void haoLoadRawPrev32(const struct FDR_Runtime_Args *a, size_t blockStart,
-                      svuint8_t *vlo) {
+static really_inline void haoLoadRawPrev32(const struct FDR_Runtime_Args *a,
+                                           size_t blockStart, svuint8_t *vlo) {
     const svbool_t pgb = haoPgB8_32();
     u8 prevBytes[HAO_RUNTIME_BLOCK_BYTES] = {0};
     u32 i;
 
     if (blockStart >= HAO_RUNTIME_BLOCK_BYTES) {
-        *vlo = svld1_u8(
-            pgb, (const uint8_t *)(a->buf + blockStart -
-                                    HAO_RUNTIME_BLOCK_BYTES));
+        *vlo = svld1_u8(pgb, (const uint8_t *)(a->buf + blockStart -
+                                               HAO_RUNTIME_BLOCK_BYTES));
         return;
     }
     if (!blockStart && (!a->buf_history || !a->len_history)) {
@@ -342,8 +319,7 @@ void haoLoadRawPrev32(const struct FDR_Runtime_Args *a, size_t blockStart,
 
     for (i = 0; i < HAO_RUNTIME_BLOCK_BYTES; i++) {
         u8 b = 0;
-        haoGetByteAt(a,
-                     (s64a)blockStart - (s64a)HAO_RUNTIME_BLOCK_BYTES + i,
+        haoGetByteAt(a, (s64a)blockStart - (s64a)HAO_RUNTIME_BLOCK_BYTES + i,
                      &b);
         prevBytes[i] = b;
     }
@@ -351,9 +327,9 @@ void haoLoadRawPrev32(const struct FDR_Runtime_Args *a, size_t blockStart,
     *vlo = svld1_u8(pgb, prevBytes);
 }
 
-static really_inline
-void haoLoadRawCurr32(const struct FDR_Runtime_Args *a, size_t blockStart,
-                      u32 blockLaneCount, svuint8_t *vhi) {
+static really_inline void haoLoadRawCurr32(const struct FDR_Runtime_Args *a,
+                                           size_t blockStart,
+                                           u32 blockLaneCount, svuint8_t *vhi) {
     const svbool_t pgb = haoPgB8_32();
     u8 currBytes[HAO_RUNTIME_BLOCK_BYTES] = {0};
     u32 i;
@@ -371,17 +347,15 @@ void haoLoadRawCurr32(const struct FDR_Runtime_Args *a, size_t blockStart,
     *vhi = svld1_u8(pgb, currBytes);
 }
 
-static really_inline
-void haoLoadRawPrev64(const struct FDR_Runtime_Args *a, size_t blockStart,
-                      svuint8_t *vlo) {
+static really_inline void haoLoadRawPrev64(const struct FDR_Runtime_Args *a,
+                                           size_t blockStart, svuint8_t *vlo) {
     const svbool_t pgb = haoPgB8_64();
     u8 prevBytes[HAO_SVE_BATCH64_BYTES] = {0};
     u32 i;
 
     if (blockStart >= HAO_SVE_BATCH64_BYTES) {
-        *vlo = svld1_u8(
-            pgb, (const uint8_t *)(a->buf + blockStart -
-                                    HAO_SVE_BATCH64_BYTES));
+        *vlo = svld1_u8(pgb, (const uint8_t *)(a->buf + blockStart -
+                                               HAO_SVE_BATCH64_BYTES));
         return;
     }
     if (!blockStart && (!a->buf_history || !a->len_history)) {
@@ -391,18 +365,16 @@ void haoLoadRawPrev64(const struct FDR_Runtime_Args *a, size_t blockStart,
 
     for (i = 0; i < HAO_SVE_BATCH64_BYTES; i++) {
         u8 b = 0;
-        haoGetByteAt(a,
-                     (s64a)blockStart - (s64a)HAO_SVE_BATCH64_BYTES + i,
-                     &b);
+        haoGetByteAt(a, (s64a)blockStart - (s64a)HAO_SVE_BATCH64_BYTES + i, &b);
         prevBytes[i] = b;
     }
 
     *vlo = svld1_u8(pgb, prevBytes);
 }
 
-static really_inline
-void haoLoadRawCurr64(const struct FDR_Runtime_Args *a, size_t blockStart,
-                      u32 blockLaneCount, svuint8_t *vhi) {
+static really_inline void haoLoadRawCurr64(const struct FDR_Runtime_Args *a,
+                                           size_t blockStart,
+                                           u32 blockLaneCount, svuint8_t *vhi) {
     const svbool_t pgb = haoPgB8_64();
     u8 currBytes[HAO_SVE_BATCH64_BYTES] = {0};
     u32 i;
@@ -420,8 +392,8 @@ void haoLoadRawCurr64(const struct FDR_Runtime_Args *a, size_t blockStart,
     *vhi = svld1_u8(pgb, currBytes);
 }
 
-static really_inline
-svuint16_t haoLoadDotVector(const struct HAOHashRuntime *hash) {
+static really_inline svuint16_t
+haoLoadDotVector(const struct HAOHashRuntime *hash) {
     const svbool_t pg16 = haoPgB16_16();
     u16 coeffs[HAO_BATCH_MAX_WIDTH / 2U];
     u32 i;
@@ -432,8 +404,8 @@ svuint16_t haoLoadDotVector(const struct HAOHashRuntime *hash) {
     return svld1_u16(pg16, coeffs);
 }
 
-static really_inline
-svuint16_t haoLoadDotVector64(const struct HAOHashRuntime *hash) {
+static really_inline svuint16_t
+haoLoadDotVector64(const struct HAOHashRuntime *hash) {
     const svbool_t pg16 = haoPgB16_32();
     u16 coeffs[HAO_SVE_BATCH64_BYTES / 2U];
     u32 i;
@@ -444,8 +416,8 @@ svuint16_t haoLoadDotVector64(const struct HAOHashRuntime *hash) {
     return svld1_u16(pg16, coeffs);
 }
 
-static really_inline
-svuint32_t haoPackU64KeysToU32(svuint64_t key0, svuint64_t key1) {
+static really_inline svuint32_t haoPackU64KeysToU32(svuint64_t key0,
+                                                    svuint64_t key1) {
 #if defined(HAO_HAVE_SVE2)
     return svqxtnt_u64(svqxtnb_u64(key0), key1);
 #else
@@ -458,8 +430,8 @@ svuint32_t haoPackU64KeysToU32(svuint64_t key0, svuint64_t key1) {
 #endif
 }
 
-static really_inline
-svuint8_t haoTbl2U8_32(svuint8_t vlo, svuint8_t vhi, svuint8_t idx) {
+static really_inline svuint8_t haoTbl2U8_32(svuint8_t vlo, svuint8_t vhi,
+                                            svuint8_t idx) {
 #if defined(HAO_HAVE_SVE2)
     const svuint8x2_t tbl = svcreate2_u8(vlo, vhi);
 
@@ -474,8 +446,8 @@ svuint8_t haoTbl2U8_32(svuint8_t vlo, svuint8_t vhi, svuint8_t idx) {
 #endif
 }
 
-static really_inline
-svuint8_t haoTbl2U8_64(svuint8_t vlo, svuint8_t vhi, svuint8_t idx) {
+static really_inline svuint8_t haoTbl2U8_64(svuint8_t vlo, svuint8_t vhi,
+                                            svuint8_t idx) {
 #if defined(HAO_HAVE_SVE2)
     const svuint8x2_t tbl = svcreate2_u8(vlo, vhi);
 
@@ -490,12 +462,14 @@ svuint8_t haoTbl2U8_64(svuint8_t vlo, svuint8_t vhi, svuint8_t idx) {
 #endif
 }
 
-static really_inline
-svuint32_t haoRawKeyPairBext(svuint8_t vrow0, svuint8_t vrow1,
-                             u64a bextMask) {
+static really_inline svuint32_t haoRawKeyPairBext(svuint8_t vrow0,
+                                                  svuint8_t vrow1,
+                                                  u64a bextMask) {
 #if defined(HAO_HAVE_SVEBITPERM)
-    const svuint64_t keys0 = svbext_n_u64(svreinterpret_u64_u8(vrow0), (uint64_t)bextMask);
-    const svuint64_t keys1 = svbext_n_u64(svreinterpret_u64_u8(vrow1), (uint64_t)bextMask);
+    const svuint64_t keys0 =
+        svbext_n_u64(svreinterpret_u64_u8(vrow0), (uint64_t)bextMask);
+    const svuint64_t keys1 =
+        svbext_n_u64(svreinterpret_u64_u8(vrow1), (uint64_t)bextMask);
 
     return haoPackU64KeysToU32(keys0, keys1);
 #else
@@ -506,24 +480,28 @@ svuint32_t haoRawKeyPairBext(svuint8_t vrow0, svuint8_t vrow1,
 #endif
 }
 
-static really_inline
-svuint32_t haoRawKeyPairDot(svuint8_t vrow0, svuint8_t vrow1,
-                            svuint16_t vdot, u64a dotInputMask,
-                            u32 keyMask) {
+static really_inline svuint32_t haoRawKeyPairDot(svuint8_t vrow0,
+                                                 svuint8_t vrow1,
+                                                 svuint16_t vdot,
+                                                 u64a dotInputMask,
+                                                 u32 keyMask) {
     const svbool_t pg64 = svptrue_b64();
     const svuint64_t zero = svdup_n_u64(0U);
-    const svuint64_t words0 = svand_n_u64_x(pg64, svreinterpret_u64_u8(vrow0), dotInputMask);
-    const svuint64_t words1 = svand_n_u64_x(pg64, svreinterpret_u64_u8(vrow1), dotInputMask);
-    const svuint64_t keys0 = svand_n_u64_x(pg64, svdot_u64(zero, svreinterpret_u16_u64(words0), vdot), keyMask);
-    const svuint64_t keys1 = svand_n_u64_x(pg64, svdot_u64(zero, svreinterpret_u16_u64(words1), vdot), keyMask);
+    const svuint64_t words0 =
+        svand_n_u64_x(pg64, svreinterpret_u64_u8(vrow0), dotInputMask);
+    const svuint64_t words1 =
+        svand_n_u64_x(pg64, svreinterpret_u64_u8(vrow1), dotInputMask);
+    const svuint64_t keys0 = svand_n_u64_x(
+        pg64, svdot_u64(zero, svreinterpret_u16_u64(words0), vdot), keyMask);
+    const svuint64_t keys1 = svand_n_u64_x(
+        pg64, svdot_u64(zero, svreinterpret_u16_u64(words1), vdot), keyMask);
 
     return haoPackU64KeysToU32(keys0, keys1);
 }
 
-static really_inline
-svuint32_t haoRawKeyPair(svuint8_t vrow0, svuint8_t vrow1,
-                         const struct HAOHashRuntime *hash,
-                         svuint16_t vdot) {
+static really_inline svuint32_t haoRawKeyPair(svuint8_t vrow0, svuint8_t vrow1,
+                                              const struct HAOHashRuntime *hash,
+                                              svuint16_t vdot) {
     if (hash->mode == HAO_RUNTIME_HASH_DOT) {
         return haoRawKeyPairDot(vrow0, vrow1, vdot, hash->dotInputMask,
                                 hash->keyMask);
@@ -531,45 +509,41 @@ svuint32_t haoRawKeyPair(svuint8_t vrow0, svuint8_t vrow1,
     return haoRawKeyPairBext(vrow0, vrow1, hash->bextMask);
 }
 
-static really_inline
-void haoPrepRawKeys(const u8 *primaryBitmap, svuint32_t vkeys,
-                    svuint32_t *vbitPos, svuint32_t *vbitmapBytes) {
+static really_inline void haoPrepRawKeys(const u8 *primaryBitmap,
+                                         svuint32_t vkeys, svuint32_t *vbitPos,
+                                         svuint32_t *vbitmapBytes) {
     const svbool_t pg32 = svptrue_b32();
     const u32 *primaryBitmapWords = (const u32 *)primaryBitmap;
     const svuint32_t vwordIdx = svlsr_n_u32_x(pg32, vkeys, 5);
 
     *vbitPos = svand_n_u32_x(pg32, vkeys, 31U);
-    *vbitmapBytes = svld1_gather_u32index_u32(pg32, primaryBitmapWords,
-                                              vwordIdx);
+    *vbitmapBytes =
+        svld1_gather_u32index_u32(pg32, primaryBitmapWords, vwordIdx);
 }
 
-static really_inline
-void haoPrepRawKeysPred(const u8 *primaryBitmap, svbool_t pg,
-                              svuint32_t vkeys, svuint32_t *vbitPos,
-                              svuint32_t *vbitmapBytes) {
+static really_inline void haoPrepRawKeysPred(const u8 *primaryBitmap,
+                                             svbool_t pg, svuint32_t vkeys,
+                                             svuint32_t *vbitPos,
+                                             svuint32_t *vbitmapBytes) {
     const u32 *primaryBitmapWords = (const u32 *)primaryBitmap;
     const svuint32_t vwordIdx = svlsr_n_u32_x(pg, vkeys, 5);
 
     *vbitPos = svand_n_u32_x(pg, vkeys, 31U);
-    *vbitmapBytes = svld1_gather_u32index_u32(pg, primaryBitmapWords,
-                                              vwordIdx);
+    *vbitmapBytes = svld1_gather_u32index_u32(pg, primaryBitmapWords, vwordIdx);
 }
 
-static really_inline
-svuint32_t haoRawLaneIds(u32 pairBase) {
+static really_inline svuint32_t haoRawLaneIds(u32 pairBase) {
     return svzip1_u32(svindex_u32(pairBase, 8U),
                       svindex_u32(pairBase + 1U, 8U));
 }
 
-static really_inline
-svuint32_t haoRawLaneBits(u32 pairBase) {
+static really_inline svuint32_t haoRawLaneBits(u32 pairBase) {
     const svbool_t pg32 = haoPgB32_8();
 
     return svlsl_u32_x(pg32, svdup_n_u32(1U), haoRawLaneIds(pairBase));
 }
 
-static really_inline
-u32 haoLaneMaskForCount32(u32 count) {
+static really_inline u32 haoLaneMaskForCount32(u32 count) {
     if (count >= HAO_RUNTIME_BLOCK_BYTES) {
         return 0xffffffffU;
     }
@@ -579,8 +553,7 @@ u32 haoLaneMaskForCount32(u32 count) {
     return (1U << count) - 1U;
 }
 
-static really_inline
-u64a haoLaneMaskForCount64(u32 count) {
+static really_inline u64a haoLaneMaskForCount64(u32 count) {
     if (count >= HAO_SVE_BATCH64_BYTES) {
         return ~0ULL;
     }
@@ -590,9 +563,9 @@ u64a haoLaneMaskForCount64(u32 count) {
     return ((u64a)1 << count) - 1U;
 }
 
-static really_inline
-svbool_t haoBitmapProbe32(svbool_t pg32, svuint32_t vbitPos,
-                          svuint32_t vbitmapBytes) {
+static really_inline svbool_t haoBitmapProbe32(svbool_t pg32,
+                                               svuint32_t vbitPos,
+                                               svuint32_t vbitmapBytes) {
     const svuint32_t vone = svdup_n_u32(1U);
     const svuint32_t vbitMask = svlsl_u32_x(pg32, vone, vbitPos);
     const svuint32_t vhit = svand_u32_x(pg32, vbitmapBytes, vbitMask);
@@ -600,10 +573,11 @@ svbool_t haoBitmapProbe32(svbool_t pg32, svuint32_t vbitPos,
     return svcmpne_n_u32(pg32, vhit, 0U);
 }
 
-static really_inline
-u32 haoPrimaryGather32(const u32 *primaryHashTable, svbool_t pg32,
-                       svbool_t phit, svuint32_t vlaneBits,
-                       svuint32_t vkeys, u32 *encodedPair) {
+static really_inline u32 haoPrimaryGather32(const u32 *primaryHashTable,
+                                            svbool_t pg32, svbool_t phit,
+                                            svuint32_t vlaneBits,
+                                            svuint32_t vkeys,
+                                            u32 *encodedPair) {
     const svuint32_t vzero = svdup_n_u32(0U);
     const svuint32_t vencoded =
         svld1_gather_u32index_u32(phit, primaryHashTable, vkeys);
@@ -615,10 +589,9 @@ u32 haoPrimaryGather32(const u32 *primaryHashTable, svbool_t pg32,
     return laneMask;
 }
 
-static really_inline
-u32 haoRetireEncodedPair(const u32 *primaryHashTable, svuint32_t vlaneBits,
-                         svuint32_t vkeys, svuint32_t vbitPos,
-                         svuint32_t vbitmapBytes, u32 *encodedPair) {
+static really_inline u32 haoRetireEncodedPair(
+    const u32 *primaryHashTable, svuint32_t vlaneBits, svuint32_t vkeys,
+    svuint32_t vbitPos, svuint32_t vbitmapBytes, u32 *encodedPair) {
     const svbool_t pg32 = haoPgB32_8();
     const svbool_t phit = haoBitmapProbe32(pg32, vbitPos, vbitmapBytes);
 
@@ -630,11 +603,10 @@ u32 haoRetireEncodedPair(const u32 *primaryHashTable, svuint32_t vlaneBits,
                               encodedPair);
 }
 
-static really_inline
-u32 haoRetireEncodedPairPred(const u32 *primaryHashTable, svbool_t pvalid,
-                             svuint32_t vlaneBits, svuint32_t vkeys,
-                             svuint32_t vbitPos, svuint32_t vbitmapBytes,
-                             u32 *encodedPair) {
+static really_inline u32 haoRetireEncodedPairPred(
+    const u32 *primaryHashTable, svbool_t pvalid, svuint32_t vlaneBits,
+    svuint32_t vkeys, svuint32_t vbitPos, svuint32_t vbitmapBytes,
+    u32 *encodedPair) {
     const svbool_t pg32 = haoPgB32_8();
     const svuint32_t vone = svdup_n_u32(1U);
     const svuint32_t vbitMask = svlsl_u32_x(pg32, vone, vbitPos);
@@ -657,10 +629,11 @@ u32 haoRetireEncodedPairPred(const u32 *primaryHashTable, svbool_t pvalid,
     return laneMask;
 }
 
-static really_inline
-u64a haoRetireEncodedPair64(const u32 *primaryHashTable, u32 pair,
-                            svuint32_t vkeys, svuint32_t vbitPos,
-                            svuint32_t vbitmapBytes, u32 *encodedPair) {
+static really_inline u64a haoRetireEncodedPair64(const u32 *primaryHashTable,
+                                                 u32 pair, svuint32_t vkeys,
+                                                 svuint32_t vbitPos,
+                                                 svuint32_t vbitmapBytes,
+                                                 u32 *encodedPair) {
     const svbool_t pg32 = haoPgB32_16();
     const svuint32_t vone = svdup_n_u32(1U);
     const svuint32_t vzero = svdup_n_u32(0U);
@@ -689,12 +662,9 @@ u64a haoRetireEncodedPair64(const u32 *primaryHashTable, u32 pair,
     return laneMask;
 }
 
-static really_inline
-u64a haoRetireEncodedPairPred64(const u32 *primaryHashTable, u32 pair,
-                                svbool_t pvalid, svuint32_t vkeys,
-                                svuint32_t vbitPos,
-                                svuint32_t vbitmapBytes,
-                                u32 *encodedPair) {
+static really_inline u64a haoRetireEncodedPairPred64(
+    const u32 *primaryHashTable, u32 pair, svbool_t pvalid, svuint32_t vkeys,
+    svuint32_t vbitPos, svuint32_t vbitmapBytes, u32 *encodedPair) {
     const svbool_t pg32 = haoPgB32_16();
     const svuint32_t vone = svdup_n_u32(1U);
     const svuint32_t vzero = svdup_n_u32(0U);
@@ -724,15 +694,12 @@ u64a haoRetireEncodedPairPred64(const u32 *primaryHashTable, u32 pair,
     return laneMask;
 }
 
-static really_inline
-int haoRunEncodedLanes(
-    u32 l2EntryCount,
-    const struct HAORuntimeL2Check *l2CheckTable,
+static really_inline int haoRunEncodedLanes(
+    u32 l2EntryCount, const struct HAORuntimeL2Check *l2CheckTable,
     const struct HAORuntimeL2Meta *l2MetaTable,
-    const struct HAORuntimeRuleMeta *ruleMeta,
-    const struct FDR_Runtime_Args *a, hwlm_group_t *control,
-    size_t blockStart, u32 fullValidBlock, const u32 encodedByPair[4][8],
-    u32 laneMask, svuint8_t vlo, svuint8_t vhi) {
+    const struct HAORuntimeRuleMeta *ruleMeta, const struct FDR_Runtime_Args *a,
+    hwlm_group_t *control, size_t blockStart, u32 fullValidBlock,
+    const u32 encodedByPair[4][8], u32 laneMask, svuint8_t vlo, svuint8_t vhi) {
     const svbool_t pgb = svptrue_b8();
     const svuint8_t baseIdx =
         svadd_n_u8_x(pgb, svand_n_u8_x(pgb, svindex_u8(0, 1), 7U), 25U);
@@ -760,9 +727,9 @@ int haoRunEncodedLanes(
         }
         ctx.endPos = endPos;
         ctx.validMask32 = validMask32;
-        if (likely(haoRunL2Range(l2EntryCount, l2CheckTable,
-                l2MetaTable, ruleMeta, a, control, &ctx, laneData, vslotBits,
-                encoded) == HWLM_TERMINATED)) {
+        if (likely(haoRunL2Range(l2EntryCount, l2CheckTable, l2MetaTable,
+                                 ruleMeta, a, control, &ctx, laneData,
+                                 vslotBits, encoded) == HWLM_TERMINATED)) {
             return HWLM_TERMINATED;
         }
     }
@@ -770,15 +737,13 @@ int haoRunEncodedLanes(
     return HWLM_SUCCESS;
 }
 
-static really_inline
-int haoRunEncodedLanes64(
-    u32 l2EntryCount,
-    const struct HAORuntimeL2Check *l2CheckTable,
+static really_inline int haoRunEncodedLanes64(
+    u32 l2EntryCount, const struct HAORuntimeL2Check *l2CheckTable,
     const struct HAORuntimeL2Meta *l2MetaTable,
-    const struct HAORuntimeRuleMeta *ruleMeta,
-    const struct FDR_Runtime_Args *a, hwlm_group_t *control,
-    size_t blockStart, u32 fullValidBlock, const u32 encodedByPair[4][16],
-    u64a laneMask, svuint8_t vlo, svuint8_t vhi) {
+    const struct HAORuntimeRuleMeta *ruleMeta, const struct FDR_Runtime_Args *a,
+    hwlm_group_t *control, size_t blockStart, u32 fullValidBlock,
+    const u32 encodedByPair[4][16], u64a laneMask, svuint8_t vlo,
+    svuint8_t vhi) {
     const svbool_t pgb = svptrue_b8();
     const svuint8_t baseIdx =
         svadd_n_u8_x(pgb, svand_n_u8_x(pgb, svindex_u8(0, 1), 7U), 57U);
@@ -806,9 +771,9 @@ int haoRunEncodedLanes64(
         }
         ctx.endPos = endPos;
         ctx.validMask32 = validMask32;
-        if (likely(haoRunL2Range(l2EntryCount, l2CheckTable,
-                l2MetaTable, ruleMeta, a, control, &ctx, laneData, vslotBits,
-                encoded) == HWLM_TERMINATED)) {
+        if (likely(haoRunL2Range(l2EntryCount, l2CheckTable, l2MetaTable,
+                                 ruleMeta, a, control, &ctx, laneData,
+                                 vslotBits, encoded) == HWLM_TERMINATED)) {
             return HWLM_TERMINATED;
         }
     }
@@ -816,17 +781,11 @@ int haoRunEncodedLanes64(
     return HWLM_SUCCESS;
 }
 
-static really_inline
-u32 haoCollectRawEncoded(const u8 *primaryBitmap,
-                         const u32 *primaryHashTable,
-                         const struct HAOHashRuntime *hash,
-                         svuint16_t vdot,
-                         svuint8_t vlo, svuint8_t vhi,
-                         svuint32_t vlaneBits01,
-                         svuint32_t vlaneBits23,
-                         svuint32_t vlaneBits45,
-                         svuint32_t vlaneBits67,
-                         u32 encodedByPair[4][8]) {
+static really_inline u32 haoCollectRawEncoded(
+    const u8 *primaryBitmap, const u32 *primaryHashTable,
+    const struct HAOHashRuntime *hash, svuint16_t vdot, svuint8_t vlo,
+    svuint8_t vhi, svuint32_t vlaneBits01, svuint32_t vlaneBits23,
+    svuint32_t vlaneBits45, svuint32_t vlaneBits67, u32 encodedByPair[4][8]) {
     u32 laneMask = 0;
     svuint32_t vbitPos01;
     svuint32_t vbitPos23;
@@ -871,45 +830,44 @@ u32 haoCollectRawEncoded(const u8 *primaryBitmap,
     haoPrepRawKeys(primaryBitmap, vkeys45, &vbitPos45, &vbitmapBytes45);
     haoPrepRawKeys(primaryBitmap, vkeys67, &vbitPos67, &vbitmapBytes67);
 
-    laneMask |= haoRetireEncodedPair(
-        primaryHashTable, vlaneBits01, vkeys01, vbitPos01, vbitmapBytes01, encodedByPair[0]);
-    laneMask |= haoRetireEncodedPair(
-        primaryHashTable, vlaneBits23, vkeys23, vbitPos23, vbitmapBytes23, encodedByPair[1]);
-    laneMask |= haoRetireEncodedPair(
-        primaryHashTable, vlaneBits45, vkeys45, vbitPos45, vbitmapBytes45, encodedByPair[2]);
-    laneMask |= haoRetireEncodedPair(
-        primaryHashTable, vlaneBits67, vkeys67, vbitPos67, vbitmapBytes67, encodedByPair[3]);
+    laneMask |=
+        haoRetireEncodedPair(primaryHashTable, vlaneBits01, vkeys01, vbitPos01,
+                             vbitmapBytes01, encodedByPair[0]);
+    laneMask |=
+        haoRetireEncodedPair(primaryHashTable, vlaneBits23, vkeys23, vbitPos23,
+                             vbitmapBytes23, encodedByPair[1]);
+    laneMask |=
+        haoRetireEncodedPair(primaryHashTable, vlaneBits45, vkeys45, vbitPos45,
+                             vbitmapBytes45, encodedByPair[2]);
+    laneMask |=
+        haoRetireEncodedPair(primaryHashTable, vlaneBits67, vkeys67, vbitPos67,
+                             vbitmapBytes67, encodedByPair[3]);
 
     HAO_STATS_ADD(primaryActiveLanes, (u32)__builtin_popcount(laneMask));
     return laneMask;
 }
 
-static really_inline
-int haoRunRaw32(
-    const struct HAOHashRuntime *hash, svuint16_t vdot,
-    u32 l2EntryCount, const u8 *primaryBitmap,
-    const u32 *primaryHashTable,
+static really_inline int haoRunRaw32(
+    const struct HAOHashRuntime *hash, svuint16_t vdot, u32 l2EntryCount,
+    const u8 *primaryBitmap, const u32 *primaryHashTable,
     const struct HAORuntimeL2Check *l2CheckTable,
     const struct HAORuntimeL2Meta *l2MetaTable,
     const struct HAORuntimeRuleMeta *ruleMeta, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control,
-    size_t blockStart, svuint8_t vlo, svuint8_t vhi,
-    svuint32_t vlaneBits01, svuint32_t vlaneBits23,
-    svuint32_t vlaneBits45, svuint32_t vlaneBits67) {
+    hwlm_group_t *control, size_t blockStart, svuint8_t vlo, svuint8_t vhi,
+    svuint32_t vlaneBits01, svuint32_t vlaneBits23, svuint32_t vlaneBits45,
+    svuint32_t vlaneBits67) {
     u32 encodedByPair[4][8];
     const u32 laneMask = haoCollectRawEncoded(
-        primaryBitmap, primaryHashTable, hash, vdot, vlo, vhi,
-        vlaneBits01, vlaneBits23, vlaneBits45, vlaneBits67,
-        encodedByPair);
+        primaryBitmap, primaryHashTable, hash, vdot, vlo, vhi, vlaneBits01,
+        vlaneBits23, vlaneBits45, vlaneBits67, encodedByPair);
     const u32 fullValidBlock =
         blockStart + a->len_history >= HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U;
 
     if (likely(laneMask)) {
-        if (haoRunEncodedLanes(
-                l2EntryCount, l2CheckTable, l2MetaTable, ruleMeta, a,
-                control, blockStart, fullValidBlock, encodedByPair, laneMask,
-                vlo, vhi) ==
-            HWLM_TERMINATED) {
+        if (haoRunEncodedLanes(l2EntryCount, l2CheckTable, l2MetaTable,
+                               ruleMeta, a, control, blockStart, fullValidBlock,
+                               encodedByPair, laneMask, vlo,
+                               vhi) == HWLM_TERMINATED) {
             return HWLM_TERMINATED;
         }
     }
@@ -917,12 +875,10 @@ int haoRunRaw32(
     return HWLM_SUCCESS;
 }
 
-static really_inline
-u64a haoCollectRawEncoded64(const u8 *primaryBitmap,
-                          const u32 *primaryHashTable,
-                          const struct HAOHashRuntime *hash,
-                          svuint16_t vdot, svuint8_t vlo, svuint8_t vhi,
-                          u32 encodedByPair[4][16]) {
+static really_inline u64a
+haoCollectRawEncoded64(const u8 *primaryBitmap, const u32 *primaryHashTable,
+                       const struct HAOHashRuntime *hash, svuint16_t vdot,
+                       svuint8_t vlo, svuint8_t vhi, u32 encodedByPair[4][16]) {
     u64a laneMask = 0;
     svuint32_t vbitPos01;
     svuint32_t vbitPos23;
@@ -971,33 +927,26 @@ u64a haoCollectRawEncoded64(const u8 *primaryBitmap,
     haoPrepRawKeysPred(primaryBitmap, pg32, vkeys67, &vbitPos67,
                        &vbitmapBytes67);
 
-    laneMask |= haoRetireEncodedPair64(
-        primaryHashTable, 0U, vkeys01, vbitPos01, vbitmapBytes01,
-        encodedByPair[0]);
-    laneMask |= haoRetireEncodedPair64(
-        primaryHashTable, 1U, vkeys23, vbitPos23, vbitmapBytes23,
-        encodedByPair[1]);
-    laneMask |= haoRetireEncodedPair64(
-        primaryHashTable, 2U, vkeys45, vbitPos45, vbitmapBytes45,
-        encodedByPair[2]);
-    laneMask |= haoRetireEncodedPair64(
-        primaryHashTable, 3U, vkeys67, vbitPos67, vbitmapBytes67,
-        encodedByPair[3]);
+    laneMask |= haoRetireEncodedPair64(primaryHashTable, 0U, vkeys01, vbitPos01,
+                                       vbitmapBytes01, encodedByPair[0]);
+    laneMask |= haoRetireEncodedPair64(primaryHashTable, 1U, vkeys23, vbitPos23,
+                                       vbitmapBytes23, encodedByPair[1]);
+    laneMask |= haoRetireEncodedPair64(primaryHashTable, 2U, vkeys45, vbitPos45,
+                                       vbitmapBytes45, encodedByPair[2]);
+    laneMask |= haoRetireEncodedPair64(primaryHashTable, 3U, vkeys67, vbitPos67,
+                                       vbitmapBytes67, encodedByPair[3]);
 
     HAO_STATS_ADD(primaryActiveLanes, popcount64(laneMask));
     return laneMask;
 }
 
-static really_inline
-int haoRunRaw64(
-    const struct HAOHashRuntime *hash, svuint16_t vdot,
-    u32 l2EntryCount, const u8 *primaryBitmap,
-    const u32 *primaryHashTable,
+static really_inline int haoRunRaw64(
+    const struct HAOHashRuntime *hash, svuint16_t vdot, u32 l2EntryCount,
+    const u8 *primaryBitmap, const u32 *primaryHashTable,
     const struct HAORuntimeL2Check *l2CheckTable,
     const struct HAORuntimeL2Meta *l2MetaTable,
     const struct HAORuntimeRuleMeta *ruleMeta, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, size_t blockStart, svuint8_t vlo,
-    svuint8_t vhi) {
+    hwlm_group_t *control, size_t blockStart, svuint8_t vlo, svuint8_t vhi) {
     u32 encodedByPair[4][16];
     const u64a laneMask = haoCollectRawEncoded64(
         primaryBitmap, primaryHashTable, hash, vdot, vlo, vhi, encodedByPair);
@@ -1005,11 +954,10 @@ int haoRunRaw64(
         blockStart + a->len_history >= HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U;
 
     if (likely(laneMask)) {
-        if (haoRunEncodedLanes64(
-                l2EntryCount, l2CheckTable, l2MetaTable, ruleMeta, a,
-                control, blockStart, fullValidBlock, encodedByPair, laneMask,
-                vlo, vhi) ==
-            HWLM_TERMINATED) {
+        if (haoRunEncodedLanes64(l2EntryCount, l2CheckTable, l2MetaTable,
+                                 ruleMeta, a, control, blockStart,
+                                 fullValidBlock, encodedByPair, laneMask, vlo,
+                                 vhi) == HWLM_TERMINATED) {
             return HWLM_TERMINATED;
         }
     }
@@ -1017,21 +965,13 @@ int haoRunRaw64(
     return HWLM_SUCCESS;
 }
 
-static really_inline
-u32 haoCollectRawTailEncoded(const u8 *primaryBitmap,
-                             const u32 *primaryHashTable,
-                             const struct HAOHashRuntime *hash,
-                             svuint16_t vdot,
-                             u32 blockLaneCount, svuint8_t vlo, svuint8_t vhi,
-                             svuint32_t vlaneIds01,
-                             svuint32_t vlaneIds23,
-                             svuint32_t vlaneIds45,
-                             svuint32_t vlaneIds67,
-                             svuint32_t vlaneBits01,
-                             svuint32_t vlaneBits23,
-                             svuint32_t vlaneBits45,
-                             svuint32_t vlaneBits67,
-                             u32 encodedByPair[4][8]) {
+static really_inline u32 haoCollectRawTailEncoded(
+    const u8 *primaryBitmap, const u32 *primaryHashTable,
+    const struct HAOHashRuntime *hash, svuint16_t vdot, u32 blockLaneCount,
+    svuint8_t vlo, svuint8_t vhi, svuint32_t vlaneIds01, svuint32_t vlaneIds23,
+    svuint32_t vlaneIds45, svuint32_t vlaneIds67, svuint32_t vlaneBits01,
+    svuint32_t vlaneBits23, svuint32_t vlaneBits45, svuint32_t vlaneBits67,
+    u32 encodedByPair[4][8]) {
     u32 laneMask = 0;
     svuint32_t vbitPos01;
     svuint32_t vbitPos23;
@@ -1083,27 +1023,27 @@ u32 haoCollectRawTailEncoded(const u8 *primaryBitmap,
         const svbool_t pvalid67 =
             svcmplt_n_u32(pg32, vlaneIds67, blockLaneCount);
 
-        haoPrepRawKeysPred(primaryBitmap, pvalid01, vkeys01,
-                                 &vbitPos01, &vbitmapBytes01);
-        haoPrepRawKeysPred(primaryBitmap, pvalid23, vkeys23,
-                                 &vbitPos23, &vbitmapBytes23);
-        haoPrepRawKeysPred(primaryBitmap, pvalid45, vkeys45,
-                                 &vbitPos45, &vbitmapBytes45);
-        haoPrepRawKeysPred(primaryBitmap, pvalid67, vkeys67,
-                                 &vbitPos67, &vbitmapBytes67);
+        haoPrepRawKeysPred(primaryBitmap, pvalid01, vkeys01, &vbitPos01,
+                           &vbitmapBytes01);
+        haoPrepRawKeysPred(primaryBitmap, pvalid23, vkeys23, &vbitPos23,
+                           &vbitmapBytes23);
+        haoPrepRawKeysPred(primaryBitmap, pvalid45, vkeys45, &vbitPos45,
+                           &vbitmapBytes45);
+        haoPrepRawKeysPred(primaryBitmap, pvalid67, vkeys67, &vbitPos67,
+                           &vbitmapBytes67);
 
-        laneMask |= haoRetireEncodedPairPred(
-            primaryHashTable, pvalid01, vlaneBits01, vkeys01, vbitPos01,
-            vbitmapBytes01, encodedByPair[0]);
-        laneMask |= haoRetireEncodedPairPred(
-            primaryHashTable, pvalid23, vlaneBits23, vkeys23, vbitPos23,
-            vbitmapBytes23, encodedByPair[1]);
-        laneMask |= haoRetireEncodedPairPred(
-            primaryHashTable, pvalid45, vlaneBits45, vkeys45, vbitPos45,
-            vbitmapBytes45, encodedByPair[2]);
-        laneMask |= haoRetireEncodedPairPred(
-            primaryHashTable, pvalid67, vlaneBits67, vkeys67, vbitPos67,
-            vbitmapBytes67, encodedByPair[3]);
+        laneMask |= haoRetireEncodedPairPred(primaryHashTable, pvalid01,
+                                             vlaneBits01, vkeys01, vbitPos01,
+                                             vbitmapBytes01, encodedByPair[0]);
+        laneMask |= haoRetireEncodedPairPred(primaryHashTable, pvalid23,
+                                             vlaneBits23, vkeys23, vbitPos23,
+                                             vbitmapBytes23, encodedByPair[1]);
+        laneMask |= haoRetireEncodedPairPred(primaryHashTable, pvalid45,
+                                             vlaneBits45, vkeys45, vbitPos45,
+                                             vbitmapBytes45, encodedByPair[2]);
+        laneMask |= haoRetireEncodedPairPred(primaryHashTable, pvalid67,
+                                             vlaneBits67, vkeys67, vbitPos67,
+                                             vbitmapBytes67, encodedByPair[3]);
     }
 
     laneMask &= haoLaneMaskForCount32(blockLaneCount);
@@ -1111,35 +1051,29 @@ u32 haoCollectRawTailEncoded(const u8 *primaryBitmap,
     return laneMask;
 }
 
-static really_inline
-int haoRunRawTailVec(
-    const struct HAOHashRuntime *hash, svuint16_t vdot,
-    u32 l2EntryCount, const u8 *primaryBitmap,
-    const u32 *primaryHashTable,
+static really_inline int haoRunRawTailVec(
+    const struct HAOHashRuntime *hash, svuint16_t vdot, u32 l2EntryCount,
+    const u8 *primaryBitmap, const u32 *primaryHashTable,
     const struct HAORuntimeL2Check *l2CheckTable,
     const struct HAORuntimeL2Meta *l2MetaTable,
     const struct HAORuntimeRuleMeta *ruleMeta, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control,
-    size_t blockStart, u32 blockLaneCount, svuint8_t vlo, svuint8_t vhi,
-    svuint32_t vlaneIds01, svuint32_t vlaneIds23,
-    svuint32_t vlaneIds45, svuint32_t vlaneIds67,
-    svuint32_t vlaneBits01, svuint32_t vlaneBits23,
-    svuint32_t vlaneBits45, svuint32_t vlaneBits67) {
+    hwlm_group_t *control, size_t blockStart, u32 blockLaneCount, svuint8_t vlo,
+    svuint8_t vhi, svuint32_t vlaneIds01, svuint32_t vlaneIds23,
+    svuint32_t vlaneIds45, svuint32_t vlaneIds67, svuint32_t vlaneBits01,
+    svuint32_t vlaneBits23, svuint32_t vlaneBits45, svuint32_t vlaneBits67) {
     u32 encodedByPair[4][8] = {{0}};
     const u32 laneMask = haoCollectRawTailEncoded(
-        primaryBitmap, primaryHashTable, hash, vdot, blockLaneCount,
-        vlo, vhi, vlaneIds01, vlaneIds23, vlaneIds45, vlaneIds67,
-        vlaneBits01, vlaneBits23, vlaneBits45, vlaneBits67,
-        encodedByPair);
+        primaryBitmap, primaryHashTable, hash, vdot, blockLaneCount, vlo, vhi,
+        vlaneIds01, vlaneIds23, vlaneIds45, vlaneIds67, vlaneBits01,
+        vlaneBits23, vlaneBits45, vlaneBits67, encodedByPair);
     const u32 fullValidBlock =
         blockStart + a->len_history >= HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U;
 
     if (likely(laneMask)) {
-        if (haoRunEncodedLanes(
-                l2EntryCount, l2CheckTable, l2MetaTable, ruleMeta, a,
-                control, blockStart, fullValidBlock, encodedByPair, laneMask,
-                vlo, vhi) ==
-            HWLM_TERMINATED) {
+        if (haoRunEncodedLanes(l2EntryCount, l2CheckTable, l2MetaTable,
+                               ruleMeta, a, control, blockStart, fullValidBlock,
+                               encodedByPair, laneMask, vlo,
+                               vhi) == HWLM_TERMINATED) {
             return HWLM_TERMINATED;
         }
     }
@@ -1147,17 +1081,11 @@ int haoRunRawTailVec(
     return HWLM_SUCCESS;
 }
 
-static really_inline
-u64a haoCollectRawTailEncoded64(const u8 *primaryBitmap,
-                              const u32 *primaryHashTable,
-                              const struct HAOHashRuntime *hash,
-                              svuint16_t vdot, u32 blockLaneCount,
-                              svuint8_t vlo, svuint8_t vhi,
-                              svuint32_t vlaneIds01,
-                              svuint32_t vlaneIds23,
-                              svuint32_t vlaneIds45,
-                              svuint32_t vlaneIds67,
-                              u32 encodedByPair[4][16]) {
+static really_inline u64a haoCollectRawTailEncoded64(
+    const u8 *primaryBitmap, const u32 *primaryHashTable,
+    const struct HAOHashRuntime *hash, svuint16_t vdot, u32 blockLaneCount,
+    svuint8_t vlo, svuint8_t vhi, svuint32_t vlaneIds01, svuint32_t vlaneIds23,
+    svuint32_t vlaneIds45, svuint32_t vlaneIds67, u32 encodedByPair[4][16]) {
     u64a laneMask = 0;
     svuint32_t vbitPos01;
     svuint32_t vbitPos23;
@@ -1210,36 +1138,33 @@ u64a haoCollectRawTailEncoded64(const u8 *primaryBitmap,
     haoPrepRawKeysPred(primaryBitmap, pvalid67, vkeys67, &vbitPos67,
                        &vbitmapBytes67);
 
-    laneMask |= haoRetireEncodedPairPred64(
-        primaryHashTable, 0U, pvalid01, vkeys01, vbitPos01, vbitmapBytes01,
-        encodedByPair[0]);
-    laneMask |= haoRetireEncodedPairPred64(
-        primaryHashTable, 1U, pvalid23, vkeys23, vbitPos23, vbitmapBytes23,
-        encodedByPair[1]);
-    laneMask |= haoRetireEncodedPairPred64(
-        primaryHashTable, 2U, pvalid45, vkeys45, vbitPos45, vbitmapBytes45,
-        encodedByPair[2]);
-    laneMask |= haoRetireEncodedPairPred64(
-        primaryHashTable, 3U, pvalid67, vkeys67, vbitPos67, vbitmapBytes67,
-        encodedByPair[3]);
+    laneMask |=
+        haoRetireEncodedPairPred64(primaryHashTable, 0U, pvalid01, vkeys01,
+                                   vbitPos01, vbitmapBytes01, encodedByPair[0]);
+    laneMask |=
+        haoRetireEncodedPairPred64(primaryHashTable, 1U, pvalid23, vkeys23,
+                                   vbitPos23, vbitmapBytes23, encodedByPair[1]);
+    laneMask |=
+        haoRetireEncodedPairPred64(primaryHashTable, 2U, pvalid45, vkeys45,
+                                   vbitPos45, vbitmapBytes45, encodedByPair[2]);
+    laneMask |=
+        haoRetireEncodedPairPred64(primaryHashTable, 3U, pvalid67, vkeys67,
+                                   vbitPos67, vbitmapBytes67, encodedByPair[3]);
 
     laneMask &= haoLaneMaskForCount64(blockLaneCount);
     HAO_STATS_ADD(primaryActiveLanes, popcount64(laneMask));
     return laneMask;
 }
 
-static really_inline
-int haoRunRawTailVec64(
-    const struct HAOHashRuntime *hash, svuint16_t vdot,
-    u32 l2EntryCount, const u8 *primaryBitmap,
-    const u32 *primaryHashTable,
+static really_inline int haoRunRawTailVec64(
+    const struct HAOHashRuntime *hash, svuint16_t vdot, u32 l2EntryCount,
+    const u8 *primaryBitmap, const u32 *primaryHashTable,
     const struct HAORuntimeL2Check *l2CheckTable,
     const struct HAORuntimeL2Meta *l2MetaTable,
     const struct HAORuntimeRuleMeta *ruleMeta, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, size_t blockStart, u32 blockLaneCount,
-    svuint8_t vlo, svuint8_t vhi, svuint32_t vlaneIds01,
-    svuint32_t vlaneIds23, svuint32_t vlaneIds45,
-    svuint32_t vlaneIds67) {
+    hwlm_group_t *control, size_t blockStart, u32 blockLaneCount, svuint8_t vlo,
+    svuint8_t vhi, svuint32_t vlaneIds01, svuint32_t vlaneIds23,
+    svuint32_t vlaneIds45, svuint32_t vlaneIds67) {
     u32 encodedByPair[4][16] = {{0}};
     const u64a laneMask = haoCollectRawTailEncoded64(
         primaryBitmap, primaryHashTable, hash, vdot, blockLaneCount, vlo, vhi,
@@ -1248,11 +1173,10 @@ int haoRunRawTailVec64(
         blockStart + a->len_history >= HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U;
 
     if (likely(laneMask)) {
-        if (haoRunEncodedLanes64(
-                l2EntryCount, l2CheckTable, l2MetaTable, ruleMeta, a,
-                control, blockStart, fullValidBlock, encodedByPair, laneMask,
-                vlo, vhi) ==
-            HWLM_TERMINATED) {
+        if (haoRunEncodedLanes64(l2EntryCount, l2CheckTable, l2MetaTable,
+                                 ruleMeta, a, control, blockStart,
+                                 fullValidBlock, encodedByPair, laneMask, vlo,
+                                 vhi) == HWLM_TERMINATED) {
             return HWLM_TERMINATED;
         }
     }
@@ -1260,8 +1184,8 @@ int haoRunRawTailVec64(
     return HWLM_SUCCESS;
 }
 
-static really_inline
-u64a haoBuildRawWordScalar(const struct FDR_Runtime_Args *a, size_t endPos) {
+static really_inline u64a
+haoBuildRawWordScalar(const struct FDR_Runtime_Args *a, size_t endPos) {
     u8 bytes[HAO_RUNTIME_BYTES_PER_RULE_SLOT];
     u32 i;
 
@@ -1270,8 +1194,7 @@ u64a haoBuildRawWordScalar(const struct FDR_Runtime_Args *a, size_t endPos) {
     for (i = 0; i < HAO_RUNTIME_BYTES_PER_RULE_SLOT; i++) {
         u8 b = 0;
         const s64a pos = (s64a)endPos -
-                         (s64a)(HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U) +
-                         (s64a)i;
+                         (s64a)(HAO_RUNTIME_BYTES_PER_RULE_SLOT - 1U) + (s64a)i;
 
         haoGetByteAt(a, pos, &b);
         bytes[i] = b;
@@ -1280,15 +1203,15 @@ u64a haoBuildRawWordScalar(const struct FDR_Runtime_Args *a, size_t endPos) {
     return unaligned_load_u64a(bytes);
 }
 
-static really_inline
-int haoRawBitmapHitScalar(const u8 *primaryBitmap, u32 key) {
+static really_inline int haoRawBitmapHitScalar(const u8 *primaryBitmap,
+                                               u32 key) {
     const u32 *primaryBitmapWords = (const u32 *)primaryBitmap;
     const u32 word = primaryBitmapWords[key >> 5U];
     return word & (1U << (key & 31U));
 }
 
-static really_inline
-u32 haoHashRuntimeScalar(const struct HAOHashRuntime *hash, u64a rawWord) {
+static really_inline u32 haoHashRuntimeScalar(const struct HAOHashRuntime *hash,
+                                              u64a rawWord) {
     if (hash->mode == HAO_RUNTIME_HASH_DOT) {
         const u64a maskedWord = rawWord & hash->dotInputMask;
         u64a dot = 0;
@@ -1304,15 +1227,14 @@ u32 haoHashRuntimeScalar(const struct HAOHashRuntime *hash, u64a rawWord) {
     return (u32)pext64(rawWord, hash->bextMask);
 }
 
-static really_inline
-int haoRunRawTailScalar(
-    const struct HAOHashRuntime *hash, u32 l2EntryCount,
-    const u8 *primaryBitmap,
-    const u32 *primaryHashTable,
-    const struct HAORuntimeL2Check *l2CheckTable,
-    const struct HAORuntimeL2Meta *l2MetaTable,
-    const struct HAORuntimeRuleMeta *ruleMeta, const struct FDR_Runtime_Args *a,
-    hwlm_group_t *control, size_t blockStart, u32 blockLaneCount) {
+static really_inline int
+haoRunRawTailScalar(const struct HAOHashRuntime *hash, u32 l2EntryCount,
+                    const u8 *primaryBitmap, const u32 *primaryHashTable,
+                    const struct HAORuntimeL2Check *l2CheckTable,
+                    const struct HAORuntimeL2Meta *l2MetaTable,
+                    const struct HAORuntimeRuleMeta *ruleMeta,
+                    const struct FDR_Runtime_Args *a, hwlm_group_t *control,
+                    size_t blockStart, u32 blockLaneCount) {
     u32 lane;
     u32 activeCount = 0;
     const svbool_t pg64 =
@@ -1335,17 +1257,14 @@ int haoRunRawTailScalar(
                 activeCount++;
                 ctx.endPos = endPos;
                 ctx.validMask32 = validMask8 * 0x01010101U;
-                if (haoRunL2Range(
-                        l2EntryCount, l2CheckTable, l2MetaTable,
-                        ruleMeta, a, control, &ctx, laneData, vslotBits,
-                        encoded) ==
-                    HWLM_TERMINATED) {
+                if (haoRunL2Range(l2EntryCount, l2CheckTable, l2MetaTable,
+                                  ruleMeta, a, control, &ctx, laneData,
+                                  vslotBits, encoded) == HWLM_TERMINATED) {
                     HAO_STATS_ADD(primaryActiveLanes, activeCount);
                     return HWLM_TERMINATED;
                 }
             }
         }
-
     }
 
     HAO_STATS_ADD(primaryActiveLanes, activeCount);
@@ -1355,8 +1274,8 @@ int haoRunRawTailScalar(
 #endif
 
 static int haoRunBatchBlob32(const struct HAORuntimeHeader *hdr,
-                           const struct FDR_Runtime_Args *a,
-                           hwlm_group_t *control) {
+                             const struct FDR_Runtime_Args *a,
+                             hwlm_group_t *control) {
     const u8 *primaryBitmap;
     const u32 *primaryHashTable;
     const struct HAORuntimeL2Check *l2CheckTable;
@@ -1372,12 +1291,11 @@ static int haoRunBatchBlob32(const struct HAORuntimeHeader *hdr,
     HAO_STATS_ADD(scanInputBytes, a->len - a->start_offset);
 
     primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
-    primaryHashTable =
-        (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
+    primaryHashTable = (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
     l2CheckTable = (const struct HAORuntimeL2Check *)((const u8 *)hdr +
                                                       hdr->l2CheckOffset);
-    l2MetaTable = (const struct HAORuntimeL2Meta *)((const u8 *)hdr +
-                                                    hdr->l2MetaOffset);
+    l2MetaTable =
+        (const struct HAORuntimeL2Meta *)((const u8 *)hdr + hdr->l2MetaOffset);
     ruleMeta = (const struct HAORuntimeRuleMeta *)((const u8 *)hdr +
                                                    hdr->ruleMetaOffset);
     haoBuildHashRuntime(hdr, &hash);
@@ -1391,7 +1309,8 @@ static int haoRunBatchBlob32(const struct HAORuntimeHeader *hdr,
 
     svuint8_t rawPrev = svdup_n_u8(0);
     haoLoadRawPrev32(a, i, &rawPrev);
-    for ( ; i + HAO_RUNTIME_BLOCK_BYTES <= a->len; i += HAO_RUNTIME_BLOCK_BYTES) {
+    for (; i + HAO_RUNTIME_BLOCK_BYTES <= a->len;
+         i += HAO_RUNTIME_BLOCK_BYTES) {
         svuint8_t rawCurr;
 
         HAO_PREFETCH_R(a->buf + i + HAO_PREFETCH_INPUT_DISTANCE);
@@ -1401,11 +1320,10 @@ static int haoRunBatchBlob32(const struct HAORuntimeHeader *hdr,
         HAO_STATS_ADD(blockCalls, 1);
         HAO_STATS_ADD(blockLanes, HAO_BATCH_MAX_WIDTH);
         HAO_STATS_ADD(primaryProbeLanes, HAO_BATCH_MAX_WIDTH);
-        int rt = haoRunRaw32(&hash, vdot, l2EntryCount, primaryBitmap,
-                                primaryHashTable, l2CheckTable,
-                                l2MetaTable, ruleMeta, a, control, i,
-                                rawPrev, rawCurr, vlaneBits01, vlaneBits23,
-                                vlaneBits45, vlaneBits67);
+        int rt = haoRunRaw32(
+            &hash, vdot, l2EntryCount, primaryBitmap, primaryHashTable,
+            l2CheckTable, l2MetaTable, ruleMeta, a, control, i, rawPrev,
+            rawCurr, vlaneBits01, vlaneBits23, vlaneBits45, vlaneBits67);
         if (likely(rt == HWLM_TERMINATED)) {
             return HWLM_TERMINATED;
         }
@@ -1424,13 +1342,11 @@ static int haoRunBatchBlob32(const struct HAORuntimeHeader *hdr,
         const svuint32_t vlaneIds23 = haoRawLaneIds(2U);
         const svuint32_t vlaneIds45 = haoRawLaneIds(4U);
         const svuint32_t vlaneIds67 = haoRawLaneIds(6U);
-        int rt = haoRunRawTailVec(&hash, vdot, l2EntryCount, primaryBitmap,
-                                    primaryHashTable, l2CheckTable,
-                                    l2MetaTable, ruleMeta, a, control, i,
-                                    blockLaneCount, rawPrev, rawCurr,
-                                    vlaneIds01, vlaneIds23, vlaneIds45,
-                                    vlaneIds67, vlaneBits01, vlaneBits23,
-                                    vlaneBits45, vlaneBits67);
+        int rt = haoRunRawTailVec(
+            &hash, vdot, l2EntryCount, primaryBitmap, primaryHashTable,
+            l2CheckTable, l2MetaTable, ruleMeta, a, control, i, blockLaneCount,
+            rawPrev, rawCurr, vlaneIds01, vlaneIds23, vlaneIds45, vlaneIds67,
+            vlaneBits01, vlaneBits23, vlaneBits45, vlaneBits67);
         if (likely(rt == HWLM_TERMINATED)) {
             return HWLM_TERMINATED;
         }
@@ -1457,12 +1373,11 @@ static int haoRunBatchBlob64(const struct HAORuntimeHeader *hdr,
     HAO_STATS_ADD(scanInputBytes, a->len - a->start_offset);
 
     primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
-    primaryHashTable =
-        (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
+    primaryHashTable = (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
     l2CheckTable = (const struct HAORuntimeL2Check *)((const u8 *)hdr +
                                                       hdr->l2CheckOffset);
-    l2MetaTable = (const struct HAORuntimeL2Meta *)((const u8 *)hdr +
-                                                    hdr->l2MetaOffset);
+    l2MetaTable =
+        (const struct HAORuntimeL2Meta *)((const u8 *)hdr + hdr->l2MetaOffset);
     ruleMeta = (const struct HAORuntimeRuleMeta *)((const u8 *)hdr +
                                                    hdr->ruleMetaOffset);
     haoBuildHashRuntime(hdr, &hash);
@@ -1471,7 +1386,7 @@ static int haoRunBatchBlob64(const struct HAORuntimeHeader *hdr,
 
     svuint8_t rawPrev = svdup_n_u8(0);
     haoLoadRawPrev64(a, i, &rawPrev);
-    for ( ; i + HAO_SVE_BATCH64_BYTES <= a->len; i += HAO_SVE_BATCH64_BYTES) {
+    for (; i + HAO_SVE_BATCH64_BYTES <= a->len; i += HAO_SVE_BATCH64_BYTES) {
         svuint8_t rawCurr;
 
         HAO_PREFETCH_R(a->buf + i + HAO_PREFETCH_INPUT_DISTANCE);
@@ -1503,9 +1418,8 @@ static int haoRunBatchBlob64(const struct HAORuntimeHeader *hdr,
         const svuint32_t vlaneIds67 = haoRawLaneIds(6U);
         int rt = haoRunRawTailVec64(
             &hash, vdot, l2EntryCount, primaryBitmap, primaryHashTable,
-            l2CheckTable, l2MetaTable, ruleMeta, a, control, i,
-            blockLaneCount, rawPrev, rawCurr, vlaneIds01, vlaneIds23,
-            vlaneIds45, vlaneIds67);
+            l2CheckTable, l2MetaTable, ruleMeta, a, control, i, blockLaneCount,
+            rawPrev, rawCurr, vlaneIds01, vlaneIds23, vlaneIds45, vlaneIds67);
         if (likely(rt == HWLM_TERMINATED)) {
             return HWLM_TERMINATED;
         }
@@ -1531,12 +1445,11 @@ static int haoRunBatchBlobScalar(const struct HAORuntimeHeader *hdr,
     HAO_STATS_ADD(scanInputBytes, a->len - a->start_offset);
 
     primaryBitmap = (const u8 *)hdr + hdr->primaryBitmapOffset;
-    primaryHashTable =
-        (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
+    primaryHashTable = (const u32 *)((const u8 *)hdr + hdr->primaryOffset);
     l2CheckTable = (const struct HAORuntimeL2Check *)((const u8 *)hdr +
                                                       hdr->l2CheckOffset);
-    l2MetaTable = (const struct HAORuntimeL2Meta *)((const u8 *)hdr +
-                                                    hdr->l2MetaOffset);
+    l2MetaTable =
+        (const struct HAORuntimeL2Meta *)((const u8 *)hdr + hdr->l2MetaOffset);
     ruleMeta = (const struct HAORuntimeRuleMeta *)((const u8 *)hdr +
                                                    hdr->ruleMetaOffset);
     haoBuildHashRuntime(hdr, &hash);
@@ -1544,8 +1457,7 @@ static int haoRunBatchBlobScalar(const struct HAORuntimeHeader *hdr,
 
     while (i < a->len) {
         const u32 blockLaneCount =
-            (u32)((a->len - i) > 0x7fffffffU ? 0x7fffffffU :
-                   (a->len - i));
+            (u32)((a->len - i) > 0x7fffffffU ? 0x7fffffffU : (a->len - i));
         int rt;
 
         HAO_STATS_ADD(blockCalls, 1);
@@ -1592,10 +1504,9 @@ static hwlm_error_t haoExecBlobWithPath(const void *blob, u32 blobSize,
     return haoRunBatchBlob(hdr, a, &control);
 }
 
-static
-hwlm_error_t haoExec(const struct FDR *fdr,
-                           const struct FDR_Runtime_Args *a,
-                           hwlm_group_t control) {
+static hwlm_error_t haoExec(const struct FDR *fdr,
+                            const struct FDR_Runtime_Args *a,
+                            hwlm_group_t control) {
     if (!fdr || !fdrMatcherBlobOffset(fdr) || !fdrMatcherBlobSize(fdr)) {
         return HWLM_SUCCESS;
     }
@@ -1603,8 +1514,7 @@ hwlm_error_t haoExec(const struct FDR *fdr,
     {
         const u8 *base = (const u8 *)fdr;
         const void *blob = base + fdrMatcherBlobOffset(fdr);
-        return haoExecBlobWithPath(blob, fdrMatcherBlobSize(fdr), a,
-                                   control);
+        return haoExecBlobWithPath(blob, fdrMatcherBlobSize(fdr), a, control);
     }
 }
 
@@ -1613,3 +1523,16 @@ hwlm_error_t HaoEngineExec(const struct FDR *fdr,
                            hwlm_group_t control) {
     return haoExec(fdr, a, control);
 }
+
+#else
+
+hwlm_error_t HaoEngineExec(const struct FDR *fdr,
+                           const struct FDR_Runtime_Args *a,
+                           hwlm_group_t control) {
+    (void)fdr;
+    (void)a;
+    (void)control;
+    return HWLM_SUCCESS;
+}
+
+#endif

@@ -1,0 +1,4 @@
+.gitattributes text eol=lf
+.gitignore text eol=lf
+cmake/keep.syms.in text eol=lf
+*.sh text eol=lf

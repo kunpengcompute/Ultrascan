@@ -53,10 +53,10 @@
 #include <fstream>
 #include <map>
 #include <numeric>
-#include <sstream>
 #include <set>
-#include <thread>
+#include <sstream>
 #include <stdio.h>
+#include <thread>
 
 #ifndef _WIN32
 #include <getopt.h>
@@ -115,8 +115,8 @@ typedef void (*thread_func_t)(void *context);
 
 class ThreadContext : boost::noncopyable {
 public:
-    ThreadContext(unsigned num_in, const Engine &db_in,
-                  thread_barrier &tb_in, thread_func_t function_in,
+    ThreadContext(unsigned num_in, const Engine &db_in, thread_barrier &tb_in,
+                  thread_func_t function_in,
                   const vector<DataBlock> &corpus_data_in)
         : num(num_in), results(repeats), engine(db_in),
           enginectx(db_in.makeContext()), corpus_data(corpus_data_in),
@@ -134,14 +134,10 @@ public:
     }
 
     // Wait for the thread to exit.
-    void join() {
-        thr.join();
-    }
+    void join() { thr.join(); }
 
     // Serialise all threads on a global barrier.
-    void barrier() {
-        tb.wait();
-    }
+    void barrier() { tb.wait(); }
 
     // Apply processor affinity (if available) to this thread.
     bool affine(UNUSED int cpu) {
@@ -172,7 +168,7 @@ public:
                                         &cpuset);
         return (rv == 0);
 #endif
-        return false;  // not available
+        return false; // not available
     }
 
     unsigned num;
@@ -189,14 +185,14 @@ protected:
 };
 
 /** Display usage information, with an optional error. */
-static
-void usage(const char *error) {
+static void usage(const char *error) {
     printf("Usage: hsbench [OPTIONS...]\n\n");
     printf("Options:\n\n");
     printf("  -h              Display help and exit.\n");
     printf("  -G OVERRIDES    Overrides for the grey box.\n");
     printf("  -e PATH         Path to expression directory.\n");
-    printf("  -U FILE         Load serialized database from FILE (hsdump -U output).\n");
+    printf("  -U FILE         Load serialized database from FILE (hsdump -U "
+           "output).\n");
     printf("  -s FILE         Signature file to use.\n");
     printf("  -z NUM          Signature ID to use.\n");
     printf("  -c FILE         File to use as corpus.\n");
@@ -210,7 +206,7 @@ void usage(const char *error) {
     printf("  -P              Benchmark using PCRE (if supported).\n");
 #endif
 #if defined(HAVE_DECL_PTHREAD_SETAFFINITY_NP) || defined(_WIN32)
-    printf("  -T CPU,CPU,... or -T CPU-CPU\n");
+    printf("  -T CPU[,CPU|CPU-CPU]...\n");
     printf("                  Benchmark with threads on specified CPUs or CPU"
            " range.\n");
 #endif
@@ -243,11 +239,11 @@ struct BenchmarkSigs {
 };
 
 /** Process command-line arguments. Prints usage and exits on error. */
-static
-void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets) {
+static void processArgs(int argc, char *argv[],
+                        vector<BenchmarkSigs> &sigSets) {
     const char options[] = "-b:c:Cd:e:E:G:hHi:n:No:p:PsS:U:Vw:z:"
 #if defined(HAVE_DECL_PTHREAD_SETAFFINITY_NP) || defined(_WIN32)
-        "T:" // add the thread flag
+                           "T:" // add the thread flag
 #endif
         ;
     int in_sigfile = 0;
@@ -266,8 +262,7 @@ void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets) {
         {"compress-stream", no_argument, &do_compress, 1},
         {"sql-out", required_argument, &do_sql_output, 1},
         {"literal-on", no_argument, &literalFlag, 1},
-        {nullptr, 0, nullptr, 0}
-    };
+        {nullptr, 0, nullptr, 0}};
 
     for (;;) {
         int c = getopt_long(argc, argv, options, longopts, &option_index);
@@ -367,8 +362,7 @@ void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets) {
         case 'T':
             if (!strToList(optarg, threadCores)) {
                 usage("Couldn't parse argument to -T flag, should be"
-                      " a list of positive integers or 2 integers"
-                      " connected with hyphen.");
+                      " a comma-separated list of CPU ids and ranges.");
                 exit(1);
             }
             break;
@@ -441,7 +435,8 @@ void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets) {
 
     // Must have a valid expression path
     if (exprPath.empty() && serializedDbPath.empty()) {
-        usage("Must specify an expression path with the -e or a serialized database with -U.");
+        usage("Must specify an expression path with the -e or a serialized "
+              "database with -U.");
         exit(1);
     }
 
@@ -452,7 +447,8 @@ void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets) {
 
     // 如果使用 -U，则不需要 signature sets
     if (loadSerializedDb && !sigSets.empty()) {
-        usage("Cannot use -s or -z with -U (database already contains patterns).");
+        usage("Cannot use -s or -z with -U (database already contains "
+              "patterns).");
         exit(1);
     }
 
@@ -497,8 +493,7 @@ void processArgs(int argc, char *argv[], vector<BenchmarkSigs> &sigSets) {
 }
 
 /** Start the global timer. */
-static
-void startTotalTimer(ThreadContext *ctx) {
+static void startTotalTimer(ThreadContext *ctx) {
     if (ctx->num != 0) {
         return; // only runs in the first thread
     }
@@ -506,8 +501,7 @@ void startTotalTimer(ThreadContext *ctx) {
 }
 
 /** Stop the global timer and calculate totals. */
-static
-void stopTotalTimer(ThreadContext *ctx) {
+static void stopTotalTimer(ThreadContext *ctx) {
     if (ctx->num != 0) {
         return; // only runs in the first thread
     }
@@ -516,8 +510,7 @@ void stopTotalTimer(ThreadContext *ctx) {
 }
 
 /** Run a benchmark over a given engine and corpus in block mode. */
-static
-void benchBlock(void *context) {
+static void benchBlock(void *context) {
     ThreadContext *ctx = (ThreadContext *)context;
 
     // Synchronization point
@@ -552,8 +545,7 @@ struct StreamInfo {
     unique_ptr<EngineStream> eng_handle;
 };
 
-static
-u64a count_streams(const vector<DataBlock> &corpus_blocks) {
+static u64a count_streams(const vector<DataBlock> &corpus_blocks) {
     set<unsigned int> streams;
     for (const DataBlock &block : corpus_blocks) {
         streams.insert(block.stream_id);
@@ -566,8 +558,7 @@ u64a count_streams(const vector<DataBlock> &corpus_blocks) {
  * Take a ThreadContext and prepare a vector<StreamDataBlock> for streaming mode
  * scanning from it.
  */
-static
-vector<StreamInfo> prepStreamingData(const ThreadContext *ctx) {
+static vector<StreamInfo> prepStreamingData(const ThreadContext *ctx) {
     vector<StreamInfo> info(count_streams(ctx->corpus_data));
     for (const DataBlock &block : ctx->corpus_data) {
         assert(block.internal_stream_index < info.size());
@@ -588,9 +579,9 @@ vector<StreamInfo> prepStreamingData(const ThreadContext *ctx) {
     return info;
 }
 
-static
-void benchStreamingInternal(ThreadContext *ctx, vector<StreamInfo> &streams,
-                            bool do_compress) {
+static void benchStreamingInternal(ThreadContext *ctx,
+                                   vector<StreamInfo> &streams,
+                                   bool do_compress) {
     assert(ctx);
     const Engine &e = ctx->engine;
     const vector<DataBlock> &blocks = ctx->corpus_data;
@@ -634,8 +625,7 @@ void benchStreamingInternal(ThreadContext *ctx, vector<StreamInfo> &streams,
 }
 
 /** Run a benchmark over a given engine and corpus in streaming mode. */
-static
-void benchStreaming(void *context) {
+static void benchStreaming(void *context) {
     ThreadContext *ctx = (ThreadContext *)context;
     vector<StreamInfo> streams = prepStreamingData(ctx);
 
@@ -653,8 +643,7 @@ void benchStreaming(void *context) {
     stopTotalTimer(ctx);
 }
 
-static
-void benchStreamingCompress(void *context) {
+static void benchStreamingCompress(void *context) {
     ThreadContext *ctx = (ThreadContext *)context;
     vector<StreamInfo> streams = prepStreamingData(ctx);
 
@@ -672,7 +661,6 @@ void benchStreamingCompress(void *context) {
     stopTotalTimer(ctx);
 }
 
-
 /** In-memory structure for a data block to be scanned in vectored mode. */
 struct VectoredInfo {
     vector<const char *> data;
@@ -684,8 +672,7 @@ struct VectoredInfo {
  * Take a ThreadContext and prepare a vector<VectoredInfo> for vectored mode
  * scanning from it.
  */
-static
-vector<VectoredInfo> prepVectorData(const ThreadContext *ctx) {
+static vector<VectoredInfo> prepVectorData(const ThreadContext *ctx) {
     vector<VectoredInfo> out(count_streams(ctx->corpus_data));
     for (const DataBlock &block : ctx->corpus_data) {
         VectoredInfo &vi = out[block.internal_stream_index];
@@ -702,8 +689,7 @@ vector<VectoredInfo> prepVectorData(const ThreadContext *ctx) {
 }
 
 /** Run a benchmark over a given engine and corpus in vectored mode. */
-static
-void benchVectored(void *context) {
+static void benchVectored(void *context) {
     ThreadContext *ctx = (ThreadContext *)context;
 
     vector<VectoredInfo> v_plans = prepVectorData(ctx);
@@ -734,16 +720,15 @@ void benchVectored(void *context) {
 }
 
 /** Given a time and a size, compute the throughput in megabits/sec. */
-static
-long double calc_mbps(double seconds, u64a bytes) {
+static long double calc_mbps(double seconds, u64a bytes) {
     assert(seconds > 0);
     return (long double)bytes / ((long double)seconds * 125000);
 }
 
 /** Dump per-scan throughput data to screen. */
-static
-void displayPerScanResults(const vector<unique_ptr<ThreadContext>> &threads,
-                           u64a bytesPerRun) {
+static void
+displayPerScanResults(const vector<unique_ptr<ThreadContext>> &threads,
+                      u64a bytesPerRun) {
     for (const auto &t : threads) {
         const auto &results = t->results;
         for (size_t j = 0; j != results.size(); j++) {
@@ -759,8 +744,7 @@ void displayPerScanResults(const vector<unique_ptr<ThreadContext>> &threads,
     printf("\n");
 }
 
-static
-double fastestResult(const vector<unique_ptr<ThreadContext>> &threads) {
+static double fastestResult(const vector<unique_ptr<ThreadContext>> &threads) {
     double best = threads[0]->results[0].seconds;
     for (const auto &t : threads) {
         for (const auto &r : t->results) {
@@ -770,8 +754,7 @@ double fastestResult(const vector<unique_ptr<ThreadContext>> &threads) {
     return best;
 }
 
-static
-u64a byte_size(const vector<DataBlock> &corpus_blocks) {
+static u64a byte_size(const vector<DataBlock> &corpus_blocks) {
     u64a total = 0;
     for (const DataBlock &block : corpus_blocks) {
         total += block.payload.size();
@@ -786,9 +769,8 @@ u64a byte_size(const vector<DataBlock> &corpus_blocks) {
 }
 
 /** Dump benchmark results to screen. */
-static
-void displayResults(const vector<unique_ptr<ThreadContext>> &threads,
-                    const vector<DataBlock> &corpus_blocks) {
+static void displayResults(const vector<unique_ptr<ThreadContext>> &threads,
+                           const vector<DataBlock> &corpus_blocks) {
     u64a bytesPerRun = byte_size(corpus_blocks);
     u64a matchesPerRun = threads[0]->results[0].matches;
 
@@ -877,9 +859,8 @@ void displayResults(const vector<unique_ptr<ThreadContext>> &threads,
 }
 
 /** Dump benchmark results to csv. */
-static
-void displayCsvResults(const vector<unique_ptr<ThreadContext>> &threads,
-                       const vector<DataBlock> &corpus_blocks) {
+static void displayCsvResults(const vector<unique_ptr<ThreadContext>> &threads,
+                              const vector<DataBlock> &corpus_blocks) {
     u64a bytesPerRun = byte_size(corpus_blocks);
     u64a matchesPerRun = threads[0]->results[0].matches;
 
@@ -909,11 +890,9 @@ void displayCsvResults(const vector<unique_ptr<ThreadContext>> &threads,
     printf("\n");
 }
 
-
 /** Dump per-scan throughput data to sql. */
-static
-void sqlPerScanResults(const vector<unique_ptr<ThreadContext>> &threads,
-                       u64a bytesPerRun, u64a scan_id) {
+static void sqlPerScanResults(const vector<unique_ptr<ThreadContext>> &threads,
+                              u64a bytesPerRun, u64a scan_id) {
     static const std::string Q =
         "INSERT INTO ScanResults (scan_id, thread, scan, throughput) "
         "VALUES (?1, ?2, ?3, ?4)";
@@ -929,9 +908,8 @@ void sqlPerScanResults(const vector<unique_ptr<ThreadContext>> &threads,
 }
 
 /** Dump benchmark results to sql. */
-static
-void sqlResults(const vector<unique_ptr<ThreadContext>> &threads,
-                const vector<DataBlock> &corpus_blocks) {
+static void sqlResults(const vector<unique_ptr<ThreadContext>> &threads,
+                       const vector<DataBlock> &corpus_blocks) {
     u64a bytesPerRun = byte_size(corpus_blocks);
     u64a matchesPerRun = threads[0]->results[0].matches;
 
@@ -956,8 +934,8 @@ void sqlResults(const vector<unique_ptr<ThreadContext>> &threads,
 
     static const std::string Q =
         "INSERT INTO Scan (scan_id, corpusFile, totalSecs, "
-            "bytesPerRun, blockSize, blockCount, totalBytes, "
-            "totalBlocks, matchesPerRun, matchRate, overallTput) "
+        "bytesPerRun, blockSize, blockCount, totalBytes, "
+        "totalBlocks, matchesPerRun, matchRate, overallTput) "
         "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
 
     out_db.insert_all(
@@ -975,14 +953,12 @@ void sqlResults(const vector<unique_ptr<ThreadContext>> &threads,
  * Construct a thread context for this scanning mode.
  *
  * Note: takes blocks by reference. This allows all threads to share the same
- * corpus data, reducing memory usage and improving performance for multi-threaded
- * benchmarks.
+ * corpus data, reducing memory usage and improving performance for
+ * multi-threaded benchmarks.
  */
-static
-unique_ptr<ThreadContext> makeThreadContext(const Engine &db,
-                                            const vector<DataBlock> &blocks,
-                                            unsigned id,
-                                            thread_barrier &sync_barrier) {
+static unique_ptr<ThreadContext>
+makeThreadContext(const Engine &db, const vector<DataBlock> &blocks,
+                  unsigned id, thread_barrier &sync_barrier) {
     thread_func_t fn = nullptr;
     switch (scan_mode) {
     case ScanMode::STREAMING:
@@ -1005,9 +981,8 @@ unique_ptr<ThreadContext> makeThreadContext(const Engine &db,
 }
 
 /** Run the given benchmark. */
-static
-void runBenchmark(const Engine &db,
-                  const vector<DataBlock> &corpus_blocks) {
+static void runBenchmark(const Engine &db,
+                         const vector<DataBlock> &corpus_blocks) {
     size_t numThreads;
     bool useAffinity = false;
 
@@ -1056,7 +1031,7 @@ void runBenchmark(const Engine &db,
 }
 } // namespace
 
-//main driver
+// main driver
 int HS_CDECL main(int argc, char *argv[]) {
     setlocale(LC_ALL, ""); // use the user's locale
 
@@ -1085,9 +1060,9 @@ int HS_CDECL main(int argc, char *argv[]) {
         if (loadSerializedDb) {
             unique_ptr<Engine> engine;
             engine = buildEngineFromSerialized(serializedDbPath, scan_mode);
-            
+
             if (!engine) {
-                printf("Error: failed to load serialized database from %s\n", 
+                printf("Error: failed to load serialized database from %s\n",
                        serializedDbPath.c_str());
                 exit(1);
             }
@@ -1103,15 +1078,15 @@ int HS_CDECL main(int argc, char *argv[]) {
             }
 
             runBenchmark(*engine, corpus_blocks);
-        } 
+        }
         // ========== 原有的表达式编译分支 ==========
         else {
             // read in and process our expressions
             ExpressionMap exprMapTemplate;
             loadExpressions(exprPath, exprMapTemplate);
 
-            // If we have no signature sets, the user wants us to benchmark all the
-            // known expressions together.
+            // If we have no signature sets, the user wants us to benchmark all
+            // the known expressions together.
             if (sigSets.empty()) {
                 SignatureSet sigs;
                 sigs.reserve(exprMapTemplate.size());
@@ -1135,8 +1110,8 @@ int HS_CDECL main(int argc, char *argv[]) {
                     engine = buildEnginePcre(exprMap, s.name, sigName);
 #endif
                 } else {
-                    engine = fat_buildEngineHyperscan(exprMap, scan_mode, s.name,
-                                                  sigName);
+                    engine = fat_buildEngineHyperscan(exprMap, scan_mode,
+                                                      s.name, sigName);
                 }
 
                 if (!engine) {

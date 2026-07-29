@@ -29,8 +29,8 @@
 /** \file
  * \brief Shortcut literal pass: directly add literal components to Rose.
  */
+#include "shortcut_literal.h"
 #include "AsciiComponentClass.h"
-#include "Utf8ComponentClass.h"
 #include "ComponentAssertion.h"
 #include "ComponentAtomicGroup.h"
 #include "ComponentBackReference.h"
@@ -42,15 +42,17 @@
 #include "ComponentVisitor.h"
 #include "ComponentWordBoundary.h"
 #include "ConstComponentVisitor.h"
-#include "parse_error.h"
-#include "shortcut_literal.h"
+#include "Utf8ComponentClass.h"
+#include "compiler/compiler.h"
+#include "fp_collector.h"
 #include "grey.h"
 #include "nfagraph/ng.h"
-#include "compiler/compiler.h"
-#include "util/ue2string.h"
-#include "ue2common.h"
+#include "nfagraph/ng_literal_quality.h"
+#include "parse_error.h"
 #include "rose/rose_build.h"
 #include "rose/rose_in_util.h"
+#include "ue2common.h"
+#include "util/ue2string.h"
 
 #include <stack>
 
@@ -160,8 +162,28 @@ public:
 
 ConstructLiteralVisitor::~ConstructLiteralVisitor() {}
 
+static bool feedbackBlocksShortcutLiteral(const CompileContext &cc,
+                                          const ue2_literal &lit) {
+    if (!cc.fp_feedback) {
+        return false;
+    }
+
+    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
+    if (!hs_fp_feedback_literal_is_bad(cc.fp_feedback, lit.c_str(),
+                                       lit.length(), lit.any_nocase())) {
+        return false;
+    }
+
+    DEBUG_PRINTF("not shortcutting feedback bad literal '%s'\n",
+                 dumpString(lit).c_str());
+    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
+    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
+    return true;
+}
+
 /** \brief True if the literal expression \a expr could be added to Rose. */
-bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const CompileContext &cc) {
+bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags,
+                     const CompileContext &cc) {
     assert(pe.component);
 
     if (!ng.cc.grey.allowLiteral) {
@@ -182,7 +204,7 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const C
         assert(pe.component);
         pe.component->accept(vis);
         assert(vis.repeat_stack.empty());
-    } catch (const ConstructLiteralVisitor::NotLiteral&) {
+    } catch (const ConstructLiteralVisitor::NotLiteral &) {
         DEBUG_PRINTF("not a literal\n");
         return false;
     }
@@ -194,27 +216,44 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags, const C
         return false;
     }
 
+    if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
+        DEBUG_PRINTF("not shortcutting low-quality NeoFDR literal\n");
+        return false;
+    }
+
+    if (feedbackBlocksShortcutLiteral(cc, lit)) {
+        return false;
+    }
+
     // Check if this expression is referenced by any logical combination rules
     bool is_referenced_by_combination = false;
-    if (ng.rm.pl.getLkeyMap().find(expr.report) != ng.rm.pl.getLkeyMap().end()) {
+    if (ng.rm.pl.getLkeyMap().find(expr.report) !=
+        ng.rm.pl.getLkeyMap().end()) {
         is_referenced_by_combination = true;
-        DEBUG_PRINTF("literal '%s' (id=%u) is referenced by combination rules, skipping lily\n",
-            dumpString(lit).c_str(), expr.report);
+        DEBUG_PRINTF("literal '%s' (id=%u) is referenced by combination rules, "
+                     "skipping lily\n",
+                     dumpString(lit).c_str(), expr.report);
     }
 
     if ((lit.length() <= 1)) {
-        if (cc.grey.allowLily && !cc.streaming && !is_referenced_by_combination) {
+        if (cc.grey.allowLily && !cc.streaming &&
+            !is_referenced_by_combination) {
             if (lit.length() == 1) {
-                return ng.rose->addChar(lit, expr.index, expr.report, expr.highlander, expr.som, expr.quiet, ng, flags);
+                return ng.rose->addChar(lit, expr.index, expr.report,
+                                        expr.highlander, expr.som, expr.quiet,
+                                        ng, flags);
             }
         }
         DEBUG_PRINTF("not shortcutting SEP literal\n");
         return false;
     }
 
-    if ((lit.length() >=2) && (lit.length() <= 4)) {
-        if (cc.grey.allowLily && ng.allowLilyForTeddy && !cc.streaming && !is_referenced_by_combination) {
-            return ng.rose->addShortLit(lit, expr.index, expr.report, expr.highlander, expr.som, expr.quiet, ng, flags);
+    if ((lit.length() >= 2) && (lit.length() <= 4)) {
+        if (cc.grey.allowLily && ng.allowLilyForTeddy && !cc.streaming &&
+            !is_referenced_by_combination) {
+            return ng.rose->addShortLit(lit, expr.index, expr.report,
+                                        expr.highlander, expr.som, expr.quiet,
+                                        ng, flags);
         }
         DEBUG_PRINTF("not shortcutting SEP literal\n");
         return false;
@@ -247,7 +286,7 @@ bool x86_shortcutLiteral(NG &ng, const ParsedExpression &pe) {
         assert(pe.component);
         pe.component->accept(vis);
         assert(vis.repeat_stack.empty());
-    } catch (const ConstructLiteralVisitor::NotLiteral&) {
+    } catch (const ConstructLiteralVisitor::NotLiteral &) {
         DEBUG_PRINTF("not a literal\n");
         return false;
     }
@@ -256,6 +295,15 @@ bool x86_shortcutLiteral(NG &ng, const ParsedExpression &pe) {
 
     if (lit.empty()) {
         DEBUG_PRINTF("empty literal\n");
+        return false;
+    }
+
+    if (ng.cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
+        DEBUG_PRINTF("not shortcutting low-quality NeoFDR literal\n");
+        return false;
+    }
+
+    if (feedbackBlocksShortcutLiteral(ng.cc, lit)) {
         return false;
     }
 
@@ -268,7 +316,6 @@ bool x86_shortcutLiteral(NG &ng, const ParsedExpression &pe) {
     return ng.addLiteral(lit, expr.index, expr.report, expr.highlander,
                          expr.som, expr.quiet);
 }
-
 
 size_t isShortLiteral(const ParsedExpression &pe) {
     if (!pe.component) {
@@ -287,7 +334,7 @@ size_t isShortLiteral(const ParsedExpression &pe) {
     try {
         pe.component->accept(vis);
         assert(vis.repeat_stack.empty());
-    } catch (const ConstructLiteralVisitor::NotLiteral&) {
+    } catch (const ConstructLiteralVisitor::NotLiteral &) {
         return 0;
     }
 

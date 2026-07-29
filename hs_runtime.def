@@ -13,6 +13,13 @@ EXPORTS
    hs_deserialize_database
    hs_deserialize_database_at
    hs_expand_stream
+   hs_fp_collector_create
+   hs_fp_collector_free
+   hs_fp_collector_merge
+   hs_fp_collector_reset
+   hs_fp_collector_to_feedback
+   hs_fp_collector_to_feedback_with_dump
+   hs_fp_feedback_free
    hs_free_database
    hs_free_scratch
    hs_open_stream
@@ -21,7 +28,10 @@ EXPORTS
    hs_reset_stream
    hs_scan
    hs_scan_stream
+   hs_scan_stream_with_collector
+   hs_scan_with_collector
    hs_scan_vector
+   hs_scan_vector_with_collector
    hs_scratch_size
    hs_serialize_database
    hs_serialized_database_info
