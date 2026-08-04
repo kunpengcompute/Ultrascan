@@ -234,9 +234,8 @@ static bool neoFdrLiteralSetHasBad(const CompileContext &cc,
            any_of(begin(lits), end(lits), isLowQualityNeoFdrLiteral);
 }
 
-static void
-neoFdrDropBadVertLitInfos(const CompileContext &cc,
-                          vector<unique_ptr<VertLitInfo>> *lits) {
+static void neoFdrDropBadVertLitInfos(const CompileContext &cc,
+                                      vector<unique_ptr<VertLitInfo>> *lits) {
     if (!cc.grey.allowNeoFdr) {
         return;
     }

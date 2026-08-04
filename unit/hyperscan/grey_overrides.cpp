@@ -24,9 +24,9 @@
  */
 
 #include "config.h"
-#include "gtest/gtest.h"
 #include "hs.h"
 #include "test_util.h"
+#include "gtest/gtest.h"
 
 #include <cstring>
 #include <string>
@@ -47,8 +47,8 @@ TEST(GreyOverrides, SetSingleValidKey) {
 
 TEST(GreyOverrides, SetMultipleValidKeys) {
     // Same format as the old config.txt
-    hs_error_t err = hs_set_grey_overrides(
-        "allowLily:1;allowHao:1;allowNeoFdr:1;");
+    hs_error_t err =
+        hs_set_grey_overrides("allowLily:1;allowHao:1;allowNeoFdr:1;");
     ASSERT_EQ(HS_SUCCESS, err);
     hs_reset_grey_overrides();
 }
@@ -74,12 +74,12 @@ TEST(GreyOverrides, SetLargeIntegerKey) {
 
 TEST(GreyOverrides, SetAllKnownEngineSwitches) {
     // Test that all commonly-used engine switches are recognised.
-    hs_error_t err = hs_set_grey_overrides(
-        "allowGough:1;allowMcClellan:1;allowSheng:1;"
-        "allowMcSheng:1;allowNeoFdr:1;allowHao:1;"
-        "allowPuff:1;allowLily:1;allowCastle:1;"
-        "allowTamarama:1;allowSmallWrite:1;"
-        "fdrAllowTeddy:1;fdrAllowFlood:1;");
+    hs_error_t err =
+        hs_set_grey_overrides("allowGough:1;allowMcClellan:1;allowSheng:1;"
+                              "allowMcSheng:1;allowNeoFdr:1;allowHao:1;"
+                              "allowPuff:1;allowLily:1;allowCastle:1;"
+                              "allowTamarama:1;allowSmallWrite:1;"
+                              "fdrAllowTeddy:1;fdrAllowFlood:1;");
     ASSERT_EQ(HS_SUCCESS, err);
     hs_reset_grey_overrides();
 }
@@ -123,8 +123,8 @@ TEST(GreyOverrides, CompilationWithLilyEnabled) {
     unsigned flags[] = {0, 0, 0};
     unsigned ids[] = {10, 20, 30};
 
-    err = hs_compile_multi(expr, flags, ids, 3, HS_MODE_BLOCK, nullptr,
-                           &db, &compile_err);
+    err = hs_compile_multi(expr, flags, ids, 3, HS_MODE_BLOCK, nullptr, &db,
+                           &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -153,8 +153,8 @@ TEST(GreyOverrides, CompilationWithHaoEnabled) {
     unsigned flags[] = {0, 0, 0};
     unsigned ids[] = {1, 2, 3};
 
-    err = hs_compile_multi(expr, flags, ids, 3, HS_MODE_BLOCK, nullptr,
-                           &db, &compile_err);
+    err = hs_compile_multi(expr, flags, ids, 3, HS_MODE_BLOCK, nullptr, &db,
+                           &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -174,8 +174,8 @@ TEST(GreyOverrides, CompilationWithHaoEnabled) {
 
 TEST(GreyOverrides, CompilationWithAllThreeSwitchesEnabled) {
     // Simulate the exact old config.txt content
-    hs_error_t err = hs_set_grey_overrides(
-        "allowLily:1;allowHao:1;allowNeoFdr:1;");
+    hs_error_t err =
+        hs_set_grey_overrides("allowLily:1;allowHao:1;allowNeoFdr:1;");
     ASSERT_EQ(HS_SUCCESS, err);
 
     hs_database_t *db = nullptr;
@@ -184,8 +184,8 @@ TEST(GreyOverrides, CompilationWithAllThreeSwitchesEnabled) {
     unsigned flags[] = {0, 0};
     unsigned ids[] = {100, 200};
 
-    err = hs_compile_multi(expr, flags, ids, 2, HS_MODE_BLOCK, nullptr,
-                           &db, &compile_err);
+    err = hs_compile_multi(expr, flags, ids, 2, HS_MODE_BLOCK, nullptr, &db,
+                           &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -216,7 +216,7 @@ TEST(GreyOverrides, CompilationAfterResetUsesDefaults) {
     unsigned ids[] = {42};
 
     hs_error_t err = hs_compile_multi(expr, flags, ids, 1, HS_MODE_BLOCK,
-                                       nullptr, &db, &compile_err);
+                                      nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_free_database(db);
@@ -249,8 +249,8 @@ TEST(GreyOverrides, SetResourceLimits) {
 
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    err = hs_compile("test_pattern", 0, HS_MODE_BLOCK, nullptr,
-                     &db, &compile_err);
+    err = hs_compile("test_pattern", 0, HS_MODE_BLOCK, nullptr, &db,
+                     &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_free_database(db);
@@ -267,9 +267,9 @@ TEST(GreyOverrides, SetVioletParameters) {
 }
 
 TEST(GreyOverrides, SetRoseParameters) {
-    hs_error_t err = hs_set_grey_overrides(
-        "roseMcClellanPrefix:2;roseMcClellanSuffix:2;"
-        "roseMcClellanOutfix:2;roseTransformDelay:1;");
+    hs_error_t err =
+        hs_set_grey_overrides("roseMcClellanPrefix:2;roseMcClellanSuffix:2;"
+                              "roseMcClellanOutfix:2;roseTransformDelay:1;");
     ASSERT_EQ(HS_SUCCESS, err);
     hs_reset_grey_overrides();
 }
@@ -284,16 +284,16 @@ TEST(GreyOverrides, SetSmallWriteParameters) {
 
 TEST(GreyOverrides, DisableAllOptionalEngines) {
     // Turn off many engines to verify compilation still works
-    hs_error_t err = hs_set_grey_overrides(
-        "allowGough:0;allowSheng:0;allowMcSheng:0;"
-        "allowPuff:0;allowCastle:0;allowSmallWrite:0;"
-        "allowTamarama:0;");
+    hs_error_t err =
+        hs_set_grey_overrides("allowGough:0;allowSheng:0;allowMcSheng:0;"
+                              "allowPuff:0;allowCastle:0;allowSmallWrite:0;"
+                              "allowTamarama:0;");
     ASSERT_EQ(HS_SUCCESS, err);
 
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    err = hs_compile("simple_pattern", 0, HS_MODE_BLOCK, nullptr,
-                     &db, &compile_err);
+    err = hs_compile("simple_pattern", 0, HS_MODE_BLOCK, nullptr, &db,
+                     &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_free_database(db);
@@ -319,8 +319,7 @@ TEST(GreyOverrides, InvalidKey) {
 }
 
 TEST(GreyOverrides, InvalidKeyAmongValidKeys) {
-    hs_error_t err = hs_set_grey_overrides(
-        "allowLily:1;bad_key:0;allowHao:1;");
+    hs_error_t err = hs_set_grey_overrides("allowLily:1;bad_key:0;allowHao:1;");
     ASSERT_EQ(HS_INVALID, err);
 }
 
@@ -336,7 +335,8 @@ TEST(GreyOverrides, NonNumericValue) {
 
 TEST(GreyOverrides, NegativeValue) {
     // Negative values may be converted to large unsigned by lexical_cast;
-    // the parser accepts them without error (behaviour depends on Boost version).
+    // the parser accepts them without error (behaviour depends on Boost
+    // version).
     hs_error_t err = hs_set_grey_overrides("allowLily:-1;");
     // On most Boost versions this succeeds (converts to large positive number).
     // On some it throws bad_lexical_cast and returns HS_INVALID.
@@ -391,8 +391,8 @@ TEST(GreyOverrides, FloatValue) {
 
 TEST(GreyOverrides, OutOfRangeValue) {
     // Extremely large value that exceeds unsigned int
-    hs_error_t err = hs_set_grey_overrides(
-        "limitPatternCount:99999999999999999999;");
+    hs_error_t err =
+        hs_set_grey_overrides("limitPatternCount:99999999999999999999;");
     ASSERT_EQ(HS_INVALID, err);
 }
 
@@ -403,8 +403,8 @@ TEST(GreyOverrides, CompilationUnaffectedByInvalidOverrides) {
     // Compilation should still work with defaults (no crash, valid result)
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("test", 0, HS_MODE_BLOCK, nullptr,
-                                &db, &compile_err);
+    hs_error_t err =
+        hs_compile("test", 0, HS_MODE_BLOCK, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_free_database(db);
@@ -427,8 +427,6 @@ TEST(GreyOverrides, KeyWithSpecialChars) {
     ASSERT_EQ(HS_INVALID, err);
 }
 
-
-
 TEST(GreyOverrides, LimitPatternCountAffectsCompilation) {
     hs_error_t err = hs_set_grey_overrides("limitPatternCount:1;");
     ASSERT_EQ(HS_SUCCESS, err);
@@ -439,8 +437,8 @@ TEST(GreyOverrides, LimitPatternCountAffectsCompilation) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
 
-    err = hs_compile_multi(expr, flags, ids, 2, HS_MODE_BLOCK, nullptr,
-                           &db, &compile_err);
+    err = hs_compile_multi(expr, flags, ids, 2, HS_MODE_BLOCK, nullptr, &db,
+                           &compile_err);
     ASSERT_NE(HS_SUCCESS, err);
     ASSERT_TRUE(db == nullptr);
     hs_free_compile_error(compile_err);
@@ -448,8 +446,8 @@ TEST(GreyOverrides, LimitPatternCountAffectsCompilation) {
     ASSERT_EQ(HS_SUCCESS, hs_reset_grey_overrides());
 
     compile_err = nullptr;
-    err = hs_compile_multi(expr, flags, ids, 2, HS_MODE_BLOCK, nullptr,
-                           &db, &compile_err);
+    err = hs_compile_multi(expr, flags, ids, 2, HS_MODE_BLOCK, nullptr, &db,
+                           &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_free_database(db);
@@ -465,8 +463,8 @@ TEST(GreyOverrides, InvalidOverridesAreTransactional) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
 
-    err = hs_compile_multi(expr, flags, ids, 2, HS_MODE_BLOCK, nullptr,
-                           &db, &compile_err);
+    err = hs_compile_multi(expr, flags, ids, 2, HS_MODE_BLOCK, nullptr, &db,
+                           &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_free_database(db);
@@ -528,8 +526,8 @@ TEST(GreyOverrides, CompileWithOverridesThenWithout) {
 
     hs_database_t *db1 = nullptr;
     hs_compile_error_t *err1 = nullptr;
-    hs_error_t ret = hs_compile("abcdef", 0, HS_MODE_BLOCK, nullptr,
-                                 &db1, &err1);
+    hs_error_t ret =
+        hs_compile("abcdef", 0, HS_MODE_BLOCK, nullptr, &db1, &err1);
     ASSERT_EQ(HS_SUCCESS, ret);
     ASSERT_TRUE(db1 != nullptr);
 
@@ -565,14 +563,11 @@ TEST(GreyOverrides, CompileWithOverridesThenWithout) {
 }
 
 TEST(GreyOverrides, NeoFdrZeroTailLiteralFallsBackWithoutLosingMatch) {
-    hs_error_t err =
-        hs_set_grey_overrides("allowLily:1;allowNeoFdr:1;");
+    hs_error_t err = hs_set_grey_overrides("allowLily:1;allowNeoFdr:1;");
     ASSERT_EQ(HS_SUCCESS, err);
 
-    const char *expressions[] = {
-        "\\x13\\x08\\x00\\x00\\x00\\x00\\x00\\x00"
-        "\\x00\\x00\\x00\\x00"
-    };
+    const char *expressions[] = {"\\x13\\x08\\x00\\x00\\x00\\x00\\x00\\x00"
+                                 "\\x00\\x00\\x00\\x00"};
     unsigned flags[] = {HS_FLAG_SINGLEMATCH};
     unsigned ids[] = {2824};
 
@@ -602,17 +597,13 @@ TEST(GreyOverrides, NeoFdrZeroTailLiteralFallsBackWithoutLosingMatch) {
 }
 
 TEST(GreyOverrides, NeoFdrVioletKeepsZeroDenseClassAlternative) {
-    hs_error_t err =
-        hs_set_grey_overrides("allowLily:1;allowNeoFdr:1;");
+    hs_error_t err = hs_set_grey_overrides("allowLily:1;allowNeoFdr:1;");
     ASSERT_EQ(HS_SUCCESS, err);
 
     const char *expressions[] = {
         "(\\x40\\x09.{19}|\\x41\\x0b.{23})[\\xf0-\\xff].{8}"
-        "\\x01\\x00[\\x00\\x01\\x02\\x04\\x08\\x10\\x18\\x20]\\x00"
-    };
-    unsigned flags[] = {
-        HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_MULTILINE
-    };
+        "\\x01\\x00[\\x00\\x01\\x02\\x04\\x08\\x10\\x18\\x20]\\x00"};
+    unsigned flags[] = {HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_MULTILINE};
     unsigned ids[] = {23};
 
     hs_database_t *db = nullptr;
@@ -646,15 +637,12 @@ TEST(GreyOverrides, NeoFdrVioletKeepsZeroDenseClassAlternative) {
 }
 
 TEST(GreyOverrides, NeoFdrVioletKeepsZeroDenseBranchAlternative) {
-    hs_error_t err =
-        hs_set_grey_overrides("allowLily:1;allowNeoFdr:1;");
+    hs_error_t err = hs_set_grey_overrides("allowLily:1;allowNeoFdr:1;");
     ASSERT_EQ(HS_SUCCESS, err);
 
-    const char *expressions[] = {
-        "^.{4}(\\x05\\x00|\\x2e/x00|\\x2e\\x08).{21}"
-        "(\\xff{7}\\x7f|\\xb8\\x0b\\x00{6}).{29}"
-        "delete\\x20+from\\x20"
-    };
+    const char *expressions[] = {"^.{4}(\\x05\\x00|\\x2e/x00|\\x2e\\x08).{21}"
+                                 "(\\xff{7}\\x7f|\\xb8\\x0b\\x00{6}).{29}"
+                                 "delete\\x20+from\\x20"};
     unsigned flags[] = {0};
     unsigned ids[] = {200001168};
 
@@ -695,18 +683,16 @@ TEST(GreyOverrides, OverridesAppliedToMultiPatternCompilation) {
     hs_set_grey_overrides("allowHao:1;allowNeoFdr:1;");
 
     const int num_patterns = 10;
-    const char *expr[] = {
-        "apple", "banana", "cherry", "dragon", "elephant",
-        "falcon", "guitar", "hammer", "island", "jungle"
-    };
+    const char *expr[] = {"apple",  "banana", "cherry", "dragon", "elephant",
+                          "falcon", "guitar", "hammer", "island", "jungle"};
     unsigned flags[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     unsigned ids[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile_multi(expr, flags, ids, num_patterns,
-                                       HS_MODE_BLOCK, nullptr,
-                                       &db, &compile_err);
+    hs_error_t err =
+        hs_compile_multi(expr, flags, ids, num_patterns, HS_MODE_BLOCK, nullptr,
+                         &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -732,9 +718,9 @@ TEST(GreyOverrides, StreamModeCompilationWithOverrides) {
 
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("stream_test", 0,
-                                 HS_MODE_STREAM | HS_MODE_SOM_HORIZON_LARGE,
-                                 nullptr, &db, &compile_err);
+    hs_error_t err =
+        hs_compile("stream_test", 0, HS_MODE_STREAM | HS_MODE_SOM_HORIZON_LARGE,
+                   nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -748,8 +734,8 @@ TEST(GreyOverrides, StreamModeCompilationWithOverrides) {
 
     CallBackContext c;
     err = hs_scan_stream(stream, "prefix stream_test suffix",
-                         (unsigned)strlen("prefix stream_test suffix"),
-                         0, scratch, record_cb, &c);
+                         (unsigned)strlen("prefix stream_test suffix"), 0,
+                         scratch, record_cb, &c);
     ASSERT_EQ(HS_SUCCESS, err);
 
     err = hs_close_stream(stream, scratch, record_cb, &c);
