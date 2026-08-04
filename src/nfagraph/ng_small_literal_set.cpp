@@ -35,6 +35,7 @@
 #include "fp_collector.h"
 #include "grey.h"
 #include "ng_holder.h"
+#include "ng_literal_quality.h"
 #include "ng_util.h"
 #include "rose/rose_build.h"
 #include "ue2common.h"
@@ -123,6 +124,25 @@ static bool fpFeedbackLiteralSetHasBad(
     const map<sls_literal, flat_set<ReportID>> &literals) {
     for (const auto &m : literals) {
         if (fpFeedbackLiteralIsBad(cc, m.first.s)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool neoFdrLiteralSetHasLongZeroTail(
+    const CompileContext &cc,
+    const map<sls_literal, flat_set<ReportID>> &literals) {
+    if (!cc.grey.allowNeoFdr) {
+        return false;
+    }
+
+    for (const auto &m : literals) {
+        if (hasLongAllZeroNeoFdrTail(m.first.s)) {
+            DEBUG_PRINTF("rejecting long zero-tail NeoFDR small literal "
+                         "'%s'\n",
+                         dumpString(m.first.s).c_str());
             return true;
         }
     }
@@ -281,6 +301,10 @@ bool handleSmallLiteralSets(RoseBuild &rose, const NGHolder &g,
 
     if (!checkLongMixedSensitivityLiterals(literals)) {
         DEBUG_PRINTF("long mixed\n");
+        return false;
+    }
+
+    if (neoFdrLiteralSetHasLongZeroTail(cc, literals)) {
         return false;
     }
 

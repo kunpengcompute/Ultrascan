@@ -228,6 +228,35 @@ static bool fpFeedbackLiteralSetHasBad(const CompileContext &cc,
     return false;
 }
 
+static bool neoFdrLiteralSetHasBad(const CompileContext &cc,
+                                   const set<ue2_literal> &lits) {
+    return cc.grey.allowNeoFdr &&
+           any_of(begin(lits), end(lits), isLowQualityNeoFdrLiteral);
+}
+
+static void
+neoFdrDropBadVertLitInfos(const CompileContext &cc,
+                          vector<unique_ptr<VertLitInfo>> *lits) {
+    if (!cc.grey.allowNeoFdr) {
+        return;
+    }
+
+    for (auto it = lits->begin(); it != lits->end();) {
+        if (!*it) {
+            ++it;
+            continue;
+        }
+
+        if (neoFdrLiteralSetHasBad(cc, (*it)->lit)) {
+            DEBUG_PRINTF("dropping Violet literal candidate due to a "
+                         "low-quality NeoFDR literal\n");
+            it = lits->erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 static void
 fpFeedbackDropBadVertLitInfos(const CompileContext &cc,
                               vector<unique_ptr<VertLitInfo>> *lits) {
@@ -721,30 +750,7 @@ findBestSplit(const NGHolder &g, const vector<NFAVertexDepth> *depths,
     getRegionRoseLiterals(g, seeking_anchored, depths, cand_raw, allowed_cand,
                           &lits, min_len, desperation, last_chance, cc);
 
-    if (cc.grey.allowNeoFdr) {
-        for (auto it = lits.begin(); it != lits.end();) {
-            if (!*it) {
-                ++it;
-                continue;
-            }
-
-            set<ue2_literal> &lit_set = (*it)->lit;
-            for (auto lit_it = lit_set.begin(); lit_it != lit_set.end();) {
-                if (isLowQualityNeoFdrLiteral(*lit_it)) {
-                    lit_it = lit_set.erase(lit_it);
-                } else {
-                    ++lit_it;
-                }
-            }
-
-            if (lit_set.empty()) {
-                it = lits.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
-
+    neoFdrDropBadVertLitInfos(cc, &lits);
     fpFeedbackDropBadVertLitInfos(cc, &lits);
 
     if (lits.empty()) {
@@ -2454,21 +2460,17 @@ static bool replaceSuffixWithInfix(const NGHolder &h, RoseInGraph &vg,
 
     for (NFAVertex v : inv_adjacent_vertices_range(h.accept, h)) {
         set<ue2_literal> ss = getLiteralSet(h, v, false);
+        if (ss.empty()) {
+            DEBUG_PRINTF("candidate is too shitty\n");
+            return false;
+        }
         if (fpFeedbackLiteralSetHasBad(cc, ss)) {
             DEBUG_PRINTF("skipping suffix split due to fp feedback\n");
             return false;
         }
-        if (cc.grey.allowNeoFdr) {
-            for (auto it = ss.begin(); it != ss.end();) {
-                if (isLowQualityNeoFdrLiteral(*it)) {
-                    it = ss.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-        }
-        if (ss.empty()) {
-            DEBUG_PRINTF("candidate is too shitty\n");
+        if (neoFdrLiteralSetHasBad(cc, ss)) {
+            DEBUG_PRINTF("skipping suffix split due to a low-quality "
+                         "NeoFDR literal\n");
             return false;
         }
 
@@ -2485,21 +2487,17 @@ static bool replaceSuffixWithInfix(const NGHolder &h, RoseInGraph &vg,
         }
 
         set<ue2_literal> ss = getLiteralSet(h, v, false);
+        if (ss.empty()) {
+            DEBUG_PRINTF("candidate is too shitty\n");
+            return false;
+        }
         if (fpFeedbackLiteralSetHasBad(cc, ss)) {
             DEBUG_PRINTF("skipping suffix split due to fp feedback\n");
             return false;
         }
-        if (cc.grey.allowNeoFdr) {
-            for (auto it = ss.begin(); it != ss.end();) {
-                if (isLowQualityNeoFdrLiteral(*it)) {
-                    it = ss.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-        }
-        if (ss.empty()) {
-            DEBUG_PRINTF("candidate is too shitty\n");
+        if (neoFdrLiteralSetHasBad(cc, ss)) {
+            DEBUG_PRINTF("skipping suffix split due to a low-quality "
+                         "NeoFDR literal\n");
             return false;
         }
 

@@ -564,6 +564,133 @@ TEST(GreyOverrides, CompileWithOverridesThenWithout) {
     hs_free_database(db2);
 }
 
+TEST(GreyOverrides, NeoFdrZeroTailLiteralFallsBackWithoutLosingMatch) {
+    hs_error_t err =
+        hs_set_grey_overrides("allowLily:1;allowNeoFdr:1;");
+    ASSERT_EQ(HS_SUCCESS, err);
+
+    const char *expressions[] = {
+        "\\x13\\x08\\x00\\x00\\x00\\x00\\x00\\x00"
+        "\\x00\\x00\\x00\\x00"
+    };
+    unsigned flags[] = {HS_FLAG_SINGLEMATCH};
+    unsigned ids[] = {2824};
+
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    err = hs_compile_multi(expressions, flags, ids, 1, HS_MODE_BLOCK, nullptr,
+                           &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+
+    const char data[] = {'\x13', '\x08', '\x00', '\x00', '\x00', '\x00',
+                         '\x00', '\x00', '\x00', '\x00', '\x00', '\x00'};
+    CallBackContext c;
+    err = hs_scan(db, data, sizeof(data), 0, scratch, record_cb, &c);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_EQ(1U, c.matches.size());
+    EXPECT_EQ(2824, c.matches[0].id);
+    EXPECT_EQ(sizeof(data), c.matches[0].to);
+
+    hs_free_scratch(scratch);
+    hs_free_database(db);
+    hs_reset_grey_overrides();
+}
+
+TEST(GreyOverrides, NeoFdrVioletKeepsZeroDenseClassAlternative) {
+    hs_error_t err =
+        hs_set_grey_overrides("allowLily:1;allowNeoFdr:1;");
+    ASSERT_EQ(HS_SUCCESS, err);
+
+    const char *expressions[] = {
+        "(\\x40\\x09.{19}|\\x41\\x0b.{23})[\\xf0-\\xff].{8}"
+        "\\x01\\x00[\\x00\\x01\\x02\\x04\\x08\\x10\\x18\\x20]\\x00"
+    };
+    unsigned flags[] = {
+        HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_MULTILINE
+    };
+    unsigned ids[] = {23};
+
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    err = hs_compile_multi(expressions, flags, ids, 1, HS_MODE_BLOCK, nullptr,
+                           &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+
+    string data("\x40\x09", 2);
+    data.append(19, 'a');
+    data.push_back(static_cast<char>(0xf0));
+    data.append(8, 'b');
+    data.append("\x01\x00\x00\x00", 4);
+
+    CallBackContext c;
+    err = hs_scan(db, data.data(), static_cast<unsigned>(data.size()), 0,
+                  scratch, record_cb, &c);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_EQ(1U, c.matches.size());
+    EXPECT_EQ(23, c.matches[0].id);
+    EXPECT_EQ(data.size(), c.matches[0].to);
+
+    hs_free_scratch(scratch);
+    hs_free_database(db);
+    hs_reset_grey_overrides();
+}
+
+TEST(GreyOverrides, NeoFdrVioletKeepsZeroDenseBranchAlternative) {
+    hs_error_t err =
+        hs_set_grey_overrides("allowLily:1;allowNeoFdr:1;");
+    ASSERT_EQ(HS_SUCCESS, err);
+
+    const char *expressions[] = {
+        "^.{4}(\\x05\\x00|\\x2e/x00|\\x2e\\x08).{21}"
+        "(\\xff{7}\\x7f|\\xb8\\x0b\\x00{6}).{29}"
+        "delete\\x20+from\\x20"
+    };
+    unsigned flags[] = {0};
+    unsigned ids[] = {200001168};
+
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    err = hs_compile_multi(expressions, flags, ids, 1, HS_MODE_BLOCK, nullptr,
+                           &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+
+    string data("ABCD");
+    data.append("\x05\x00", 2);
+    data.append(21, 'c');
+    data.push_back(static_cast<char>(0xb8));
+    data.push_back('\x0b');
+    data.append(6, '\x00');
+    data.append(29, 'd');
+    data.append("delete from ");
+
+    CallBackContext c;
+    err = hs_scan(db, data.data(), static_cast<unsigned>(data.size()), 0,
+                  scratch, record_cb, &c);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_EQ(1U, c.matches.size());
+    EXPECT_EQ(200001168U, c.matches[0].id);
+    EXPECT_EQ(data.size(), c.matches[0].to);
+
+    hs_free_scratch(scratch);
+    hs_free_database(db);
+    hs_reset_grey_overrides();
+}
+
 TEST(GreyOverrides, OverridesAppliedToMultiPatternCompilation) {
     hs_set_grey_overrides("allowHao:1;allowNeoFdr:1;");
 

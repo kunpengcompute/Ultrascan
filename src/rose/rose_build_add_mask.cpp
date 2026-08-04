@@ -589,6 +589,9 @@ static void addTransientMask(RoseBuildImpl &build,
         return;
     }
 
+    assert(!build.cc.grey.allowNeoFdr ||
+           none_of(begin(lits), end(lits), isLowQualityNeoFdrLiteral));
+
     u32 delay = mask.size() - lit_length - lit_minBound;
     assert(delay <= MAX_DELAY);
     DEBUG_PRINTF("delay=%u\n", delay);
@@ -638,12 +641,6 @@ static void addTransientMask(RoseBuildImpl &build,
     const flat_set<ReportID> no_reports;
 
     for (const auto &lit : lits) {
-        if (build.cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
-            DEBUG_PRINTF("skipping low-quality NeoFDR transient mask literal "
-                         "'%s'\n",
-                         escapeString(lit).c_str());
-            continue;
-        }
         u32 lit_id = build.getLiteralId(lit, msk, cmp, delay, table);
         const RoseVertex parent = anchored ? build.anchored_root : build.root;
         bool use_mask = delay || maskIsNeeded(lit, *mask_graph);
