@@ -63,6 +63,7 @@
 using namespace std;
 using namespace ue2;
 
+#ifdef HS_ENABLE_FP_FEEDBACK
 struct hs_compile_context {
     hs_fp_feedback_t *fp_feedback;
     u32 fp_observe_checked_count;
@@ -109,6 +110,7 @@ static void observeCompileFeedback(const hs_compile_context_t *ctx,
     mutable_ctx->fp_observe_checked_count = checked_count;
     mutable_ctx->fp_observe_hit_count = hit_count;
 }
+#endif /* HS_ENABLE_FP_FEEDBACK */
 
 /** \brief Cheap check that no unexpected mode flags are on. */
 static bool validModeFlags(unsigned int mode) {
@@ -591,7 +593,11 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
                                 hs_database_t **db,
                                 hs_compile_error_t **comp_error, const Grey &g,
                                 const hs_compile_context_t *fp_ctx) {
+#ifdef HS_ENABLE_FP_FEEDBACK
     resetCompileContextDiagnostics(fp_ctx);
+#else
+    (void)fp_ctx;
+#endif
 
     // Check the args: note that it's OK for flags, ids or ext to be null.
     if (!comp_error) {
@@ -669,12 +675,16 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
     }
 
     try {
+#ifdef HS_ENABLE_FP_FEEDBACK
         hs_compile_context_t *mutable_fp_ctx =
             const_cast<hs_compile_context_t *>(fp_ctx);
         CompileContext cc(isStreaming, isVectored, target_info, g,
                           fp_ctx ? fp_ctx->fp_feedback : nullptr,
                           mutable_fp_ctx ? mutable_fp_ctx->fp_checkpoint_info
                                          : nullptr);
+#else
+        CompileContext cc(isStreaming, isVectored, target_info, g);
+#endif
         NG ng(cc, elements, somPrecision);
 
         if (count_2_4_byte_literals > 8) {
@@ -958,32 +968,56 @@ extern "C" hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
 
 extern "C" hs_error_t HS_CDECL
 hs_compile_context_free(hs_compile_context_t *ctx) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+#else
     if (ctx) {
         hs_fp_feedback_free(ctx->fp_feedback);
         hs_misc_free(ctx);
     }
+#endif
     return HS_SUCCESS;
 }
 
 extern "C" unsigned int HS_CDECL
 hs_compile_context_observe_checked_count(const hs_compile_context_t *ctx) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    return 0;
+#else
     return ctx ? ctx->fp_observe_checked_count : 0;
+#endif
 }
 
 extern "C" unsigned int HS_CDECL
 hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    return 0;
+#else
     return ctx ? ctx->fp_observe_hit_count : 0;
+#endif
 }
 
 extern "C" hs_error_t HS_CDECL hs_compile_context_get_checkpoint_info(
     const hs_compile_context_t *ctx, unsigned int checkpoint,
     hs_compile_context_checkpoint_info_t *info) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    (void)checkpoint;
+    if (!info) {
+        return HS_INVALID;
+    }
+    memset(info, 0, sizeof(*info));
+    return HS_ARCH_ERROR;
+#else
     if (!ctx || !info || checkpoint >= HS_FP_COMPILE_CHECKPOINT_COUNT) {
         return HS_INVALID;
     }
 
     *info = ctx->fp_checkpoint_info[checkpoint];
     return HS_SUCCESS;
+#endif
 }
 
 extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_multi(

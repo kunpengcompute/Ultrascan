@@ -34,6 +34,7 @@
 
 namespace ue2 {
 
+#ifdef HS_ENABLE_FP_FEEDBACK
 CompileContext::CompileContext(
     bool in_isStreaming, bool in_isVectored, const target_t &in_target_info,
     const Grey &in_grey, const hs_fp_feedback_t *in_fp_feedback,
@@ -41,5 +42,12 @@ CompileContext::CompileContext(
     : streaming(in_isStreaming || in_isVectored), vectored(in_isVectored),
       target_info(in_target_info), grey(in_grey), fp_feedback(in_fp_feedback),
       fp_checkpoint_info(in_fp_checkpoint_info) {}
+#else
+CompileContext::CompileContext(bool in_isStreaming, bool in_isVectored,
+                               const target_t &in_target_info,
+                               const Grey &in_grey)
+    : streaming(in_isStreaming || in_isVectored), vectored(in_isVectored),
+      target_info(in_target_info), grey(in_grey) {}
+#endif
 
 } // namespace ue2

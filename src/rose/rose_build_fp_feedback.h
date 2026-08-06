@@ -87,6 +87,14 @@ static inline bool fpFeedbackBlocksRoseFragment(const CompileContext &cc,
                                                 const std::vector<u8> *msk,
                                                 const std::vector<u8> *cmp,
                                                 unsigned int checkpoint) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)cc;
+    (void)lit;
+    (void)msk;
+    (void)cmp;
+    (void)checkpoint;
+    return false;
+#else
     if (!cc.fp_feedback) {
         return false;
     }
@@ -113,6 +121,7 @@ static inline bool fpFeedbackBlocksRoseFragment(const CompileContext &cc,
                  escapeString(s).c_str());
     fpCompileRecordBlocked(cc, checkpoint);
     return true;
+#endif
 }
 
 static inline bool fpFeedbackBlocksRoseLiteral(const CompileContext &cc,
@@ -126,6 +135,14 @@ static inline bool fpFeedbackObservesRoseFragment(const CompileContext &cc,
                                                   const std::vector<u8> *msk,
                                                   const std::vector<u8> *cmp,
                                                   unsigned int checkpoint) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)cc;
+    (void)lit;
+    (void)msk;
+    (void)cmp;
+    (void)checkpoint;
+    return false;
+#else
     if (!cc.fp_feedback) {
         return false;
     }
@@ -152,6 +169,7 @@ static inline bool fpFeedbackObservesRoseFragment(const CompileContext &cc,
     DEBUG_PRINTF("observed Rose literal rewrite feedback hit: '%s'\n",
                  escapeString(s).c_str());
     return true;
+#endif
 }
 
 static inline bool fpFeedbackObservesRoseLiteral(const CompileContext &cc,

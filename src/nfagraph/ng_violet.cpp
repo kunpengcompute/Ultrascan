@@ -202,6 +202,11 @@ struct VertLitInfo {
 
 static bool fpFeedbackLiteralIsBad(const CompileContext &cc,
                                    const ue2_literal &lit) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)cc;
+    (void)lit;
+    return false;
+#else
     if (!cc.fp_feedback) {
         return false;
     }
@@ -216,6 +221,7 @@ static bool fpFeedbackLiteralIsBad(const CompileContext &cc,
     fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
     fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
     return true;
+#endif
 }
 
 static bool fpFeedbackLiteralSetHasBad(const CompileContext &cc,
@@ -259,6 +265,10 @@ static void neoFdrDropBadVertLitInfos(const CompileContext &cc,
 static void
 fpFeedbackDropBadVertLitInfos(const CompileContext &cc,
                               vector<unique_ptr<VertLitInfo>> *lits) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)cc;
+    (void)lits;
+#else
     if (!cc.fp_feedback) {
         return;
     }
@@ -277,6 +287,7 @@ fpFeedbackDropBadVertLitInfos(const CompileContext &cc,
             ++it;
         }
     }
+#endif
 }
 
 /**

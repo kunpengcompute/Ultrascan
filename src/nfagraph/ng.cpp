@@ -577,6 +577,11 @@ bool NG::addHolder(NGHolder &g) {
 
 static bool feedbackBlocksShortcutLiteral(const CompileContext &cc,
                                           const ue2_literal &literal) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)cc;
+    (void)literal;
+    return false;
+#else
     if (!cc.fp_feedback) {
         return false;
     }
@@ -600,6 +605,7 @@ static bool feedbackBlocksShortcutLiteral(const CompileContext &cc,
     fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
     fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
     return true;
+#endif
 }
 
 bool NG::addLiteral(const ue2_literal &literal, u32 expr_index,

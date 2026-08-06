@@ -336,7 +336,9 @@ static really_inline int roseDeliverReport(u64a offset, ReportID onmatch,
     DEBUG_PRINTF(">> reporting match @[%llu,%llu] for sig %u ctxt %p <<\n",
                  from_offset, to_offset, onmatch, ci->userContext);
 
+#ifdef HS_ENABLE_FP_FEEDBACK
     hs_fp_collector_record_final_report(scratch);
+#endif
 
     int halt = ci->userCallback(onmatch, from_offset, to_offset, flags,
                                 ci->userContext);
@@ -386,7 +388,9 @@ roseDeliverSomReport(u64a from_offset, u64a to_offset, ReportID onmatch,
     DEBUG_PRINTF(">> reporting match @[%llu,%llu] for sig %u ctxt %p <<\n",
                  from_offset, to_offset, onmatch, ci->userContext);
 
+#ifdef HS_ENABLE_FP_FEEDBACK
     hs_fp_collector_record_final_report(scratch);
+#endif
 
     int halt = ci->userCallback(onmatch, from_offset, to_offset, flags,
                                 ci->userContext);

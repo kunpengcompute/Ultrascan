@@ -703,6 +703,13 @@ static void checkFpFeedbackMatcherFragment(const RoseBuildImpl &build,
                                            const string &s_final, bool nocase,
                                            const vector<u8> &msk,
                                            const vector<u8> &cmp) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)build;
+    (void)s_final;
+    (void)nocase;
+    (void)msk;
+    (void)cmp;
+#else
     if (!build.cc.fp_feedback) {
         return;
     }
@@ -723,6 +730,7 @@ static void checkFpFeedbackMatcherFragment(const RoseBuildImpl &build,
                  "table=%u, lit_ids=%zu, s='%s'\n",
                  f.fragment_id, (u32)lit.table, f.lit_ids.size(),
                  escapeString(s_final).c_str());
+#endif
 }
 
 static void addFragmentLiteral(const RoseBuildImpl &build, MatcherProto &mp,

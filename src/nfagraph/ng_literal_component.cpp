@@ -186,6 +186,7 @@ static bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v,
     }
 
     ue2_literal rose_literal(literal, nocase);
+#ifdef HS_ENABLE_FP_FEEDBACK
     if (ng.cc.fp_feedback) {
         fpCompileRecordCheck(ng.cc, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT);
         if (hs_fp_feedback_literal_is_bad(
@@ -198,6 +199,7 @@ static bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v,
             return false;
         }
     }
+#endif
 
     ng.rose->add(anchored, eod, rose_literal, g[u].reports);
 

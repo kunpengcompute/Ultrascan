@@ -52,6 +52,8 @@ typedef u64a rose_group;
 // 最大支持的lily匹配数限制
 #define LILY_ITEMS_COUNT 4096
 
+#ifdef HS_ENABLE_FP_FEEDBACK
+
 #define ROSE_FP_FRAGMENT_BYTES_MAX 8
 
 #define ROSE_FP_TABLE_UNKNOWN 0
@@ -84,6 +86,8 @@ struct RoseFpFragmentMeta {
     u8 mask[ROSE_FP_FRAGMENT_BYTES_MAX];
     u8 cmp[ROSE_FP_FRAGMENT_BYTES_MAX];
 };
+
+#endif /* HS_ENABLE_FP_FEEDBACK */
 
 /* Allocation of Rose literal ids
  *
@@ -455,8 +459,6 @@ struct x86_RoseEngine {
     struct RoseStateOffsets stateOffsets;
     struct RoseBoundaryReports boundary;
     u32 totalNumLiterals;     /* total number of literals including dr */
-    u32 fpFragmentMetaOffset; /* offset of RoseFpFragmentMeta array */
-    u32 fpFragmentMetaCount;
     u32 asize;                /* size of the atable */
     u32 outfixBeginQueue;     /* first outfix queue */
     u32 outfixEndQueue;       /* one past the last outfix queue */
@@ -469,6 +471,10 @@ struct x86_RoseEngine {
     u32 somRevOffsetOffset;   /**< offset to array of offsets to som rev nfas */
     u32 longLitStreamState;   // size in bytes
     struct scatter_full_plan state_init;
+#ifdef HS_ENABLE_FP_FEEDBACK
+    u32 fpFragmentMetaOffset; /* offset of RoseFpFragmentMeta array */
+    u32 fpFragmentMetaCount;
+#endif
 };
 
 struct RoseEngine {
@@ -613,8 +619,6 @@ struct RoseEngine {
     struct RoseStateOffsets stateOffsets;
     struct RoseBoundaryReports boundary;
     u32 totalNumLiterals;     /* total number of literals including dr */
-    u32 fpFragmentMetaOffset; /**< offset of RoseFpFragmentMeta array */
-    u32 fpFragmentMetaCount;  /**< number of RoseFpFragmentMeta records */
     u32 asize;                /* size of the atable */
     u32 outfixBeginQueue;     /* first outfix queue */
     u32 outfixEndQueue;       /* one past the last outfix queue */
@@ -628,6 +632,10 @@ struct RoseEngine {
     u32 longLitStreamState;   // size in bytes
 
     struct scatter_full_plan state_init;
+#ifdef HS_ENABLE_FP_FEEDBACK
+    u32 fpFragmentMetaOffset; /**< offset of RoseFpFragmentMeta array */
+    u32 fpFragmentMetaCount;  /**< number of RoseFpFragmentMeta records */
+#endif
 };
 
 struct ALIGN_CL_DIRECTIVE anchored_matcher_info {
@@ -737,6 +745,7 @@ getSBLiteralMatcher(const struct RoseEngine *t) {
     return matcher;
 }
 
+#ifdef HS_ENABLE_FP_FEEDBACK
 static really_inline const struct RoseFpFragmentMeta *
 getRoseFpFragmentMeta(const struct RoseEngine *t) {
     if (!t->fpFragmentMetaOffset || !t->fpFragmentMetaCount) {
@@ -747,6 +756,7 @@ getRoseFpFragmentMeta(const struct RoseEngine *t) {
     assert(ISALIGNED_N(meta, 4));
     return (const struct RoseFpFragmentMeta *)meta;
 }
+#endif
 
 static really_inline const struct LeftNfaInfo *
 getLeftTable(const struct RoseEngine *t) {

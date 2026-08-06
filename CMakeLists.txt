@@ -754,11 +754,7 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
     set(HS_TARGET_AARCH64 TRUE)
 endif()
 
-if (HS_TARGET_AARCH64)
-    set(HS_ENABLE_FP_FEEDBACK_DEFAULT ON)
-else()
-    set(HS_ENABLE_FP_FEEDBACK_DEFAULT OFF)
-endif()
+set(HS_ENABLE_FP_FEEDBACK_DEFAULT OFF)
 
 option(HS_ENABLE_FP_FEEDBACK
     "Build false-positive feedback optimization support"
@@ -772,7 +768,9 @@ endif()
 if (HS_ENABLE_FP_FEEDBACK)
     message(STATUS "False-positive feedback optimization enabled")
 else()
-    message(STATUS "False-positive feedback optimization disabled")
+    message(STATUS
+        "False-positive feedback optimization disabled "
+        "(enable explicitly with -DHS_ENABLE_FP_FEEDBACK=ON on AArch64)")
 endif()
 
 # testing a builtin takes a little more work

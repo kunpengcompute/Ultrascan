@@ -457,6 +457,11 @@ static void buildMatcherLiteralMask(const ue2_literal &lit,
 
 static bool feedbackBlocksTransientMask(const vector<CharReach> &mask,
                                         const CompileContext &cc) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)mask;
+    (void)cc;
+    return false;
+#else
     if (!cc.fp_feedback) {
         return false;
     }
@@ -503,10 +508,16 @@ static bool feedbackBlocksTransientMask(const vector<CharReach> &mask,
     }
 
     return false;
+#endif
 }
 
 static bool feedbackBlocksUnmaskedMaskLiteral(const ue2_literal &lit,
                                               const CompileContext &cc) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)lit;
+    (void)cc;
+    return false;
+#else
     if (!cc.fp_feedback) {
         return false;
     }
@@ -531,6 +542,7 @@ static bool feedbackBlocksUnmaskedMaskLiteral(const ue2_literal &lit,
     fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
     fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
     return true;
+#endif
 }
 
 static bool maskIsNeeded(const ue2_literal &lit, const NGHolder &g) {

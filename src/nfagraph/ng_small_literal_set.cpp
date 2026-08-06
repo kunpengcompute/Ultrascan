@@ -101,6 +101,11 @@ static bool operator<(const sls_literal &a, const sls_literal &b) {
 
 static bool fpFeedbackLiteralIsBad(const CompileContext &cc,
                                    const ue2_literal &lit) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)cc;
+    (void)lit;
+    return false;
+#else
     if (!cc.fp_feedback) {
         return false;
     }
@@ -117,6 +122,7 @@ static bool fpFeedbackLiteralIsBad(const CompileContext &cc,
     fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
     fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
     return true;
+#endif
 }
 
 static bool fpFeedbackLiteralSetHasBad(
