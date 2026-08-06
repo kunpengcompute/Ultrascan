@@ -44,7 +44,6 @@
 #include "ConstComponentVisitor.h"
 #include "Utf8ComponentClass.h"
 #include "compiler/compiler.h"
-#include "fp_collector.h"
 #include "grey.h"
 #include "nfagraph/ng.h"
 #include "nfagraph/ng_literal_quality.h"
@@ -162,31 +161,6 @@ public:
 
 ConstructLiteralVisitor::~ConstructLiteralVisitor() {}
 
-static bool feedbackBlocksShortcutLiteral(const CompileContext &cc,
-                                          const ue2_literal &lit) {
-#ifndef HS_ENABLE_FP_FEEDBACK
-    (void)cc;
-    (void)lit;
-    return false;
-#else
-    if (!cc.fp_feedback) {
-        return false;
-    }
-
-    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
-    if (!hs_fp_feedback_literal_is_bad(cc.fp_feedback, lit.c_str(),
-                                       lit.length(), lit.any_nocase())) {
-        return false;
-    }
-
-    DEBUG_PRINTF("not shortcutting feedback bad literal '%s'\n",
-                 dumpString(lit).c_str());
-    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
-    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
-    return true;
-#endif
-}
-
 /** \brief True if the literal expression \a expr could be added to Rose. */
 bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags,
                      const CompileContext &cc) {
@@ -224,10 +198,6 @@ bool shortcutLiteral(NG &ng, const ParsedExpression &pe, unsigned flags,
 
     if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
         DEBUG_PRINTF("not shortcutting low-quality NeoFDR literal\n");
-        return false;
-    }
-
-    if (feedbackBlocksShortcutLiteral(cc, lit)) {
         return false;
     }
 
@@ -306,10 +276,6 @@ bool x86_shortcutLiteral(NG &ng, const ParsedExpression &pe) {
 
     if (ng.cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(lit)) {
         DEBUG_PRINTF("not shortcutting low-quality NeoFDR literal\n");
-        return false;
-    }
-
-    if (feedbackBlocksShortcutLiteral(ng.cc, lit)) {
         return false;
     }
 

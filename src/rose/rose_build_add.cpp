@@ -47,6 +47,7 @@
 #include "nfagraph/ng_util.h"
 #include "nfagraph/ng_width.h"
 #include "rose_build_anchored.h"
+#include "rose_build_fp_feedback.h"
 #include "rose_in_util.h"
 #include "ue2common.h"
 #include "util/charreach.h"
@@ -508,8 +509,8 @@ static u32 findRoseAnchorFloatingOverlap(const RoseInEdgeProps &ep,
     return overlap;
 }
 
-static void findRoseLiteralMask(const NGHolder &h, const u32 lag,
-                                vector<u8> &msk, vector<u8> &cmp) {
+void findRoseLiteralMask(const NGHolder &h, const u32 lag, vector<u8> &msk,
+                         vector<u8> &cmp) {
     if (lag >= HWLM_MASKLEN) {
         msk.clear();
         cmp.clear();
@@ -926,6 +927,62 @@ static void shift_accepts_to_end(const RoseInGraph &ig,
                      [&](RoseInVertex v) { return !is_any_accept(v, ig); });
 }
 
+static bool feedbackBlocksFinalRoseGraph(const RoseInGraph &ig,
+                                         const CompileContext &cc) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)ig;
+    (void)cc;
+    return false;
+#else
+    if (!cc.fp_feedback) {
+        return false;
+    }
+
+    vector<RoseInVertex> order = topo_order(ig);
+    shift_accepts_to_end(ig, order);
+    u32 eod_space_required = 0;
+    const bool use_eod_table =
+        suitableForEod(ig, order, &eod_space_required, cc);
+
+    for (RoseInVertex v : vertices_range(ig)) {
+        if (ig[v].type != RIV_LITERAL) {
+            continue;
+        }
+
+        vector<u8> msk, cmp;
+        if (cc.grey.roseHamsterMasks && in_degree(v, ig) == 1) {
+            const RoseInEdge e = *in_edges(v, ig).first;
+            if (ig[e].graph) {
+                findRoseLiteralMask(*ig[e].graph, ig[e].graph_lag, msk, cmp);
+            }
+        }
+
+        const unsigned int table = use_eod_table
+                                       ? HS_FP_TABLE_EOD_ANCHORED
+                                       : HS_FP_TABLE_FLOATING;
+        const unsigned int checkpoint =
+            msk.empty() ? HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT
+                        : HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL;
+        if (fpFeedbackBlocksRoseFragment(cc, table, ig[v].s, &msk, &cmp,
+                                         checkpoint)) {
+            DEBUG_PRINTF("rejecting final Rose graph due to fp feedback\n");
+            return true;
+        }
+
+        if (!use_eod_table && ig[v].delay && cc.streaming &&
+            fpFeedbackBlocksRoseFragment(
+                cc, HS_FP_TABLE_DELAY_REBUILD, ig[v].s, &msk, &cmp,
+                HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM)) {
+            DEBUG_PRINTF("rejecting final Rose graph due to delay-rebuild fp "
+                         "feedback\n");
+            return true;
+        }
+    }
+
+    return false;
+#endif
+}
+
 static void populateRoseGraph(RoseBuildImpl *tbi, RoseBuildData &bd) {
     const RoseInGraph &ig = bd.ig;
 
@@ -1208,6 +1265,33 @@ static bool transformInfixToDelay(const RoseInGraph &ig, const RoseInEdge &e,
     return true;
 }
 
+static bool feedbackBlocksDelayTransform(const RoseInGraph &ig,
+                                         RoseInVertex v,
+                                         const CompileContext &cc) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)ig;
+    (void)v;
+    (void)cc;
+    return false;
+#else
+    if (!cc.streaming || ig[v].type != RIV_LITERAL) {
+        return false;
+    }
+
+    vector<u8> msk, cmp;
+    if (cc.grey.roseHamsterMasks && in_degree(v, ig) == 1) {
+        const RoseInEdge e = *in_edges(v, ig).first;
+        if (ig[e].graph) {
+            findRoseLiteralMask(*ig[e].graph, ig[e].graph_lag, msk, cmp);
+        }
+    }
+
+    return fpFeedbackBlocksRoseFragment(
+        cc, HS_FP_TABLE_DELAY_REBUILD, ig[v].s, &msk, &cmp,
+        HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM);
+#endif
+}
+
 static void transformLiteralDelay(RoseInGraph &ig, const CompileContext &cc) {
     if (!cc.grey.roseTransformDelay) {
         return;
@@ -1251,6 +1335,12 @@ static void transformLiteralDelay(RoseInGraph &ig, const CompileContext &cc) {
 
         if (delay > max_delay) {
             DEBUG_PRINTF("delay=%u > max_delay=%u\n", delay, max_delay);
+            continue;
+        }
+
+        if (feedbackBlocksDelayTransform(ig, u, cc)) {
+            DEBUG_PRINTF("not transforming infix to delay due to fp "
+                         "feedback\n");
             continue;
         }
 
@@ -1449,6 +1539,12 @@ static void transformSuffixDelay(RoseInGraph &ig, const CompileContext &cc) {
             continue;
         }
 
+        if (feedbackBlocksDelayTransform(ig, u, cc)) {
+            DEBUG_PRINTF("not transforming suffix to delay due to fp "
+                         "feedback\n");
+            continue;
+        }
+
         DEBUG_PRINTF("setting lit delay to %u and removing suffix\n", delay);
         ig[u].delay = delay;
         ig[u].min_offset = add_rose_depth(ig[u].min_offset, delay);
@@ -1486,6 +1582,11 @@ static bool validateKinds(const RoseInGraph &g) {
 #endif
 
 bool RoseBuildImpl::addRose(const RoseInGraph &ig, bool prefilter) {
+    return addRoseInternal(ig, prefilter, true);
+}
+
+bool RoseBuildImpl::addRoseInternal(const RoseInGraph &ig, bool prefilter,
+                                    bool allow_feedback_reject) {
     DEBUG_PRINTF("trying to rose\n");
     assert(validateKinds(ig));
     assert(hasCorrectlyNumberedVertices(ig));
@@ -1536,6 +1637,10 @@ bool RoseBuildImpl::addRose(const RoseInGraph &ig, bool prefilter) {
             return false;
         }
         insert(&graph_edges, graph_edges.end(), m.second);
+    }
+
+    if (allow_feedback_reject && feedbackBlocksFinalRoseGraph(in, cc)) {
+        return false;
     }
 
     /* we are now past the point of no return. We can start making irreversible
@@ -1648,7 +1753,7 @@ void RoseBuildImpl::add(bool anchored, bool eod, const ue2_literal &lit,
 
     ig[accept].reports.insert(reports.begin(), reports.end());
 
-    addRose(ig, false);
+    (void)addRoseInternal(ig, false, false);
 }
 
 static u32 findMaxBAWidth(const NGHolder &h) {

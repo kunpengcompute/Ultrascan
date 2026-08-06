@@ -508,6 +508,8 @@ public:
              const flat_set<ReportID> &ids) override;
 
     bool addRose(const RoseInGraph &ig, bool prefilter) override;
+    bool addRoseInternal(const RoseInGraph &ig, bool prefilter,
+                         bool allow_feedback_reject);
     bool addSombeRose(const RoseInGraph &ig) override;
 
     bool addOutfix(const NGHolder &h) override;

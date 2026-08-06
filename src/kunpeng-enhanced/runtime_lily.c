@@ -148,7 +148,14 @@ int pushLilyItems(const LilyMatchItem *item, LilyEngineCtx *ctx) {
     }
 
     if (ctx->size >= ctx->capacity) {
-        return HS_INSUFFICIENT_SPACE; // 空间不足直接返回报错，不插入新项
+        // If all stored items have been consumed (flushed), the buffer is
+        // logically empty and can be reused from the beginning.
+        if (ctx->start == ctx->size) {
+            ctx->size = 0;
+            ctx->start = 0;
+        } else {
+            return HS_INSUFFICIENT_SPACE;
+        }
     }
 
     // 尾插, O(1)
@@ -331,16 +338,25 @@ int RoseDeliverReport(enum HsEngine engine_type, u64a offset, uint8_t index, s32
         .toOffset = toOffset
     };
 
-    // 暂存
+    // 暂存：若缓冲区满则先冲刷已存储的匹配项，再重试
     int ret = 0;
-    if (engine_type == HS_ENGINE_LILY) {
-    	ret = pushLilyItems(&item, &scratch->lily_ctx);
-    } else {
-    	ret = pushLilyItems(&item, &scratch->lily_for_teddy_ctx);
-    }
-    if (ret != 0) { // 暂存失败，停止后续匹配
-        ci->status |= STATUS_TERMINATED;
-        return KHSEL_MO_HALT_MATCHING;
+    LilyEngineCtx *ctx = (engine_type == HS_ENGINE_LILY)
+                             ? &scratch->lily_ctx
+                             : &scratch->lily_for_teddy_ctx;
+    ret = pushLilyItems(&item, ctx);
+    if (ret != 0) {
+        // 缓冲区满：冲刷全部已暂存的匹配项以腾出空间
+        int flush_halt = flushStoredLilyMatches(scratch, ALL_LILY_MATCH_ITEMS);
+        if (flush_halt) {
+            ci->status |= STATUS_TERMINATED;
+            return KHSEL_MO_HALT_MATCHING;
+        }
+        // 冲刷后缓冲区逻辑上已空，pushLilyItems 会自动重置游标
+        ret = pushLilyItems(&item, ctx);
+        if (ret != 0) {
+            ci->status |= STATUS_TERMINATED;
+            return KHSEL_MO_HALT_MATCHING;
+        }
     }
 
     if (ekey != INVALID_EKEY) {

@@ -70,6 +70,10 @@ struct hs_compile_context {
     u32 fp_observe_hit_count;
     hs_compile_context_checkpoint_info_t
         fp_checkpoint_info[HS_FP_COMPILE_CHECKPOINT_COUNT];
+    u32 fp_matcher_build_hit_count;
+    u32 fp_matcher_build_hit_capacity;
+    u32 fp_matcher_build_hit_dropped_count;
+    hs_compile_context_matcher_build_hit_info_t *fp_matcher_build_hits;
 };
 
 static void resetCompileContextObserve(const hs_compile_context_t *ctx) {
@@ -91,6 +95,8 @@ static void resetCompileContextDiagnostics(const hs_compile_context_t *ctx) {
     hs_compile_context_t *mutable_ctx = const_cast<hs_compile_context_t *>(ctx);
     memset(mutable_ctx->fp_checkpoint_info, 0,
            sizeof(mutable_ctx->fp_checkpoint_info));
+    mutable_ctx->fp_matcher_build_hit_count = 0;
+    mutable_ctx->fp_matcher_build_hit_dropped_count = 0;
 }
 
 static void observeCompileFeedback(const hs_compile_context_t *ctx,
@@ -678,10 +684,27 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
 #ifdef HS_ENABLE_FP_FEEDBACK
         hs_compile_context_t *mutable_fp_ctx =
             const_cast<hs_compile_context_t *>(fp_ctx);
+        hs_compile_context_checkpoint_info_t *fp_checkpoint_info = nullptr;
+        hs_compile_context_matcher_build_hit_info_t **fp_matcher_hits =
+            nullptr;
+        u32 *fp_matcher_hit_count = nullptr;
+        u32 *fp_matcher_hit_dropped_count = nullptr;
+        u32 *fp_matcher_hit_capacity = nullptr;
+        if (mutable_fp_ctx) {
+            fp_checkpoint_info = mutable_fp_ctx->fp_checkpoint_info;
+            fp_matcher_hits = &mutable_fp_ctx->fp_matcher_build_hits;
+            fp_matcher_hit_count = &mutable_fp_ctx->fp_matcher_build_hit_count;
+            fp_matcher_hit_dropped_count =
+                &mutable_fp_ctx->fp_matcher_build_hit_dropped_count;
+            fp_matcher_hit_capacity =
+                &mutable_fp_ctx->fp_matcher_build_hit_capacity;
+        }
+
         CompileContext cc(isStreaming, isVectored, target_info, g,
                           fp_ctx ? fp_ctx->fp_feedback : nullptr,
-                          mutable_fp_ctx ? mutable_fp_ctx->fp_checkpoint_info
-                                         : nullptr);
+                          fp_checkpoint_info, fp_matcher_hits,
+                          fp_matcher_hit_count, fp_matcher_hit_dropped_count,
+                          fp_matcher_hit_capacity);
 #else
         CompileContext cc(isStreaming, isVectored, target_info, g);
 #endif
@@ -973,6 +996,7 @@ hs_compile_context_free(hs_compile_context_t *ctx) {
 #else
     if (ctx) {
         hs_fp_feedback_free(ctx->fp_feedback);
+        hs_misc_free(ctx->fp_matcher_build_hits);
         hs_misc_free(ctx);
     }
 #endif
@@ -1016,6 +1040,48 @@ extern "C" hs_error_t HS_CDECL hs_compile_context_get_checkpoint_info(
     }
 
     *info = ctx->fp_checkpoint_info[checkpoint];
+    return HS_SUCCESS;
+#endif
+}
+
+extern "C" unsigned int HS_CDECL
+hs_compile_context_matcher_build_hit_count(const hs_compile_context_t *ctx) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    return 0;
+#else
+    return ctx ? ctx->fp_matcher_build_hit_count : 0;
+#endif
+}
+
+extern "C" unsigned int HS_CDECL
+hs_compile_context_matcher_build_hit_dropped_count(
+    const hs_compile_context_t *ctx) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    return 0;
+#else
+    return ctx ? ctx->fp_matcher_build_hit_dropped_count : 0;
+#endif
+}
+
+extern "C" hs_error_t HS_CDECL hs_compile_context_get_matcher_build_hit_info(
+    const hs_compile_context_t *ctx, unsigned int index,
+    hs_compile_context_matcher_build_hit_info_t *info) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    (void)index;
+    if (!info) {
+        return HS_INVALID;
+    }
+    memset(info, 0, sizeof(*info));
+    return HS_ARCH_ERROR;
+#else
+    if (!ctx || !info || index >= ctx->fp_matcher_build_hit_count) {
+        return HS_INVALID;
+    }
+
+    *info = ctx->fp_matcher_build_hits[index];
     return HS_SUCCESS;
 #endif
 }

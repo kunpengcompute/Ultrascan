@@ -49,7 +49,13 @@ struct CompileContext {
     CompileContext(
         bool isStreaming, bool isVectored, const target_t &target_info,
         const Grey &grey, const hs_fp_feedback_t *fp_feedback = nullptr,
-        hs_compile_context_checkpoint_info_t *fp_checkpoint_info = nullptr);
+        hs_compile_context_checkpoint_info_t *fp_checkpoint_info = nullptr,
+        hs_compile_context_matcher_build_hit_info_t
+            **fp_matcher_build_hit_info =
+            nullptr,
+        u32 *fp_matcher_build_hit_count = nullptr,
+        u32 *fp_matcher_build_hit_dropped_count = nullptr,
+        u32 *fp_matcher_build_hit_capacity = nullptr);
 #else
     CompileContext(bool isStreaming, bool isVectored,
                    const target_t &target_info, const Grey &grey);
@@ -69,8 +75,16 @@ struct CompileContext {
     const hs_fp_feedback_t *fp_feedback;
 
     hs_compile_context_checkpoint_info_t *fp_checkpoint_info;
+    hs_compile_context_matcher_build_hit_info_t **fp_matcher_build_hit_info;
+    u32 *fp_matcher_build_hit_count;
+    u32 *fp_matcher_build_hit_dropped_count;
+    u32 *fp_matcher_build_hit_capacity;
 #endif
 };
+
+void fpCompileRecordMatcherBuildHit(
+    const CompileContext &cc,
+    const hs_compile_context_matcher_build_hit_info_t &info);
 
 static inline void fpCompileRecordCheck(const CompileContext &cc,
                                         unsigned int checkpoint) {

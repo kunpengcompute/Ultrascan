@@ -171,6 +171,17 @@ static bool delayLiteralWithPrefix(RoseBuildImpl &tbi, RoseVertex v, u32 lit_id,
         return false;
     }
 
+#ifdef HS_ENABLE_FP_FEEDBACK
+    if (tbi.cc.streaming && fpFeedbackBlocksRoseLiteral(
+                                tbi.cc, HS_FP_TABLE_DELAY_REBUILD,
+                                lit.s.substr(0, lit.s.length() - suffixlen),
+                                HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM)) {
+        DEBUG_PRINTF("not converting flood suffix to delay due to fp "
+                     "feedback\n");
+        return false;
+    }
+#endif
+
     RoseGraph &g = tbi.g;
     assert(!g[v].left);
     g[v].left.graph = h;
@@ -335,8 +346,12 @@ void convertFloodProneSuffixes(RoseBuildImpl &tbi) {
         }
 
         ue2_literal new_lit = lit.s.substr(0, lit.s.length() - suffixLen);
-        fpFeedbackObservesRoseLiteral(
-            tbi.cc, new_lit, HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX);
+        if (fpFeedbackBlocksRoseLiteral(
+                tbi.cc, HS_FP_TABLE_FLOATING, new_lit,
+                HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX)) {
+            DEBUG_PRINTF("skipping flood suffix rewrite due to fp feedback\n");
+            continue;
+        }
 
         convertFloodProneSuffix(tbi, v, lit_id, lit, suffixLen);
     }

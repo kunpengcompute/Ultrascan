@@ -103,6 +103,53 @@ static bool limited_explosion(const ue2_literal &s) {
     return nc_count <= MAX_EXPLOSION_NC;
 }
 
+#ifdef HS_ENABLE_FP_FEEDBACK
+static unsigned int fpTableForRoseLiteral(rose_literal_table table) {
+    switch (table) {
+    case ROSE_FLOATING:
+        return HS_FP_TABLE_FLOATING;
+    case ROSE_EOD_ANCHORED:
+        return HS_FP_TABLE_EOD_ANCHORED;
+    case ROSE_ANCHORED_SMALL_BLOCK:
+        return HS_FP_TABLE_SMALL_BLOCK;
+    default:
+        return HS_FP_TABLE_UNKNOWN;
+    }
+}
+#endif
+
+static bool feedbackBlocksMixedSensitivityExplosion(
+    const RoseBuildImpl &build, const rose_literal_id &lit) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)build;
+    (void)lit;
+    return false;
+#else
+    const unsigned int table = fpTableForRoseLiteral(lit.table);
+    if (!fpFeedbackCanMatch(build.cc, table)) {
+        return false;
+    }
+
+    for (auto it = caseIterateBegin(lit.s); it != caseIterateEnd(); ++it) {
+        const ue2_literal variant(*it, false);
+        if (!maskIsConsistent(variant.get_string(), false, lit.msk, lit.cmp)) {
+            continue;
+        }
+
+        if (fpFeedbackBlocksRoseFragment(
+                build.cc, table, variant, &lit.msk, &lit.cmp,
+                HS_FP_COMPILE_CHECKPOINT_MIXED_SENSITIVITY)) {
+            DEBUG_PRINTF("not exploding mixed-sensitivity literal due to fp "
+                         "feedback: '%s'\n",
+                         dumpString(variant).c_str());
+            return true;
+        }
+    }
+
+    return false;
+#endif
+}
+
 static void removeLiteralFromGraph(RoseBuildImpl &build, u32 id) {
     assert(id < build.literal_info.size());
     auto &info = build.literal_info.at(id);
@@ -190,6 +237,10 @@ void RoseBuildImpl::handleMixedSensitivity(void) {
 
         if (lit.s.length() <= ROSE_LONG_LITERAL_THRESHOLD_MIN &&
             limited_explosion(lit.s) && literal_info[id].delayed_ids.empty()) {
+            if (feedbackBlocksMixedSensitivityExplosion(*this, lit)) {
+                literal_info[id].requires_benefits = true;
+                continue;
+            }
             DEBUG_PRINTF("need to explode existing string '%s'\n",
                          dumpString(lit.s).c_str());
             explode.push_back(id);
@@ -520,10 +571,6 @@ static bool checkEodStealFloating(const RoseBuildImpl &build,
             continue;
         }
 
-        fpFeedbackObservesRoseFragment(
-            build.cc, lit.s, &lit.msk, &lit.cmp,
-            HS_FP_COMPILE_CHECKPOINT_REWRITE_EOD_TO_FLOATING);
-
         // Don't want to make the shortest floating literal shorter/worse.
         if (trailerDueToSelf(lit) < 4 || lit.s.length() < shortestFloatingLen) {
             DEBUG_PRINTF("len=%zu, selfOverlap=%zu\n", lit.s.length(),
@@ -548,6 +595,27 @@ static bool checkEodStealFloating(const RoseBuildImpl &build,
     return true;
 }
 
+static bool feedbackBlocksEodToFloating(const RoseBuildImpl &tbi,
+                                        const vector<u32> &eodLiterals) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)tbi;
+    (void)eodLiterals;
+    return false;
+#else
+    for (u32 eod_id : eodLiterals) {
+        const rose_literal_id &lit = tbi.literals.at(eod_id);
+        if (fpFeedbackBlocksRoseFragment(
+                tbi.cc, HS_FP_TABLE_FLOATING, lit.s, &lit.msk, &lit.cmp,
+                HS_FP_COMPILE_CHECKPOINT_REWRITE_EOD_TO_FLOATING)) {
+            DEBUG_PRINTF("not stealing EOD table due to fp feedback: '%s'\n",
+                         dumpString(lit.s).c_str());
+            return true;
+        }
+    }
+    return false;
+#endif
+}
+
 static void promoteEodToFloating(RoseBuildImpl &tbi,
                                  const vector<u32> &eodLiterals) {
     DEBUG_PRINTF("promoting %zu eod literals to floating table\n",
@@ -556,6 +624,7 @@ static void promoteEodToFloating(RoseBuildImpl &tbi,
     for (u32 eod_id : eodLiterals) {
         const rose_literal_id &lit = tbi.literals.at(eod_id);
         DEBUG_PRINTF("eod_id=%u, lit=%s\n", eod_id, dumpString(lit.s).c_str());
+
         u32 floating_id =
             tbi.getLiteralId(lit.s, lit.msk, lit.cmp, lit.delay, ROSE_FLOATING);
         DEBUG_PRINTF("floating_id=%u, lit=%s\n", floating_id,
@@ -745,6 +814,12 @@ static void stealEodVertices(RoseBuildImpl &tbi) {
     if (!checkEodStealFloating(tbi, eodLiteralsForFloating, numFloatingLiterals,
                                shortestFloatingLen)) {
         DEBUG_PRINTF("removing etable weakens ftable\n");
+        return;
+    }
+
+    // EOD stealing is an all-or-nothing rewrite: if one promoted literal is
+    // rejected, retain the complete EOD table and leave the graph untouched.
+    if (feedbackBlocksEodToFloating(tbi, eodLiteralsForFloating)) {
         return;
     }
 
@@ -1342,9 +1417,13 @@ static void rehomeAnchoredLiterals(RoseBuildImpl &tbi) {
             continue;
         }
 
-        fpFeedbackObservesRoseLiteral(
-            tbi.cc, it->first.literal,
-            HS_FP_COMPILE_CHECKPOINT_REWRITE_ANCHORED_REHOME);
+        if (fpFeedbackBlocksRoseLiteral(
+                tbi.cc, HS_FP_TABLE_FLOATING, it->first.literal,
+                HS_FP_COMPILE_CHECKPOINT_REWRITE_ANCHORED_REHOME)) {
+            DEBUG_PRINTF("not rehoming anchored literal due to fp feedback\n");
+            ++it;
+            continue;
+        }
 
         rehomeAnchoredLiteral(tbi, it->first, it->second);
         tbi.anchored_simple.erase(it++);
@@ -1584,21 +1663,9 @@ static void addAnchoredSmallBlockLiterals(RoseBuildImpl &tbi) {
         return;
     }
 
-    for (const auto &e : anchored_lits) {
-        const simple_anchored_info &sai = e.first;
-        fpFeedbackObservesRoseLiteral(
-            tbi.cc, sai.literal, HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
-    }
-
-    for (const auto &m : sep_literals) {
-        fpFeedbackObservesRoseLiteral(
-            tbi.cc, m.first, HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
-    }
-
     for (const auto &e : tbi.anchored_simple) {
         const simple_anchored_info &sai = e.first;
         const set<u32> &lit_ids = e.second;
-
         addSmallBlockLiteral(tbi, sai, lit_ids);
     }
 

@@ -85,7 +85,7 @@ static const size_t MAX_SOMBE_CHAIN_VERTICES = 4000;
 
 static bool fpFeedbackSombeLiteralIsBad(const CompileContext &cc,
                                         const ue2_literal &lit) {
-    return fpFeedbackBlocksRoseLiteral(cc, lit,
+    return fpFeedbackBlocksRoseLiteral(cc, HS_FP_TABLE_FLOATING, lit,
                                        HS_FP_COMPILE_CHECKPOINT_SOMBE_LITERAL);
 }
 

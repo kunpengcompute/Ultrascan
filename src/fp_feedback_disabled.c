@@ -211,27 +211,50 @@ u32 hs_fp_feedback_count_matches_in_rose(const hs_fp_feedback_t *feedback,
     return 0;
 }
 
-char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
+char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback, u32 table,
                                    const char *bytes, size_t length,
                                    char nocase) {
     (void)feedback;
+    (void)table;
     (void)bytes;
     (void)length;
     (void)nocase;
     return 0;
 }
 
-char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
+char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback, u32 table,
                                     const char *bytes, size_t length,
                                     char nocase, const u8 *mask, const u8 *cmp,
                                     size_t mask_length) {
     (void)feedback;
+    (void)table;
     (void)bytes;
     (void)length;
     (void)nocase;
     (void)mask;
     (void)cmp;
     (void)mask_length;
+    return 0;
+}
+
+char hs_fp_feedback_fragment_match_index(const hs_fp_feedback_t *feedback,
+                                         u32 table, const char *bytes,
+                                         size_t length, char nocase,
+                                         const u8 *mask, const u8 *cmp,
+                                         size_t mask_length,
+                                         u32 *feedback_index) {
+    if (feedback_index) {
+        *feedback_index = HS_FP_FEEDBACK_INDEX_INVALID;
+    }
+    (void)feedback;
+    (void)table;
+    (void)bytes;
+    (void)length;
+    (void)nocase;
+    (void)mask;
+    (void)cmp;
+    (void)mask_length;
+    (void)feedback_index;
     return 0;
 }
 

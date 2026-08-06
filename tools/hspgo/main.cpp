@@ -1591,6 +1591,41 @@ const char *tableName(unsigned int table) {
     }
 }
 
+const char *compileCheckpointName(unsigned int checkpoint) {
+    switch (checkpoint) {
+    case HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL:
+        return "shortcut_literal";
+    case HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT:
+        return "literal_split";
+    case HS_FP_COMPILE_CHECKPOINT_ANCHORED_ACYCLIC:
+        return "anchored_acyclic";
+    case HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET:
+        return "small_literal_set";
+    case HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL:
+        return "masked_literal";
+    case HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT:
+        return "violet_split";
+    case HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM:
+        return "delay_transform";
+    case HS_FP_COMPILE_CHECKPOINT_SOMBE_LITERAL:
+        return "sombe_literal";
+    case HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX:
+        return "rewrite_flood_suffix";
+    case HS_FP_COMPILE_CHECKPOINT_REWRITE_ANCHORED_REHOME:
+        return "rewrite_anchored_rehome";
+    case HS_FP_COMPILE_CHECKPOINT_REWRITE_EOD_TO_FLOATING:
+        return "rewrite_eod_to_floating";
+    case HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK:
+        return "rewrite_small_block";
+    case HS_FP_COMPILE_CHECKPOINT_MIXED_SENSITIVITY:
+        return "mixed_sensitivity";
+    case HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD:
+        return "matcher_build";
+    default:
+        return "unknown";
+    }
+}
+
 const char *engineName(unsigned int engine) {
     switch (engine) {
     case HS_FP_ENGINE_NOODLE:
@@ -1745,6 +1780,179 @@ void printFragmentRow(size_t index, const hs_fp_fragment_info_t &fragment,
          << formatPercent(falsePositiveShare(fragment, totalFalsePositive))
          << left << "  " << setw(18) << mask << setw(18) << cmp << bytes
          << "\n";
+}
+
+bool fragmentBytesEqual(const unsigned char *lhs, const unsigned char *rhs,
+                        size_t length) {
+    return !length || (lhs && rhs && !std::memcmp(lhs, rhs, length));
+}
+
+bool sameFeedbackFragment(const hs_fp_fragment_info_t &lhs,
+                          const hs_fp_fragment_info_t &rhs) {
+    return lhs.table == rhs.table && lhs.flags == rhs.flags &&
+           lhs.length == rhs.length && lhs.mask_length == rhs.mask_length &&
+           fragmentBytesEqual(lhs.bytes, rhs.bytes, lhs.length) &&
+           fragmentBytesEqual(lhs.mask, rhs.mask, lhs.mask_length) &&
+           fragmentBytesEqual(lhs.cmp, rhs.cmp, lhs.mask_length);
+}
+
+const hs_fp_fragment_info_t *
+findFeedbackDumpFragment(const hs_fp_fragment_info_t &fragment,
+                         unsigned int table,
+                         const vector<OwnedFragment> &selected) {
+    if (fragment.table != table) {
+        return nullptr;
+    }
+    for (const auto &candidate : selected) {
+        if (sameFeedbackFragment(fragment, candidate.info)) {
+            return &candidate.info;
+        }
+    }
+    return nullptr;
+}
+
+struct MatcherBuildHitRow {
+    hs_compile_context_matcher_build_hit_info_t info = {};
+    hs_fp_fragment_info_t fragment = {};
+    bool fragmentAvailable = false;
+    unsigned long long stableKey = 0;
+    bool stableKeyAvailable = false;
+    unsigned long long hits = 0;
+};
+
+string diagnosticSourceLiteral(const unsigned char *suffix,
+                               unsigned int copiedLength,
+                               unsigned int sourceLength) {
+    if (!copiedLength) {
+        return "\"\"";
+    }
+
+    const size_t maxShown = 32;
+    const size_t shown = std::min<size_t>(copiedLength, maxShown);
+    const unsigned char *shownSuffix = suffix + copiedLength - shown;
+    string value = "\"";
+    if (sourceLength > shown) {
+        value += "...";
+    }
+    value += escapedBytes(shownSuffix, shown);
+    value += "\"";
+    return value;
+}
+
+string matcherSourceLiteral(
+    const hs_compile_context_matcher_build_hit_info_t &info) {
+    return diagnosticSourceLiteral(info.source_suffix,
+                                   info.source_copied_length,
+                                   info.source_length);
+}
+
+void printMatcherBuildHitDetails(
+    const hs_compile_context_t *ctx, const hs_fp_feedback_t *feedback,
+    const vector<OwnedFragment> &selectedFeedbackFragments) {
+    const unsigned int count = hs_compile_context_matcher_build_hit_count(ctx);
+    const unsigned int dropped =
+        hs_compile_context_matcher_build_hit_dropped_count(ctx);
+    if (!count && !dropped) {
+        return;
+    }
+
+    cout << "\nResidual feedback fragments:\n";
+    cout << "Note: these exact feedback identities still reached a final "
+            "HWLM matcher; hits combines repeated matcher construction "
+            "attempts.\n";
+
+    vector<MatcherBuildHitRow> rows;
+    rows.reserve(count);
+
+    for (unsigned int i = 0; i < count; i++) {
+        hs_compile_context_matcher_build_hit_info_t info = {};
+        hs_error_t err =
+            hs_compile_context_get_matcher_build_hit_info(ctx, i, &info);
+        if (err != HS_SUCCESS) {
+            continue;
+        }
+
+        hs_fp_fragment_info_t fragment = {};
+        const bool fragmentAvailable =
+            feedback && info.feedback_index != HS_FP_FEEDBACK_INDEX_INVALID &&
+            hs_fp_feedback_get_fragment(feedback, info.feedback_index,
+                                        &fragment) == HS_SUCCESS;
+
+        auto existing = std::find_if(
+            rows.begin(), rows.end(), [&info](const MatcherBuildHitRow &row) {
+                return row.info.feedback_index == info.feedback_index &&
+                       row.info.table == info.table &&
+                       row.info.fragment_id == info.fragment_id &&
+                       row.info.lit_id == info.lit_id;
+            });
+        if (existing != rows.end()) {
+            existing->hits += info.occurrences;
+            continue;
+        }
+
+        MatcherBuildHitRow row;
+        row.info = info;
+        row.fragment = fragment;
+        row.fragmentAvailable = fragmentAvailable;
+        row.hits = info.occurrences;
+        if (fragmentAvailable) {
+            const hs_fp_fragment_info_t *dumpFragment =
+                findFeedbackDumpFragment(fragment, info.table,
+                                         selectedFeedbackFragments);
+            if (dumpFragment) {
+                row.stableKey = dumpFragment->key;
+                row.stableKeyAvailable = true;
+            }
+        }
+        rows.push_back(row);
+    }
+
+    cout << left << setw(4) << "#" << setw(20) << "key" << setw(10)
+         << "table" << setw(9) << "nocase" << right << setw(10) << "hits"
+         << setw(22) << "compile_fragment_id" << setw(14) << "rose_lit_id"
+         << left << "  " << setw(18) << "msk" << setw(18) << "cmp"
+         << setw(36) << "feedback_fragment" << setw(14) << "source_table"
+         << setw(9) << "src_nc" << right << setw(10) << "source_len"
+         << setw(8) << "delay" << left << "  source_literal\n";
+
+    for (size_t i = 0; i < rows.size(); i++) {
+        const MatcherBuildHitRow &row = rows[i];
+        string key = "<unavailable>";
+        string nocase = "-";
+        string mask = "\"\"";
+        string cmp = "\"\"";
+        string bytes = "<unavailable>";
+        const string source = matcherSourceLiteral(row.info);
+        const string sourceNocase = row.info.source_nocase ? "yes" : "no";
+        if (row.stableKeyAvailable) {
+            hs_fp_fragment_info_t keyFragment = {};
+            keyFragment.key = row.stableKey;
+            key = fragmentKeyString(keyFragment);
+        }
+        if (row.fragmentAvailable) {
+            nocase =
+                row.fragment.flags & HS_FP_FRAGMENT_FLAG_NOCASE ? "yes" : "no";
+            mask = quotedHexBytes(row.fragment.mask, row.fragment.mask_length);
+            cmp = quotedHexBytes(row.fragment.cmp, row.fragment.mask_length);
+            bytes = quotedBytes(row.fragment.bytes, row.fragment.length);
+        }
+
+        cout << left << setw(4) << (i + 1) << setw(20) << key << setw(10)
+             << tableName(row.info.table) << setw(9) << nocase << right
+             << setw(10) << formatCount(row.hits) << setw(22)
+             << formatCount(row.info.fragment_id) << setw(14)
+             << formatCount(row.info.lit_id) << left << "  " << setw(18) << mask
+             << setw(18) << cmp << setw(36) << bytes << setw(14)
+             << tableName(row.info.source_table) << setw(9) << sourceNocase
+             << right << setw(10) << formatCount(row.info.source_length)
+             << setw(8) << formatCount(row.info.source_delay) << left << "  "
+             << source << "\n";
+    }
+
+    if (dropped) {
+        printField("Dropped matcher hit details (capacity/allocation failure):",
+                   static_cast<unsigned long long>(dropped));
+    }
 }
 
 void printTopReportFragments(const DumpData &dump, unsigned top) {
@@ -2489,7 +2697,9 @@ bool createCompileContext(const hs_fp_feedback_t *feedback,
     return true;
 }
 
-void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
+void printCompileContextDiagnostics(
+    const hs_compile_context_t *ctx, const hs_fp_feedback_t *feedback,
+    const vector<OwnedFragment> &selectedFeedbackFragments) {
     struct CheckpointName {
         unsigned int id;
         const char *name;
@@ -2502,15 +2712,18 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
         {HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET, "small_literal_set", true},
         {HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL, "masked_literal", true},
         {HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT, "violet_split", true},
+        {HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM, "delay_transform", true},
         {HS_FP_COMPILE_CHECKPOINT_SOMBE_LITERAL, "sombe_literal", true},
-        {HS_FP_COMPILE_CHECKPOINT_REWRITE_EOD_TO_FLOATING,
-         "rewrite_eod_to_floating", false},
+        {HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX,
+         "rewrite_flood_suffix", true},
         {HS_FP_COMPILE_CHECKPOINT_REWRITE_ANCHORED_REHOME,
-         "rewrite_anchored_rehome", false},
-        {HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX, "rewrite_flood_suffix",
-         false},
+         "rewrite_anchored_rehome", true},
+        {HS_FP_COMPILE_CHECKPOINT_REWRITE_EOD_TO_FLOATING,
+         "rewrite_eod_to_floating", true},
         {HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK, "rewrite_small_block",
          false},
+        {HS_FP_COMPILE_CHECKPOINT_MIXED_SENSITIVITY, "mixed_sensitivity",
+         true},
         {HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD, "matcher_build", false},
     };
 
@@ -2527,10 +2740,10 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
         }
         if (checkpoint.canBlock) {
             blockChecked += info.checked_count;
+            blockHit += info.hit_count;
+            blocked += info.blocked_count;
+            passed += info.passed_count;
         }
-        blockHit += info.hit_count;
-        blocked += info.blocked_count;
-        passed += info.passed_count;
     }
 
     const unsigned long long observeChecked =
@@ -2557,8 +2770,10 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
     const int checkpointNameWidth = 28;
     const int checkpointCountWidth = 14;
     cout << "\nCompile feedback checkpoints:\n";
-    cout << "Note: rewrite_* and matcher_build are diagnostic-only; hits are "
-            "counted as passed.\n";
+    cout << "Note: rewrite_small_block and matcher_build are diagnostic-only; "
+            "matcher_build hits are residual feedback identities in final "
+            "HWLM matchers. Diagnostic-only rows are excluded from candidate "
+            "totals.\n";
     cout << left << setw(checkpointNameWidth) << "checkpoint" << right
          << setw(checkpointCountWidth) << "checked"
          << setw(checkpointCountWidth) << "hit" << setw(checkpointCountWidth)
@@ -2577,6 +2792,8 @@ void printCompileContextDiagnostics(const hs_compile_context_t *ctx) {
              << setw(checkpointCountWidth) << formatCount(info.passed_count)
              << "\n";
     }
+
+    printMatcherBuildHitDetails(ctx, feedback, selectedFeedbackFragments);
 }
 
 double secondsSince(const std::chrono::steady_clock::time_point &start,
@@ -2710,9 +2927,9 @@ void printScanSummary(const char *title, const vector<DataBlock> &blocks,
                formatFixed(result.seconds, 3) + " seconds");
     printField("Corpus size:",
                formatCount(bytesPerRun) + " bytes (" + corpusShape + ")");
-    printField("Matches per iteration:", formatFixed(matchesPerIteration, 0) +
-                                             " (" + formatFixed(matchRate, 3) +
-                                             " matches/kilobyte)");
+    printField("Matches per iteration:",
+               formatFixedWithCommas(matchesPerIteration, 0) + " (" +
+                   formatFixed(matchRate, 3) + " matches/kilobyte)");
     printField("Overall block rate:",
                formatFixedWithCommas(blockRate, 2) + " blocks/sec");
     printField(
@@ -2900,7 +3117,8 @@ int HS_CDECL main(int argc, char **argv) {
     }
     const auto optimizedCompileEnd = std::chrono::steady_clock::now();
     if (opts.showDiagnostics) {
-        printCompileContextDiagnostics(compileCtx.get());
+        printCompileContextDiagnostics(compileCtx.get(), feedback.get(),
+                                       dump.feedbackFragments);
     }
 
     vector<ScratchPtr> optimizedScratches;
