@@ -495,6 +495,7 @@ size_t find_last_bad(const struct mpv_kilopuff *kp, const u8 *buf,
 
     DEBUG_PRINTF("repeats = %u\n", min_rep);
     /* TODO: this should be replace by some sort of simd stuff */
+    /* Verm storage is char, but direct buffer comparisons are byte-valued. */
 
     if (kp->type == MPV_VERM) {
         if (min_rep < MIN_SKIP_REPEAT) {
@@ -502,8 +503,10 @@ size_t find_last_bad(const struct mpv_kilopuff *kp, const u8 *buf,
                                   buf + length) - buf - 1;
         }
 
+        const u8 c = (u8)kp->u.verm.c;
+
     verm_restart:;
-        assert(buf[curr] == kp->u.verm.c);
+        assert(buf[curr] == c);
         size_t test = curr;
         if (curr + min_rep < length) {
             test = curr + min_rep;
@@ -512,7 +515,7 @@ size_t find_last_bad(const struct mpv_kilopuff *kp, const u8 *buf,
         }
 
         while (test > curr) {
-            if (buf[test] == kp->u.verm.c) {
+            if (buf[test] == c) {
                 curr = test;
                 if (curr == length - 1) {
                     return curr;
@@ -572,8 +575,10 @@ size_t find_last_bad(const struct mpv_kilopuff *kp, const u8 *buf,
                                  buf + length) - buf - 1;
         }
 
+        const u8 c = (u8)kp->u.verm.c;
+
     nverm_restart:;
-        assert(buf[curr] != kp->u.verm.c);
+        assert(buf[curr] != c);
         size_t test = curr;
         if (curr + min_rep < length) {
             test = curr + min_rep;
@@ -582,7 +587,7 @@ size_t find_last_bad(const struct mpv_kilopuff *kp, const u8 *buf,
         }
 
         while (test > curr) {
-            if (buf[test] != kp->u.verm.c) {
+            if (buf[test] != c) {
                 curr = test;
                 if (curr == length - 1) {
                     return curr;

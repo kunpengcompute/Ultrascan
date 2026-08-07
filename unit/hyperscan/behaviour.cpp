@@ -1510,6 +1510,42 @@ TEST(regression, UE_2798) {
     hs_free_database(db);
 }
 
+TEST(regression, HighBitMpvVermRestart) {
+    const char *expressions[] = {"[^\\x80]{32}", "[^\\xff]{32}"};
+    const unsigned char excluded_bytes[] = {0x80, 0xff};
+
+    for (size_t i = 0; i < 2; i++) {
+        SCOPED_TRACE(testing::Message()
+                     << "excluded byte: "
+                     << static_cast<unsigned int>(excluded_bytes[i]));
+
+        hs_database_t *db = nullptr;
+        hs_compile_error_t *compile_err = nullptr;
+        ASSERT_EQ(HS_SUCCESS,
+                  hs_compile(expressions[i], HS_FLAG_SINGLEMATCH,
+                             HS_MODE_BLOCK, nullptr, &db, &compile_err));
+        ASSERT_NE(nullptr, db);
+
+        hs_scratch_t *scratch = nullptr;
+        ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(db, &scratch));
+
+        // The excluded prefix forces the auto-restarting MPV_VERM path.
+        string data(1, static_cast<char>(excluded_bytes[i]));
+        data.append(32, 'A');
+        CallBackContext matches;
+        ASSERT_EQ(HS_SUCCESS,
+                  hs_scan(db, data.data(),
+                          static_cast<unsigned int>(data.size()), 0, scratch,
+                          record_cb, &matches));
+        ASSERT_EQ(1U, matches.matches.size());
+        EXPECT_EQ(MatchRecord(33, 0), matches.matches[0]);
+
+        ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+        ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+        hs_free_compile_error(compile_err);
+    }
+}
+
 TEST(PcreSpace, NewPcre) {
     const char regex[] = "\\s";
     const string data = "\x09\x0a\x0b\x0c\x0d\x20"; /* aka "\t\n\v\f\r " */
