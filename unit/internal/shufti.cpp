@@ -28,6 +28,7 @@
 
 #include "config.h"
 
+#include <cstring>
 #include <set>
 
 #include "gtest/gtest.h"
@@ -106,6 +107,39 @@ TEST(Shufti, BuildMask4) {
     ASSERT_TRUE(lo['b' % 16] & hi['b' >> 4]);
     ASSERT_TRUE(lo['B' % 16] & hi['B' >> 4]);
 }
+
+#if defined(HAVE_NEON)
+TEST(Shufti, KhselExecAllMaskBits) {
+    const size_t buffer_len = 48;
+    const size_t match_offset = 17;
+    const size_t prefetch_padding = 256;
+
+    for (unsigned bit_index = 0; bit_index < 8; bit_index++) {
+        m128 lo = zeroes128();
+        m128 hi = zeroes128();
+
+        const u8 bucket = (u8)(1U << bit_index);
+        ((u8 *)&lo)['H' & 0xf] = bucket;
+        ((u8 *)&hi)['H' >> 4] = bucket;
+
+        // Exercise every possible input alignment and keep the match outside
+        // the first vector, so that the SIMD scanning loop must find it.
+        for (size_t start_offset = 0; start_offset < 16; start_offset++) {
+            u8 data[buffer_len + 15 + prefetch_padding];
+            memset(data, 'x', sizeof(data));
+
+            u8 *buf = data + start_offset;
+            buf[match_offset] = 'H';
+
+            const u8 *rv =
+                KHSEL_ShuftiExec(lo, hi, buf, buf + buffer_len);
+            ASSERT_EQ(buf + match_offset, rv)
+                << "bucket bit " << bit_index
+                << ", start offset " << start_offset;
+        }
+    }
+}
+#endif
 
 TEST(Shufti, ExecNoMatch1) {
     m128 lo, hi;

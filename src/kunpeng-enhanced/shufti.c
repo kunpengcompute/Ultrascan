@@ -81,7 +81,8 @@ static REALLY_INLINE const u8 *FwdBlockOpt(m128 mask_lo, m128 mask_hi, m128 char
 {
     m128 z = BlockOpt(mask_lo, mask_hi, chars, low4bits, zeroes);
     m128 r;
-    r.vect_u8 = vcgtq_s8(z.vect_s8, zeroes.vect_s8);
+    /* Every non-zero mask, including bit 7, denotes a match. */
+    r.vect_u8 = vcgtq_u8(z.vect_u8, zeroes.vect_u8);
 
     return FirstMatchOpt(buf, r);
 }
