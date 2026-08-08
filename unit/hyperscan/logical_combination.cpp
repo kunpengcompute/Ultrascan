@@ -920,3 +920,141 @@ TEST(LogicalCombination, MultiCombStream1) {
     err = hs_free_scratch(scratch);
     ASSERT_EQ(HS_SUCCESS, err);
 }
+
+// A QUIET expression that is NOT referenced by any logical combination
+// produces no user-visible reports and no internal state changes.  The
+// compiler should silently skip it so that it does not generate an empty
+// Rose program.  This test covers block, stream, and vectored modes.
+TEST(LogicalCombination, QuietOnlyLiteralNoCombinationBlock) {
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    // "Q" is a single-byte literal with HS_FLAG_QUIET, no combination
+    // expression references report 2001.
+    const char *expr[] = {"Q"};
+    unsigned flags[] = {HS_FLAG_QUIET};
+    unsigned ids[] = {2001};
+    hs_error_t err = hs_compile_multi(expr, flags, ids, 1, HS_MODE_BLOCK,
+                                      nullptr, &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(scratch != nullptr);
+
+    CallBackContext c;
+    c.halt = 0;
+    // Scan data that definitely contains 'Q', expect zero callbacks.
+    err = hs_scan(db, "QQQQQQQQQQ", 10, 0, scratch, record_cb, (void *)&c);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_EQ(0U, c.matches.size());
+
+    hs_free_database(db);
+    err = hs_free_scratch(scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+}
+
+TEST(LogicalCombination, QuietOnlyLiteralNoCombinationStream) {
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    const char *expr[] = {"Q"};
+    unsigned flags[] = {HS_FLAG_QUIET};
+    unsigned ids[] = {2001};
+    hs_error_t err = hs_compile_multi(expr, flags, ids, 1, HS_MODE_STREAM,
+                                      nullptr, &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(scratch != nullptr);
+
+    hs_stream_t *stream = nullptr;
+    err = hs_open_stream(db, 0, &stream);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(stream != nullptr);
+
+    CallBackContext c;
+    c.halt = 0;
+    err = hs_scan_stream(stream, "QQQQQQQQQQ", 10, 0, scratch, record_cb,
+                         (void *)&c);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_EQ(0U, c.matches.size());
+
+    err = hs_close_stream(stream, scratch, dummy_cb, nullptr);
+    ASSERT_EQ(HS_SUCCESS, err);
+
+    hs_free_database(db);
+    err = hs_free_scratch(scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+}
+
+TEST(LogicalCombination, QuietOnlyLiteralNoCombinationVectored) {
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    const char *expr[] = {"Q"};
+    unsigned flags[] = {HS_FLAG_QUIET};
+    unsigned ids[] = {2001};
+    hs_error_t err = hs_compile_multi(expr, flags, ids, 1, HS_MODE_VECTORED,
+                                      nullptr, &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(scratch != nullptr);
+
+    CallBackContext c;
+    c.halt = 0;
+
+    const char *data = "QQQQQQQQQQ";
+    unsigned int data_len = 10;
+    err = hs_scan_vector(db, &data, &data_len, 1, 0, scratch, record_cb,
+                         (void *)&c);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_EQ(0U, c.matches.size());
+
+    hs_free_database(db);
+    err = hs_free_scratch(scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+}
+
+// Regression: a QUIET expression that IS referenced by a logical combination
+// must still be compiled and produce correct match results.  The sub-expressions
+// themselves are QUIET (no user-visible report), but the combination fires when
+// both sub-expressions match.
+TEST(LogicalCombination, QuietSubExprWithCombinationStillWorks) {
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    CallBackContext c;
+    // Both "abc" and "def" appear, so combination 101 & 102 fires once.
+    string data = "abcxdefx";
+    const char *expr[] = {"abc", "def", "101 & 102"};
+    unsigned flags[] = {HS_FLAG_QUIET, HS_FLAG_QUIET, HS_FLAG_COMBINATION};
+    unsigned ids[] = {101, 102, 1001};
+    hs_error_t err = hs_compile_multi(expr, flags, ids, 3, HS_MODE_BLOCK,
+                                      nullptr, &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(scratch != nullptr);
+
+    c.halt = 0;
+    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, record_cb,
+                  (void *)&c);
+    ASSERT_EQ(HS_SUCCESS, err);
+    // QUIET sub-expressions "abc" and "def" produce no reports.
+    // The combination (101 & 102) fires once, reporting 1001.
+    ASSERT_EQ(1U, c.matches.size());
+    ASSERT_EQ(1001U, c.matches[0].id);
+
+    hs_free_database(db);
+    err = hs_free_scratch(scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+}

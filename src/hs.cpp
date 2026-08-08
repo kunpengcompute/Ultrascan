@@ -54,9 +54,11 @@
 #include "util/target_info.h"
 
 #include <cassert>
+#include <cctype>
 #include <cstddef>
 #include <cstring>
 #include <limits.h>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -288,6 +290,46 @@ static hs_error_t validate_fat_compile_args(fat_hs_database_t **db,
     return HS_SUCCESS;
 }
 
+/**
+ * Collect the set of sub-expression report IDs referenced by HS_FLAG_COMBINATION
+ * expressions.  A combination expression string is a logical formula such as
+ * "1 & 2" or "1001 | 1002 & 1003" whose integers are the external report IDs
+ * of the sub-expressions consumed by the combination.
+ *
+ * This is used to identify QUIET expressions that are NOT consumed by any
+ * combination and can therefore be safely skipped at compile time.
+ */
+static std::set<unsigned>
+collectCombinationSubRefs(const char *const *expressions,
+                          const unsigned *flags, unsigned elements) {
+    std::set<unsigned> refs;
+    if (!flags || !expressions) {
+        return refs;
+    }
+    for (unsigned i = 0; i < elements; i++) {
+        if (!(flags[i] & HS_FLAG_COMBINATION)) {
+            continue;
+        }
+        const char *s = expressions[i];
+        if (!s) {
+            continue;
+        }
+        while (*s) {
+            if (isdigit((unsigned char)*s)) {
+                unsigned val = 0;
+                while (isdigit((unsigned char)*s)) {
+                    val = val * 10 + (unsigned)(*s - '0');
+                    s++;
+                }
+                refs.insert(val);
+            } else {
+                s++;
+            }
+        }
+    }
+    return refs;
+}
+
 hs_error_t fat_hs_compile_multi_int(
     const char *const *expressions, const unsigned *flags, const unsigned *ids,
     const hs_expr_ext *const *ext, unsigned elements, unsigned mode,
@@ -352,6 +394,12 @@ hs_error_t fat_hs_compile_multi_int(
         NG x86_ng(x86_cc, elements, somPrecision);
         x86_ng.allowLilyForTeddy = false;
 
+        // Build the set of sub-expression report IDs referenced by logical
+        // combinations.  This set is architecture-independent and is shared
+        // by the x86 and ARM compilation passes below.
+        const std::set<unsigned> comb_sub_refs =
+            collectCombinationSubRefs(expressions, flags, elements);
+
         // First pass: process all HS_FLAG_COMBINATION rules to populate
         // toLogicalKeyMap
         for (unsigned int i = 0; i < elements; i++) {
@@ -372,10 +420,18 @@ hs_error_t fat_hs_compile_multi_int(
         // Second pass: process all non-HS_FLAG_COMBINATION rules
         for (unsigned int i = 0; i < elements; i++) {
             if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
+                const unsigned rid = ids ? ids[i] : i;
+                if ((flags[i] & HS_FLAG_QUIET) &&
+                    comb_sub_refs.find(rid) == comb_sub_refs.end()) {
+                    DEBUG_PRINTF("skipping QUIET expr %u (rid=%u) without "
+                                 "logical combination consumer\n",
+                                 i, rid);
+                    continue;
+                }
                 try {
                     x86_addExpression(x86_ng, i, expressions[i],
                                       flags ? flags[i] : 0,
-                                      ext ? ext[i] : nullptr, ids ? ids[i] : 0);
+                                      ext ? ext[i] : nullptr, rid);
                 } catch (CompileError &e) {
                     /* Caught a parse error:
                      * throw it upstream as a CompileError with a specific index
@@ -431,10 +487,18 @@ hs_error_t fat_hs_compile_multi_int(
         // Second pass: process all non-HS_FLAG_COMBINATION rules
         for (unsigned int i = 0; i < elements; i++) {
             if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
+                const unsigned rid = ids ? ids[i] : i;
+                if ((flags[i] & HS_FLAG_QUIET) &&
+                    comb_sub_refs.find(rid) == comb_sub_refs.end()) {
+                    DEBUG_PRINTF("skipping QUIET expr %u (rid=%u) without "
+                                 "logical combination consumer\n",
+                                 i, rid);
+                    continue;
+                }
                 try {
                     addExpression(arm_ng, i, expressions[i],
                                   flags ? flags[i] : 0, ext ? ext[i] : nullptr,
-                                  ids ? ids[i] : 0);
+                                  rid);
                 } catch (CompileError &e) {
                     /* Caught a parse error:
                      * throw it upstream as a CompileError with a specific index
@@ -733,12 +797,27 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
             }
         }
 
+        // Build the set of sub-expression report IDs referenced by logical
+        // combinations so that QUIET expressions without a consumer can be
+        // safely skipped (they produce empty Rose programs with no observable
+        // effect).
+        const std::set<unsigned> comb_sub_refs =
+            collectCombinationSubRefs(expressions, flags, elements);
+
         // Second pass: process all non-HS_FLAG_COMBINATION rules
         for (unsigned int i = 0; i < elements; i++) {
             if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
+                const unsigned rid = ids ? ids[i] : i;
+                if ((flags[i] & HS_FLAG_QUIET) &&
+                    comb_sub_refs.find(rid) == comb_sub_refs.end()) {
+                    DEBUG_PRINTF("skipping QUIET expr %u (rid=%u) without "
+                                 "logical combination consumer\n",
+                                 i, rid);
+                    continue;
+                }
                 try {
                     addExpression(ng, i, expressions[i], flags ? flags[i] : 0,
-                                  ext ? ext[i] : nullptr, ids ? ids[i] : 0);
+                                  ext ? ext[i] : nullptr, rid);
                 } catch (CompileError &e) {
                     /* Caught a parse error:
                      * throw it upstream as a CompileError with a specific index
