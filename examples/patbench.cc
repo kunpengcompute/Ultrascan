@@ -89,12 +89,15 @@
  * Usage:
  *
  *     ./patbench [ -n repeats] [ -G generations] [ -C criterion ]
- *             [ -F factor_group_size ] [ -N | -S ] <pattern file> <pcap file>
+ *             [ -F factor_group_size ] [ -N | -S ] [ -g OVERRIDES ]
+ *             <pattern file> <pcap file>
  *
  *     -n repeats sets the number of times the PCAP is repeatedly scanned
  *        with the pattern
  *     -G generations sets the number of generations that the algorithm is
  *        run for
+ *     -g OVERRIDES sets Hyperscan grey box overrides
+ *        (e.g. -g "allowLily:1;allowHao:0;")
  *     -N sets non-streaming mode, -S sets streaming mode (default)
  *     -F sets the factor group size (must be >0); this allows the detection
  *        of multiple interacting factors
@@ -505,8 +508,9 @@ static
 void usage(const char *) {
     cerr << "Usage:" << endl << endl;
     cerr << "  patbench [-n repeats] [ -G generations] [ -C criterion ]" << endl
-         << "           [ -F factor_group_size ] [ -N | -S ] "
-         << "<pattern file> <pcap file>" << endl << endl
+         << "           [ -F factor_group_size ] [ -N | -S ] [ -g OVERRIDES ]"
+         << endl
+         << "           <pattern file> <pcap file>" << endl << endl
          << "    -n repeats sets the number of times the PCAP is repeatedly "
             "scanned" << endl << "       with the pattern." << endl
          << "    -G generations sets the number of generations that the "
@@ -514,7 +518,8 @@ void usage(const char *) {
          << "    -N sets non-streaming mode, -S sets streaming mode (default)."
          << endl << "    -F sets the factor group size (must be >0); this "
                     "allows the detection" << endl
-         << "       of multiple interacting factors." << endl << "" << endl
+         << "       of multiple interacting factors." << endl
+         << "    -g OVERRIDES  Overrides for the grey box." << endl << "" << endl
          << "    -C sets the 'criterion', which can be either:" << endl
          << "         t  throughput (the default) - this requires a pcap file"
          << endl << "         r  scratch size" << endl
@@ -619,13 +624,20 @@ int main(int argc, char **argv) {
     unsigned int factor_max = 1;
     // Process command line arguments.
     int opt;
-    while ((opt = getopt(argc, argv, "SNn:G:F:C:")) != -1) {
+    while ((opt = getopt(argc, argv, "SNn:G:F:C:g:")) != -1) {
         switch (opt) {
         case 'F':
             factor_max = atoi(optarg);
             break;
         case 'G':
             gen_max = atoi(optarg);
+            break;
+        case 'g':
+            if (hs_set_grey_overrides(optarg) != HS_SUCCESS) {
+                cerr << "Invalid grey overrides." << endl;
+                usage(argv[0]);
+                exit(-1);
+            }
             break;
         case 'S':
             mode = HS_MODE_STREAM;

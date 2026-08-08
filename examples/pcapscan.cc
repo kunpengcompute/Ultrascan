@@ -439,7 +439,8 @@ static void databasesFromFile(const char *filename,
 }
 
 static void usage(const char *prog) {
-    cerr << "Usage: " << prog << " [-n repeats] <pattern file> <pcap file>" << endl;
+    cerr << "Usage: " << prog << " [-n repeats] [-G OVERRIDES] <pattern file> <pcap file>"
+         << endl;
 }
 
 // Main entry point.
@@ -448,10 +449,17 @@ int main(int argc, char **argv) {
 
     // Process command line arguments.
     int opt;
-    while ((opt = getopt(argc, argv, "n:")) != -1) {
+    while ((opt = getopt(argc, argv, "n:G:")) != -1) {
         switch (opt) {
         case 'n':
             repeatCount = atoi(optarg);
+            break;
+        case 'G':
+            if (hs_set_grey_overrides(optarg) != HS_SUCCESS) {
+                cerr << "ERROR: Invalid grey overrides." << endl;
+                usage(argv[0]);
+                exit(-1);
+            }
             break;
         default:
             usage(argv[0]);
