@@ -126,8 +126,8 @@ public:
             return testCase;
         }
 
-        testCase.pattern = line.substr(firstSlash + 1,
-                                       lastSlash - firstSlash - 1);
+        testCase.pattern =
+            line.substr(firstSlash + 1, lastSlash - firstSlash - 1);
 
         std::string flagsStr = line.substr(lastSlash + 1);
         flagsStr.erase(std::remove(flagsStr.begin(), flagsStr.end(), '\n'),
@@ -144,17 +144,39 @@ public:
         // Keep this mapping in sync with util/ExpressionParser.rl.
         for (char c : flagsStr) {
             switch (c) {
-            case 's': flags |= HS_FLAG_DOTALL; break;
-            case 'm': flags |= HS_FLAG_MULTILINE; break;
-            case 'i': flags |= HS_FLAG_CASELESS; break;
-            case 'H': flags |= HS_FLAG_SINGLEMATCH; break;
-            case 'V': flags |= HS_FLAG_ALLOWEMPTY; break;
-            case 'W': flags |= HS_FLAG_UCP; break;
-            case '8': flags |= HS_FLAG_UTF8; break;
-            case 'P': flags |= HS_FLAG_PREFILTER; break;
-            case 'L': flags |= HS_FLAG_SOM_LEFTMOST; break;
-            case 'C': flags |= HS_FLAG_COMBINATION; break;
-            case 'Q': flags |= HS_FLAG_QUIET; break;
+            case 's':
+                flags |= HS_FLAG_DOTALL;
+                break;
+            case 'm':
+                flags |= HS_FLAG_MULTILINE;
+                break;
+            case 'i':
+                flags |= HS_FLAG_CASELESS;
+                break;
+            case 'H':
+                flags |= HS_FLAG_SINGLEMATCH;
+                break;
+            case 'V':
+                flags |= HS_FLAG_ALLOWEMPTY;
+                break;
+            case 'W':
+                flags |= HS_FLAG_UCP;
+                break;
+            case '8':
+                flags |= HS_FLAG_UTF8;
+                break;
+            case 'P':
+                flags |= HS_FLAG_PREFILTER;
+                break;
+            case 'L':
+                flags |= HS_FLAG_SOM_LEFTMOST;
+                break;
+            case 'C':
+                flags |= HS_FLAG_COMBINATION;
+                break;
+            case 'Q':
+                flags |= HS_FLAG_QUIET;
+                break;
             }
         }
 
@@ -170,8 +192,7 @@ private:
             "../../tools/fuzz/" + script,
             "../../../tools/fuzz/" + script,
             "tools/fuzz/" + script,
-            "../tools/fuzz/" + script
-        };
+            "../tools/fuzz/" + script};
 
         for (const auto &path : candidates) {
             if (fileExists(path)) {
@@ -220,8 +241,8 @@ private:
 
 TEST(PythonGeneratorParsing, PatternMayContainSlash) {
     PythonGenerator generator;
-    const FuzzTestCase testCase = generator.parseGeneratorOutput(
-        "42:/left/Q/right/smH\n");
+    const FuzzTestCase testCase =
+        generator.parseGeneratorOutput("42:/left/Q/right/smH\n");
     const unsigned int expectedFlags =
         HS_FLAG_DOTALL | HS_FLAG_MULTILINE | HS_FLAG_SINGLEMATCH;
 
@@ -237,9 +258,9 @@ TEST(PythonGeneratorParsing, MapsAllExpressionParserFlags) {
         generator.parseGeneratorOutput("7:/x/smiHVW8PLCQ\n");
     const unsigned int expectedFlags =
         HS_FLAG_DOTALL | HS_FLAG_MULTILINE | HS_FLAG_CASELESS |
-        HS_FLAG_SINGLEMATCH | HS_FLAG_ALLOWEMPTY | HS_FLAG_UCP |
-        HS_FLAG_UTF8 | HS_FLAG_PREFILTER | HS_FLAG_SOM_LEFTMOST |
-        HS_FLAG_COMBINATION | HS_FLAG_QUIET;
+        HS_FLAG_SINGLEMATCH | HS_FLAG_ALLOWEMPTY | HS_FLAG_UCP | HS_FLAG_UTF8 |
+        HS_FLAG_PREFILTER | HS_FLAG_SOM_LEFTMOST | HS_FLAG_COMBINATION |
+        HS_FLAG_QUIET;
 
     EXPECT_EQ(7, testCase.id);
     EXPECT_EQ("x", testCase.pattern);

@@ -20,17 +20,17 @@ public:
 };
 
 bool fuzzVerbose() {
-    const char* value = std::getenv("HS_FUZZ_VERBOSE");
+    const char *value = std::getenv("HS_FUZZ_VERBOSE");
     return value && value[0] != '\0' && value[0] != '0';
 }
 
-std::ostream& detailOut() {
+std::ostream &detailOut() {
     thread_local NullBuffer nullBuffer;
     thread_local std::ostream nullStream(&nullBuffer);
     return fuzzVerbose() ? std::cout : nullStream;
 }
 
-std::ostream& detailErr() {
+std::ostream &detailErr() {
     thread_local NullBuffer nullBuffer;
     thread_local std::ostream nullStream(&nullBuffer);
     return fuzzVerbose() ? std::cerr : nullStream;
@@ -42,19 +42,20 @@ std::string errString(hs_error_t err) {
     return out.str();
 }
 
-std::string compileErrorMessage(hs_compile_error_t*& err) {
+std::string compileErrorMessage(hs_compile_error_t *&err) {
     if (!err) {
         return "no compile error detail";
     }
 
-    std::string message = err->message ? err->message : "no compile error detail";
+    std::string message =
+        err->message ? err->message : "no compile error detail";
     hs_free_compile_error(err);
     err = nullptr;
     return message;
 }
 
 size_t maxUniqueErrors() {
-    const char* value = std::getenv("HS_FUZZ_MAX_UNIQUE_ERRORS");
+    const char *value = std::getenv("HS_FUZZ_MAX_UNIQUE_ERRORS");
     if (!value || value[0] == '\0') {
         return 30;
     }
@@ -72,42 +73,37 @@ struct ApiStats {
 
 class FuzzStats {
 public:
-    void ok(const std::string& api) {
-        stats[api].ok++;
-    }
+    void ok(const std::string &api) { stats[api].ok++; }
 
-    void expectedFail(const std::string& api, const std::string& message) {
+    void expectedFail(const std::string &api, const std::string &message) {
         stats[api].expectedFail++;
         recordMessage(api, message);
     }
 
-    void error(const std::string& api, hs_error_t err) {
+    void error(const std::string &api, hs_error_t err) {
         error(api, "error " + errString(err));
     }
 
-    void error(const std::string& api, const std::string& message) {
+    void error(const std::string &api, const std::string &message) {
         stats[api].errors++;
         recordMessage(api, message);
     }
 
-    void skipped(const std::string& api) {
-        stats[api].skipped++;
-    }
+    void skipped(const std::string &api) { stats[api].skipped++; }
 
-    void matches(const std::string& api, unsigned long long count) {
+    void matches(const std::string &api, unsigned long long count) {
         stats[api].matches += count;
     }
 
-    void print(std::ostream& os) const {
+    void print(std::ostream &os) const {
         os << "api summary:" << std::endl;
         if (stats.empty()) {
             os << "  no api calls recorded" << std::endl;
         }
 
-        for (const auto& item : stats) {
-            const ApiStats& value = item.second;
-            os << "  " << item.first
-               << ": ok=" << value.ok
+        for (const auto &item : stats) {
+            const ApiStats &value = item.second;
+            os << "  " << item.first << ": ok=" << value.ok
                << ", expected_fail=" << value.expectedFail
                << ", errors=" << value.errors;
             if (value.skipped) {
@@ -123,7 +119,7 @@ public:
             os << "unique errors:" << std::endl;
             size_t shown = 0;
             const size_t limit = maxUniqueErrors();
-            for (const auto& item : messages) {
+            for (const auto &item : messages) {
                 if (shown >= limit) {
                     os << "  ... " << (messages.size() - shown)
                        << " more unique errors hidden" << std::endl;
@@ -136,7 +132,7 @@ public:
     }
 
 private:
-    void recordMessage(const std::string& api, const std::string& message) {
+    void recordMessage(const std::string &api, const std::string &message) {
         std::string text = api + ": " + message;
         messages[text]++;
     }
@@ -232,8 +228,8 @@ int HS_CDECL captureMatch(unsigned int id, unsigned long long from,
         auto it = std::lower_bound(capture->vectorEnds.begin(),
                                    capture->vectorEnds.end(), to);
         if (it == capture->vectorEnds.end()) {
-            inputIndex = static_cast<unsigned int>(
-                capture->vectorEnds.size() - 1);
+            inputIndex =
+                static_cast<unsigned int>(capture->vectorEnds.size() - 1);
         } else {
             inputIndex = static_cast<unsigned int>(
                 std::distance(capture->vectorEnds.begin(), it));
@@ -247,9 +243,8 @@ int HS_CDECL captureMatch(unsigned int id, unsigned long long from,
 
 std::string describeMatch(const MatchRecord &match) {
     std::ostringstream out;
-    out << "input=" << match.inputIndex
-        << ", phase=" << match.callbackPhase << ", id=" << match.id
-        << ", from=" << match.from << ", to=" << match.to
+    out << "input=" << match.inputIndex << ", phase=" << match.callbackPhase
+        << ", id=" << match.id << ", from=" << match.from << ", to=" << match.to
         << ", flags=" << match.flags;
     return out.str();
 }
@@ -313,8 +308,7 @@ void HS_CDECL feedbackDumpFragment(const hs_fp_fragment_info_t *fragment,
         fragment->table > HS_FP_TABLE_SMALL_BLOCK) {
         state->fail("fragment uses an unknown or reserved table");
     } else if ((fragment->length && !fragment->bytes) ||
-               (fragment->mask_length &&
-                (!fragment->mask || !fragment->cmp)) ||
+               (fragment->mask_length && (!fragment->mask || !fragment->cmp)) ||
                fragment->true_trigger_count > fragment->trigger_count ||
                fragment->false_positive_count > fragment->trigger_count) {
         state->fail("invalid fragment callback payload");
@@ -329,25 +323,21 @@ void HS_CDECL feedbackDumpFragment(const hs_fp_fragment_info_t *fragment,
 
 class HyperscanRunner : public Runner {
 public:
-    HyperscanRunner() : db(nullptr), fatDb(nullptr), compileErr(nullptr), scratch(nullptr) {}
+    HyperscanRunner()
+        : db(nullptr), fatDb(nullptr), compileErr(nullptr), scratch(nullptr) {}
 
-    ~HyperscanRunner() {
-        reset();
-    }
+    ~HyperscanRunner() { reset(); }
 
-    bool compile(const FuzzTestCase& testCase, unsigned int mode = HS_MODE_BLOCK) override {
+    bool compile(const FuzzTestCase &testCase,
+                 unsigned int mode = HS_MODE_BLOCK) override {
         // 重置之前的状态
         reset();
 
         // 编译正则表达式
-        hs_error_t err = hs_compile(
-            testCase.pattern.c_str(),
-            testCase.flags,
-            mode,
-            nullptr, // 使用默认平台
-            &db,
-            &compileErr
-        );
+        hs_error_t err =
+            hs_compile(testCase.pattern.c_str(), testCase.flags, mode,
+                       nullptr, // 使用默认平台
+                       &db, &compileErr);
 
         if (err != HS_SUCCESS) {
             // 编译失败，但这是正常的fuzz测试行为
@@ -355,8 +345,8 @@ public:
             if (compileErr) {
                 std::string message = compileErrorMessage(compileErr);
                 stats.expectedFail("hs_compile", message);
-                detailErr() << "Compilation failed for pattern " << testCase.id << ": "
-                          << message << std::endl;
+                detailErr() << "Compilation failed for pattern " << testCase.id
+                            << ": " << message << std::endl;
             } else {
                 stats.expectedFail("hs_compile", errString(err));
             }
@@ -365,7 +355,8 @@ public:
 
         // 编译成功
         stats.ok("hs_compile");
-        detailOut() << "Compilation succeeded for pattern " << testCase.id << std::endl;
+        detailOut() << "Compilation succeeded for pattern " << testCase.id
+                    << std::endl;
 
         // 分配scratch空间
         err = hs_alloc_scratch(db, &scratch);
@@ -378,27 +369,24 @@ public:
         return true;
     }
 
-    bool fatCompile(const FuzzTestCase& testCase, unsigned int mode = HS_MODE_BLOCK) override {
+    bool fatCompile(const FuzzTestCase &testCase,
+                    unsigned int mode = HS_MODE_BLOCK) override {
         // 重置之前的状态
         reset();
 
         // 编译通用字节码正则表达式
-        hs_error_t err = fat_hs_compile(
-            testCase.pattern.c_str(),
-            testCase.flags,
-            mode,
-            nullptr, // 使用默认平台
-            &fatDb,
-            &compileErr
-        );
+        hs_error_t err =
+            fat_hs_compile(testCase.pattern.c_str(), testCase.flags, mode,
+                           nullptr, // 使用默认平台
+                           &fatDb, &compileErr);
 
         if (err != HS_SUCCESS) {
             // 编译失败是正常的fuzz测试行为
             if (compileErr) {
                 std::string message = compileErrorMessage(compileErr);
                 stats.expectedFail("fat_hs_compile", message);
-                detailErr() << "Fat compilation failed for pattern " << testCase.id << ": "
-                          << message << std::endl;
+                detailErr() << "Fat compilation failed for pattern "
+                            << testCase.id << ": " << message << std::endl;
             } else {
                 stats.expectedFail("fat_hs_compile", errString(err));
             }
@@ -406,14 +394,15 @@ public:
         }
 
         stats.ok("fat_hs_compile");
-        detailOut() << "Fat compilation succeeded for pattern " << testCase.id << std::endl;
+        detailOut() << "Fat compilation succeeded for pattern " << testCase.id
+                    << std::endl;
         if (shouldExerciseFatDatabaseApis(mode)) {
             exerciseFatDatabaseApis("fat_hs_compile");
         }
         return true;
     }
 
-    bool scan(const std::string& data) override {
+    bool scan(const std::string &data) override {
         if (!db || !scratch) {
             stats.skipped("hs_scan");
             return false;
@@ -421,22 +410,17 @@ public:
 
         // 定义匹配回调函数
         int matchCount = 0;
-        auto matchCallback = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* context) {
-            int* count = static_cast<int*>(context);
+        auto matchCallback = [](unsigned int id, unsigned long long from,
+                                unsigned long long to, unsigned int flags,
+                                void *context) {
+            int *count = static_cast<int *>(context);
             (*count)++;
             return 0; // 继续扫描
         };
 
         // 执行扫描
-        hs_error_t err = hs_scan(
-            db,
-            data.c_str(),
-            data.length(),
-            0,
-            scratch,
-            matchCallback,
-            &matchCount
-        );
+        hs_error_t err = hs_scan(db, data.c_str(), data.length(), 0, scratch,
+                                 matchCallback, &matchCount);
 
         if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
             stats.error("hs_scan", err);
@@ -446,18 +430,19 @@ public:
         }
 
         stats.matches("hs_scan", matchCount);
-        detailOut() << "Scan completed, found " << matchCount << " matches" << std::endl;
+        detailOut() << "Scan completed, found " << matchCount << " matches"
+                    << std::endl;
         return true;
     }
 
-    bool streamScan(const std::string& data) override {
+    bool streamScan(const std::string &data) override {
         if (!db || !scratch) {
             stats.skipped("hs_scan_stream");
             return false;
         }
 
         // 打开流
-        hs_stream_t* stream = nullptr;
+        hs_stream_t *stream = nullptr;
         hs_error_t err = hs_open_stream(db, 0, &stream);
         if (err != HS_SUCCESS) {
             stats.error("hs_open_stream", err);
@@ -467,8 +452,10 @@ public:
 
         // 定义匹配回调函数
         int matchCount = 0;
-        auto matchCallback = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* context) {
-            int* count = static_cast<int*>(context);
+        auto matchCallback = [](unsigned int id, unsigned long long from,
+                                unsigned long long to, unsigned int flags,
+                                void *context) {
+            int *count = static_cast<int *>(context);
             (*count)++;
             return 0; // 继续扫描
         };
@@ -478,18 +465,12 @@ public:
         size_t offset = 0;
         while (offset < data.length()) {
             size_t chunk = std::min(chunkSize, data.length() - offset);
-            err = hs_scan_stream(
-                stream,
-                data.c_str() + offset,
-                chunk,
-                0,
-                scratch,
-                matchCallback,
-                &matchCount
-            );
+            err = hs_scan_stream(stream, data.c_str() + offset, chunk, 0,
+                                 scratch, matchCallback, &matchCount);
             if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
                 stats.error("hs_scan_stream", err);
-                detailErr() << "Stream scan failed with error: " << err << std::endl;
+                detailErr()
+                    << "Stream scan failed with error: " << err << std::endl;
                 break;
             }
             offset += chunk;
@@ -505,11 +486,12 @@ public:
         }
 
         stats.matches("hs_scan_stream", matchCount);
-        detailOut() << "Stream scan completed, found " << matchCount << " matches" << std::endl;
+        detailOut() << "Stream scan completed, found " << matchCount
+                    << " matches" << std::endl;
         return true;
     }
 
-    bool compileMulti(const std::vector<FuzzTestCase>& testCases) override {
+    bool compileMulti(const std::vector<FuzzTestCase> &testCases) override {
         if (testCases.empty()) {
             return true;
         }
@@ -518,11 +500,11 @@ public:
         reset();
 
         // 准备参数
-        std::vector<const char*> patterns;
+        std::vector<const char *> patterns;
         std::vector<unsigned int> flags;
         std::vector<unsigned int> ids;
 
-        for (const auto& testCase : testCases) {
+        for (const auto &testCase : testCases) {
             patterns.push_back(testCase.pattern.c_str());
             flags.push_back(testCase.flags);
             ids.push_back(testCase.id);
@@ -530,22 +512,16 @@ public:
 
         // 编译多模式
         hs_error_t err = hs_compile_multi(
-            patterns.data(),
-            flags.data(),
-            ids.data(),
-            testCases.size(),
-            HS_MODE_BLOCK,
-            nullptr,
-            &db,
-            &compileErr
-        );
+            patterns.data(), flags.data(), ids.data(), testCases.size(),
+            HS_MODE_BLOCK, nullptr, &db, &compileErr);
 
         if (err != HS_SUCCESS) {
             // 编译失败，但这是正常的fuzz测试行为
             if (compileErr) {
                 std::string message = compileErrorMessage(compileErr);
                 stats.expectedFail("hs_compile_multi", message);
-                detailErr() << "Multi compilation failed: " << message << std::endl;
+                detailErr()
+                    << "Multi compilation failed: " << message << std::endl;
             } else {
                 stats.expectedFail("hs_compile_multi", errString(err));
             }
@@ -554,7 +530,8 @@ public:
 
         // 编译成功
         stats.ok("hs_compile_multi");
-        detailOut() << "Multi compilation succeeded for " << testCases.size() << " patterns" << std::endl;
+        detailOut() << "Multi compilation succeeded for " << testCases.size()
+                    << " patterns" << std::endl;
 
         // 分配scratch空间
         err = hs_alloc_scratch(db, &scratch);
@@ -567,7 +544,7 @@ public:
         return true;
     }
 
-    bool compileExtMulti(const std::vector<FuzzTestCase>& testCases) override {
+    bool compileExtMulti(const std::vector<FuzzTestCase> &testCases) override {
         if (testCases.empty()) {
             return true;
         }
@@ -576,21 +553,21 @@ public:
         reset();
 
         // 准备参数
-        std::vector<const char*> patterns;
+        std::vector<const char *> patterns;
         std::vector<unsigned int> flags;
         std::vector<unsigned int> ids;
         std::vector<hs_expr_ext_t> extParams(testCases.size());
-        std::vector<const hs_expr_ext_t*> extParamsPtrs;
+        std::vector<const hs_expr_ext_t *> extParamsPtrs;
         extParamsPtrs.reserve(testCases.size());
 
         for (size_t i = 0; i < testCases.size(); i++) {
-            const auto& testCase = testCases[i];
+            const auto &testCase = testCases[i];
             patterns.push_back(testCase.pattern.c_str());
             flags.push_back(testCase.flags);
             ids.push_back(testCase.id);
 
             // 创建扩展参数
-            hs_expr_ext_t& ext = extParams[i];
+            hs_expr_ext_t &ext = extParams[i];
             ext.flags = 0;
             ext.min_offset = 0;
             ext.max_offset = 0;
@@ -602,23 +579,16 @@ public:
 
         // 编译带扩展参数的多模式
         hs_error_t err = hs_compile_ext_multi(
-            patterns.data(),
-            flags.data(),
-            ids.data(),
-            extParamsPtrs.data(),
-            testCases.size(),
-            HS_MODE_BLOCK,
-            nullptr,
-            &db,
-            &compileErr
-        );
+            patterns.data(), flags.data(), ids.data(), extParamsPtrs.data(),
+            testCases.size(), HS_MODE_BLOCK, nullptr, &db, &compileErr);
 
         if (err != HS_SUCCESS) {
             // 编译失败，但这是正常的fuzz测试行为
             if (compileErr) {
                 std::string message = compileErrorMessage(compileErr);
                 stats.expectedFail("hs_compile_ext_multi", message);
-                detailErr() << "Ext multi compilation failed: " << message << std::endl;
+                detailErr()
+                    << "Ext multi compilation failed: " << message << std::endl;
             } else {
                 stats.expectedFail("hs_compile_ext_multi", errString(err));
             }
@@ -627,7 +597,8 @@ public:
 
         // 编译成功
         stats.ok("hs_compile_ext_multi");
-        detailOut() << "Ext multi compilation succeeded for " << testCases.size() << " patterns" << std::endl;
+        detailOut() << "Ext multi compilation succeeded for "
+                    << testCases.size() << " patterns" << std::endl;
 
         // 分配scratch空间
         err = hs_alloc_scratch(db, &scratch);
@@ -640,7 +611,8 @@ public:
         return true;
     }
 
-    bool fatCompileMulti(const std::vector<FuzzTestCase>& testCases, unsigned int mode = HS_MODE_BLOCK) override {
+    bool fatCompileMulti(const std::vector<FuzzTestCase> &testCases,
+                         unsigned int mode = HS_MODE_BLOCK) override {
         if (testCases.empty()) {
             return true;
         }
@@ -649,11 +621,11 @@ public:
         reset();
 
         // 准备参数
-        std::vector<const char*> patterns;
+        std::vector<const char *> patterns;
         std::vector<unsigned int> flags;
         std::vector<unsigned int> ids;
 
-        for (const auto& testCase : testCases) {
+        for (const auto &testCase : testCases) {
             patterns.push_back(testCase.pattern.c_str());
             flags.push_back(testCase.flags);
             ids.push_back(testCase.id);
@@ -661,22 +633,16 @@ public:
 
         // 编译通用字节码多模式
         hs_error_t err = fat_hs_compile_multi(
-            patterns.data(),
-            flags.data(),
-            ids.data(),
-            testCases.size(),
-            mode,
-            nullptr,
-            &fatDb,
-            &compileErr
-        );
+            patterns.data(), flags.data(), ids.data(), testCases.size(), mode,
+            nullptr, &fatDb, &compileErr);
 
         if (err != HS_SUCCESS) {
             // 编译失败是正常的fuzz测试行为
             if (compileErr) {
                 std::string message = compileErrorMessage(compileErr);
                 stats.expectedFail("fat_hs_compile_multi", message);
-                detailErr() << "Fat multi compilation failed: " << message << std::endl;
+                detailErr()
+                    << "Fat multi compilation failed: " << message << std::endl;
             } else {
                 stats.expectedFail("fat_hs_compile_multi", errString(err));
             }
@@ -684,14 +650,16 @@ public:
         }
 
         stats.ok("fat_hs_compile_multi");
-        detailOut() << "Fat multi compilation succeeded for " << testCases.size() << " patterns" << std::endl;
+        detailOut() << "Fat multi compilation succeeded for "
+                    << testCases.size() << " patterns" << std::endl;
         if (shouldExerciseFatDatabaseApis(mode)) {
             exerciseFatDatabaseApis("fat_hs_compile_multi");
         }
         return true;
     }
 
-    bool fatCompileExtMulti(const std::vector<FuzzTestCase>& testCases, unsigned int mode = HS_MODE_BLOCK) override {
+    bool fatCompileExtMulti(const std::vector<FuzzTestCase> &testCases,
+                            unsigned int mode = HS_MODE_BLOCK) override {
         if (testCases.empty()) {
             return true;
         }
@@ -700,21 +668,21 @@ public:
         reset();
 
         // 准备参数
-        std::vector<const char*> patterns;
+        std::vector<const char *> patterns;
         std::vector<unsigned int> flags;
         std::vector<unsigned int> ids;
         std::vector<hs_expr_ext_t> extParams(testCases.size());
-        std::vector<const hs_expr_ext_t*> extParamsPtrs;
+        std::vector<const hs_expr_ext_t *> extParamsPtrs;
         extParamsPtrs.reserve(testCases.size());
 
         for (size_t i = 0; i < testCases.size(); i++) {
-            const auto& testCase = testCases[i];
+            const auto &testCase = testCases[i];
             patterns.push_back(testCase.pattern.c_str());
             flags.push_back(testCase.flags);
             ids.push_back(testCase.id);
 
             // 创建扩展参数
-            hs_expr_ext_t& ext = extParams[i];
+            hs_expr_ext_t &ext = extParams[i];
             ext.flags = 0;
             ext.min_offset = 0;
             ext.max_offset = 0;
@@ -726,23 +694,16 @@ public:
 
         // 编译带扩展参数的通用字节码多模式
         hs_error_t err = fat_hs_compile_ext_multi(
-            patterns.data(),
-            flags.data(),
-            ids.data(),
-            extParamsPtrs.data(),
-            testCases.size(),
-            mode,
-            nullptr,
-            &fatDb,
-            &compileErr
-        );
+            patterns.data(), flags.data(), ids.data(), extParamsPtrs.data(),
+            testCases.size(), mode, nullptr, &fatDb, &compileErr);
 
         if (err != HS_SUCCESS) {
             // 编译失败是正常的fuzz测试行为
             if (compileErr) {
                 std::string message = compileErrorMessage(compileErr);
                 stats.expectedFail("fat_hs_compile_ext_multi", message);
-                detailErr() << "Fat ext multi compilation failed: " << message << std::endl;
+                detailErr() << "Fat ext multi compilation failed: " << message
+                            << std::endl;
             } else {
                 stats.expectedFail("fat_hs_compile_ext_multi", errString(err));
             }
@@ -750,35 +711,30 @@ public:
         }
 
         stats.ok("fat_hs_compile_ext_multi");
-        detailOut() << "Fat ext multi compilation succeeded for " << testCases.size() << " patterns" << std::endl;
+        detailOut() << "Fat ext multi compilation succeeded for "
+                    << testCases.size() << " patterns" << std::endl;
         if (shouldExerciseFatDatabaseApis(mode)) {
             exerciseFatDatabaseApis("fat_hs_compile_ext_multi");
         }
         return true;
     }
 
-    bool compileLit(const FuzzTestCase& testCase, size_t length) override {
+    bool compileLit(const FuzzTestCase &testCase, size_t length) override {
         // 重置之前的状态
         reset();
 
         // 编译纯字面表达式
-        hs_error_t err = hs_compile_lit(
-            testCase.pattern.c_str(),
-            testCase.flags,
-            length,
-            HS_MODE_BLOCK,
-            nullptr,
-            &db,
-            &compileErr
-        );
+        hs_error_t err =
+            hs_compile_lit(testCase.pattern.c_str(), testCase.flags, length,
+                           HS_MODE_BLOCK, nullptr, &db, &compileErr);
 
         if (err != HS_SUCCESS) {
             // 编译失败，但这是正常的fuzz测试行为
             if (compileErr) {
                 std::string message = compileErrorMessage(compileErr);
                 stats.expectedFail("hs_compile_lit", message);
-                detailErr() << "Literal compilation failed for pattern " << testCase.id << ": "
-                          << message << std::endl;
+                detailErr() << "Literal compilation failed for pattern "
+                            << testCase.id << ": " << message << std::endl;
             } else {
                 stats.expectedFail("hs_compile_lit", errString(err));
             }
@@ -787,7 +743,8 @@ public:
 
         // 编译成功
         stats.ok("hs_compile_lit");
-        detailOut() << "Literal compilation succeeded for pattern " << testCase.id << std::endl;
+        detailOut() << "Literal compilation succeeded for pattern "
+                    << testCase.id << std::endl;
 
         // 分配scratch空间
         err = hs_alloc_scratch(db, &scratch);
@@ -800,28 +757,23 @@ public:
         return true;
     }
 
-    bool fatCompileLit(const FuzzTestCase& testCase, size_t length, unsigned int mode = HS_MODE_BLOCK) override {
+    bool fatCompileLit(const FuzzTestCase &testCase, size_t length,
+                       unsigned int mode = HS_MODE_BLOCK) override {
         // 重置之前的状态
         reset();
 
         // 编译通用字节码纯字面表达式
-        hs_error_t err = fat_hs_compile_lit(
-            testCase.pattern.c_str(),
-            testCase.flags,
-            length,
-            mode,
-            nullptr,
-            &fatDb,
-            &compileErr
-        );
+        hs_error_t err =
+            fat_hs_compile_lit(testCase.pattern.c_str(), testCase.flags, length,
+                               mode, nullptr, &fatDb, &compileErr);
 
         if (err != HS_SUCCESS) {
             // 编译失败是正常的fuzz测试行为
             if (compileErr) {
                 std::string message = compileErrorMessage(compileErr);
                 stats.expectedFail("fat_hs_compile_lit", message);
-                detailErr() << "Fat literal compilation failed for pattern " << testCase.id << ": "
-                          << message << std::endl;
+                detailErr() << "Fat literal compilation failed for pattern "
+                            << testCase.id << ": " << message << std::endl;
             } else {
                 stats.expectedFail("fat_hs_compile_lit", errString(err));
             }
@@ -829,14 +781,16 @@ public:
         }
 
         stats.ok("fat_hs_compile_lit");
-        detailOut() << "Fat literal compilation succeeded for pattern " << testCase.id << std::endl;
+        detailOut() << "Fat literal compilation succeeded for pattern "
+                    << testCase.id << std::endl;
         if (shouldExerciseFatDatabaseApis(mode)) {
             exerciseFatDatabaseApis("fat_hs_compile_lit");
         }
         return true;
     }
 
-    bool compileLitMulti(const std::vector<FuzzTestCase>& testCases, const std::vector<size_t>& lengths) override {
+    bool compileLitMulti(const std::vector<FuzzTestCase> &testCases,
+                         const std::vector<size_t> &lengths) override {
         if (testCases.empty() || testCases.size() != lengths.size()) {
             return true;
         }
@@ -845,11 +799,11 @@ public:
         reset();
 
         // 准备参数
-        std::vector<const char*> patterns;
+        std::vector<const char *> patterns;
         std::vector<unsigned int> flags;
         std::vector<unsigned int> ids;
 
-        for (const auto& testCase : testCases) {
+        for (const auto &testCase : testCases) {
             patterns.push_back(testCase.pattern.c_str());
             flags.push_back(testCase.flags);
             ids.push_back(testCase.id);
@@ -857,23 +811,16 @@ public:
 
         // 编译多纯字面表达式
         hs_error_t err = hs_compile_lit_multi(
-            patterns.data(),
-            flags.data(),
-            ids.data(),
-            lengths.data(),
-            testCases.size(),
-            HS_MODE_BLOCK,
-            nullptr,
-            &db,
-            &compileErr
-        );
+            patterns.data(), flags.data(), ids.data(), lengths.data(),
+            testCases.size(), HS_MODE_BLOCK, nullptr, &db, &compileErr);
 
         if (err != HS_SUCCESS) {
             // 编译失败，但这是正常的fuzz测试行为
             if (compileErr) {
                 std::string message = compileErrorMessage(compileErr);
                 stats.expectedFail("hs_compile_lit_multi", message);
-                detailErr() << "Multi literal compilation failed: " << message << std::endl;
+                detailErr() << "Multi literal compilation failed: " << message
+                            << std::endl;
             } else {
                 stats.expectedFail("hs_compile_lit_multi", errString(err));
             }
@@ -882,7 +829,8 @@ public:
 
         // 编译成功
         stats.ok("hs_compile_lit_multi");
-        detailOut() << "Multi literal compilation succeeded for " << testCases.size() << " patterns" << std::endl;
+        detailOut() << "Multi literal compilation succeeded for "
+                    << testCases.size() << " patterns" << std::endl;
 
         // 分配scratch空间
         err = hs_alloc_scratch(db, &scratch);
@@ -895,7 +843,9 @@ public:
         return true;
     }
 
-    bool fatCompileLitMulti(const std::vector<FuzzTestCase>& testCases, const std::vector<size_t>& lengths, unsigned int mode = HS_MODE_BLOCK) override {
+    bool fatCompileLitMulti(const std::vector<FuzzTestCase> &testCases,
+                            const std::vector<size_t> &lengths,
+                            unsigned int mode = HS_MODE_BLOCK) override {
         if (testCases.empty() || testCases.size() != lengths.size()) {
             return true;
         }
@@ -904,11 +854,11 @@ public:
         reset();
 
         // 准备参数
-        std::vector<const char*> patterns;
+        std::vector<const char *> patterns;
         std::vector<unsigned int> flags;
         std::vector<unsigned int> ids;
 
-        for (const auto& testCase : testCases) {
+        for (const auto &testCase : testCases) {
             patterns.push_back(testCase.pattern.c_str());
             flags.push_back(testCase.flags);
             ids.push_back(testCase.id);
@@ -916,23 +866,17 @@ public:
 
         // 编译通用字节码多纯字面表达式
         hs_error_t err = fat_hs_compile_lit_multi(
-            patterns.data(),
-            flags.data(),
-            ids.data(),
-            lengths.data(),
-            testCases.size(),
-            mode,
-            nullptr,
-            &fatDb,
-            &compileErr
-        );
+            patterns.data(), flags.data(), ids.data(), lengths.data(),
+            testCases.size(), mode, nullptr, &fatDb, &compileErr);
 
         if (err != HS_SUCCESS) {
             // 编译失败是正常的fuzz测试行为
             if (compileErr) {
                 std::string message = compileErrorMessage(compileErr);
                 stats.expectedFail("fat_hs_compile_lit_multi", message);
-                detailErr() << "Fat multi literal compilation failed: " << message << std::endl;
+                detailErr()
+                    << "Fat multi literal compilation failed: " << message
+                    << std::endl;
             } else {
                 stats.expectedFail("fat_hs_compile_lit_multi", errString(err));
             }
@@ -940,7 +884,8 @@ public:
         }
 
         stats.ok("fat_hs_compile_lit_multi");
-        detailOut() << "Fat multi literal compilation succeeded for " << testCases.size() << " patterns" << std::endl;
+        detailOut() << "Fat multi literal compilation succeeded for "
+                    << testCases.size() << " patterns" << std::endl;
         if (shouldExerciseFatDatabaseApis(mode)) {
             exerciseFatDatabaseApis("fat_hs_compile_lit_multi");
         }
@@ -948,39 +893,46 @@ public:
     }
 
     bool fatCompileInvalidArgs() override {
-        detailOut() << "Testing fat_hs_compile invalid argument paths..." << std::endl;
+        detailOut() << "Testing fat_hs_compile invalid argument paths..."
+                    << std::endl;
 
-        const char* patterns[] = {"abc"};
+        const char *patterns[] = {"abc"};
         unsigned int flags[] = {0};
         unsigned int ids[] = {0};
         size_t lengths[] = {3};
-        const hs_expr_ext_t* ext[] = {nullptr};
+        const hs_expr_ext_t *ext[] = {nullptr};
         const unsigned int tooManyElements = 8000001U;
 
-        auto finishCase = [this](const char* name, hs_error_t err,
-                                 fat_hs_database_t* localDb,
-                                 hs_compile_error_t* localErr) {
+        auto finishCase = [this](const char *name, hs_error_t err,
+                                 fat_hs_database_t *localDb,
+                                 hs_compile_error_t *localErr) {
             detailOut() << name << " returned " << err << std::endl;
             if (err != HS_SUCCESS) {
-                std::string message = localErr ? compileErrorMessage(localErr)
-                                               : errString(err);
-                stats.expectedFail("fat_invalid_args", std::string(name) + ": " + message);
-                detailErr() << name << " compile error: " << message << std::endl;
+                std::string message =
+                    localErr ? compileErrorMessage(localErr) : errString(err);
+                stats.expectedFail("fat_invalid_args",
+                                   std::string(name) + ": " + message);
+                detailErr()
+                    << name << " compile error: " << message << std::endl;
             } else {
-                stats.error("fat_invalid_args", std::string(name) + ": unexpected success");
+                stats.error("fat_invalid_args",
+                            std::string(name) + ": unexpected success");
             }
             if (localErr) {
                 hs_free_compile_error(localErr);
             }
             if (localDb) {
-                stats.error("fat_invalid_args", std::string(name) + ": unexpectedly produced a database");
-                detailErr() << name << " unexpectedly produced a database" << std::endl;
+                stats.error("fat_invalid_args",
+                            std::string(name) +
+                                ": unexpectedly produced a database");
+                detailErr()
+                    << name << " unexpectedly produced a database" << std::endl;
                 fat_hs_free_database(localDb);
             }
         };
 
-        fat_hs_database_t* localDb = nullptr;
-        hs_compile_error_t* localErr = nullptr;
+        fat_hs_database_t *localDb = nullptr;
+        hs_compile_error_t *localErr = nullptr;
 
         // validate_fat_compile_args: comp_error is NULL.
         localDb = nullptr;
@@ -1017,47 +969,52 @@ public:
         localErr = nullptr;
         finishCase("fat_hs_compile_multi too many elements",
                    fat_hs_compile_multi(patterns, flags, ids, tooManyElements,
-                                        HS_MODE_BLOCK, nullptr, &localDb, &localErr),
+                                        HS_MODE_BLOCK, nullptr, &localDb,
+                                        &localErr),
                    localDb, localErr);
 
-        // Exercise the same validator through the ext and literal multi entry points.
+        // Exercise the same validator through the ext and literal multi entry
+        // points.
         localDb = nullptr;
         localErr = nullptr;
         finishCase("fat_hs_compile_ext_multi zero elements",
                    fat_hs_compile_ext_multi(patterns, flags, ids, ext, 0,
-                                            HS_MODE_BLOCK, nullptr, &localDb, &localErr),
+                                            HS_MODE_BLOCK, nullptr, &localDb,
+                                            &localErr),
                    localDb, localErr);
 
         localDb = nullptr;
         localErr = nullptr;
         finishCase("fat_hs_compile_lit_multi zero elements",
                    fat_hs_compile_lit_multi(patterns, flags, ids, lengths, 0,
-                                            HS_MODE_BLOCK, nullptr, &localDb, &localErr),
+                                            HS_MODE_BLOCK, nullptr, &localDb,
+                                            &localErr),
                    localDb, localErr);
 
         // Adjacent fat compile error paths after validation.
         localDb = nullptr;
         localErr = nullptr;
         finishCase("fat_hs_compile_multi invalid mode none",
-                   fat_hs_compile_multi(patterns, flags, ids, 1, 0,
-                                        nullptr, &localDb, &localErr),
+                   fat_hs_compile_multi(patterns, flags, ids, 1, 0, nullptr,
+                                        &localDb, &localErr),
                    localDb, localErr);
 
         localDb = nullptr;
         localErr = nullptr;
         finishCase("fat_hs_compile_multi invalid mode multiple",
                    fat_hs_compile_multi(patterns, flags, ids, 1,
-                                        HS_MODE_BLOCK | HS_MODE_STREAM,
-                                        nullptr, &localDb, &localErr),
+                                        HS_MODE_BLOCK | HS_MODE_STREAM, nullptr,
+                                        &localDb, &localErr),
                    localDb, localErr);
 
         localDb = nullptr;
         localErr = nullptr;
-        finishCase("fat_hs_compile_multi invalid som mode",
-                   fat_hs_compile_multi(patterns, flags, ids, 1,
-                                        HS_MODE_BLOCK | HS_MODE_SOM_HORIZON_LARGE,
-                                        nullptr, &localDb, &localErr),
-                   localDb, localErr);
+        finishCase(
+            "fat_hs_compile_multi invalid som mode",
+            fat_hs_compile_multi(patterns, flags, ids, 1,
+                                 HS_MODE_BLOCK | HS_MODE_SOM_HORIZON_LARGE,
+                                 nullptr, &localDb, &localErr),
+            localDb, localErr);
 
         hs_platform_info_t platform;
         platform.tune = 0;
@@ -1083,25 +1040,21 @@ public:
         return true;
     }
 
-    bool expressionInfo(const FuzzTestCase& testCase) override {
-        hs_expr_info_t* info = nullptr;
-        hs_compile_error_t* error = nullptr;
+    bool expressionInfo(const FuzzTestCase &testCase) override {
+        hs_expr_info_t *info = nullptr;
+        hs_compile_error_t *error = nullptr;
 
         // 获取表达式信息
-        hs_error_t err = hs_expression_info(
-            testCase.pattern.c_str(),
-            testCase.flags,
-            &info,
-            &error
-        );
+        hs_error_t err = hs_expression_info(testCase.pattern.c_str(),
+                                            testCase.flags, &info, &error);
 
         if (err != HS_SUCCESS) {
             // 获取失败，但这是正常的fuzz测试行为
             if (error) {
                 std::string message = compileErrorMessage(error);
                 stats.expectedFail("hs_expression_info", message);
-                detailErr() << "Expression info failed for pattern " << testCase.id << ": "
-                          << message << std::endl;
+                detailErr() << "Expression info failed for pattern "
+                            << testCase.id << ": " << message << std::endl;
             } else {
                 stats.expectedFail("hs_expression_info", errString(err));
             }
@@ -1111,21 +1064,25 @@ public:
         // 获取成功
         stats.ok("hs_expression_info");
         if (info) {
-            detailOut() << "Expression info succeeded for pattern " << testCase.id << ": "
-                      << "min_width=" << info->min_width << ", "
-                      << "max_width=" << info->max_width << ", "
-                      << "unordered_matches=" << (int)info->unordered_matches << ", "
-                      << "matches_at_eod=" << (int)info->matches_at_eod << ", "
-                      << "matches_only_at_eod=" << (int)info->matches_only_at_eod << std::endl;
+            detailOut() << "Expression info succeeded for pattern "
+                        << testCase.id << ": "
+                        << "min_width=" << info->min_width << ", "
+                        << "max_width=" << info->max_width << ", "
+                        << "unordered_matches=" << (int)info->unordered_matches
+                        << ", "
+                        << "matches_at_eod=" << (int)info->matches_at_eod
+                        << ", "
+                        << "matches_only_at_eod="
+                        << (int)info->matches_only_at_eod << std::endl;
             free(info); // hs_expression_info使用malloc分配内存
         }
 
         return true;
     }
 
-    bool expressionExtInfo(const FuzzTestCase& testCase) override {
-        hs_expr_info_t* info = nullptr;
-        hs_compile_error_t* error = nullptr;
+    bool expressionExtInfo(const FuzzTestCase &testCase) override {
+        hs_expr_info_t *info = nullptr;
+        hs_compile_error_t *error = nullptr;
 
         // 创建扩展参数
         hs_expr_ext_t ext;
@@ -1138,20 +1095,15 @@ public:
 
         // 获取带扩展参数的表达式信息
         hs_error_t err = hs_expression_ext_info(
-            testCase.pattern.c_str(),
-            testCase.flags,
-            &ext,
-            &info,
-            &error
-        );
+            testCase.pattern.c_str(), testCase.flags, &ext, &info, &error);
 
         if (err != HS_SUCCESS) {
             // 获取失败，但这是正常的fuzz测试行为
             if (error) {
                 std::string message = compileErrorMessage(error);
                 stats.expectedFail("hs_expression_ext_info", message);
-                detailErr() << "Expression ext info failed for pattern " << testCase.id << ": "
-                          << message << std::endl;
+                detailErr() << "Expression ext info failed for pattern "
+                            << testCase.id << ": " << message << std::endl;
             } else {
                 stats.expectedFail("hs_expression_ext_info", errString(err));
             }
@@ -1161,12 +1113,16 @@ public:
         // 获取成功
         stats.ok("hs_expression_ext_info");
         if (info) {
-            detailOut() << "Expression ext info succeeded for pattern " << testCase.id << ": "
-                      << "min_width=" << info->min_width << ", "
-                      << "max_width=" << info->max_width << ", "
-                      << "unordered_matches=" << (int)info->unordered_matches << ", "
-                      << "matches_at_eod=" << (int)info->matches_at_eod << ", "
-                      << "matches_only_at_eod=" << (int)info->matches_only_at_eod << std::endl;
+            detailOut() << "Expression ext info succeeded for pattern "
+                        << testCase.id << ": "
+                        << "min_width=" << info->min_width << ", "
+                        << "max_width=" << info->max_width << ", "
+                        << "unordered_matches=" << (int)info->unordered_matches
+                        << ", "
+                        << "matches_at_eod=" << (int)info->matches_at_eod
+                        << ", "
+                        << "matches_only_at_eod="
+                        << (int)info->matches_only_at_eod << std::endl;
             free(info); // hs_expression_ext_info使用malloc分配内存
         }
 
@@ -1188,8 +1144,8 @@ public:
         // 填充成功
         stats.ok("hs_populate_platform");
         detailOut() << "Populate platform succeeded: "
-                  << "tune=" << platform.tune << ", "
-                  << "cpu_features=" << platform.cpu_features << std::endl;
+                    << "tune=" << platform.tune << ", "
+                    << "cpu_features=" << platform.cpu_features << std::endl;
 
         return true;
     }
@@ -1201,25 +1157,29 @@ public:
         }
 
         // 打开流
-        hs_stream_t* stream = nullptr;
+        hs_stream_t *stream = nullptr;
         hs_error_t err = hs_open_stream(db, 0, &stream);
         if (err != HS_SUCCESS) {
             stats.error("hs_open_stream", err);
-            detailErr() << "Failed to open stream for reset: " << err << std::endl;
+            detailErr() << "Failed to open stream for reset: " << err
+                        << std::endl;
             return true;
         }
 
         // 定义匹配回调函数
         int matchCount = 0;
-        auto matchCallback = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* context) {
-            int* count = static_cast<int*>(context);
+        auto matchCallback = [](unsigned int id, unsigned long long from,
+                                unsigned long long to, unsigned int flags,
+                                void *context) {
+            int *count = static_cast<int *>(context);
             (*count)++;
             return 0; // 继续扫描
         };
 
         // 写入一些数据
         std::string testData = "test data for reset stream";
-        err = hs_scan_stream(stream, testData.c_str(), testData.length(), 0, scratch, matchCallback, &matchCount);
+        err = hs_scan_stream(stream, testData.c_str(), testData.length(), 0,
+                             scratch, matchCallback, &matchCount);
         if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
             stats.error("hs_scan_stream", err);
             detailErr() << "Stream scan failed: " << err << std::endl;
@@ -1248,7 +1208,7 @@ public:
         }
 
         // 打开流
-        hs_stream_t* stream1 = nullptr;
+        hs_stream_t *stream1 = nullptr;
         hs_error_t err = hs_open_stream(db, 0, &stream1);
         if (err != HS_SUCCESS) {
             stats.error("hs_open_stream", err);
@@ -1259,20 +1219,23 @@ public:
         // 写入一些数据
         std::string testData = "test data for copy stream";
         int matchCount = 0;
-        auto matchCallback = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* context) {
-            int* count = static_cast<int*>(context);
+        auto matchCallback = [](unsigned int id, unsigned long long from,
+                                unsigned long long to, unsigned int flags,
+                                void *context) {
+            int *count = static_cast<int *>(context);
             (*count)++;
             return 0; // 继续扫描
         };
 
-        err = hs_scan_stream(stream1, testData.c_str(), testData.length(), 0, scratch, matchCallback, &matchCount);
+        err = hs_scan_stream(stream1, testData.c_str(), testData.length(), 0,
+                             scratch, matchCallback, &matchCount);
         if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
             stats.error("hs_scan_stream", err);
             detailErr() << "Stream scan failed: " << err << std::endl;
         }
 
         // 复制流
-        hs_stream_t* stream2 = nullptr;
+        hs_stream_t *stream2 = nullptr;
         err = hs_copy_stream(&stream2, stream1);
         if (err != HS_SUCCESS) {
             stats.error("hs_copy_stream", err);
@@ -1298,8 +1261,8 @@ public:
         }
 
         // 打开两个流
-        hs_stream_t* stream1 = nullptr;
-        hs_stream_t* stream2 = nullptr;
+        hs_stream_t *stream1 = nullptr;
+        hs_stream_t *stream2 = nullptr;
 
         hs_error_t err = hs_open_stream(db, 0, &stream1);
         if (err != HS_SUCCESS) {
@@ -1319,20 +1282,24 @@ public:
         // 向流1写入数据
         std::string testData = "test data for reset and copy stream";
         int matchCount = 0;
-        auto matchCallback = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* context) {
-            int* count = static_cast<int*>(context);
+        auto matchCallback = [](unsigned int id, unsigned long long from,
+                                unsigned long long to, unsigned int flags,
+                                void *context) {
+            int *count = static_cast<int *>(context);
             (*count)++;
             return 0; // 继续扫描
         };
 
-        err = hs_scan_stream(stream1, testData.c_str(), testData.length(), 0, scratch, matchCallback, &matchCount);
+        err = hs_scan_stream(stream1, testData.c_str(), testData.length(), 0,
+                             scratch, matchCallback, &matchCount);
         if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
             stats.error("hs_scan_stream", err);
             detailErr() << "Stream scan failed: " << err << std::endl;
         }
 
         // 重置并复制流
-        err = hs_reset_and_copy_stream(stream2, stream1, scratch, matchCallback, &matchCount);
+        err = hs_reset_and_copy_stream(stream2, stream1, scratch, matchCallback,
+                                       &matchCount);
         if (err != HS_SUCCESS) {
             stats.error("hs_reset_and_copy_stream", err);
             detailErr() << "Reset and copy stream failed: " << err << std::endl;
@@ -1355,7 +1322,7 @@ public:
         }
 
         // 打开流
-        hs_stream_t* stream = nullptr;
+        hs_stream_t *stream = nullptr;
         hs_error_t err = hs_open_stream(db, 0, &stream);
         if (err != HS_SUCCESS) {
             stats.error("hs_open_stream", err);
@@ -1366,13 +1333,16 @@ public:
         // 写入一些数据
         std::string testData = "test data for compress stream";
         int matchCount = 0;
-        auto matchCallback = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* context) {
-            int* count = static_cast<int*>(context);
+        auto matchCallback = [](unsigned int id, unsigned long long from,
+                                unsigned long long to, unsigned int flags,
+                                void *context) {
+            int *count = static_cast<int *>(context);
             (*count)++;
             return 0; // 继续扫描
         };
 
-        err = hs_scan_stream(stream, testData.c_str(), testData.length(), 0, scratch, matchCallback, &matchCount);
+        err = hs_scan_stream(stream, testData.c_str(), testData.length(), 0,
+                             scratch, matchCallback, &matchCount);
         if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
             stats.error("hs_scan_stream", err);
             detailErr() << "Stream scan failed: " << err << std::endl;
@@ -1391,13 +1361,15 @@ public:
         // 分配缓冲区并压缩
         std::vector<char> buffer(requiredSpace);
         size_t usedSpace = 0;
-        err = hs_compress_stream(stream, buffer.data(), buffer.size(), &usedSpace);
+        err = hs_compress_stream(stream, buffer.data(), buffer.size(),
+                                 &usedSpace);
         if (err != HS_SUCCESS) {
             stats.error("hs_compress_stream", err);
             detailErr() << "Compress stream failed: " << err << std::endl;
         } else {
             stats.ok("hs_compress_stream");
-            detailOut() << "Compress stream succeeded, used " << usedSpace << " bytes" << std::endl;
+            detailOut() << "Compress stream succeeded, used " << usedSpace
+                        << " bytes" << std::endl;
         }
 
         // 关闭流
@@ -1413,7 +1385,7 @@ public:
         }
 
         // 打开流并写入数据
-        hs_stream_t* stream1 = nullptr;
+        hs_stream_t *stream1 = nullptr;
         hs_error_t err = hs_open_stream(db, 0, &stream1);
         if (err != HS_SUCCESS) {
             stats.error("hs_open_stream", err);
@@ -1423,13 +1395,16 @@ public:
 
         std::string testData = "test data for expand stream";
         int matchCount = 0;
-        auto matchCallback = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* context) {
-            int* count = static_cast<int*>(context);
+        auto matchCallback = [](unsigned int id, unsigned long long from,
+                                unsigned long long to, unsigned int flags,
+                                void *context) {
+            int *count = static_cast<int *>(context);
             (*count)++;
             return 0; // 继续扫描
         };
 
-        err = hs_scan_stream(stream1, testData.c_str(), testData.length(), 0, scratch, matchCallback, &matchCount);
+        err = hs_scan_stream(stream1, testData.c_str(), testData.length(), 0,
+                             scratch, matchCallback, &matchCount);
         if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
             stats.error("hs_scan_stream", err);
             detailErr() << "Stream scan failed: " << err << std::endl;
@@ -1447,7 +1422,8 @@ public:
 
         std::vector<char> buffer(requiredSpace);
         size_t usedSpace = 0;
-        err = hs_compress_stream(stream1, buffer.data(), buffer.size(), &usedSpace);
+        err = hs_compress_stream(stream1, buffer.data(), buffer.size(),
+                                 &usedSpace);
         if (err != HS_SUCCESS) {
             stats.error("hs_compress_stream", err);
             detailErr() << "Compress stream failed: " << err << std::endl;
@@ -1456,7 +1432,7 @@ public:
         }
 
         // 解压流
-        hs_stream_t* stream2 = nullptr;
+        hs_stream_t *stream2 = nullptr;
         err = hs_expand_stream(db, &stream2, buffer.data(), usedSpace);
         if (err != HS_SUCCESS) {
             stats.error("hs_expand_stream", err);
@@ -1482,8 +1458,8 @@ public:
         }
 
         // 打开流并写入数据
-        hs_stream_t* stream1 = nullptr;
-        hs_stream_t* stream2 = nullptr;
+        hs_stream_t *stream1 = nullptr;
+        hs_stream_t *stream2 = nullptr;
 
         hs_error_t err = hs_open_stream(db, 0, &stream1);
         if (err != HS_SUCCESS) {
@@ -1502,13 +1478,16 @@ public:
 
         std::string testData = "test data for reset and expand stream";
         int matchCount = 0;
-        auto matchCallback = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* context) {
-            int* count = static_cast<int*>(context);
+        auto matchCallback = [](unsigned int id, unsigned long long from,
+                                unsigned long long to, unsigned int flags,
+                                void *context) {
+            int *count = static_cast<int *>(context);
             (*count)++;
             return 0; // 继续扫描
         };
 
-        err = hs_scan_stream(stream1, testData.c_str(), testData.length(), 0, scratch, matchCallback, &matchCount);
+        err = hs_scan_stream(stream1, testData.c_str(), testData.length(), 0,
+                             scratch, matchCallback, &matchCount);
         if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
             stats.error("hs_scan_stream", err);
             detailErr() << "Stream scan failed: " << err << std::endl;
@@ -1527,7 +1506,8 @@ public:
 
         std::vector<char> buffer(requiredSpace);
         size_t usedSpace = 0;
-        err = hs_compress_stream(stream1, buffer.data(), buffer.size(), &usedSpace);
+        err = hs_compress_stream(stream1, buffer.data(), buffer.size(),
+                                 &usedSpace);
         if (err != HS_SUCCESS) {
             stats.error("hs_compress_stream", err);
             detailErr() << "Compress stream failed: " << err << std::endl;
@@ -1537,10 +1517,12 @@ public:
         }
 
         // 重置并解压流
-        err = hs_reset_and_expand_stream(stream2, buffer.data(), usedSpace, scratch, matchCallback, &matchCount);
+        err = hs_reset_and_expand_stream(stream2, buffer.data(), usedSpace,
+                                         scratch, matchCallback, &matchCount);
         if (err != HS_SUCCESS) {
             stats.error("hs_reset_and_expand_stream", err);
-            detailErr() << "Reset and expand stream failed: " << err << std::endl;
+            detailErr() << "Reset and expand stream failed: " << err
+                        << std::endl;
         } else {
             stats.ok("hs_reset_and_expand_stream");
             detailOut() << "Reset and expand stream succeeded" << std::endl;
@@ -1553,7 +1535,7 @@ public:
         return true;
     }
 
-    bool scanVector(const std::vector<std::string>& data) override {
+    bool scanVector(const std::vector<std::string> &data) override {
         if (!db || !scratch) {
             stats.skipped("hs_scan_vector");
             return true;
@@ -1565,41 +1547,38 @@ public:
         }
 
         // 准备向量扫描参数
-        std::vector<const char*> dataPtrs;
+        std::vector<const char *> dataPtrs;
         std::vector<unsigned int> lengths;
 
-        for (const auto& str : data) {
+        for (const auto &str : data) {
             dataPtrs.push_back(str.c_str());
             lengths.push_back(str.length());
         }
 
         // 定义匹配回调函数
         int matchCount = 0;
-        auto matchCallback = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* context) {
-            int* count = static_cast<int*>(context);
+        auto matchCallback = [](unsigned int id, unsigned long long from,
+                                unsigned long long to, unsigned int flags,
+                                void *context) {
+            int *count = static_cast<int *>(context);
             (*count)++;
             return 0; // 继续扫描
         };
 
         // 执行向量扫描
-        hs_error_t err = hs_scan_vector(
-            db,
-            dataPtrs.data(),
-            lengths.data(),
-            data.size(),
-            0,
-            scratch,
-            matchCallback,
-            &matchCount
-        );
+        hs_error_t err =
+            hs_scan_vector(db, dataPtrs.data(), lengths.data(), data.size(), 0,
+                           scratch, matchCallback, &matchCount);
 
         if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
             stats.error("hs_scan_vector", err);
-            detailErr() << "Vector scan failed with error: " << err << std::endl;
+            detailErr() << "Vector scan failed with error: " << err
+                        << std::endl;
         } else {
             stats.ok("hs_scan_vector");
             stats.matches("hs_scan_vector", matchCount);
-            detailOut() << "Vector scan completed, found " << matchCount << " matches" << std::endl;
+            detailOut() << "Vector scan completed, found " << matchCount
+                        << " matches" << std::endl;
         }
 
         return true;
@@ -1622,7 +1601,7 @@ public:
         }
 
         // 克隆scratch空间
-        hs_scratch_t* clonedScratch = nullptr;
+        hs_scratch_t *clonedScratch = nullptr;
         hs_error_t err = hs_clone_scratch(scratch, &clonedScratch);
         if (err != HS_SUCCESS) {
             stats.error("hs_clone_scratch", err);
@@ -1651,7 +1630,8 @@ public:
             detailErr() << "Get scratch size failed: " << err << std::endl;
         } else {
             stats.ok("hs_scratch_size");
-            detailOut() << "Scratch size: " << scratchSize << " bytes" << std::endl;
+            detailOut() << "Scratch size: " << scratchSize << " bytes"
+                        << std::endl;
         }
 
         return true;
@@ -1663,9 +1643,9 @@ public:
         const unsigned int ids[] = {1};
         hs_database_t *probeDb = nullptr;
         hs_compile_error_t *probeError = nullptr;
-        hs_error_t result = hs_compile_multi(
-            expressions, flags, ids, 1, HS_MODE_BLOCK, nullptr, &probeDb,
-            &probeError);
+        hs_error_t result =
+            hs_compile_multi(expressions, flags, ids, 1, HS_MODE_BLOCK, nullptr,
+                             &probeDb, &probeError);
         if (probeError) {
             hs_free_compile_error(probeError);
         }
@@ -1710,10 +1690,9 @@ public:
         return result;
     }
 
-    bool falsePositiveFeedback(
-            const FuzzTestCase& testCase,
-            const std::vector<std::string>& data,
-            const FuzzProgressCallback& progress) override {
+    bool falsePositiveFeedback(const FuzzTestCase &testCase,
+                               const std::vector<std::string> &data,
+                               const FuzzProgressCallback &progress) override {
         bool ok = true;
         if (!exerciseFalsePositiveFeedbackMode(testCase, data, HS_MODE_BLOCK,
                                                "block", progress)) {
@@ -1723,9 +1702,8 @@ public:
                                                "stream", progress)) {
             ok = false;
         }
-        if (!exerciseFalsePositiveFeedbackMode(testCase, data,
-                                               HS_MODE_VECTORED, "vector",
-                                               progress)) {
+        if (!exerciseFalsePositiveFeedbackMode(testCase, data, HS_MODE_VECTORED,
+                                               "vector", progress)) {
             ok = false;
         }
         return ok;
@@ -1736,9 +1714,8 @@ public:
         ScopedCollector unexpectedCollector;
         ScopedFeedback unexpectedFeedback;
 
-        ok &= recordExpectedInvalid(
-            "hs_fp_collector_create_null_out",
-            hs_fp_collector_create(nullptr, nullptr));
+        ok &= recordExpectedInvalid("hs_fp_collector_create_null_out",
+                                    hs_fp_collector_create(nullptr, nullptr));
         ok &= recordExpectedInvalid(
             "hs_fp_collector_create_null_db",
             hs_fp_collector_create(nullptr, &unexpectedCollector.value));
@@ -1787,26 +1764,25 @@ public:
         ok &= recordExpectedInvalid(
             "hs_fp_collector_to_feedback_with_dump_null_collector",
             hs_fp_collector_to_feedback_with_dump(
-                nullptr, nullptr, nullptr, nullptr,
-                &unexpectedFeedback.value));
+                nullptr, nullptr, nullptr, nullptr, &unexpectedFeedback.value));
         ok &= recordExpectedInvalid(
             "hs_fp_collector_to_feedback_with_dump_null_out",
-            hs_fp_collector_to_feedback_with_dump(
-                nullptr, nullptr, nullptr, nullptr, nullptr));
+            hs_fp_collector_to_feedback_with_dump(nullptr, nullptr, nullptr,
+                                                  nullptr, nullptr));
 
         ok &= recordExpectedSuccess("hs_fp_collector_free_null",
                                     hs_fp_collector_free(nullptr));
         ok &= recordExpectedSuccess("hs_fp_feedback_free_null",
                                     hs_fp_feedback_free(nullptr));
 
-        ok &= recordExpectedInvalid(
-            "hs_scan_with_collector_null_db",
-            hs_scan_with_collector(nullptr, "", 0, 0, nullptr, nullptr,
-                                   nullptr, nullptr));
+        ok &= recordExpectedInvalid("hs_scan_with_collector_null_db",
+                                    hs_scan_with_collector(nullptr, "", 0, 0,
+                                                           nullptr, nullptr,
+                                                           nullptr, nullptr));
         ok &= recordExpectedInvalid(
             "hs_scan_stream_with_collector_null_stream",
-            hs_scan_stream_with_collector(nullptr, "", 0, 0, nullptr,
-                                          nullptr, nullptr, nullptr));
+            hs_scan_stream_with_collector(nullptr, "", 0, 0, nullptr, nullptr,
+                                          nullptr, nullptr));
         ok &= recordExpectedInvalid(
             "hs_scan_vector_with_collector_null_db",
             hs_scan_vector_with_collector(nullptr, nullptr, nullptr, 0, 0,
@@ -1840,16 +1816,15 @@ public:
         }
     }
 
-    void printSummary(std::ostream& os) const override {
-        stats.print(os);
-    }
+    void printSummary(std::ostream &os) const override { stats.print(os); }
 
 private:
     bool shouldExerciseFatDatabaseApis(unsigned int mode) const {
-        return mode == HS_MODE_BLOCK || mode == HS_MODE_STREAM || mode == HS_MODE_VECTORED;
+        return mode == HS_MODE_BLOCK || mode == HS_MODE_STREAM ||
+               mode == HS_MODE_VECTORED;
     }
 
-    bool exerciseFatDatabaseApis(const char* context) {
+    bool exerciseFatDatabaseApis(const char *context) {
         if (!fatDb) {
             return true;
         }
@@ -1858,69 +1833,90 @@ private:
         hs_error_t err = fat_hs_database_size(fatDb, &databaseSize);
         if (err != HS_SUCCESS) {
             stats.error("fat_hs_database_size", err);
-            detailErr() << context << ": fat_hs_database_size failed: " << err << std::endl;
+            detailErr() << context << ": fat_hs_database_size failed: " << err
+                        << std::endl;
         } else {
             stats.ok("fat_hs_database_size");
-            detailOut() << context << ": fat database size is " << databaseSize << " bytes" << std::endl;
+            detailOut() << context << ": fat database size is " << databaseSize
+                        << " bytes" << std::endl;
         }
 
-        char* info = nullptr;
+        char *info = nullptr;
         err = fat_hs_database_info(fatDb, &info);
         if (err != HS_SUCCESS) {
             stats.error("fat_hs_database_info", err);
-            detailErr() << context << ": fat_hs_database_info failed: " << err << std::endl;
+            detailErr() << context << ": fat_hs_database_info failed: " << err
+                        << std::endl;
         } else {
             stats.ok("fat_hs_database_info");
-            detailOut() << context << ": fat database info: " << info << std::endl;
+            detailOut() << context << ": fat database info: " << info
+                        << std::endl;
         }
         std::free(info);
 
-        char* serialized = nullptr;
+        char *serialized = nullptr;
         size_t serializedLength = 0;
         err = fat_hs_serialize_database(fatDb, &serialized, &serializedLength);
         if (err != HS_SUCCESS) {
             stats.error("fat_hs_serialize_database", err);
-            detailErr() << context << ": fat_hs_serialize_database failed: " << err << std::endl;
+            detailErr() << context
+                        << ": fat_hs_serialize_database failed: " << err
+                        << std::endl;
             return true;
         }
         stats.ok("fat_hs_serialize_database");
         detailOut() << context << ": serialized fat database size is "
-                  << serializedLength << " bytes" << std::endl;
+                    << serializedLength << " bytes" << std::endl;
 
         size_t deserializedSize = 0;
-        err = fat_hs_serialized_database_size(serialized, serializedLength, &deserializedSize);
+        err = fat_hs_serialized_database_size(serialized, serializedLength,
+                                              &deserializedSize);
         if (err != HS_SUCCESS) {
             stats.error("fat_hs_serialized_database_size", err);
-            detailErr() << context << ": fat_hs_serialized_database_size failed: " << err << std::endl;
+            detailErr() << context
+                        << ": fat_hs_serialized_database_size failed: " << err
+                        << std::endl;
         } else {
             stats.ok("fat_hs_serialized_database_size");
             detailOut() << context << ": deserialized fat database size is "
-                      << deserializedSize << " bytes" << std::endl;
+                        << deserializedSize << " bytes" << std::endl;
         }
 
-        fat_hs_database_t* deserializedDb = nullptr;
-        err = fat_hs_deserialize_database(serialized, serializedLength, &deserializedDb);
+        fat_hs_database_t *deserializedDb = nullptr;
+        err = fat_hs_deserialize_database(serialized, serializedLength,
+                                          &deserializedDb);
         if (err != HS_SUCCESS) {
             stats.error("fat_hs_deserialize_database", err);
-            detailErr() << context << ": fat_hs_deserialize_database failed: " << err << std::endl;
+            detailErr() << context
+                        << ": fat_hs_deserialize_database failed: " << err
+                        << std::endl;
         } else {
             stats.ok("fat_hs_deserialize_database");
-            detailOut() << context << ": fat_hs_deserialize_database succeeded" << std::endl;
+            detailOut() << context << ": fat_hs_deserialize_database succeeded"
+                        << std::endl;
             fat_hs_free_database(deserializedDb);
         }
 
         if (deserializedSize > 0) {
             std::vector<unsigned long long> deserializedBuffer(
-                (deserializedSize + sizeof(unsigned long long) - 1) / sizeof(unsigned long long));
-            fat_hs_database_t* deserializedAtDb =
-                reinterpret_cast<fat_hs_database_t*>(deserializedBuffer.data());
-            err = fat_hs_deserialize_database_at(serialized, serializedLength, deserializedAtDb);
+                (deserializedSize + sizeof(unsigned long long) - 1) /
+                sizeof(unsigned long long));
+            fat_hs_database_t *deserializedAtDb =
+                reinterpret_cast<fat_hs_database_t *>(
+                    deserializedBuffer.data());
+            err = fat_hs_deserialize_database_at(serialized, serializedLength,
+                                                 deserializedAtDb);
             if (err != HS_SUCCESS) {
                 stats.error("fat_hs_deserialize_database_at", err);
-                detailErr() << context << ": fat_hs_deserialize_database_at failed: " << err << std::endl;
+                detailErr()
+                    << context
+                    << ": fat_hs_deserialize_database_at failed: " << err
+                    << std::endl;
             } else {
                 stats.ok("fat_hs_deserialize_database_at");
-                detailOut() << context << ": fat_hs_deserialize_database_at succeeded" << std::endl;
+                detailOut()
+                    << context << ": fat_hs_deserialize_database_at succeeded"
+                    << std::endl;
             }
         }
 
@@ -1980,16 +1976,13 @@ private:
         compiled = false;
         const char *expressions[] = {testCase.pattern.c_str()};
         const unsigned int flags[] = {testCase.flags};
-        const unsigned int ids[] = {
-            static_cast<unsigned int>(testCase.id)};
+        const unsigned int ids[] = {static_cast<unsigned int>(testCase.id)};
         hs_compile_error_t *localError = nullptr;
-        hs_error_t err = hs_compile_multi(
-            expressions, flags, ids, 1, mode, nullptr, &database.db,
-            &localError);
+        hs_error_t err = hs_compile_multi(expressions, flags, ids, 1, mode,
+                                          nullptr, &database.db, &localError);
         if (err != HS_SUCCESS) {
-            const std::string message = localError
-                                            ? compileErrorMessage(localError)
-                                            : errString(err);
+            const std::string message =
+                localError ? compileErrorMessage(localError) : errString(err);
             if (err == HS_COMPILER_ERROR) {
                 stats.expectedFail(apiPrefix + "_compile", message);
             } else {
@@ -2034,8 +2027,7 @@ private:
     hs_error_t scanBlockMatches(const LocalDatabase &database,
                                 const std::vector<std::string> &data,
                                 hs_fp_collector_t *collector,
-                                const std::string &api,
-                                MatchCapture &capture) {
+                                const std::string &api, MatchCapture &capture) {
         capture.matches.clear();
         capture.vectorEnds.clear();
         for (size_t i = 0; i < data.size(); i++) {
@@ -2087,10 +2079,9 @@ private:
                     static_cast<unsigned int>(block.size()), 0,
                     database.scratch, captureMatch, &capture, collector);
             } else {
-                err = hs_scan_stream(
-                    stream, block.c_str(),
-                    static_cast<unsigned int>(block.size()), 0,
-                    database.scratch, captureMatch, &capture);
+                err = hs_scan_stream(stream, block.c_str(),
+                                     static_cast<unsigned int>(block.size()), 0,
+                                     database.scratch, captureMatch, &capture);
             }
             if (err != HS_SUCCESS) {
                 stats.error(api, err);
@@ -2105,8 +2096,7 @@ private:
 
         capture.currentInput = static_cast<unsigned int>(data.size());
         capture.currentPhase = 1;
-        err = hs_close_stream(stream, database.scratch, captureMatch,
-                              &capture);
+        err = hs_close_stream(stream, database.scratch, captureMatch, &capture);
         if (err != HS_SUCCESS) {
             stats.error(api + "_close", err);
             return err;
@@ -2140,13 +2130,12 @@ private:
         if (collector) {
             err = hs_scan_vector_with_collector(
                 database.db, pointers.data(), lengths.data(),
-                static_cast<unsigned int>(pointers.size()), 0,
-                database.scratch, captureMatch, &capture, collector);
+                static_cast<unsigned int>(pointers.size()), 0, database.scratch,
+                captureMatch, &capture, collector);
         } else {
-            err = hs_scan_vector(
-                database.db, pointers.data(), lengths.data(),
-                static_cast<unsigned int>(pointers.size()), 0,
-                database.scratch, captureMatch, &capture);
+            err = hs_scan_vector(database.db, pointers.data(), lengths.data(),
+                                 static_cast<unsigned int>(pointers.size()), 0,
+                                 database.scratch, captureMatch, &capture);
         }
         if (err != HS_SUCCESS) {
             stats.error(api, err);
@@ -2159,10 +2148,8 @@ private:
 
     hs_error_t scanModeMatches(const LocalDatabase &database,
                                const std::vector<std::string> &data,
-                               unsigned int mode,
-                               hs_fp_collector_t *collector,
-                               const std::string &api,
-                               MatchCapture &capture) {
+                               unsigned int mode, hs_fp_collector_t *collector,
+                               const std::string &api, MatchCapture &capture) {
         if (mode == HS_MODE_BLOCK) {
             return scanBlockMatches(database, data, collector, api, capture);
         }
@@ -2199,8 +2186,8 @@ private:
             out << ", first extra expected {"
                 << describeMatch(expected[mismatch]) << "}";
         } else if (mismatch < actual.size()) {
-            out << ", first extra actual {"
-                << describeMatch(actual[mismatch]) << "}";
+            out << ", first extra actual {" << describeMatch(actual[mismatch])
+                << "}";
         }
         stats.error(api, out.str());
         return false;
@@ -2234,18 +2221,16 @@ private:
         return true;
     }
 
-    bool compileFeedbackVariant(
-            const FuzzTestCase &testCase, unsigned int mode,
-            const std::vector<std::string> &data,
-            const MatchCapture &expectedMatches,
-            const hs_fp_feedback_t *feedback, bool useExt,
-            const std::string &api,
-            const FuzzProgressCallback &progress) {
+    bool compileFeedbackVariant(const FuzzTestCase &testCase, unsigned int mode,
+                                const std::vector<std::string> &data,
+                                const MatchCapture &expectedMatches,
+                                const hs_fp_feedback_t *feedback, bool useExt,
+                                const std::string &api,
+                                const FuzzProgressCallback &progress) {
         markProgress(progress, api);
         const char *expressions[] = {testCase.pattern.c_str()};
         const unsigned int flags[] = {testCase.flags};
-        const unsigned int ids[] = {
-            static_cast<unsigned int>(testCase.id)};
+        const unsigned int ids[] = {static_cast<unsigned int>(testCase.id)};
         hs_expr_ext_t extValue = {};
         const hs_expr_ext_t *ext[] = {&extValue};
         LocalDatabase compiled;
@@ -2256,15 +2241,14 @@ private:
                 expressions, flags, ids, ext, 1, mode, nullptr, feedback,
                 &compiled.db, &localError);
         } else {
-            err = hs_compile_multi_with_feedback(
-                expressions, flags, ids, 1, mode, nullptr, feedback,
-                &compiled.db, &localError);
+            err = hs_compile_multi_with_feedback(expressions, flags, ids, 1,
+                                                 mode, nullptr, feedback,
+                                                 &compiled.db, &localError);
         }
 
         if (err != HS_SUCCESS) {
-            const std::string message = localError
-                                            ? compileErrorMessage(localError)
-                                            : errString(err);
+            const std::string message =
+                localError ? compileErrorMessage(localError) : errString(err);
             stats.error(api, message);
             return false;
         }
@@ -2291,17 +2275,14 @@ private:
         if (err != HS_SUCCESS) {
             return false;
         }
-        return compareMatches(api + "_matches", expectedMatches,
-                              actualMatches);
+        return compareMatches(api + "_matches", expectedMatches, actualMatches);
     }
 
     bool exerciseFalsePositiveFeedbackMode(
-            const FuzzTestCase &testCase,
-            const std::vector<std::string> &generatedData, unsigned int mode,
-            const char *modeName,
-            const FuzzProgressCallback &progress) {
-        const std::string prefix =
-            std::string("fp_feedback_") + modeName;
+        const FuzzTestCase &testCase,
+        const std::vector<std::string> &generatedData, unsigned int mode,
+        const char *modeName, const FuzzProgressCallback &progress) {
+        const std::string prefix = std::string("fp_feedback_") + modeName;
         bool ok = true;
         bool mergedReady = false;
         bool feedbackReady = false;
@@ -2309,8 +2290,7 @@ private:
         LocalDatabase database;
         bool compiled = false;
         markProgress(progress, prefix + "_compile");
-        if (!compileLocalDatabase(testCase, mode, prefix, database,
-                                  compiled)) {
+        if (!compileLocalDatabase(testCase, mode, prefix, database, compiled)) {
             return false;
         }
         if (!compiled) {
@@ -2326,8 +2306,7 @@ private:
         ScopedFeedback resetFeedback;
 
         markProgress(progress, prefix + "_collector_create");
-        hs_error_t err =
-            hs_fp_collector_create(database.db, &collectorA.value);
+        hs_error_t err = hs_fp_collector_create(database.db, &collectorA.value);
         if (isFeedbackDisabled(err)) {
             stats.expectedFail(prefix + "_collector_create",
                                "false-positive feedback disabled");
@@ -2366,13 +2345,13 @@ private:
             ok = false;
         }
         markProgress(progress, prefix + "_scan_with_collector");
-        err = scanModeMatches(database, data, mode, collectorA.value,
-                              prefix + "_scan_with_collector",
-                              collectorMatches);
+        err =
+            scanModeMatches(database, data, mode, collectorA.value,
+                            prefix + "_scan_with_collector", collectorMatches);
         if (err != HS_SUCCESS) {
             ok = false;
-        } else if (!compareMatches(prefix + "_collector_matches",
-                                   normalMatches, collectorMatches)) {
+        } else if (!compareMatches(prefix + "_collector_matches", normalMatches,
+                                   collectorMatches)) {
             ok = false;
         }
 
@@ -2384,8 +2363,7 @@ private:
         if (err != HS_SUCCESS) {
             ok = false;
         } else if (!compareMatches(prefix + "_second_collector_matches",
-                                   normalMatches,
-                                   secondCollectorMatches)) {
+                                   normalMatches, secondCollectorMatches)) {
             ok = false;
         }
 
@@ -2437,13 +2415,11 @@ private:
         if (err != HS_SUCCESS) {
             ok = false;
         } else if (!compareMatches(prefix + "_after_reset_matches",
-                                   normalMatches,
-                                   secondCollectorMatches)) {
+                                   normalMatches, secondCollectorMatches)) {
             ok = false;
         }
 
-        hs_fp_collector_t *mergeInputs[] = {collectorA.value,
-                                            collectorB.value};
+        hs_fp_collector_t *mergeInputs[] = {collectorA.value, collectorB.value};
         markProgress(progress, prefix + "_collector_merge");
         err = hs_fp_collector_merge(mergeInputs, 2, &merged.value);
         if (err != HS_SUCCESS || !merged.value) {
@@ -2477,22 +2453,19 @@ private:
             }
 
             hs_fp_feedback_params_t params = {};
-            params.flags =
-                HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT |
-                HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT |
-                HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE |
-                HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE |
-                HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS;
+            params.flags = HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT |
+                           HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT |
+                           HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE |
+                           HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE |
+                           HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS;
             params.max_bad_fragments = 8;
             FeedbackDumpStats dump;
             hs_fp_feedback_dump_callbacks_t callbacks = {};
             callbacks.on_summary = feedbackDumpSummary;
             callbacks.on_fragment = feedbackDumpFragment;
-            markProgress(progress,
-                         prefix + "_collector_to_feedback_with_dump");
+            markProgress(progress, prefix + "_collector_to_feedback_with_dump");
             err = hs_fp_collector_to_feedback_with_dump(
-                merged.value, &params, &callbacks, &dump,
-                &dumpFeedback.value);
+                merged.value, &params, &callbacks, &dump, &dumpFeedback.value);
             if (err != HS_SUCCESS || !dumpFeedback.value) {
                 if (err == HS_SUCCESS) {
                     stats.error(prefix + "_collector_to_feedback_with_dump",
@@ -2534,12 +2507,10 @@ private:
             ok = false;
         }
 
-        if (!releaseFeedback(prefix + "_reset_feedback_free",
-                             resetFeedback)) {
+        if (!releaseFeedback(prefix + "_reset_feedback_free", resetFeedback)) {
             ok = false;
         }
-        if (!releaseFeedback(prefix + "_dump_feedback_free",
-                             dumpFeedback)) {
+        if (!releaseFeedback(prefix + "_dump_feedback_free", dumpFeedback)) {
             ok = false;
         }
         if (!releaseFeedback(prefix + "_feedback_free", feedback)) {
@@ -2548,8 +2519,7 @@ private:
         if (!releaseCollector(prefix + "_merged_collector_free", merged)) {
             ok = false;
         }
-        if (!releaseCollector(prefix + "_second_collector_free",
-                              collectorB)) {
+        if (!releaseCollector(prefix + "_second_collector_free", collectorB)) {
             ok = false;
         }
         if (!releaseCollector(prefix + "_collector_free", collectorA)) {
@@ -2578,12 +2548,10 @@ private:
 
         bool ok = true;
         ScopedCollector collector;
-        hs_error_t err =
-            hs_fp_collector_create(database.db, &collector.value);
+        hs_error_t err = hs_fp_collector_create(database.db, &collector.value);
         if (isFeedbackDisabled(err)) {
-            stats.expectedFail(
-                "fp_feedback_invalid_params_collector_create",
-                "false-positive feedback disabled");
+            stats.expectedFail("fp_feedback_invalid_params_collector_create",
+                               "false-positive feedback disabled");
             return true;
         }
         if (err != HS_SUCCESS || !collector.value) {
@@ -2591,63 +2559,61 @@ private:
                 stats.error("fp_feedback_invalid_params_collector_create",
                             "successful call returned null collector");
             } else {
-                stats.error("fp_feedback_invalid_params_collector_create",
-                            err);
+                stats.error("fp_feedback_invalid_params_collector_create", err);
             }
             return false;
         }
         stats.ok("fp_feedback_invalid_params_collector_create");
 
-        auto checkInvalidParams =
-            [this, &collector](const std::string &api,
-                               const hs_fp_feedback_params_t &params,
-                               bool withDump) {
-                bool caseOk = true;
-                ScopedFeedback output;
-                hs_error_t callErr;
-                if (withDump) {
-                    callErr = hs_fp_collector_to_feedback_with_dump(
-                        collector.value, &params, nullptr, nullptr,
-                        &output.value);
-                } else {
-                    callErr = hs_fp_collector_to_feedback(
-                        collector.value, &params, &output.value);
-                }
-                if (!recordExpectedInvalid(api, callErr, false)) {
+        auto checkInvalidParams = [this, &collector](
+                                      const std::string &api,
+                                      const hs_fp_feedback_params_t &params,
+                                      bool withDump) {
+            bool caseOk = true;
+            ScopedFeedback output;
+            hs_error_t callErr;
+            if (withDump) {
+                callErr = hs_fp_collector_to_feedback_with_dump(
+                    collector.value, &params, nullptr, nullptr, &output.value);
+            } else {
+                callErr = hs_fp_collector_to_feedback(collector.value, &params,
+                                                      &output.value);
+            }
+            if (!recordExpectedInvalid(api, callErr, false)) {
+                caseOk = false;
+            }
+            if (output.value) {
+                stats.error(api, "invalid call produced feedback");
+                if (!releaseFeedback(api + "_unexpected_free", output)) {
                     caseOk = false;
                 }
-                if (output.value) {
-                    stats.error(api, "invalid call produced feedback");
-                    if (!releaseFeedback(api + "_unexpected_free", output)) {
-                        caseOk = false;
-                    }
-                    caseOk = false;
-                }
-                return caseOk;
-            };
+                caseOk = false;
+            }
+            return caseOk;
+        };
 
         hs_fp_feedback_params_t params = {};
         params.flags = 0x80000000U;
-        ok &= checkInvalidParams(
-            "hs_fp_collector_to_feedback_bad_flags", params, false);
+        ok &= checkInvalidParams("hs_fp_collector_to_feedback_bad_flags",
+                                 params, false);
 
         params = {};
         params.flags = HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE;
         params.min_false_positive_rate = HS_FP_FEEDBACK_RATE_SCALE + 1;
-        ok &= checkInvalidParams(
-            "hs_fp_collector_to_feedback_bad_fp_rate", params, false);
+        ok &= checkInvalidParams("hs_fp_collector_to_feedback_bad_fp_rate",
+                                 params, false);
 
         params = {};
         params.flags = HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE;
         params.min_waste_share = HS_FP_FEEDBACK_RATE_SCALE + 1;
-        ok &= checkInvalidParams(
-            "hs_fp_collector_to_feedback_bad_waste_share", params, true);
+        ok &= checkInvalidParams("hs_fp_collector_to_feedback_bad_waste_share",
+                                 params, true);
 
         params = {};
         params.flags = HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS;
         params.max_bad_fragments = 0;
-        ok &= checkInvalidParams(
-            "hs_fp_collector_to_feedback_bad_topk", params, false);
+        ok &= checkInvalidParams("hs_fp_collector_to_feedback_bad_topk", params,
+                                 false);
 
         ScopedFeedback validFeedback;
         err = hs_fp_collector_to_feedback(collector.value, nullptr,
@@ -2657,8 +2623,7 @@ private:
                 stats.error("hs_fp_collector_to_feedback_default_params",
                             "successful call returned null feedback");
             } else {
-                stats.error("hs_fp_collector_to_feedback_default_params",
-                            err);
+                stats.error("hs_fp_collector_to_feedback_default_params", err);
             }
             ok = false;
         } else {
@@ -2676,8 +2641,9 @@ private:
         return ok;
     }
 
-    bool exerciseFalsePositiveFeedbackDatabaseMismatchMode(
-            unsigned int mode, const char *modeName) {
+    bool
+    exerciseFalsePositiveFeedbackDatabaseMismatchMode(unsigned int mode,
+                                                      const char *modeName) {
         const std::string prefix =
             std::string("fp_feedback_mismatch_") + modeName;
         FuzzTestCase caseA;
@@ -2739,9 +2705,9 @@ private:
 
         MatchCapture capture;
         if (mode == HS_MODE_BLOCK) {
-            err = hs_scan_with_collector(
-                databaseB.db, "def", 3, 0, databaseB.scratch, captureMatch,
-                &capture, collectorA.value);
+            err = hs_scan_with_collector(databaseB.db, "def", 3, 0,
+                                         databaseB.scratch, captureMatch,
+                                         &capture, collectorA.value);
         } else if (mode == HS_MODE_VECTORED) {
             const char *blocks[] = {"def"};
             const unsigned int lengths[] = {3};
@@ -2773,8 +2739,7 @@ private:
             ok = false;
         }
 
-        hs_fp_collector_t *mergeInputs[] = {collectorA.value,
-                                            collectorB.value};
+        hs_fp_collector_t *mergeInputs[] = {collectorA.value, collectorB.value};
         ScopedCollector merged;
         err = hs_fp_collector_merge(mergeInputs, 2, &merged.value);
         if (!recordExpectedInvalid(prefix + "_merge_database_mismatch", err,
@@ -2787,8 +2752,7 @@ private:
             ok = false;
         }
 
-        if (!releaseCollector(prefix + "_collector_free_second",
-                              collectorB)) {
+        if (!releaseCollector(prefix + "_collector_free_second", collectorB)) {
             ok = false;
         }
         if (!releaseCollector(prefix + "_collector_free", collectorA)) {
@@ -2799,25 +2763,25 @@ private:
 
     bool exerciseFalsePositiveFeedbackDatabaseMismatch() {
         bool ok = true;
-        if (!exerciseFalsePositiveFeedbackDatabaseMismatchMode(
-                HS_MODE_BLOCK, "block")) {
+        if (!exerciseFalsePositiveFeedbackDatabaseMismatchMode(HS_MODE_BLOCK,
+                                                               "block")) {
             ok = false;
         }
-        if (!exerciseFalsePositiveFeedbackDatabaseMismatchMode(
-                HS_MODE_STREAM, "stream")) {
+        if (!exerciseFalsePositiveFeedbackDatabaseMismatchMode(HS_MODE_STREAM,
+                                                               "stream")) {
             ok = false;
         }
-        if (!exerciseFalsePositiveFeedbackDatabaseMismatchMode(
-                HS_MODE_VECTORED, "vector")) {
+        if (!exerciseFalsePositiveFeedbackDatabaseMismatchMode(HS_MODE_VECTORED,
+                                                               "vector")) {
             ok = false;
         }
         return ok;
     }
 
-    hs_database_t* db;
-    fat_hs_database_t* fatDb;
-    hs_compile_error_t* compileErr;
-    hs_scratch_t* scratch;
+    hs_database_t *db;
+    fat_hs_database_t *fatDb;
+    hs_compile_error_t *compileErr;
+    hs_scratch_t *scratch;
     FuzzStats stats;
 };
 

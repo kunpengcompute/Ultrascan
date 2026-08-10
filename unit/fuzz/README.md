@@ -38,13 +38,13 @@ ARM 机器上需要：
 
 ```bash
 cd /path/to/Ultrascan
-mkdir -p build
-cd build
+mkdir -p build_cov
+cd build_cov
 cmake .. -DHS_ENABLE_FP_FEEDBACK=ON 
 make -j$(nproc)
 ```
 
-再构建 fuzz。标准目录布局会自动使用项目根目录下的 `build`：
+再构建 fuzz。标准目录布局会自动使用项目根目录下的 `build_cov`：
 
 ```bash
 cd ../unit/fuzz
@@ -150,9 +150,9 @@ endif()
 ```bash
 export HS_ROOT=/path/to/hyperscan
 cd "$HS_ROOT"
-rm -rf build
-mkdir build
-cd build
+rm -rf build_cov
+mkdir build_cov
+cd build_cov
 
 cmake .. -DHS_ENABLE_FP_FEEDBACK=ON -DENABLE_COVERAGE=ON \
   -DCMAKE_BUILD_TYPE=Debug -DOPTIMISE=OFF
@@ -176,8 +176,8 @@ make -j$(nproc)
 
 ```bash
 cd "$HS_ROOT"
-find build -name '*.gcda' | head
-find build -name '*.gcda' | grep fat_database
+find build_cov -name '*.gcda' | head
+find build_cov -name '*.gcda' | grep fat_database
 ```
 
 ## 5. 生成全量覆盖率报告
@@ -189,7 +189,7 @@ cd "$HS_ROOT"
 rm -f coverage.info coverage.info.cleaned
 
 lcov --capture \
-  --directory build \
+  --directory build_cov \
   --directory unit/fuzz/build \
   --ignore-errors inconsistent,inconsistent \
   --output-file coverage.info
@@ -228,8 +228,8 @@ $HS_ROOT/coverage_report/index.html
 检查：
 
 ```bash
-find build -name '*.gcno' | head
-find build -name '*.gcda' | head
+find build_cov -name '*.gcno' | head
+find build_cov -name '*.gcda' | head
 ```
 
 如果没有 `.gcno`，重新使用：
@@ -253,7 +253,7 @@ cd "$HS_ROOT/unit/fuzz/build"
 
 ```bash
 lcov --capture \
-  --directory build \
+  --directory build_cov \
   --directory unit/fuzz/build \
   --ignore-errors inconsistent,inconsistent \
   --output-file coverage.info
@@ -270,8 +270,8 @@ grep -n 'SF:.*fat_database.c' coverage.info coverage.info.cleaned 2>/dev/null
 再确认编译和运行数据：
 
 ```bash
-find build -name '*.gcno' | grep fat_database
-find build -name '*.gcda' | grep fat_database
+find build_cov -name '*.gcno' | grep fat_database
+find build_cov -name '*.gcda' | grep fat_database
 ```
 
 如果 `.gcno` 没有，说明顶层 `CMakeLists.txt` 没给 C 文件加 coverage 参数，
@@ -293,7 +293,7 @@ lcov: ERROR: (inconsistent) mismatched end line ...
 
 ### 6.5 fuzz 链接了错误的 libhs
 
-标准目录布局会自动使用项目根目录下的 `build`，CMake 配置阶段会打印实际选中的
+标准目录布局会自动使用项目根目录下的 `build_cov`，CMake 配置阶段会打印实际选中的
 Hyperscan 库路径。只有根库位于其他目录时才需要显式指定，例如：
 
 ```bash

@@ -1,6 +1,6 @@
 #include "fuzz_test.h"
-#include "data/data_generator.h"
 #include "../gtest/gtest.h"
+#include "data/data_generator.h"
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
@@ -36,11 +36,10 @@ public:
     explicit FuzzCaseQueue(size_t capacity)
         : capacity(std::max<size_t>(1, capacity)) {}
 
-    bool push(const FuzzTestCase& testCase) {
+    bool push(const FuzzTestCase &testCase) {
         std::unique_lock<std::mutex> lock(mutex);
-        notFull.wait(lock, [this]() {
-            return closed || queue.size() < capacity;
-        });
+        notFull.wait(lock,
+                     [this]() { return closed || queue.size() < capacity; });
 
         if (closed) {
             return false;
@@ -51,11 +50,9 @@ public:
         return true;
     }
 
-    bool pop(FuzzTestCase& testCase) {
+    bool pop(FuzzTestCase &testCase) {
         std::unique_lock<std::mutex> lock(mutex);
-        notEmpty.wait(lock, [this]() {
-            return closed || !queue.empty();
-        });
+        notEmpty.wait(lock, [this]() { return closed || !queue.empty(); });
 
         if (queue.empty()) {
             return false;
@@ -86,23 +83,23 @@ private:
 };
 
 bool fuzzVerbose() {
-    const char* value = std::getenv("HS_FUZZ_VERBOSE");
+    const char *value = std::getenv("HS_FUZZ_VERBOSE");
     return value && value[0] != '\0' && value[0] != '0';
 }
 
-std::ostream& detailOut() {
+std::ostream &detailOut() {
     thread_local NullBuffer nullBuffer;
     thread_local std::ostream nullStream(&nullBuffer);
     return fuzzVerbose() ? std::cout : nullStream;
 }
 
-size_t readSizeEnv(const char* name, size_t defaultValue) {
-    const char* value = std::getenv(name);
+size_t readSizeEnv(const char *name, size_t defaultValue) {
+    const char *value = std::getenv(name);
     if (!value || value[0] == '\0') {
         return defaultValue;
     }
 
-    char* end = nullptr;
+    char *end = nullptr;
     unsigned long parsed = std::strtoul(value, &end, 10);
     if (end == value) {
         return defaultValue;
@@ -199,8 +196,7 @@ std::string traceCaseFile(const char *dir, size_t workerId) {
 }
 
 void writeCurrentCase(const char *dir, size_t workerId,
-                      const FuzzTestCase &testCase,
-                      const std::string &stage) {
+                      const FuzzTestCase &testCase, const std::string &stage) {
     if (!dir) {
         return;
     }
@@ -236,19 +232,18 @@ void traceCaseEvent(size_t workerId, const char *phase,
     std::lock_guard<std::mutex> lock(traceMutex);
     std::cout << "[case] worker=" << workerId << " " << phase
               << " id=" << testCase.id << " flags=" << testCase.flags
-              << " pattern=\"" << escapeTraceString(testCase.pattern)
-              << "\"" << std::endl;
+              << " pattern=\"" << escapeTraceString(testCase.pattern) << "\""
+              << std::endl;
 }
 
-void reportFpFeedbackFailure(size_t workerId,
-                             const FuzzTestCase &testCase,
+void reportFpFeedbackFailure(size_t workerId, const FuzzTestCase &testCase,
                              const std::vector<std::string> &data) {
     static std::mutex failureMutex;
     std::lock_guard<std::mutex> lock(failureMutex);
     std::cerr << "[fp-feedback-failure] worker=" << workerId
               << " id=" << testCase.id << " flags=" << testCase.flags
-              << " pattern=\"" << escapeTraceString(testCase.pattern)
-              << "\"" << std::endl;
+              << " pattern=\"" << escapeTraceString(testCase.pattern) << "\""
+              << std::endl;
     const size_t limit = std::min<size_t>(data.size(), 4);
     for (size_t i = 0; i < limit; i++) {
         std::cerr << "  data[" << i << "] length=" << data[i].size()
@@ -285,8 +280,7 @@ int HS_CDECL quietMatchCallback(unsigned int, unsigned long long,
 static const FuzzTestParams testParams[] = {
     {"aristocrats", 10, 10000000, false},
     {"completocrats", 10, 10000000, false},
-    {"heuristocrats", 10, 10000000, false}
-};
+    {"heuristocrats", 10, 10000000, false}};
 
 class HyperscanFuzzTest : public ::testing::TestWithParam<FuzzTestParams> {
 protected:
@@ -298,8 +292,7 @@ protected:
         runner = createRunner();
         dataGenerator = std::make_unique<DataGenerator>();
 
-        const hs_error_t capability =
-            runner->falsePositiveFeedbackCapability();
+        const hs_error_t capability = runner->falsePositiveFeedbackCapability();
         if (capability == HS_SUCCESS) {
             fpFeedbackAvailable = true;
         } else if (capability == HS_ARCH_ERROR) {
@@ -311,26 +304,21 @@ protected:
         }
 
         // 配置生成器
-        generator->configure(
-            params.generatorType,
-            params.depth,
-            params.count,
-            params.fullCharset
-        );
+        generator->configure(params.generatorType, params.depth, params.count,
+                             params.fullCharset);
 
         // 生成测试数据
         testData = dataGenerator->generateTestData(10, 0, 1024);
-        detailOut() << "Generated " << testData.size() << " test data items" << std::endl;
+        detailOut() << "Generated " << testData.size() << " test data items"
+                    << std::endl;
     }
 
-    void TearDown() override {
-        runner->reset();
-    }
+    void TearDown() override { runner->reset(); }
 
-    void runSingleCase(Runner& activeRunner, const FuzzTestCase& testCase,
-                       const unsigned int* fatModes, size_t fatModeCount,
-                       const char* traceDir, size_t workerId) {
-        const FuzzProgressCallback markStage = [&](const std::string& stage) {
+    void runSingleCase(Runner &activeRunner, const FuzzTestCase &testCase,
+                       const unsigned int *fatModes, size_t fatModeCount,
+                       const char *traceDir, size_t workerId) {
+        const FuzzProgressCallback markStage = [&](const std::string &stage) {
             writeCurrentCase(traceDir, workerId, testCase, stage);
         };
         markStage("case_start");
@@ -345,7 +333,8 @@ protected:
         // 1.1 测试fat_hs_compile接口
         for (size_t i = 0; i < fatModeCount; i++) {
             unsigned int mode = fatModes[i];
-            detailOut() << "测试 fat_hs_compile, mode=" << mode << "..." << std::endl;
+            detailOut() << "测试 fat_hs_compile, mode=" << mode << "..."
+                        << std::endl;
             markStage(stageWithMode("fat_hs_compile", mode));
             activeRunner.fatCompile(testCase, mode);
             activeRunner.reset();
@@ -381,7 +370,8 @@ protected:
         // 4.1 测试fat_hs_compile_lit接口
         for (size_t i = 0; i < fatModeCount; i++) {
             unsigned int mode = fatModes[i];
-            detailOut() << "测试 fat_hs_compile_lit, mode=" << mode << "..." << std::endl;
+            detailOut() << "测试 fat_hs_compile_lit, mode=" << mode << "..."
+                        << std::endl;
             markStage(stageWithMode("fat_hs_compile_lit", mode));
             activeRunner.fatCompileLit(testCase, length, mode);
             activeRunner.reset();
@@ -480,8 +470,7 @@ protected:
             if (!activeRunner.falsePositiveFeedback(testCase, testData,
                                                     markStage)) {
                 reportFpFeedbackFailure(workerId, testCase, testData);
-                fpFeedbackFailureCount.fetch_add(1,
-                                                 std::memory_order_relaxed);
+                fpFeedbackFailureCount.fetch_add(1, std::memory_order_relaxed);
             }
             activeRunner.reset();
         }
@@ -494,8 +483,7 @@ protected:
             return false;
         }
 
-        size_t current =
-            fpFeedbackCaseCount.load(std::memory_order_relaxed);
+        size_t current = fpFeedbackCaseCount.load(std::memory_order_relaxed);
         while (current < fpFeedbackLimit) {
             if (fpFeedbackCaseCount.compare_exchange_weak(
                     current, current + 1, std::memory_order_relaxed,
@@ -506,22 +494,24 @@ protected:
         return false;
     }
 
-    void runSingleCasesSerial(const unsigned int* fatModes, size_t fatModeCount) {
-        const char* traceDir = traceCaseDir();
-        for (const auto& testCase : testCases) {
+    void runSingleCasesSerial(const unsigned int *fatModes,
+                              size_t fatModeCount) {
+        const char *traceDir = traceCaseDir();
+        for (const auto &testCase : testCases) {
             writeCurrentCase(traceDir, 0, testCase, "queued");
             traceCaseEvent(0, "begin", testCase);
-            runSingleCase(*runner, testCase, fatModes, fatModeCount,
-                          traceDir, 0);
+            runSingleCase(*runner, testCase, fatModes, fatModeCount, traceDir,
+                          0);
             traceCaseEvent(0, "end", testCase);
             clearCurrentCase(traceDir, 0);
         }
     }
 
-    std::vector<std::unique_ptr<Runner>> runSingleCasesStreaming(
-            size_t threadCount, size_t queueSize, size_t multiLimit,
-            const unsigned int* fatModes, size_t fatModeCount,
-            std::vector<FuzzTestCase>& multiCases) {
+    std::vector<std::unique_ptr<Runner>>
+    runSingleCasesStreaming(size_t threadCount, size_t queueSize,
+                            size_t multiLimit, const unsigned int *fatModes,
+                            size_t fatModeCount,
+                            std::vector<FuzzTestCase> &multiCases) {
         std::vector<std::unique_ptr<Runner>> workerRunners;
         workerRunners.reserve(threadCount);
         for (size_t i = 0; i < threadCount; i++) {
@@ -534,8 +524,8 @@ protected:
 
         for (size_t workerId = 0; workerId < threadCount; workerId++) {
             workers.emplace_back([&, workerId]() {
-                Runner& workerRunner = *workerRunners[workerId];
-                const char* traceDir = traceCaseDir();
+                Runner &workerRunner = *workerRunners[workerId];
+                const char *traceDir = traceCaseDir();
                 FuzzTestCase testCase;
                 while (queue.pop(testCase)) {
                     writeCurrentCase(traceDir, workerId, testCase, "queued");
@@ -549,8 +539,8 @@ protected:
             });
         }
 
-        generatedCaseCount = generator->generateTo(
-            [&](const FuzzTestCase& testCase) {
+        generatedCaseCount =
+            generator->generateTo([&](const FuzzTestCase &testCase) {
                 if (multiLimit && multiCases.size() < multiLimit) {
                     multiCases.push_back(testCase);
                 }
@@ -558,15 +548,16 @@ protected:
             });
 
         queue.close();
-        for (auto& worker : workers) {
+        for (auto &worker : workers) {
             worker.join();
         }
 
         return workerRunners;
     }
 
-    const std::vector<FuzzTestCase>& selectMultiCases(
-            size_t threadCount, std::vector<FuzzTestCase>& selected) const {
+    const std::vector<FuzzTestCase> &
+    selectMultiCases(size_t threadCount,
+                     std::vector<FuzzTestCase> &selected) const {
         if (threadCount <= 1) {
             return testCases;
         }
@@ -584,9 +575,8 @@ protected:
         return selected;
     }
 
-    void runMultiInterfaces(const std::vector<FuzzTestCase>& multiCases,
-                            const unsigned int* fatModes,
-                            size_t fatModeCount) {
+    void runMultiInterfaces(const std::vector<FuzzTestCase> &multiCases,
+                            const unsigned int *fatModes, size_t fatModeCount) {
         if (multiCases.size() < 2) {
             return;
         }
@@ -596,7 +586,7 @@ protected:
         // 16. 测试hs_compile_multi接口
         detailOut() << "测试 hs_compile_multi..." << std::endl;
         runner->compileMulti(multiCases);
-        for (const auto& data : testData) {
+        for (const auto &data : testData) {
             runner->scan(data);
         }
         runner->reset();
@@ -604,7 +594,8 @@ protected:
         // 16.1 测试fat_hs_compile_multi接口
         for (size_t i = 0; i < fatModeCount; i++) {
             unsigned int mode = fatModes[i];
-            detailOut() << "测试 fat_hs_compile_multi, mode=" << mode << "..." << std::endl;
+            detailOut() << "测试 fat_hs_compile_multi, mode=" << mode << "..."
+                        << std::endl;
             runner->fatCompileMulti(multiCases, mode);
             runner->reset();
         }
@@ -612,7 +603,7 @@ protected:
         // 17. 测试hs_compile_ext_multi接口
         detailOut() << "测试 hs_compile_ext_multi..." << std::endl;
         runner->compileExtMulti(multiCases);
-        for (const auto& data : testData) {
+        for (const auto &data : testData) {
             runner->scan(data);
         }
         runner->reset();
@@ -620,7 +611,8 @@ protected:
         // 17.1 测试fat_hs_compile_ext_multi接口
         for (size_t i = 0; i < fatModeCount; i++) {
             unsigned int mode = fatModes[i];
-            detailOut() << "测试 fat_hs_compile_ext_multi, mode=" << mode << "..." << std::endl;
+            detailOut() << "测试 fat_hs_compile_ext_multi, mode=" << mode
+                        << "..." << std::endl;
             runner->fatCompileExtMulti(multiCases, mode);
             runner->reset();
         }
@@ -628,11 +620,11 @@ protected:
         // 18. 测试hs_compile_lit_multi接口
         detailOut() << "测试 hs_compile_lit_multi..." << std::endl;
         std::vector<size_t> lengths;
-        for (const auto& testCase : multiCases) {
+        for (const auto &testCase : multiCases) {
             lengths.push_back(testCase.pattern.length());
         }
         runner->compileLitMulti(multiCases, lengths);
-        for (const auto& data : testData) {
+        for (const auto &data : testData) {
             runner->scan(data);
         }
         runner->reset();
@@ -640,14 +632,16 @@ protected:
         // 18.1 测试fat_hs_compile_lit_multi接口
         for (size_t i = 0; i < fatModeCount; i++) {
             unsigned int mode = fatModes[i];
-            detailOut() << "测试 fat_hs_compile_lit_multi, mode=" << mode << "..." << std::endl;
+            detailOut() << "测试 fat_hs_compile_lit_multi, mode=" << mode
+                        << "..." << std::endl;
             runner->fatCompileLitMulti(multiCases, lengths, mode);
             runner->reset();
         }
     }
 
-    void printSummary(size_t threadCount,
-                      const std::vector<std::unique_ptr<Runner>>& workerRunners) {
+    void
+    printSummary(size_t threadCount,
+                 const std::vector<std::unique_ptr<Runner>> &workerRunners) {
         std::cout << "\n=== Fuzz Summary ===" << std::endl;
         std::cout << "generator: " << params.generatorType << std::endl;
         std::cout << "test rounds: " << params.count << std::endl;
@@ -668,8 +662,7 @@ protected:
             HS_MODE_VECTORED,
             HS_MODE_STREAM | HS_MODE_SOM_HORIZON_LARGE,
             HS_MODE_STREAM | HS_MODE_SOM_HORIZON_MEDIUM,
-            HS_MODE_STREAM | HS_MODE_SOM_HORIZON_SMALL
-        };
+            HS_MODE_STREAM | HS_MODE_SOM_HORIZON_SMALL};
         const size_t fatModeCount = sizeof(fatModes) / sizeof(fatModes[0]);
 
         size_t threadCount = readThreadCount();
@@ -682,8 +675,8 @@ protected:
             // 单线程保留原先行为，生成全部用例后顺序执行。
             testCases = generator->generate();
             generatedCaseCount = testCases.size();
-            detailOut() << "Generated " << testCases.size()
-                        << " test cases" << std::endl;
+            detailOut() << "Generated " << testCases.size() << " test cases"
+                        << std::endl;
 
             if (testCases.empty()) {
                 printSummary(threadCount, workerRunners);
@@ -692,7 +685,7 @@ protected:
             }
 
             runSingleCasesSerial(fatModes, fatModeCount);
-            const std::vector<FuzzTestCase>& selectedMultiCases =
+            const std::vector<FuzzTestCase> &selectedMultiCases =
                 selectMultiCases(threadCount, multiCases);
             runMultiInterfaces(selectedMultiCases, fatModes, fatModeCount);
         } else {
@@ -700,21 +693,19 @@ protected:
             const size_t multiLimit = readMultiLimit(1024);
             std::cout << "[并行设置] HS_FUZZ_THREADS=" << threadCount
                       << ", HS_FUZZ_QUEUE_SIZE=" << queueSize
-                      << ", streaming producer-consumer enabled"
-                      << std::endl;
+                      << ", streaming producer-consumer enabled" << std::endl;
             if (multiLimit == 0) {
                 std::cout << "[并行设置] multi interfaces disabled by "
                           << "HS_FUZZ_MULTI_LIMIT=0" << std::endl;
             } else {
                 std::cout << "[并行设置] multi interfaces use first "
-                          << multiLimit
-                          << " streamed cases; override with "
+                          << multiLimit << " streamed cases; override with "
                           << "HS_FUZZ_MULTI_LIMIT" << std::endl;
             }
 
-            workerRunners = runSingleCasesStreaming(threadCount, queueSize,
-                                                    multiLimit, fatModes,
-                                                    fatModeCount, multiCases);
+            workerRunners =
+                runSingleCasesStreaming(threadCount, queueSize, multiLimit,
+                                        fatModes, fatModeCount, multiCases);
 
             if (generatedCaseCount == 0) {
                 printSummary(threadCount, workerRunners);
@@ -740,7 +731,8 @@ protected:
 
         if (fpFeedbackAvailable) {
             detailOut() << "\n=== Testing false-positive feedback invalid "
-                           "args ===" << std::endl;
+                           "args ==="
+                        << std::endl;
             if (!runner->falsePositiveFeedbackInvalidArgs()) {
                 ADD_FAILURE() << "false-positive feedback invalid-argument "
                                  "checks failed";
@@ -770,18 +762,15 @@ protected:
 };
 
 // 测试所有接口
-TEST_P(HyperscanFuzzTest, AllInterfaces) {
-    testAllInterfaces();
-}
+TEST_P(HyperscanFuzzTest, AllInterfaces) { testAllInterfaces(); }
 
 TEST(QuietOnlyFuzzRegression, BlockStreamVectoredNoCallbacks) {
     const char *expression = "Q";
     const unsigned int flags = HS_FLAG_QUIET | HS_FLAG_PREFILTER |
                                HS_FLAG_ALLOWEMPTY | HS_FLAG_MULTILINE;
     const unsigned int id = 2001;
-    const unsigned int modes[] = {
-        HS_MODE_BLOCK, HS_MODE_STREAM, HS_MODE_VECTORED
-    };
+    const unsigned int modes[] = {HS_MODE_BLOCK, HS_MODE_STREAM,
+                                  HS_MODE_VECTORED};
     const char data[] = "QQQQQQQQQQ";
     const unsigned int dataLength = sizeof(data) - 1;
 
@@ -843,8 +832,5 @@ TEST(QuietOnlyFuzzRegression, BlockStreamVectoredNoCallbacks) {
 }
 
 // 实例化测试
-INSTANTIATE_TEST_CASE_P(
-    FuzzTests,
-    HyperscanFuzzTest,
-    ::testing::ValuesIn(testParams)
-);
+INSTANTIATE_TEST_CASE_P(FuzzTests, HyperscanFuzzTest,
+                        ::testing::ValuesIn(testParams));

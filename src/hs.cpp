@@ -291,17 +291,17 @@ static hs_error_t validate_fat_compile_args(fat_hs_database_t **db,
 }
 
 /**
- * Collect the set of sub-expression report IDs referenced by HS_FLAG_COMBINATION
- * expressions.  A combination expression string is a logical formula such as
- * "1 & 2" or "1001 | 1002 & 1003" whose integers are the external report IDs
- * of the sub-expressions consumed by the combination.
+ * Collect the set of sub-expression report IDs referenced by
+ * HS_FLAG_COMBINATION expressions.  A combination expression string is a
+ * logical formula such as "1 & 2" or "1001 | 1002 & 1003" whose integers are
+ * the external report IDs of the sub-expressions consumed by the combination.
  *
  * This is used to identify QUIET expressions that are NOT consumed by any
  * combination and can therefore be safely skipped at compile time.
  */
 static std::set<unsigned>
-collectCombinationSubRefs(const char *const *expressions,
-                          const unsigned *flags, unsigned elements) {
+collectCombinationSubRefs(const char *const *expressions, const unsigned *flags,
+                          unsigned elements) {
     std::set<unsigned> refs;
     if (!flags || !expressions) {
         return refs;
@@ -749,8 +749,7 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
         hs_compile_context_t *mutable_fp_ctx =
             const_cast<hs_compile_context_t *>(fp_ctx);
         hs_compile_context_checkpoint_info_t *fp_checkpoint_info = nullptr;
-        hs_compile_context_matcher_build_hit_info_t **fp_matcher_hits =
-            nullptr;
+        hs_compile_context_matcher_build_hit_info_t **fp_matcher_hits = nullptr;
         u32 *fp_matcher_hit_count = nullptr;
         u32 *fp_matcher_hit_dropped_count = nullptr;
         u32 *fp_matcher_hit_capacity = nullptr;

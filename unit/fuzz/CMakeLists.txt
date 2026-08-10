@@ -6,7 +6,7 @@ project(hyperscan_fuzz_test)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(HS_BUILD_DIR "${CMAKE_SOURCE_DIR}/../../build" CACHE PATH "Hyperscan build directory")
+set(HS_BUILD_DIR "${CMAKE_SOURCE_DIR}/../../build_cov" CACHE PATH "Hyperscan build directory")
 find_package(Threads REQUIRED)
 
 # 包含头文件目录

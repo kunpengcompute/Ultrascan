@@ -202,11 +202,10 @@ struct VertLitInfo {
 
 #define LAST_CHANCE_STRONG_LEN 1
 
-static bool fpFeedbackLiteralIsBad(const CompileContext &cc,
-                                   unsigned int table,
+static bool fpFeedbackLiteralIsBad(const CompileContext &cc, unsigned int table,
                                    const ue2_literal &lit) {
-    return fpFeedbackBlocksRoseLiteral(
-        cc, table, lit, HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
+    return fpFeedbackBlocksRoseLiteral(cc, table, lit,
+                                       HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
 }
 
 static bool fpFeedbackLiteralSetHasBad(const CompileContext &cc,
@@ -225,8 +224,8 @@ static bool fpFeedbackVioletLiteralIsBad(const CompileContext &cc,
     return fpFeedbackLiteralIsBad(cc, HS_FP_TABLE_FLOATING, lit);
 }
 
-static bool fpFeedbackVioletLiteralSetHasBad(
-    const CompileContext &cc, const set<ue2_literal> &lits) {
+static bool fpFeedbackVioletLiteralSetHasBad(const CompileContext &cc,
+                                             const set<ue2_literal> &lits) {
     for (const auto &lit : lits) {
         if (fpFeedbackVioletLiteralIsBad(cc, lit)) {
             return true;

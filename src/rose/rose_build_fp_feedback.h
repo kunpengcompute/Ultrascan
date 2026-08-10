@@ -153,10 +153,12 @@ static inline bool fpFeedbackMatchesRoseFragment(
         matcher_cmp, feedback_index);
 }
 
-static inline bool fpFeedbackBlocksRoseFragment(
-    const CompileContext &cc, unsigned int table, const ue2_literal &lit,
-    const std::vector<u8> *msk, const std::vector<u8> *cmp,
-    unsigned int checkpoint) {
+static inline bool fpFeedbackBlocksRoseFragment(const CompileContext &cc,
+                                                unsigned int table,
+                                                const ue2_literal &lit,
+                                                const std::vector<u8> *msk,
+                                                const std::vector<u8> *cmp,
+                                                unsigned int checkpoint) {
 #ifndef HS_ENABLE_FP_FEEDBACK
     (void)cc;
     (void)table;
@@ -184,22 +186,26 @@ static inline bool fpFeedbackBlocksRoseFragment(
 #endif
 }
 
-static inline bool fpFeedbackBlocksRoseLiteral(
-    const CompileContext &cc, unsigned int table, const ue2_literal &lit,
-    unsigned int checkpoint) {
+static inline bool fpFeedbackBlocksRoseLiteral(const CompileContext &cc,
+                                               unsigned int table,
+                                               const ue2_literal &lit,
+                                               unsigned int checkpoint) {
     return fpFeedbackBlocksRoseFragment(cc, table, lit, nullptr, nullptr,
                                         checkpoint);
 }
 
 /**
  * Resolve the table used by a literal passed directly to RoseBuild::add().
- * Anchored literals beyond the anchored matcher region necessarily fall back
- * to the floating table in tryForAnchoredVertex(). Shorter anchored literals
- * are outside the feedback collection scope and therefore remain unknown.
+
+ * * Anchored literals beyond the anchored matcher region necessarily fall back
+
+ * * to the floating table in tryForAnchoredVertex(). Shorter anchored literals
+
+ * * are outside the feedback collection scope and therefore remain unknown.
  */
-static inline unsigned int fpFeedbackTableForDirectRoseLiteral(
-    const CompileContext &cc, bool anchored, bool eod,
-    const ue2_literal &lit) {
+static inline unsigned int
+fpFeedbackTableForDirectRoseLiteral(const CompileContext &cc, bool anchored,
+                                    bool eod, const ue2_literal &lit) {
     if (eod) {
         return HS_FP_TABLE_EOD_ANCHORED;
     }

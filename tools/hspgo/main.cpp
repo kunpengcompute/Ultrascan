@@ -1839,11 +1839,10 @@ string diagnosticSourceLiteral(const unsigned char *suffix,
     return value;
 }
 
-string matcherSourceLiteral(
-    const hs_compile_context_matcher_build_hit_info_t &info) {
-    return diagnosticSourceLiteral(info.source_suffix,
-                                   info.source_copied_length,
-                                   info.source_length);
+string
+matcherSourceLiteral(const hs_compile_context_matcher_build_hit_info_t &info) {
+    return diagnosticSourceLiteral(
+        info.source_suffix, info.source_copied_length, info.source_length);
 }
 
 void printMatcherBuildHitDetails(
@@ -1907,13 +1906,13 @@ void printMatcherBuildHitDetails(
         rows.push_back(row);
     }
 
-    cout << left << setw(4) << "#" << setw(20) << "key" << setw(10)
-         << "table" << setw(9) << "nocase" << right << setw(10) << "hits"
-         << setw(22) << "compile_fragment_id" << setw(14) << "rose_lit_id"
-         << left << "  " << setw(18) << "msk" << setw(18) << "cmp"
-         << setw(36) << "feedback_fragment" << setw(14) << "source_table"
-         << setw(9) << "src_nc" << right << setw(10) << "source_len"
-         << setw(8) << "delay" << left << "  source_literal\n";
+    cout << left << setw(4) << "#" << setw(20) << "key" << setw(10) << "table"
+         << setw(9) << "nocase" << right << setw(10) << "hits" << setw(22)
+         << "compile_fragment_id" << setw(14) << "rose_lit_id" << left << "  "
+         << setw(18) << "msk" << setw(18) << "cmp" << setw(36)
+         << "feedback_fragment" << setw(14) << "source_table" << setw(9)
+         << "src_nc" << right << setw(10) << "source_len" << setw(8) << "delay"
+         << left << "  source_literal\n";
 
     for (size_t i = 0; i < rows.size(); i++) {
         const MatcherBuildHitRow &row = rows[i];
@@ -2712,14 +2711,13 @@ void printCompileContextDiagnostics(
         {HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL, "masked_literal", true},
         {HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT, "violet_split", true},
         {HS_FP_COMPILE_CHECKPOINT_SOMBE_LITERAL, "sombe_literal", true},
-        {HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX,
-         "rewrite_flood_suffix", true},
+        {HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX, "rewrite_flood_suffix",
+         true},
         {HS_FP_COMPILE_CHECKPOINT_REWRITE_ANCHORED_REHOME,
          "rewrite_anchored_rehome", true},
         {HS_FP_COMPILE_CHECKPOINT_REWRITE_EOD_TO_FLOATING,
          "rewrite_eod_to_floating", true},
-        {HS_FP_COMPILE_CHECKPOINT_MIXED_SENSITIVITY, "mixed_sensitivity",
-         true},
+        {HS_FP_COMPILE_CHECKPOINT_MIXED_SENSITIVITY, "mixed_sensitivity", true},
         {HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK, "rewrite_small_block",
          true},
         {HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD, "matcher_build", false},
@@ -2768,8 +2766,7 @@ void printCompileContextDiagnostics(
     const int checkpointNameWidth = 28;
     const int checkpointCountWidth = 14;
     cout << "\nCompile feedback checkpoints:\n";
-    cout << "Note: rewrite_small_block disables the whole optional small-"
-            "block matcher on a feedback hit; matcher_build is diagnostic-"
+    cout << "Note: matcher_build is diagnostic-"
             "only and reports residual feedback identities in final HWLM "
             "matchers. Diagnostic-only rows are excluded from candidate "
             "totals.\n";

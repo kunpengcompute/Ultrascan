@@ -775,8 +775,8 @@ static bool checkAllowMask(const vector<CharReach> &mask, ue2_literal *lit,
         return false;
     }
 
-    if (!anchored && feedbackBlocksUnmaskedMaskLiteral(
-                         *lit, HS_FP_TABLE_FLOATING, cc)) {
+    if (!anchored &&
+        feedbackBlocksUnmaskedMaskLiteral(*lit, HS_FP_TABLE_FLOATING, cc)) {
         return false;
     }
 

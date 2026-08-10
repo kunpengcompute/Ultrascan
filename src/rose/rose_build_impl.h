@@ -29,15 +29,16 @@
 #ifndef ROSE_BUILD_IMPL_H
 #define ROSE_BUILD_IMPL_H
 
+#include "lily.h"
+#include "nfa/goughcompile.h"
+#include "nfa/mpvcompile.h"
+#include "nfa/nfa_internal.h"
+#include "nfagraph/ng_holder.h"
+#include "nfagraph/ng_revacc.h"
 #include "rose_build.h"
 #include "rose_build_util.h"
 #include "rose_common.h"
 #include "rose_graph.h"
-#include "nfa/mpvcompile.h"
-#include "nfa/goughcompile.h"
-#include "nfa/nfa_internal.h"
-#include "nfagraph/ng_holder.h"
-#include "nfagraph/ng_revacc.h"
 #include "util/bytecode_ptr.h"
 #include "util/flat_containers.h"
 #include "util/hash.h"
@@ -46,13 +47,12 @@
 #include "util/ue2string.h"
 #include "util/unordered.h"
 #include "util/verify_types.h"
-#include "lily.h"
 
+#include <boost/variant.hpp>
 #include <deque>
 #include <map>
 #include <string>
 #include <vector>
-#include <boost/variant.hpp>
 
 struct RoseEngine;
 
@@ -86,9 +86,8 @@ struct suffix_id {
     suffix_id(const RoseSuffixInfo &in)
         : g(in.graph.get()), c(in.castle.get()), d(in.rdfa.get()),
           h(in.haig.get()), t(in.tamarama.get()),
-          dfa_min_width(in.dfa_min_width),
-          dfa_max_width(in.dfa_max_width) {
-            assert(!g || g->kind == NFA_SUFFIX);
+          dfa_min_width(in.dfa_min_width), dfa_max_width(in.dfa_max_width) {
+        assert(!g || g->kind == NFA_SUFFIX);
     }
     bool operator==(const suffix_id &b) const {
         bool rv = g == b.g && c == b.c && h == b.h && d == b.d && t == b.t;
@@ -149,7 +148,6 @@ struct suffix_id {
         }
         return t;
     }
-
 
     raw_som_dfa *haig() { return h; }
     const raw_som_dfa *haig() const { return h; }
@@ -315,8 +313,8 @@ struct rose_literal_id {
     }
 };
 
-static inline
-bool operator<(const rose_literal_id &a, const rose_literal_id &b) {
+static inline bool operator<(const rose_literal_id &a,
+                             const rose_literal_id &b) {
     ORDER_CHECK(distinctiveness);
     ORDER_CHECK(table);
     ORDER_CHECK(s);
@@ -370,14 +368,12 @@ public:
     const_iterator begin() const { return lits.begin(); }
     const_iterator end() const { return lits.end(); }
 
-    size_t size() const {
-        return lits.size();
-    }
+    size_t size() const { return lits.size(); }
 };
 
 struct simple_anchored_info {
     simple_anchored_info(u32 min_b, u32 max_b, const ue2_literal &lit)
-    : min_bound(min_b), max_bound(max_b), literal(lit) {}
+        : min_bound(min_b), max_bound(max_b), literal(lit) {}
     u32 min_bound; /**< min number of characters required before literal can
                     * start matching */
     u32 max_bound; /**< max number of characters allowed before literal can
@@ -385,8 +381,8 @@ struct simple_anchored_info {
     ue2_literal literal;
 };
 
-static really_inline
-bool operator<(const simple_anchored_info &a, const simple_anchored_info &b) {
+static really_inline bool operator<(const simple_anchored_info &a,
+                                    const simple_anchored_info &b) {
     ORDER_CHECK(min_bound);
     ORDER_CHECK(max_bound);
     ORDER_CHECK(literal);
@@ -406,7 +402,7 @@ struct MpvProto {
 };
 
 struct OutfixInfo {
-    template<class T>
+    template <class T>
     explicit OutfixInfo(std::unique_ptr<T> x) : proto(std::move(x)) {}
 
     explicit OutfixInfo(MpvProto mpv_in) : proto(std::move(mpv_in)) {}
@@ -431,9 +427,7 @@ struct OutfixInfo {
         return boost::get<boost::blank>(&proto) != nullptr;
     }
 
-    void clear() {
-        proto = boost::blank();
-    }
+    void clear() { proto = boost::blank(); }
 
     // Convenience accessor functions.
 
@@ -449,9 +443,7 @@ struct OutfixInfo {
         auto *up = boost::get<std::unique_ptr<raw_som_dfa>>(&proto);
         return up ? up->get() : nullptr;
     }
-    MpvProto *mpv() {
-        return boost::get<MpvProto>(&proto);
-    }
+    MpvProto *mpv() { return boost::get<MpvProto>(&proto); }
 
     // Convenience const accessor functions.
 
@@ -467,20 +459,16 @@ struct OutfixInfo {
         auto *up = boost::get<std::unique_ptr<raw_som_dfa>>(&proto);
         return up ? up->get() : nullptr;
     }
-    const MpvProto *mpv() const {
-        return boost::get<MpvProto>(&proto);
-    }
+    const MpvProto *mpv() const { return boost::get<MpvProto>(&proto); }
 
     /**
      * \brief Variant wrapping the various engine types. If this is
      * boost::blank, it means that this outfix is unused (dead).
      */
-    boost::variant<
-        boost::blank,
-        std::unique_ptr<NGHolder>,
-        std::unique_ptr<raw_dfa>,
-        std::unique_ptr<raw_som_dfa>,
-        MpvProto> proto = boost::blank();
+    boost::variant<boost::blank, std::unique_ptr<NGHolder>,
+                   std::unique_ptr<raw_dfa>, std::unique_ptr<raw_som_dfa>,
+                   MpvProto>
+        proto = boost::blank();
 
     RevAccInfo rev_info;
     u32 maxBAWidth = 0; //!< max bi-anchored width
@@ -516,7 +504,8 @@ public:
     bool addOutfix(const NGHolder &h, const raw_som_dfa &haig) override;
     bool addOutfix(const raw_puff &rp) override;
 
-    bool addChainTail(const raw_puff &rp, u32 *queue_out, u32 *event_out) override;
+    bool addChainTail(const raw_puff &rp, u32 *queue_out,
+                      u32 *event_out) override;
 
     // Returns true if we were able to add it as a mask
     bool add(bool anchored, const std::vector<CharReach> &mask,
@@ -531,17 +520,17 @@ public:
                  const flat_set<ReportID> &reports, bool anchored,
                  bool eod) override;
 
-    bool addChar(const ue2_literal &lit, u32 expr_index,
-                 u32 external_report, bool highlander, som_type som,
-                 bool quiet, NG& ng, unsigned flags);
+    bool addChar(const ue2_literal &lit, u32 expr_index, u32 external_report,
+                 bool highlander, som_type som, bool quiet, NG &ng,
+                 unsigned flags);
 
     bool addShortLit(const ue2_literal &lit, u32 expr_index,
                      u32 external_report, bool highlander, som_type som,
-                     bool quiet, NG& ng, unsigned flags);
+                     bool quiet, NG &ng, unsigned flags);
 
     // Construct a runtime implementation.
     bytecode_ptr<RoseEngine> buildRose(u32 minWidth) override;
-    //bytecode_ptr<RoseEngine> buildFinalEngine(u32 minWidth);
+    // bytecode_ptr<RoseEngine> buildFinalEngine(u32 minWidth);
     bytecode_ptr<x86_RoseEngine> x86_buildRose(u32 minWidth) override;
     bytecode_ptr<RoseEngine> arm_buildRose(u32 minWidth) override;
     bytecode_ptr<RoseEngine> arm_buildFinalEngine(u32 minWidth);
@@ -625,14 +614,12 @@ public:
     const RoseVertex anchored_root;
     RoseLiteralMap literals;
     std::map<RoseVertex, RoseVertex> ghost;
-    ReportID getNewNfaReport() override {
-        return next_nfa_report++;
-    }
+    ReportID getNewNfaReport() override { return next_nfa_report++; }
     std::deque<rose_literal_info> literal_info;
     bool hasSom; //!< at least one pattern requires SOM.
     std::map<size_t, std::vector<std::unique_ptr<raw_dfa>>> anchored_nfas;
     std::map<simple_anchored_info, std::set<u32>> anchored_simple;
-    std::map<u32, std::set<u32> > group_to_literal;
+    std::map<u32, std::set<u32>> group_to_literal;
     u32 group_end;
 
     u32 ematcher_region_size; /**< number of bytes the eod table runs over */
@@ -666,7 +653,10 @@ public:
 
     std::map<char, lilyReport> lily;
     std::map<std::string, lilyReport> lilyForTeddy;
-    std::priority_queue<LilyForTeddyPair, std::vector<LilyForTeddyPair>, CompareStringLength> lilyForTeddyPQ;
+    std::priority_queue<LilyForTeddyPair, std::vector<LilyForTeddyPair>,
+                        CompareStringLength>
+        lilyForTeddyPQ;
+
 private:
     ReportID next_nfa_report;
 };
@@ -709,18 +699,12 @@ bool canImplementGraphs(const RoseBuildImpl &tbi);
 
 namespace std {
 
-template<>
-struct hash<ue2::left_id> {
-    size_t operator()(const ue2::left_id &l) const {
-        return l.hash();
-    }
+template <> struct hash<ue2::left_id> {
+    size_t operator()(const ue2::left_id &l) const { return l.hash(); }
 };
 
-template<>
-struct hash<ue2::suffix_id> {
-    size_t operator()(const ue2::suffix_id &s) const {
-        return s.hash();
-    }
+template <> struct hash<ue2::suffix_id> {
+    size_t operator()(const ue2::suffix_id &s) const { return s.hash(); }
 };
 
 } // namespace std

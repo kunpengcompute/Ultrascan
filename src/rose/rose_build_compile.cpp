@@ -118,8 +118,9 @@ static unsigned int fpTableForRoseLiteral(rose_literal_table table) {
 }
 #endif
 
-static bool feedbackBlocksMixedSensitivityExplosion(
-    const RoseBuildImpl &build, const rose_literal_id &lit) {
+static bool
+feedbackBlocksMixedSensitivityExplosion(const RoseBuildImpl &build,
+                                        const rose_literal_id &lit) {
 #ifndef HS_ENABLE_FP_FEEDBACK
     (void)build;
     (void)lit;

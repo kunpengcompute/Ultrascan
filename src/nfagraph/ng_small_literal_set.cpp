@@ -102,11 +102,10 @@ static bool operator<(const sls_literal &a, const sls_literal &b) {
 
 static bool fpFeedbackLiteralIsBad(const CompileContext &cc,
                                    const sls_literal &lit) {
-    const unsigned int table = fpFeedbackTableForDirectRoseLiteral(
-        cc, lit.anchored, lit.eod, lit.s);
+    const unsigned int table =
+        fpFeedbackTableForDirectRoseLiteral(cc, lit.anchored, lit.eod, lit.s);
     return fpFeedbackBlocksRoseLiteral(
-        cc, table, lit.s,
-        HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
+        cc, table, lit.s, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
 }
 
 static bool fpFeedbackLiteralSetHasBad(

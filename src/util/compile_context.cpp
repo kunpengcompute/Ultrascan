@@ -43,8 +43,7 @@ CompileContext::CompileContext(
     bool in_isStreaming, bool in_isVectored, const target_t &in_target_info,
     const Grey &in_grey, const hs_fp_feedback_t *in_fp_feedback,
     hs_compile_context_checkpoint_info_t *in_fp_checkpoint_info,
-    hs_compile_context_matcher_build_hit_info_t
-        **in_fp_matcher_build_hit_info,
+    hs_compile_context_matcher_build_hit_info_t **in_fp_matcher_build_hit_info,
     u32 *in_fp_matcher_build_hit_count,
     u32 *in_fp_matcher_build_hit_dropped_count,
     u32 *in_fp_matcher_build_hit_capacity)
@@ -81,10 +80,9 @@ static bool ensureDiagnosticCapacity(T **entries, u32 count, u32 *capacity,
 
     u32 new_capacity = initial_capacity;
     if (old_capacity) {
-        new_capacity =
-            old_capacity > std::numeric_limits<u32>::max() / 2
-                ? std::numeric_limits<u32>::max()
-                : old_capacity * 2;
+        new_capacity = old_capacity > std::numeric_limits<u32>::max() / 2
+                           ? std::numeric_limits<u32>::max()
+                           : old_capacity * 2;
     }
     if (new_capacity <= count) {
         return false;
@@ -95,8 +93,7 @@ static bool ensureDiagnosticCapacity(T **entries, u32 count, u32 *capacity,
     if (allocation_size / sizeof(T) != new_capacity) {
         return false;
     }
-    T *new_entries = static_cast<T *>(
-        hs_misc_alloc(allocation_size));
+    T *new_entries = static_cast<T *>(hs_misc_alloc(allocation_size));
     if (hs_check_alloc(new_entries) != HS_SUCCESS) {
         hs_misc_free(new_entries);
         return false;

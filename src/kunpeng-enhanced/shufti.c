@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2024 Huawei Technologies Co., Ltd.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
@@ -27,8 +27,8 @@
  */
 
 #include "../nfa/shufti.h"
-#include "ue2common.h"
 #include "core_precomp.h"
+#include "ue2common.h"
 
 #define BATCH_SIZE 16
 #define BYTE_SIZE_FOUR 4
@@ -38,8 +38,8 @@
 #define GET_HI_4(chars) Rshift8_m128(chars, BYTE_SIZE_FOUR)
 
 /** \brief Naive byte-by-byte implementation. */
-static REALLY_INLINE const u8 *ShuftiFwdSlow(const u8 *lo, const u8 *hi, const u8 *buf,
-    const u8 *buf_end) {
+static REALLY_INLINE const u8 *ShuftiFwdSlow(const u8 *lo, const u8 *hi,
+                                             const u8 *buf, const u8 *buf_end) {
 
     for (; buf < buf_end; ++buf) {
         u8 c = *buf;
@@ -50,23 +50,21 @@ static REALLY_INLINE const u8 *ShuftiFwdSlow(const u8 *lo, const u8 *hi, const u
     return buf;
 }
 
-static REALLY_INLINE m128 BlockOpt(m128 mask_lo, m128 mask_hi, m128 chars, const m128 low4bits,
-    UNUSED const m128 compare)
-{
-    m128 c_lo  = Pshufb_m128_opt(mask_lo, GET_LO_4(chars));
-    m128 c_hi  = Pshufb_m128_opt(mask_hi, GET_HI_4(chars));
+static REALLY_INLINE m128 BlockOpt(m128 mask_lo, m128 mask_hi, m128 chars,
+                                   const m128 low4bits,
+                                   UNUSED const m128 compare) {
+    m128 c_lo = Pshufb_m128_opt(mask_lo, GET_LO_4(chars));
+    m128 c_hi = Pshufb_m128_opt(mask_hi, GET_HI_4(chars));
     return and128(c_lo, c_hi);
 }
 
-static REALLY_INLINE u64a Comparemask(uint16x8_t mask)
-{
+static REALLY_INLINE u64a Comparemask(uint16x8_t mask) {
     return vget_lane_u64((uint64x1_t)vshrn_n_u16(mask, BYTE_SIZE_FOUR), 0);
 }
 
-static REALLY_INLINE const u8 *FirstMatchOpt(const u8 *buf, m128 mask)
-{
+static REALLY_INLINE const u8 *FirstMatchOpt(const u8 *buf, m128 mask) {
     uint32x4_t m = mask.vect_u32;
-    uint64_t vmax = vgetq_lane_u64 (vreinterpretq_u64_u32 (vpmaxq_u32(m, m)), 0);
+    uint64_t vmax = vgetq_lane_u64(vreinterpretq_u64_u32(vpmaxq_u32(m, m)), 0);
     if (vmax != 0) {
         u64a z = Comparemask(mask.vect_u16);
         u32 pos = CTZ64(z) / BYTE_SIZE_FOUR;
@@ -76,9 +74,10 @@ static REALLY_INLINE const u8 *FirstMatchOpt(const u8 *buf, m128 mask)
     }
 }
 
-static REALLY_INLINE const u8 *FwdBlockOpt(m128 mask_lo, m128 mask_hi, m128 chars,
-    const u8 *buf, const m128 low4bits, const m128 zeroes)
-{
+static REALLY_INLINE const u8 *FwdBlockOpt(m128 mask_lo, m128 mask_hi,
+                                           m128 chars, const u8 *buf,
+                                           const m128 low4bits,
+                                           const m128 zeroes) {
     m128 z = BlockOpt(mask_lo, mask_hi, chars, low4bits, zeroes);
     m128 r;
     /* Every non-zero mask, including bit 7, denotes a match. */
@@ -87,16 +86,16 @@ static REALLY_INLINE const u8 *FwdBlockOpt(m128 mask_lo, m128 mask_hi, m128 char
     return FirstMatchOpt(buf, r);
 }
 
-const u8 *KHSEL_ShuftiExec(m128 mask_lo, m128 mask_hi, const u8 *buf, const u8 *buf_end)
-{
+const u8 *KHSEL_ShuftiExec(m128 mask_lo, m128 mask_hi, const u8 *buf,
+                           const u8 *buf_end) {
     KHSEL_RETURN_IF_NULL(buf, NULL);
     KHSEL_RETURN_IF_NULL(buf_end, NULL);
     KHSEL_RETURN_IF_GE(buf, buf_end, NULL);
 
     // Slow path for small cases.
     if (unlikely(buf_end - buf < BATCH_SIZE)) {
-        return ShuftiFwdSlow((const u8 *)&mask_lo, (const u8 *)&mask_hi,
-                             buf, buf_end);
+        return ShuftiFwdSlow((const u8 *)&mask_lo, (const u8 *)&mask_hi, buf,
+                             buf_end);
     }
 
     const m128 zeroes = zeroes128();
@@ -128,7 +127,8 @@ const u8 *KHSEL_ShuftiExec(m128 mask_lo, m128 mask_hi, const u8 *buf, const u8 *
     }
 
     chars = loadu128(buf_end - BATCH_SIZE);
-    rv = FwdBlockOpt(mask_lo, mask_hi, chars, buf_end - BATCH_SIZE, low4bits, zeroes);
+    rv = FwdBlockOpt(mask_lo, mask_hi, chars, buf_end - BATCH_SIZE, low4bits,
+                     zeroes);
     if (rv) {
         return rv;
     }

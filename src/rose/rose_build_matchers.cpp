@@ -873,13 +873,10 @@ static void addAccelLiteral(MatcherProto &mp, const rose_literal_id &lit,
  * If max_offset is specified (and not ROSE_BOUND_INF), then literals that can
  * only lead to a pattern match after max_offset may be excluded.
  */
-static MatcherProto makeMatcherProto(const RoseBuildImpl &build,
-                                     const vector<LitFragment> &fragments,
-                                     rose_literal_table table,
-                                     bool delay_rebuild, u32 fp_table,
-                                     size_t max_len,
-                                     u32 max_offset = ROSE_BOUND_INF,
-                                     bool diagnose_feedback = true) {
+static MatcherProto makeMatcherProto(
+    const RoseBuildImpl &build, const vector<LitFragment> &fragments,
+    rose_literal_table table, bool delay_rebuild, u32 fp_table, size_t max_len,
+    u32 max_offset = ROSE_BOUND_INF, bool diagnose_feedback = true) {
     MatcherProto mp;
 
     if (delay_rebuild) {
@@ -1050,10 +1047,9 @@ buildDelayRebuildMatcherProto(const RoseBuildImpl &build,
         return nullptr;
     }
 
-    auto mp =
-        makeMatcherProto(build, fragments, ROSE_FLOATING, true,
-                         HS_FP_TABLE_UNKNOWN, longLitLengthThreshold,
-                         ROSE_BOUND_INF, false);
+    auto mp = makeMatcherProto(build, fragments, ROSE_FLOATING, true,
+                               HS_FP_TABLE_UNKNOWN, longLitLengthThreshold,
+                               ROSE_BOUND_INF, false);
     if (mp.lits.empty()) {
         DEBUG_PRINTF("empty delay rebuild matcher\n");
         return nullptr;
@@ -1096,10 +1092,10 @@ buildSmallBlockMatcherProto(const RoseBuildImpl &build,
         return nullptr;
     }
 
-    auto mp_anchored = makeMatcherProto(
-        build, fragments, ROSE_ANCHORED_SMALL_BLOCK, false,
-        HS_FP_TABLE_SMALL_BLOCK, ROSE_SMALL_BLOCK_LEN, ROSE_SMALL_BLOCK_LEN,
-        false);
+    auto mp_anchored =
+        makeMatcherProto(build, fragments, ROSE_ANCHORED_SMALL_BLOCK, false,
+                         HS_FP_TABLE_SMALL_BLOCK, ROSE_SMALL_BLOCK_LEN,
+                         ROSE_SMALL_BLOCK_LEN, false);
     if (mp_anchored.lits.empty()) {
         DEBUG_PRINTF("no small-block anchored literals\n");
         return nullptr;
@@ -1126,21 +1122,22 @@ buildSmallBlockMatcherProto(const RoseBuildImpl &build,
 
         fpCompileRecordCheck(build.cc,
                              HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
-        if (!fpFeedbackMatchesFinalRoseFragment(
-                build.cc, HS_FP_TABLE_SMALL_BLOCK, lit.s, lit.nocase, lit.msk,
-                lit.cmp)) {
+        if (!fpFeedbackMatchesFinalRoseFragment(build.cc,
+                                                HS_FP_TABLE_SMALL_BLOCK, lit.s,
+                                                lit.nocase, lit.msk, lit.cmp)) {
             continue;
         }
 
         fpCompileRecordHit(build.cc,
                            HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
-        fpCompileRecordBlocked(
-            build.cc, HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
+        fpCompileRecordBlocked(build.cc,
+                               HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
         // Small-block execution replaces the anchored and floating scans, so
         // dropping only this literal would be unsafe. Reject the whole
         // optional matcher and let block runtime use those normal paths.
         DEBUG_PRINTF("disabling small-block matcher due to fp feedback: "
-                     "'%s'\n", escapeString(lit.s).c_str());
+                     "'%s'\n",
+                     escapeString(lit.s).c_str());
         return nullptr;
     }
 #endif

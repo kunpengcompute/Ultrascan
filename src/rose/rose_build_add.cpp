@@ -957,9 +957,8 @@ static bool feedbackBlocksFinalRoseGraph(const RoseInGraph &ig,
             }
         }
 
-        const unsigned int table = use_eod_table
-                                       ? HS_FP_TABLE_EOD_ANCHORED
-                                       : HS_FP_TABLE_FLOATING;
+        const unsigned int table =
+            use_eod_table ? HS_FP_TABLE_EOD_ANCHORED : HS_FP_TABLE_FLOATING;
         const unsigned int checkpoint =
             msk.empty() ? HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT
                         : HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL;

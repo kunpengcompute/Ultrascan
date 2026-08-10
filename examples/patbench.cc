@@ -116,45 +116,45 @@
  */
 
 #include <algorithm>
-#include <cstring>
 #include <chrono>
 #include <climits>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <set>
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include <unistd.h>
 
 // We use the BSD primitives throughout as they exist on both BSD and Linux.
 #define __FAVOR_BSD
+#include <arpa/inet.h>
+#include <net/ethernet.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <netinet/ip_icmp.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
-#include <netinet/ip_icmp.h>
-#include <net/ethernet.h>
-#include <arpa/inet.h>
 
 #include <pcap.h>
 
 #include <hs.h>
 
 using std::cerr;
+using std::copy;
 using std::cout;
 using std::endl;
 using std::ifstream;
+using std::max;
+using std::min;
+using std::set;
 using std::string;
 using std::unordered_map;
 using std::vector;
-using std::set;
-using std::min;
-using std::max;
-using std::copy;
 
 enum Criterion {
     CRITERION_THROUGHPUT,
@@ -164,9 +164,7 @@ enum Criterion {
     CRITERION_SCRATCH_SIZE
 };
 
-static bool higher_is_better(Criterion c) {
-    return c == CRITERION_THROUGHPUT;
-}
+static bool higher_is_better(Criterion c) { return c == CRITERION_THROUGHPUT; }
 
 static void print_criterion(Criterion c, double val) {
     std::ios::fmtflags f(cout.flags());
@@ -204,8 +202,8 @@ struct FiveTuple {
         dstAddr = iphdr->ip_dst.s_addr;
 
         // UDP/TCP ports
-        const struct udphdr *uh = (const struct udphdr *)
-                (((const char *)iphdr) + (iphdr->ip_hl * 4));
+        const struct udphdr *uh =
+            (const struct udphdr *)(((const char *)iphdr) + (iphdr->ip_hl * 4));
         srcPort = uh->uh_sport;
         dstPort = uh->uh_dport;
     }
@@ -230,9 +228,8 @@ static bool payloadOffset(const unsigned char *pkt_data, unsigned int *offset,
                           unsigned int *length);
 
 // Match event handler: called every time Hyperscan finds a match.
-static
-int onMatch(unsigned int id, unsigned long long from, unsigned long long to,
-            unsigned int flags, void *ctx) {
+static int onMatch(unsigned int id, unsigned long long from,
+                   unsigned long long to, unsigned int flags, void *ctx) {
     // Our context points to a size_t storing the match count
     size_t *matches = (size_t *)ctx;
     (*matches)++;
@@ -242,18 +239,15 @@ int onMatch(unsigned int id, unsigned long long from, unsigned long long to,
 // Simple timing class
 class Clock {
 public:
-    void start() {
-        time_start = std::chrono::system_clock::now();
-    }
+    void start() { time_start = std::chrono::system_clock::now(); }
 
-    void stop() {
-        time_end = std::chrono::system_clock::now();
-    }
+    void stop() { time_end = std::chrono::system_clock::now(); }
 
     double seconds() const {
         std::chrono::duration<double> delta = time_end - time_start;
         return delta.count();
     }
+
 private:
     std::chrono::time_point<std::chrono::system_clock> time_start, time_end;
 };
@@ -281,6 +275,7 @@ private:
 
     // Count of matches found while scanning
     size_t matchCount = 0;
+
 public:
     ~Benchmark() {
         hs_free_scratch(scratch);
@@ -300,9 +295,7 @@ public:
             exit(-1);
         }
     }
-    const hs_database_t *getDatabase() const {
-        return db;
-    }
+    const hs_database_t *getDatabase() const { return db; }
 
     size_t getScratchSize() const {
         size_t scratch_size;
@@ -335,12 +328,14 @@ public:
             }
 
             // Valid TCP or UDP packet
-            const struct ip *iphdr = (const struct ip *)(pktData
-                    + sizeof(struct ether_header));
+            const struct ip *iphdr =
+                (const struct ip *)(pktData + sizeof(struct ether_header));
             const char *payload = (const char *)pktData + offset;
 
-            size_t id = stream_map.insert(std::make_pair(FiveTuple(iphdr),
-                                          stream_map.size())).first->second;
+            size_t id =
+                stream_map
+                    .insert(std::make_pair(FiveTuple(iphdr), stream_map.size()))
+                    .first->second;
 
             packets.push_back(string(payload, length));
             stream_ids.push_back(id);
@@ -360,14 +355,10 @@ public:
     }
 
     // Return the number of matches found.
-    size_t matches() const {
-        return matchCount;
-    }
+    size_t matches() const { return matchCount; }
 
     // Clear the number of matches found.
-    void clearMatches() {
-        matchCount = 0;
-    }
+    void clearMatches() { matchCount = 0; }
 
     // Open a Hyperscan stream for each stream in stream_ids
     void openStreams() {
@@ -399,9 +390,9 @@ public:
     void scanStreams() {
         for (size_t i = 0; i != packets.size(); ++i) {
             const std::string &pkt = packets[i];
-            hs_error_t err = hs_scan_stream(streams[stream_ids[i]],
-                                            pkt.c_str(), pkt.length(), 0,
-                                            scratch, onMatch, &matchCount);
+            hs_error_t err =
+                hs_scan_stream(streams[stream_ids[i]], pkt.c_str(),
+                               pkt.length(), 0, scratch, onMatch, &matchCount);
             if (err != HS_SUCCESS) {
                 cerr << "ERROR: Unable to scan packet. Exiting." << endl;
                 exit(-1);
@@ -414,8 +405,8 @@ public:
     void scanBlock() {
         for (size_t i = 0; i != packets.size(); ++i) {
             const std::string &pkt = packets[i];
-            hs_error_t err = hs_scan(db, pkt.c_str(), pkt.length(), 0,
-                                     scratch, onMatch, &matchCount);
+            hs_error_t err = hs_scan(db, pkt.c_str(), pkt.length(), 0, scratch,
+                                     onMatch, &matchCount);
             if (err != HS_SUCCESS) {
                 cerr << "ERROR: Unable to scan packet. Exiting." << endl;
                 exit(-1);
@@ -439,7 +430,6 @@ public:
     Sigdata() {}
     Sigdata(const char *filename) {
         parseFile(filename, patterns, flags, ids, originals);
-
     }
 
     const string &get_original(unsigned index) const {
@@ -470,8 +460,7 @@ public:
                 // The error does not refer to a particular expression.
                 cerr << "ERROR: " << compileErr->message << endl;
             } else {
-                cerr << "ERROR: Pattern '"
-                     << patterns[compileErr->expression]
+                cerr << "ERROR: Pattern '" << patterns[compileErr->expression]
                      << "' failed with error '" << compileErr->message << "'"
                      << endl;
             }
@@ -486,9 +475,7 @@ public:
         return db;
     }
 
-    unsigned size() const {
-        return patterns.size();
-    }
+    unsigned size() const { return patterns.size(); }
 
     Sigdata cloneExclude(const set<unsigned> &excludeIndexSet) const {
         Sigdata c;
@@ -504,37 +491,47 @@ public:
     }
 };
 
-static
-void usage(const char *) {
+static void usage(const char *) {
     cerr << "Usage:" << endl << endl;
     cerr << "  patbench [-n repeats] [ -G generations] [ -C criterion ]" << endl
          << "           [ -F factor_group_size ] [ -N | -S ] [ -g OVERRIDES ]"
          << endl
-         << "           <pattern file> <pcap file>" << endl << endl
+         << "           <pattern file> <pcap file>" << endl
+         << endl
          << "    -n repeats sets the number of times the PCAP is repeatedly "
-            "scanned" << endl << "       with the pattern." << endl
+            "scanned"
+         << endl
+         << "       with the pattern." << endl
          << "    -G generations sets the number of generations that the "
-            "algorithm is" << endl << "       run for." << endl
+            "algorithm is"
+         << endl
+         << "       run for." << endl
          << "    -N sets non-streaming mode, -S sets streaming mode (default)."
-         << endl << "    -F sets the factor group size (must be >0); this "
-                    "allows the detection" << endl
+         << endl
+         << "    -F sets the factor group size (must be >0); this "
+            "allows the detection"
+         << endl
          << "       of multiple interacting factors." << endl
-         << "    -g OVERRIDES  Overrides for the grey box." << endl << "" << endl
+         << "    -g OVERRIDES  Overrides for the grey box." << endl
+         << "" << endl
          << "    -C sets the 'criterion', which can be either:" << endl
          << "         t  throughput (the default) - this requires a pcap file"
-         << endl << "         r  scratch size" << endl
+         << endl
+         << "         r  scratch size" << endl
          << "         s  stream state size" << endl
-         << "         c  compile time" << endl << "         b  bytecode size"
-         << endl << endl
+         << "         c  compile time" << endl
+         << "         b  bytecode size" << endl
+         << endl
          << "We recommend the use of a utility like 'taskset' on "
-            "multiprocessor hosts to" << endl
+            "multiprocessor hosts to"
+         << endl
          << "lock execution to a single processor: this will remove processor "
-            "migration" << endl
+            "migration"
+         << endl
          << "by the scheduler as a source of noise in the results." << endl;
 }
 
-static
-double measure_stream_time(Benchmark &bench, unsigned int repeatCount) {
+static double measure_stream_time(Benchmark &bench, unsigned int repeatCount) {
     Clock clock;
     bench.clearMatches();
     clock.start();
@@ -548,8 +545,7 @@ double measure_stream_time(Benchmark &bench, unsigned int repeatCount) {
     return secsScan;
 }
 
-static
-double measure_block_time(Benchmark &bench, unsigned int repeatCount) {
+static double measure_block_time(Benchmark &bench, unsigned int repeatCount) {
     Clock clock;
     bench.clearMatches();
     clock.start();
@@ -561,10 +557,9 @@ double measure_block_time(Benchmark &bench, unsigned int repeatCount) {
     return secsScan;
 }
 
-static
-double eval_set(Benchmark &bench, Sigdata &sigs, unsigned int mode,
-                unsigned repeatCount, Criterion criterion,
-                bool diagnose = true) {
+static double eval_set(Benchmark &bench, Sigdata &sigs, unsigned int mode,
+                       unsigned repeatCount, Criterion criterion,
+                       bool diagnose = true) {
     double compileTime = 0;
     bench.setDatabase(sigs.compileDatabase(mode, &compileTime));
 
@@ -779,8 +774,8 @@ int main(int argc, char **argv) {
         std::ios::fmtflags out_f(cout.flags());
         cout << "Performance: ";
         print_criterion(criterion, best);
-        cout << " (" << std::fixed << std::setprecision(3) << (best / score_base)
-             << "x) after cutting:" << endl;
+        cout << " (" << std::fixed << std::setprecision(3)
+             << (best / score_base) << "x) after cutting:" << endl;
         cout.flags(out_f);
 
         // s now has factor_max signatures
@@ -800,9 +795,8 @@ int main(int argc, char **argv) {
  * given ethernet frame. Offset into the packet, and the length of the payload
  * are returned in the arguments @a offset and @a length.
  */
-static
-bool payloadOffset(const unsigned char *pkt_data, unsigned int *offset,
-                   unsigned int *length) {
+static bool payloadOffset(const unsigned char *pkt_data, unsigned int *offset,
+                          unsigned int *length) {
     const ip *iph = (const ip *)(pkt_data + sizeof(ether_header));
     const tcphdr *th = nullptr;
 
@@ -843,19 +837,26 @@ static unsigned parseFlags(const string &flagsStr) {
     for (const auto &c : flagsStr) {
         switch (c) {
         case 'i':
-            flags |= HS_FLAG_CASELESS; break;
+            flags |= HS_FLAG_CASELESS;
+            break;
         case 'm':
-            flags |= HS_FLAG_MULTILINE; break;
+            flags |= HS_FLAG_MULTILINE;
+            break;
         case 's':
-            flags |= HS_FLAG_DOTALL; break;
+            flags |= HS_FLAG_DOTALL;
+            break;
         case 'H':
-            flags |= HS_FLAG_SINGLEMATCH; break;
+            flags |= HS_FLAG_SINGLEMATCH;
+            break;
         case 'V':
-            flags |= HS_FLAG_ALLOWEMPTY; break;
+            flags |= HS_FLAG_ALLOWEMPTY;
+            break;
         case '8':
-            flags |= HS_FLAG_UTF8; break;
+            flags |= HS_FLAG_UTF8;
+            break;
         case 'W':
-            flags |= HS_FLAG_UCP; break;
+            flags |= HS_FLAG_UCP;
+            break;
         case '\r': // stray carriage-return
             break;
         default:

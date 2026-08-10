@@ -187,8 +187,8 @@ static bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v,
     }
 
     ue2_literal rose_literal(literal, nocase);
-    const unsigned int fp_table = fpFeedbackTableForDirectRoseLiteral(
-        ng.cc, anchored, eod, rose_literal);
+    const unsigned int fp_table =
+        fpFeedbackTableForDirectRoseLiteral(ng.cc, anchored, eod, rose_literal);
     if (fpFeedbackBlocksRoseLiteral(ng.cc, fp_table, rose_literal,
                                     HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT)) {
         DEBUG_PRINTF("skipping literal split due to fp feedback\n");
