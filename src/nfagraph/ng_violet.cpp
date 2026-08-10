@@ -221,27 +221,14 @@ static bool fpFeedbackLiteralSetHasBad(const CompileContext &cc,
 }
 
 static bool fpFeedbackVioletLiteralIsBad(const CompileContext &cc,
-                                         bool creates_anchored,
                                          const ue2_literal &lit) {
-    /*
-     * An apparently anchored Violet candidate is not guaranteed to reach the
-     * anchored matcher: doRoseLiteralVertex() can still fall back to the
-     * floating table if anchored construction or overlap checks fail. Check
-     * the floating identity first, then the anchored identity when relevant.
-     */
-    if (fpFeedbackLiteralIsBad(cc, HS_FP_TABLE_FLOATING, lit)) {
-        return true;
-    }
-
-    return creates_anchored &&
-           fpFeedbackLiteralIsBad(cc, HS_FP_TABLE_ANCHORED, lit);
+    return fpFeedbackLiteralIsBad(cc, HS_FP_TABLE_FLOATING, lit);
 }
 
 static bool fpFeedbackVioletLiteralSetHasBad(
-    const CompileContext &cc, bool creates_anchored,
-    const set<ue2_literal> &lits) {
+    const CompileContext &cc, const set<ue2_literal> &lits) {
     for (const auto &lit : lits) {
-        if (fpFeedbackVioletLiteralIsBad(cc, creates_anchored, lit)) {
+        if (fpFeedbackVioletLiteralIsBad(cc, lit)) {
             return true;
         }
     }
@@ -265,8 +252,7 @@ fpFeedbackDropBadVertLitInfos(const CompileContext &cc,
             continue;
         }
 
-        if (fpFeedbackVioletLiteralSetHasBad(cc, (*it)->creates_anchored,
-                                             (*it)->lit)) {
+        if (fpFeedbackVioletLiteralSetHasBad(cc, (*it)->lit)) {
             DEBUG_PRINTF("dropping Violet literal candidate due to fp "
                          "feedback\n");
             it = lits->erase(it);
@@ -1029,7 +1015,7 @@ static unique_ptr<VertLitInfo> findSimplePrefixSplit(const NGHolder &g,
         return nullptr;
     }
 
-    if (fpFeedbackVioletLiteralIsBad(cc, anchored, best_lit)) {
+    if (fpFeedbackVioletLiteralIsBad(cc, best_lit)) {
         DEBUG_PRINTF("rejecting prefix literal due to fp feedback: '%s'\n",
                      dumpString(best_lit).c_str());
         return nullptr;
@@ -1129,8 +1115,7 @@ static bool splitRoseEdge(const NGHolder &base_graph, RoseInGraph &vg,
     const vector<NFAVertex> &splitters = split.vv;
     assert(!splitters.empty());
 
-    if (fpFeedbackVioletLiteralSetHasBad(cc, split.creates_anchored,
-                                         split.lit)) {
+    if (fpFeedbackVioletLiteralSetHasBad(cc, split.lit)) {
         DEBUG_PRINTF("skipping Violet literal split due to fp feedback\n");
         return false;
     }
@@ -1494,7 +1479,7 @@ static bool doNetflowCut(NGHolder &h, const vector<NFAVertexDepth> *depths,
         set<ue2_literal> lits = getLiteralSet(h, e);
         sanitizeAndCompressAndScore(lits);
 
-        if (fpFeedbackVioletLiteralSetHasBad(cc, for_prefix, lits)) {
+        if (fpFeedbackVioletLiteralSetHasBad(cc, lits)) {
             DEBUG_PRINTF("skipping netflow cut due to fp feedback\n");
             cut_lits.clear();
             return false;

@@ -968,15 +968,6 @@ static bool feedbackBlocksFinalRoseGraph(const RoseInGraph &ig,
             DEBUG_PRINTF("rejecting final Rose graph due to fp feedback\n");
             return true;
         }
-
-        if (!use_eod_table && ig[v].delay && cc.streaming &&
-            fpFeedbackBlocksRoseFragment(
-                cc, HS_FP_TABLE_DELAY_REBUILD, ig[v].s, &msk, &cmp,
-                HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM)) {
-            DEBUG_PRINTF("rejecting final Rose graph due to delay-rebuild fp "
-                         "feedback\n");
-            return true;
-        }
     }
 
     return false;
@@ -1265,33 +1256,6 @@ static bool transformInfixToDelay(const RoseInGraph &ig, const RoseInEdge &e,
     return true;
 }
 
-static bool feedbackBlocksDelayTransform(const RoseInGraph &ig,
-                                         RoseInVertex v,
-                                         const CompileContext &cc) {
-#ifndef HS_ENABLE_FP_FEEDBACK
-    (void)ig;
-    (void)v;
-    (void)cc;
-    return false;
-#else
-    if (!cc.streaming || ig[v].type != RIV_LITERAL) {
-        return false;
-    }
-
-    vector<u8> msk, cmp;
-    if (cc.grey.roseHamsterMasks && in_degree(v, ig) == 1) {
-        const RoseInEdge e = *in_edges(v, ig).first;
-        if (ig[e].graph) {
-            findRoseLiteralMask(*ig[e].graph, ig[e].graph_lag, msk, cmp);
-        }
-    }
-
-    return fpFeedbackBlocksRoseFragment(
-        cc, HS_FP_TABLE_DELAY_REBUILD, ig[v].s, &msk, &cmp,
-        HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM);
-#endif
-}
-
 static void transformLiteralDelay(RoseInGraph &ig, const CompileContext &cc) {
     if (!cc.grey.roseTransformDelay) {
         return;
@@ -1335,12 +1299,6 @@ static void transformLiteralDelay(RoseInGraph &ig, const CompileContext &cc) {
 
         if (delay > max_delay) {
             DEBUG_PRINTF("delay=%u > max_delay=%u\n", delay, max_delay);
-            continue;
-        }
-
-        if (feedbackBlocksDelayTransform(ig, u, cc)) {
-            DEBUG_PRINTF("not transforming infix to delay due to fp "
-                         "feedback\n");
             continue;
         }
 
@@ -1536,12 +1494,6 @@ static void transformSuffixDelay(RoseInGraph &ig, const CompileContext &cc) {
 
         if (delay + ig[u].s.length() - 1 > max_history) {
             DEBUG_PRINTF("delay too large for history\n");
-            continue;
-        }
-
-        if (feedbackBlocksDelayTransform(ig, u, cc)) {
-            DEBUG_PRINTF("not transforming suffix to delay due to fp "
-                         "feedback\n");
             continue;
         }
 

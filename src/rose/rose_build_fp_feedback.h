@@ -191,22 +191,11 @@ static inline bool fpFeedbackBlocksRoseLiteral(
                                         checkpoint);
 }
 
-static inline unsigned int fpFeedbackTableForRoseCandidate(bool anchored,
-                                                           bool eod) {
-    if (eod) {
-        return HS_FP_TABLE_EOD_ANCHORED;
-    }
-    if (anchored) {
-        return HS_FP_TABLE_UNKNOWN;
-    }
-    return HS_FP_TABLE_FLOATING;
-}
-
 /**
  * Resolve the table used by a literal passed directly to RoseBuild::add().
  * Anchored literals beyond the anchored matcher region necessarily fall back
  * to the floating table in tryForAnchoredVertex(). Shorter anchored literals
- * are checked when they are added to the anchored matcher.
+ * are outside the feedback collection scope and therefore remain unknown.
  */
 static inline unsigned int fpFeedbackTableForDirectRoseLiteral(
     const CompileContext &cc, bool anchored, bool eod,

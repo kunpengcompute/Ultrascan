@@ -65,8 +65,10 @@ typedef struct hs_compile_context hs_compile_context_t;
 #define HS_FP_COMPILE_CHECKPOINT_REWRITE_ANCHORED_REHOME 8U
 #define HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX 9U
 #define HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK 10U
+/* Retired compatibility slot; anchored fragments are not collected. */
 #define HS_FP_COMPILE_CHECKPOINT_ANCHORED_ACYCLIC 11U
 #define HS_FP_COMPILE_CHECKPOINT_MIXED_SENSITIVITY 12U
+/* Retired compatibility slot; delay rebuild is outside feedback scope. */
 #define HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM 13U
 #define HS_FP_COMPILE_CHECKPOINT_COUNT 14U
 

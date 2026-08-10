@@ -212,13 +212,7 @@ int roseAnchoredCallback(u64a start, u64a end, u32 id, void *ctx) {
 
     // Note that the "id" we have been handed is the program offset.
     const u8 flags = ROSE_PROG_FLAG_IN_ANCHORED;
-#ifdef HS_ENABLE_FP_FEEDBACK
-    hs_fp_collector_begin_trigger(scratch, id);
-#endif
     hwlmcb_rv_t rv = roseRunProgram(t, scratch, id, start, real_end, flags);
-#ifdef HS_ENABLE_FP_FEEDBACK
-    hs_fp_collector_end_trigger(scratch);
-#endif
     if (rv == HWLM_TERMINATE_MATCHING) {
         assert(can_stop_matching(scratch));
         DEBUG_PRINTF("caller requested termination\n");

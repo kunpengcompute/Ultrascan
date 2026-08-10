@@ -1007,8 +1007,9 @@ hs_error_t hs_fp_feedback_clone(const hs_fp_feedback_t *src,
 static char import_fragment_is_valid(
     const struct hs_fp_feedback_import_fragment *fragment) {
     if (!fragment || !fragment->bytes || !fragment->length ||
-        fragment->table <= HS_FP_TABLE_UNKNOWN ||
-        fragment->table > HS_FP_TABLE_ANCHORED ||
+        (fragment->table != HS_FP_TABLE_FLOATING &&
+         fragment->table != HS_FP_TABLE_EOD_ANCHORED &&
+         fragment->table != HS_FP_TABLE_SMALL_BLOCK) ||
         fragment->length > ROSE_FP_FRAGMENT_BYTES_MAX ||
         fragment->mask_length > ROSE_FP_FRAGMENT_BYTES_MAX) {
         return 0;

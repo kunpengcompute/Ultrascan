@@ -493,16 +493,6 @@ static bool feedbackBlocksTransientMask(const vector<CharReach> &mask, bool eod,
                          escapeString(lit).c_str());
             return true;
         }
-
-        if (!eod && cc.streaming && delay &&
-            fpFeedbackBlocksRoseFragment(
-                cc, HS_FP_TABLE_DELAY_REBUILD, lit, &msk, &cmp,
-                HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM)) {
-            DEBUG_PRINTF("rejecting transient delay-rebuild literal due to "
-                         "fp feedback: '%s'\n",
-                         escapeString(lit).c_str());
-            return true;
-        }
     }
 
     return false;
@@ -714,10 +704,7 @@ static bool doAddMask(RoseBuildImpl &tbi, bool anchored,
             findMaskLiteral(mask2, tbi.cc.streaming, &lit2, &lit2_offset,
                             tbi.cc.grey);
 
-            if (lit2.length() >= MIN_MASK_LIT_LEN &&
-                !feedbackBlocksUnmaskedMaskLiteral(
-                    lit2, fpFeedbackTableForRoseCandidate(anchored, false),
-                    tbi.cc)) {
+            if (lit2.length() >= MIN_MASK_LIT_LEN) {
                 u32 prefix2_len = lit2_offset + lit2.length();
                 assert(prefix2_len < minBound);
                 RoseInVertex u =
@@ -788,8 +775,8 @@ static bool checkAllowMask(const vector<CharReach> &mask, ue2_literal *lit,
         return false;
     }
 
-    if (feedbackBlocksUnmaskedMaskLiteral(
-            *lit, fpFeedbackTableForRoseCandidate(anchored, false), cc)) {
+    if (!anchored && feedbackBlocksUnmaskedMaskLiteral(
+                         *lit, HS_FP_TABLE_FLOATING, cc)) {
         return false;
     }
 

@@ -1583,9 +1583,9 @@ const char *tableName(unsigned int table) {
     case HS_FP_TABLE_SMALL_BLOCK:
         return "small";
     case HS_FP_TABLE_DELAY_REBUILD:
-        return "delay";
+        return "reserved-delay";
     case HS_FP_TABLE_ANCHORED:
-        return "anchored";
+        return "reserved-anchored";
     default:
         return "unknown";
     }
@@ -1598,7 +1598,7 @@ const char *compileCheckpointName(unsigned int checkpoint) {
     case HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT:
         return "literal_split";
     case HS_FP_COMPILE_CHECKPOINT_ANCHORED_ACYCLIC:
-        return "anchored_acyclic";
+        return "retired_anchored_acyclic";
     case HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET:
         return "small_literal_set";
     case HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL:
@@ -1606,7 +1606,7 @@ const char *compileCheckpointName(unsigned int checkpoint) {
     case HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT:
         return "violet_split";
     case HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM:
-        return "delay_transform";
+        return "retired_delay_transform";
     case HS_FP_COMPILE_CHECKPOINT_SOMBE_LITERAL:
         return "sombe_literal";
     case HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX:
@@ -2708,11 +2708,9 @@ void printCompileContextDiagnostics(
     const CheckpointName checkpoints[] = {
         {HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL, "shortcut_literal", true},
         {HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT, "literal_split", true},
-        {HS_FP_COMPILE_CHECKPOINT_ANCHORED_ACYCLIC, "anchored_acyclic", true},
         {HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET, "small_literal_set", true},
         {HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL, "masked_literal", true},
         {HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT, "violet_split", true},
-        {HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM, "delay_transform", true},
         {HS_FP_COMPILE_CHECKPOINT_SOMBE_LITERAL, "sombe_literal", true},
         {HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX,
          "rewrite_flood_suffix", true},
@@ -2720,9 +2718,9 @@ void printCompileContextDiagnostics(
          "rewrite_anchored_rehome", true},
         {HS_FP_COMPILE_CHECKPOINT_REWRITE_EOD_TO_FLOATING,
          "rewrite_eod_to_floating", true},
-        {HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK, "rewrite_small_block",
-         false},
         {HS_FP_COMPILE_CHECKPOINT_MIXED_SENSITIVITY, "mixed_sensitivity",
+         true},
+        {HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK, "rewrite_small_block",
          true},
         {HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD, "matcher_build", false},
     };
@@ -2770,9 +2768,10 @@ void printCompileContextDiagnostics(
     const int checkpointNameWidth = 28;
     const int checkpointCountWidth = 14;
     cout << "\nCompile feedback checkpoints:\n";
-    cout << "Note: rewrite_small_block and matcher_build are diagnostic-only; "
-            "matcher_build hits are residual feedback identities in final "
-            "HWLM matchers. Diagnostic-only rows are excluded from candidate "
+    cout << "Note: rewrite_small_block disables the whole optional small-"
+            "block matcher on a feedback hit; matcher_build is diagnostic-"
+            "only and reports residual feedback identities in final HWLM "
+            "matchers. Diagnostic-only rows are excluded from candidate "
             "totals.\n";
     cout << left << setw(checkpointNameWidth) << "checkpoint" << right
          << setw(checkpointCountWidth) << "checked"

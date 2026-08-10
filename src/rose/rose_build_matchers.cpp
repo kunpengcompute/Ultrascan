@@ -1052,7 +1052,8 @@ buildDelayRebuildMatcherProto(const RoseBuildImpl &build,
 
     auto mp =
         makeMatcherProto(build, fragments, ROSE_FLOATING, true,
-                         HS_FP_TABLE_DELAY_REBUILD, longLitLengthThreshold);
+                         HS_FP_TABLE_UNKNOWN, longLitLengthThreshold,
+                         ROSE_BOUND_INF, false);
     if (mp.lits.empty()) {
         DEBUG_PRINTF("empty delay rebuild matcher\n");
         return nullptr;
@@ -1133,10 +1134,14 @@ buildSmallBlockMatcherProto(const RoseBuildImpl &build,
 
         fpCompileRecordHit(build.cc,
                            HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
-        fpCompileRecordPassed(build.cc,
-                              HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
-        DEBUG_PRINTF("fp feedback observed in small-block matcher: '%s'\n",
-                     escapeString(lit.s).c_str());
+        fpCompileRecordBlocked(
+            build.cc, HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
+        // Small-block execution replaces the anchored and floating scans, so
+        // dropping only this literal would be unsafe. Reject the whole
+        // optional matcher and let block runtime use those normal paths.
+        DEBUG_PRINTF("disabling small-block matcher due to fp feedback: "
+                     "'%s'\n", escapeString(lit.s).c_str());
+        return nullptr;
     }
 #endif
 
