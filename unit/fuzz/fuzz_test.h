@@ -24,6 +24,8 @@ struct FuzzTestParams {
     bool fullCharset;          // 是否使用完整字符集
 };
 
+using FuzzProgressCallback = std::function<void(const std::string&)>;
+
 // 生成器接口
 class Generator {
 public:
@@ -73,6 +75,11 @@ public:
     virtual bool scanVector(const std::vector<std::string>& data) = 0;
     virtual bool cloneScratch() = 0;
     virtual bool getScratchSize() = 0;
+    virtual hs_error_t falsePositiveFeedbackCapability() = 0;
+    virtual bool falsePositiveFeedback(
+        const FuzzTestCase& testCase, const std::vector<std::string>& data,
+        const FuzzProgressCallback& progress) = 0;
+    virtual bool falsePositiveFeedbackInvalidArgs() = 0;
     virtual void printSummary(std::ostream& os) const = 0;
     virtual void reset() = 0;
 };

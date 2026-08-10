@@ -32,7 +32,18 @@ set(SOURCES
 )
 
 # 链接库
-find_library(HS_LIBRARY hs PATHS ${HS_BUILD_DIR}/lib)
+find_library(HS_LIBRARY hs
+    PATHS "${HS_BUILD_DIR}/lib"
+    NO_DEFAULT_PATH
+)
+
+if(NOT HS_LIBRARY)
+    message(FATAL_ERROR
+        "Unable to find libhs under ${HS_BUILD_DIR}/lib. "
+        "Set HS_BUILD_DIR to the Hyperscan build being tested.")
+endif()
+
+message(STATUS "Fuzz tests use Hyperscan library: ${HS_LIBRARY}")
 
 # 创建可执行文件
 add_executable(hyperscan_fuzz_test ${SOURCES})

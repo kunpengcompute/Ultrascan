@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <sstream>
 #include <streambuf>
+#include <tuple>
+#include <vector>
 
 namespace {
 
@@ -141,6 +144,186 @@ private:
     std::map<std::string, ApiStats> stats;
     std::map<std::string, unsigned long long> messages;
 };
+
+struct MatchRecord {
+    unsigned int inputIndex = 0;
+    unsigned int callbackPhase = 0;
+    unsigned int id = 0;
+    unsigned long long from = 0;
+    unsigned long long to = 0;
+    unsigned int flags = 0;
+
+    bool operator<(const MatchRecord &other) const {
+        return std::tie(inputIndex, callbackPhase, id, from, to, flags) <
+               std::tie(other.inputIndex, other.callbackPhase, other.id,
+                        other.from, other.to, other.flags);
+    }
+
+    bool operator==(const MatchRecord &other) const {
+        return inputIndex == other.inputIndex &&
+               callbackPhase == other.callbackPhase && id == other.id &&
+               from == other.from && to == other.to && flags == other.flags;
+    }
+};
+
+struct MatchCapture {
+    unsigned int currentInput = 0;
+    unsigned int currentPhase = 0;
+    std::vector<unsigned long long> vectorEnds;
+    std::vector<MatchRecord> matches;
+};
+
+struct LocalDatabase {
+    hs_database_t *db = nullptr;
+    hs_scratch_t *scratch = nullptr;
+
+    LocalDatabase() = default;
+    LocalDatabase(const LocalDatabase &) = delete;
+    LocalDatabase &operator=(const LocalDatabase &) = delete;
+
+    ~LocalDatabase() {
+        if (scratch) {
+            hs_free_scratch(scratch);
+        }
+        if (db) {
+            hs_free_database(db);
+        }
+    }
+};
+
+struct ScopedCollector {
+    hs_fp_collector_t *value = nullptr;
+
+    ScopedCollector() = default;
+    ScopedCollector(const ScopedCollector &) = delete;
+    ScopedCollector &operator=(const ScopedCollector &) = delete;
+
+    ~ScopedCollector() {
+        if (value) {
+            hs_fp_collector_free(value);
+        }
+    }
+};
+
+struct ScopedFeedback {
+    hs_fp_feedback_t *value = nullptr;
+
+    ScopedFeedback() = default;
+    ScopedFeedback(const ScopedFeedback &) = delete;
+    ScopedFeedback &operator=(const ScopedFeedback &) = delete;
+
+    ~ScopedFeedback() {
+        if (value) {
+            hs_fp_feedback_free(value);
+        }
+    }
+};
+
+int HS_CDECL captureMatch(unsigned int id, unsigned long long from,
+                          unsigned long long to, unsigned int flags,
+                          void *context) {
+    auto *capture = static_cast<MatchCapture *>(context);
+    if (!capture) {
+        return 0;
+    }
+
+    unsigned int inputIndex = capture->currentInput;
+    if (!capture->vectorEnds.empty()) {
+        auto it = std::lower_bound(capture->vectorEnds.begin(),
+                                   capture->vectorEnds.end(), to);
+        if (it == capture->vectorEnds.end()) {
+            inputIndex = static_cast<unsigned int>(
+                capture->vectorEnds.size() - 1);
+        } else {
+            inputIndex = static_cast<unsigned int>(
+                std::distance(capture->vectorEnds.begin(), it));
+        }
+    }
+
+    capture->matches.push_back(
+        {inputIndex, capture->currentPhase, id, from, to, flags});
+    return 0;
+}
+
+std::string describeMatch(const MatchRecord &match) {
+    std::ostringstream out;
+    out << "input=" << match.inputIndex
+        << ", phase=" << match.callbackPhase << ", id=" << match.id
+        << ", from=" << match.from << ", to=" << match.to
+        << ", flags=" << match.flags;
+    return out.str();
+}
+
+struct FeedbackDumpStats {
+    unsigned int summaryCalls = 0;
+    unsigned int fragmentCalls = 0;
+    unsigned int selectedCalls = 0;
+    unsigned long long triggerCount = 0;
+    unsigned long long trueTriggerCount = 0;
+    unsigned long long falsePositiveCount = 0;
+    hs_fp_feedback_dump_summary_t summary = {};
+    bool invalid = false;
+    std::string invalidReason;
+
+    void fail(const std::string &reason) {
+        if (!invalid) {
+            invalidReason = reason;
+        }
+        invalid = true;
+    }
+};
+
+void HS_CDECL feedbackDumpSummary(const hs_fp_feedback_dump_summary_t *summary,
+                                  void *context) {
+    auto *state = static_cast<FeedbackDumpStats *>(context);
+    if (!state) {
+        return;
+    }
+    if (!summary) {
+        state->fail("null summary callback payload");
+        return;
+    }
+
+    state->summaryCalls++;
+    state->summary = *summary;
+    if (summary->bad_fragment_count > summary->fragment_count ||
+        summary->true_trigger_count > summary->trigger_count ||
+        summary->false_positive_count > summary->trigger_count) {
+        state->fail("invalid summary counters");
+    }
+}
+
+void HS_CDECL feedbackDumpFragment(const hs_fp_fragment_info_t *fragment,
+                                   unsigned int selected, void *context) {
+    auto *state = static_cast<FeedbackDumpStats *>(context);
+    if (!state) {
+        return;
+    }
+    if (!fragment) {
+        state->fail("null fragment callback payload");
+        return;
+    }
+
+    state->fragmentCalls++;
+    if (selected) {
+        state->selectedCalls++;
+    }
+
+    if (fragment->table < HS_FP_TABLE_FLOATING ||
+        fragment->table > HS_FP_TABLE_SMALL_BLOCK) {
+        state->fail("fragment uses an unknown or reserved table");
+    } else if ((fragment->length && !fragment->bytes) ||
+               (fragment->mask_length &&
+                (!fragment->mask || !fragment->cmp)) ||
+               fragment->true_trigger_count > fragment->trigger_count ||
+               fragment->false_positive_count > fragment->trigger_count) {
+        state->fail("invalid fragment callback payload");
+    }
+
+    state->triggerCount += fragment->trigger_count;
+    state->trueTriggerCount += fragment->true_trigger_count;
+    state->falsePositiveCount += fragment->false_positive_count;
+}
 
 } // namespace
 
@@ -1474,6 +1657,170 @@ public:
         return true;
     }
 
+    hs_error_t falsePositiveFeedbackCapability() override {
+        const char *expressions[] = {"abc"};
+        const unsigned int flags[] = {0};
+        const unsigned int ids[] = {1};
+        hs_database_t *probeDb = nullptr;
+        hs_compile_error_t *probeError = nullptr;
+        hs_error_t result = hs_compile_multi(
+            expressions, flags, ids, 1, HS_MODE_BLOCK, nullptr, &probeDb,
+            &probeError);
+        if (probeError) {
+            hs_free_compile_error(probeError);
+        }
+        if (result != HS_SUCCESS || !probeDb) {
+            if (result == HS_SUCCESS) {
+                result = HS_UNKNOWN_ERROR;
+            }
+            if (probeDb) {
+                const hs_error_t freeErr = hs_free_database(probeDb);
+                if (freeErr != HS_SUCCESS) {
+                    result = freeErr;
+                }
+            }
+            stats.error("fp_feedback_capability_probe", result);
+            return result;
+        }
+
+        hs_fp_collector_t *collector = nullptr;
+        result = hs_fp_collector_create(probeDb, &collector);
+
+        hs_error_t collectorFreeErr = HS_SUCCESS;
+        if (collector) {
+            collectorFreeErr = hs_fp_collector_free(collector);
+        } else if (result == HS_SUCCESS) {
+            result = HS_UNKNOWN_ERROR;
+        }
+        const hs_error_t databaseFreeErr = hs_free_database(probeDb);
+
+        if (collectorFreeErr != HS_SUCCESS) {
+            result = collectorFreeErr;
+        } else if (databaseFreeErr != HS_SUCCESS) {
+            result = databaseFreeErr;
+        }
+
+        if (result == HS_SUCCESS) {
+            stats.ok("fp_feedback_capability_probe");
+        } else if (result == HS_ARCH_ERROR) {
+            stats.skipped("fp_feedback_capability_probe");
+        } else {
+            stats.error("fp_feedback_capability_probe", result);
+        }
+        return result;
+    }
+
+    bool falsePositiveFeedback(
+            const FuzzTestCase& testCase,
+            const std::vector<std::string>& data,
+            const FuzzProgressCallback& progress) override {
+        bool ok = true;
+        if (!exerciseFalsePositiveFeedbackMode(testCase, data, HS_MODE_BLOCK,
+                                               "block", progress)) {
+            ok = false;
+        }
+        if (!exerciseFalsePositiveFeedbackMode(testCase, data, HS_MODE_STREAM,
+                                               "stream", progress)) {
+            ok = false;
+        }
+        if (!exerciseFalsePositiveFeedbackMode(testCase, data,
+                                               HS_MODE_VECTORED, "vector",
+                                               progress)) {
+            ok = false;
+        }
+        return ok;
+    }
+
+    bool falsePositiveFeedbackInvalidArgs() override {
+        bool ok = true;
+        ScopedCollector unexpectedCollector;
+        ScopedFeedback unexpectedFeedback;
+
+        ok &= recordExpectedInvalid(
+            "hs_fp_collector_create_null_out",
+            hs_fp_collector_create(nullptr, nullptr));
+        ok &= recordExpectedInvalid(
+            "hs_fp_collector_create_null_db",
+            hs_fp_collector_create(nullptr, &unexpectedCollector.value));
+        if (unexpectedCollector.value) {
+            stats.error("hs_fp_collector_create_null_db",
+                        "invalid call produced a collector");
+            ok = false;
+        }
+        ok &= recordExpectedInvalid("hs_fp_collector_reset_null",
+                                    hs_fp_collector_reset(nullptr));
+
+        hs_fp_collector_t *nullCollector = nullptr;
+        hs_fp_collector_t *mergeOutput = nullptr;
+        ok &= recordExpectedInvalid(
+            "hs_fp_collector_merge_null_inputs",
+            hs_fp_collector_merge(nullptr, 0, &mergeOutput));
+        if (mergeOutput) {
+            stats.error("hs_fp_collector_merge_null_inputs",
+                        "invalid call produced a collector");
+            hs_fp_collector_free(mergeOutput);
+            mergeOutput = nullptr;
+            ok = false;
+        }
+        ok &= recordExpectedInvalid(
+            "hs_fp_collector_merge_zero_count",
+            hs_fp_collector_merge(&nullCollector, 0, &mergeOutput));
+        ok &= recordExpectedInvalid(
+            "hs_fp_collector_merge_null_member",
+            hs_fp_collector_merge(&nullCollector, 1, &mergeOutput));
+        ok &= recordExpectedInvalid(
+            "hs_fp_collector_merge_null_out",
+            hs_fp_collector_merge(&nullCollector, 1, nullptr));
+
+        ok &= recordExpectedInvalid(
+            "hs_fp_collector_to_feedback_null_collector",
+            hs_fp_collector_to_feedback(nullptr, nullptr,
+                                        &unexpectedFeedback.value));
+        if (unexpectedFeedback.value) {
+            stats.error("hs_fp_collector_to_feedback_null_collector",
+                        "invalid call produced feedback");
+            ok = false;
+        }
+        ok &= recordExpectedInvalid(
+            "hs_fp_collector_to_feedback_null_out",
+            hs_fp_collector_to_feedback(nullptr, nullptr, nullptr));
+        ok &= recordExpectedInvalid(
+            "hs_fp_collector_to_feedback_with_dump_null_collector",
+            hs_fp_collector_to_feedback_with_dump(
+                nullptr, nullptr, nullptr, nullptr,
+                &unexpectedFeedback.value));
+        ok &= recordExpectedInvalid(
+            "hs_fp_collector_to_feedback_with_dump_null_out",
+            hs_fp_collector_to_feedback_with_dump(
+                nullptr, nullptr, nullptr, nullptr, nullptr));
+
+        ok &= recordExpectedSuccess("hs_fp_collector_free_null",
+                                    hs_fp_collector_free(nullptr));
+        ok &= recordExpectedSuccess("hs_fp_feedback_free_null",
+                                    hs_fp_feedback_free(nullptr));
+
+        ok &= recordExpectedInvalid(
+            "hs_scan_with_collector_null_db",
+            hs_scan_with_collector(nullptr, "", 0, 0, nullptr, nullptr,
+                                   nullptr, nullptr));
+        ok &= recordExpectedInvalid(
+            "hs_scan_stream_with_collector_null_stream",
+            hs_scan_stream_with_collector(nullptr, "", 0, 0, nullptr,
+                                          nullptr, nullptr, nullptr));
+        ok &= recordExpectedInvalid(
+            "hs_scan_vector_with_collector_null_db",
+            hs_scan_vector_with_collector(nullptr, nullptr, nullptr, 0, 0,
+                                          nullptr, nullptr, nullptr, nullptr));
+
+        if (!exerciseFalsePositiveFeedbackParameterInvalidArgs()) {
+            ok = false;
+        }
+        if (!exerciseFalsePositiveFeedbackDatabaseMismatch()) {
+            ok = false;
+        }
+        return ok;
+    }
+
     void reset() override {
         if (scratch) {
             hs_free_scratch(scratch);
@@ -1579,6 +1926,892 @@ private:
 
         std::free(serialized);
         return true;
+    }
+
+    static bool isFeedbackDisabled(hs_error_t err) {
+        return err == HS_ARCH_ERROR;
+    }
+
+    bool recordExpectedInvalid(const std::string &api, hs_error_t err,
+                               bool allowDisabled = true) {
+        if (err == HS_INVALID || (allowDisabled && isFeedbackDisabled(err))) {
+            stats.expectedFail(api, errString(err));
+            return true;
+        }
+        if (err == HS_SUCCESS) {
+            stats.error(api, "unexpected success");
+        } else {
+            stats.error(api, err);
+        }
+        return false;
+    }
+
+    bool recordExpectedSuccess(const std::string &api, hs_error_t err) {
+        if (err == HS_SUCCESS) {
+            stats.ok(api);
+            return true;
+        }
+        stats.error(api, err);
+        return false;
+    }
+
+    bool releaseCollector(const std::string &api, ScopedCollector &collector) {
+        hs_fp_collector_t *raw = collector.value;
+        collector.value = nullptr;
+        return recordExpectedSuccess(api, hs_fp_collector_free(raw));
+    }
+
+    bool releaseFeedback(const std::string &api, ScopedFeedback &feedback) {
+        hs_fp_feedback_t *raw = feedback.value;
+        feedback.value = nullptr;
+        return recordExpectedSuccess(api, hs_fp_feedback_free(raw));
+    }
+
+    static void markProgress(const FuzzProgressCallback &progress,
+                             const std::string &stage) {
+        if (progress) {
+            progress(stage);
+        }
+    }
+
+    bool compileLocalDatabase(const FuzzTestCase &testCase, unsigned int mode,
+                              const std::string &apiPrefix,
+                              LocalDatabase &database, bool &compiled) {
+        compiled = false;
+        const char *expressions[] = {testCase.pattern.c_str()};
+        const unsigned int flags[] = {testCase.flags};
+        const unsigned int ids[] = {
+            static_cast<unsigned int>(testCase.id)};
+        hs_compile_error_t *localError = nullptr;
+        hs_error_t err = hs_compile_multi(
+            expressions, flags, ids, 1, mode, nullptr, &database.db,
+            &localError);
+        if (err != HS_SUCCESS) {
+            const std::string message = localError
+                                            ? compileErrorMessage(localError)
+                                            : errString(err);
+            if (err == HS_COMPILER_ERROR) {
+                stats.expectedFail(apiPrefix + "_compile", message);
+            } else {
+                stats.error(apiPrefix + "_compile", message);
+            }
+            if (database.db) {
+                stats.error(apiPrefix + "_compile",
+                            "failed compilation produced a database");
+                return false;
+            }
+            return err == HS_COMPILER_ERROR;
+        }
+        if (localError) {
+            hs_free_compile_error(localError);
+        }
+        stats.ok(apiPrefix + "_compile");
+
+        err = hs_alloc_scratch(database.db, &database.scratch);
+        if (err != HS_SUCCESS) {
+            stats.error(apiPrefix + "_alloc_scratch", err);
+            return false;
+        }
+        stats.ok(apiPrefix + "_alloc_scratch");
+        compiled = true;
+        return true;
+    }
+
+    static std::vector<std::string>
+    sampleData(const std::vector<std::string> &generatedData) {
+        std::vector<std::string> data;
+        const size_t limit = std::min<size_t>(generatedData.size(), 4);
+        data.reserve(limit ? limit : 1);
+        for (size_t i = 0; i < limit; i++) {
+            data.push_back(generatedData[i]);
+        }
+        if (data.empty()) {
+            data.emplace_back();
+        }
+        return data;
+    }
+
+    hs_error_t scanBlockMatches(const LocalDatabase &database,
+                                const std::vector<std::string> &data,
+                                hs_fp_collector_t *collector,
+                                const std::string &api,
+                                MatchCapture &capture) {
+        capture.matches.clear();
+        capture.vectorEnds.clear();
+        for (size_t i = 0; i < data.size(); i++) {
+            capture.currentInput = static_cast<unsigned int>(i);
+            capture.currentPhase = 0;
+            const std::string &block = data[i];
+            hs_error_t err;
+            if (collector) {
+                err = hs_scan_with_collector(
+                    database.db, block.c_str(),
+                    static_cast<unsigned int>(block.size()), 0,
+                    database.scratch, captureMatch, &capture, collector);
+            } else {
+                err = hs_scan(database.db, block.c_str(),
+                              static_cast<unsigned int>(block.size()), 0,
+                              database.scratch, captureMatch, &capture);
+            }
+            if (err != HS_SUCCESS) {
+                stats.error(api, err);
+                return err;
+            }
+        }
+        stats.ok(api);
+        stats.matches(api, capture.matches.size());
+        return HS_SUCCESS;
+    }
+
+    hs_error_t scanStreamMatches(const LocalDatabase &database,
+                                 const std::vector<std::string> &data,
+                                 hs_fp_collector_t *collector,
+                                 const std::string &api,
+                                 MatchCapture &capture) {
+        capture.matches.clear();
+        capture.vectorEnds.clear();
+        hs_stream_t *stream = nullptr;
+        hs_error_t err = hs_open_stream(database.db, 0, &stream);
+        if (err != HS_SUCCESS) {
+            stats.error(api + "_open", err);
+            return err;
+        }
+
+        for (size_t i = 0; i < data.size(); i++) {
+            capture.currentInput = static_cast<unsigned int>(i);
+            capture.currentPhase = 0;
+            const std::string &block = data[i];
+            if (collector) {
+                err = hs_scan_stream_with_collector(
+                    stream, block.c_str(),
+                    static_cast<unsigned int>(block.size()), 0,
+                    database.scratch, captureMatch, &capture, collector);
+            } else {
+                err = hs_scan_stream(
+                    stream, block.c_str(),
+                    static_cast<unsigned int>(block.size()), 0,
+                    database.scratch, captureMatch, &capture);
+            }
+            if (err != HS_SUCCESS) {
+                stats.error(api, err);
+                const hs_error_t closeErr =
+                    hs_close_stream(stream, nullptr, nullptr, nullptr);
+                if (closeErr != HS_SUCCESS) {
+                    stats.error(api + "_cleanup_close", closeErr);
+                }
+                return err;
+            }
+        }
+
+        capture.currentInput = static_cast<unsigned int>(data.size());
+        capture.currentPhase = 1;
+        err = hs_close_stream(stream, database.scratch, captureMatch,
+                              &capture);
+        if (err != HS_SUCCESS) {
+            stats.error(api + "_close", err);
+            return err;
+        }
+        stats.ok(api);
+        stats.matches(api, capture.matches.size());
+        return HS_SUCCESS;
+    }
+
+    hs_error_t scanVectorMatches(const LocalDatabase &database,
+                                 const std::vector<std::string> &data,
+                                 hs_fp_collector_t *collector,
+                                 const std::string &api,
+                                 MatchCapture &capture) {
+        capture.matches.clear();
+        capture.vectorEnds.clear();
+        capture.currentPhase = 0;
+        std::vector<const char *> pointers;
+        std::vector<unsigned int> lengths;
+        pointers.reserve(data.size());
+        lengths.reserve(data.size());
+        unsigned long long end = 0;
+        for (const auto &block : data) {
+            pointers.push_back(block.c_str());
+            lengths.push_back(static_cast<unsigned int>(block.size()));
+            end += block.size();
+            capture.vectorEnds.push_back(end);
+        }
+
+        hs_error_t err;
+        if (collector) {
+            err = hs_scan_vector_with_collector(
+                database.db, pointers.data(), lengths.data(),
+                static_cast<unsigned int>(pointers.size()), 0,
+                database.scratch, captureMatch, &capture, collector);
+        } else {
+            err = hs_scan_vector(
+                database.db, pointers.data(), lengths.data(),
+                static_cast<unsigned int>(pointers.size()), 0,
+                database.scratch, captureMatch, &capture);
+        }
+        if (err != HS_SUCCESS) {
+            stats.error(api, err);
+            return err;
+        }
+        stats.ok(api);
+        stats.matches(api, capture.matches.size());
+        return HS_SUCCESS;
+    }
+
+    hs_error_t scanModeMatches(const LocalDatabase &database,
+                               const std::vector<std::string> &data,
+                               unsigned int mode,
+                               hs_fp_collector_t *collector,
+                               const std::string &api,
+                               MatchCapture &capture) {
+        if (mode == HS_MODE_BLOCK) {
+            return scanBlockMatches(database, data, collector, api, capture);
+        }
+        if (mode == HS_MODE_STREAM) {
+            return scanStreamMatches(database, data, collector, api, capture);
+        }
+        return scanVectorMatches(database, data, collector, api, capture);
+    }
+
+    bool compareMatches(const std::string &api,
+                        const MatchCapture &expectedCapture,
+                        const MatchCapture &actualCapture) {
+        std::vector<MatchRecord> expected = expectedCapture.matches;
+        std::vector<MatchRecord> actual = actualCapture.matches;
+        std::sort(expected.begin(), expected.end());
+        std::sort(actual.begin(), actual.end());
+        if (expected == actual) {
+            stats.ok(api);
+            return true;
+        }
+
+        std::ostringstream out;
+        out << "match multiset mismatch, expected=" << expected.size()
+            << ", actual=" << actual.size();
+        const size_t common = std::min(expected.size(), actual.size());
+        size_t mismatch = 0;
+        while (mismatch < common && expected[mismatch] == actual[mismatch]) {
+            mismatch++;
+        }
+        if (mismatch < common) {
+            out << ", first expected {" << describeMatch(expected[mismatch])
+                << "}, actual {" << describeMatch(actual[mismatch]) << "}";
+        } else if (mismatch < expected.size()) {
+            out << ", first extra expected {"
+                << describeMatch(expected[mismatch]) << "}";
+        } else if (mismatch < actual.size()) {
+            out << ", first extra actual {"
+                << describeMatch(actual[mismatch]) << "}";
+        }
+        stats.error(api, out.str());
+        return false;
+    }
+
+    bool validateFeedbackDump(const std::string &api,
+                              const FeedbackDumpStats &dump) {
+        if (dump.invalid) {
+            stats.error(api, dump.invalidReason);
+            return false;
+        }
+        if (dump.summaryCalls != 1) {
+            stats.error(api, "summary callback count mismatch");
+            return false;
+        }
+        if (dump.fragmentCalls != dump.summary.fragment_count) {
+            stats.error(api, "fragment callback count mismatch");
+            return false;
+        }
+        if (dump.selectedCalls != dump.summary.bad_fragment_count) {
+            stats.error(api, "selected fragment count mismatch");
+            return false;
+        }
+        if (dump.triggerCount != dump.summary.trigger_count ||
+            dump.trueTriggerCount != dump.summary.true_trigger_count ||
+            dump.falsePositiveCount != dump.summary.false_positive_count) {
+            stats.error(api, "fragment counters do not match summary");
+            return false;
+        }
+        stats.ok(api);
+        return true;
+    }
+
+    bool compileFeedbackVariant(
+            const FuzzTestCase &testCase, unsigned int mode,
+            const std::vector<std::string> &data,
+            const MatchCapture &expectedMatches,
+            const hs_fp_feedback_t *feedback, bool useExt,
+            const std::string &api,
+            const FuzzProgressCallback &progress) {
+        markProgress(progress, api);
+        const char *expressions[] = {testCase.pattern.c_str()};
+        const unsigned int flags[] = {testCase.flags};
+        const unsigned int ids[] = {
+            static_cast<unsigned int>(testCase.id)};
+        hs_expr_ext_t extValue = {};
+        const hs_expr_ext_t *ext[] = {&extValue};
+        LocalDatabase compiled;
+        hs_compile_error_t *localError = nullptr;
+        hs_error_t err;
+        if (useExt) {
+            err = hs_compile_ext_multi_with_feedback(
+                expressions, flags, ids, ext, 1, mode, nullptr, feedback,
+                &compiled.db, &localError);
+        } else {
+            err = hs_compile_multi_with_feedback(
+                expressions, flags, ids, 1, mode, nullptr, feedback,
+                &compiled.db, &localError);
+        }
+
+        if (err != HS_SUCCESS) {
+            const std::string message = localError
+                                            ? compileErrorMessage(localError)
+                                            : errString(err);
+            stats.error(api, message);
+            return false;
+        }
+        if (localError) {
+            hs_free_compile_error(localError);
+        }
+        if (!compiled.db) {
+            stats.error(api, "successful compilation returned a null database");
+            return false;
+        }
+        stats.ok(api);
+
+        err = hs_alloc_scratch(compiled.db, &compiled.scratch);
+        if (err != HS_SUCCESS) {
+            stats.error(api + "_alloc_scratch", err);
+            return false;
+        }
+        stats.ok(api + "_alloc_scratch");
+
+        MatchCapture actualMatches;
+        markProgress(progress, api + "_scan");
+        err = scanModeMatches(compiled, data, mode, nullptr, api + "_scan",
+                              actualMatches);
+        if (err != HS_SUCCESS) {
+            return false;
+        }
+        return compareMatches(api + "_matches", expectedMatches,
+                              actualMatches);
+    }
+
+    bool exerciseFalsePositiveFeedbackMode(
+            const FuzzTestCase &testCase,
+            const std::vector<std::string> &generatedData, unsigned int mode,
+            const char *modeName,
+            const FuzzProgressCallback &progress) {
+        const std::string prefix =
+            std::string("fp_feedback_") + modeName;
+        bool ok = true;
+        bool mergedReady = false;
+        bool feedbackReady = false;
+        bool dumpFeedbackReady = false;
+        LocalDatabase database;
+        bool compiled = false;
+        markProgress(progress, prefix + "_compile");
+        if (!compileLocalDatabase(testCase, mode, prefix, database,
+                                  compiled)) {
+            return false;
+        }
+        if (!compiled) {
+            return true;
+        }
+
+        const std::vector<std::string> data = sampleData(generatedData);
+        ScopedCollector collectorA;
+        ScopedCollector collectorB;
+        ScopedCollector merged;
+        ScopedFeedback feedback;
+        ScopedFeedback dumpFeedback;
+        ScopedFeedback resetFeedback;
+
+        markProgress(progress, prefix + "_collector_create");
+        hs_error_t err =
+            hs_fp_collector_create(database.db, &collectorA.value);
+        if (isFeedbackDisabled(err)) {
+            stats.expectedFail(prefix + "_collector_create",
+                               "false-positive feedback disabled");
+            return true;
+        }
+        if (err != HS_SUCCESS || !collectorA.value) {
+            if (err == HS_SUCCESS) {
+                stats.error(prefix + "_collector_create",
+                            "successful call returned a null collector");
+            } else {
+                stats.error(prefix + "_collector_create", err);
+            }
+            return false;
+        }
+        stats.ok(prefix + "_collector_create");
+
+        markProgress(progress, prefix + "_collector_create_second");
+        err = hs_fp_collector_create(database.db, &collectorB.value);
+        if (err != HS_SUCCESS || !collectorB.value) {
+            if (err == HS_SUCCESS) {
+                stats.error(prefix + "_collector_create_second",
+                            "successful call returned a null collector");
+            } else {
+                stats.error(prefix + "_collector_create_second", err);
+            }
+            return false;
+        }
+        stats.ok(prefix + "_collector_create_second");
+
+        MatchCapture normalMatches;
+        MatchCapture collectorMatches;
+        markProgress(progress, prefix + "_normal_scan");
+        err = scanModeMatches(database, data, mode, nullptr,
+                              prefix + "_normal_scan", normalMatches);
+        if (err != HS_SUCCESS) {
+            ok = false;
+        }
+        markProgress(progress, prefix + "_scan_with_collector");
+        err = scanModeMatches(database, data, mode, collectorA.value,
+                              prefix + "_scan_with_collector",
+                              collectorMatches);
+        if (err != HS_SUCCESS) {
+            ok = false;
+        } else if (!compareMatches(prefix + "_collector_matches",
+                                   normalMatches, collectorMatches)) {
+            ok = false;
+        }
+
+        MatchCapture secondCollectorMatches;
+        markProgress(progress, prefix + "_second_scan_with_collector");
+        err = scanModeMatches(database, data, mode, collectorB.value,
+                              prefix + "_second_scan_with_collector",
+                              secondCollectorMatches);
+        if (err != HS_SUCCESS) {
+            ok = false;
+        } else if (!compareMatches(prefix + "_second_collector_matches",
+                                   normalMatches,
+                                   secondCollectorMatches)) {
+            ok = false;
+        }
+
+        markProgress(progress, prefix + "_collector_reset");
+        err = hs_fp_collector_reset(collectorB.value);
+        if (err != HS_SUCCESS) {
+            stats.error(prefix + "_collector_reset", err);
+            ok = false;
+        } else {
+            stats.ok(prefix + "_collector_reset");
+            FeedbackDumpStats resetDump;
+            hs_fp_feedback_dump_callbacks_t resetCallbacks = {};
+            resetCallbacks.on_summary = feedbackDumpSummary;
+            resetCallbacks.on_fragment = feedbackDumpFragment;
+            markProgress(progress, prefix + "_collector_reset_dump");
+            err = hs_fp_collector_to_feedback_with_dump(
+                collectorB.value, nullptr, &resetCallbacks, &resetDump,
+                &resetFeedback.value);
+            if (err != HS_SUCCESS || !resetFeedback.value) {
+                if (err == HS_SUCCESS) {
+                    stats.error(prefix + "_collector_reset_dump",
+                                "successful call returned null feedback");
+                } else {
+                    stats.error(prefix + "_collector_reset_dump", err);
+                }
+                ok = false;
+            } else {
+                if (!validateFeedbackDump(prefix + "_collector_reset_dump",
+                                          resetDump)) {
+                    ok = false;
+                }
+                if (resetDump.summary.trigger_count ||
+                    resetDump.summary.true_trigger_count ||
+                    resetDump.summary.false_positive_count) {
+                    stats.error(prefix + "_collector_reset_counters",
+                                "reset collector retained runtime counters");
+                    ok = false;
+                } else {
+                    stats.ok(prefix + "_collector_reset_counters");
+                }
+            }
+        }
+
+        secondCollectorMatches = MatchCapture();
+        markProgress(progress, prefix + "_second_scan_after_reset");
+        err = scanModeMatches(database, data, mode, collectorB.value,
+                              prefix + "_second_scan_after_reset",
+                              secondCollectorMatches);
+        if (err != HS_SUCCESS) {
+            ok = false;
+        } else if (!compareMatches(prefix + "_after_reset_matches",
+                                   normalMatches,
+                                   secondCollectorMatches)) {
+            ok = false;
+        }
+
+        hs_fp_collector_t *mergeInputs[] = {collectorA.value,
+                                            collectorB.value};
+        markProgress(progress, prefix + "_collector_merge");
+        err = hs_fp_collector_merge(mergeInputs, 2, &merged.value);
+        if (err != HS_SUCCESS || !merged.value) {
+            if (err == HS_SUCCESS) {
+                stats.error(prefix + "_collector_merge",
+                            "successful call returned a null collector");
+            } else {
+                stats.error(prefix + "_collector_merge", err);
+            }
+            ok = false;
+        } else {
+            stats.ok(prefix + "_collector_merge");
+            mergedReady = true;
+        }
+
+        if (mergedReady) {
+            markProgress(progress, prefix + "_collector_to_feedback");
+            err = hs_fp_collector_to_feedback(merged.value, nullptr,
+                                              &feedback.value);
+            if (err != HS_SUCCESS || !feedback.value) {
+                if (err == HS_SUCCESS) {
+                    stats.error(prefix + "_collector_to_feedback",
+                                "successful call returned null feedback");
+                } else {
+                    stats.error(prefix + "_collector_to_feedback", err);
+                }
+                ok = false;
+            } else {
+                stats.ok(prefix + "_collector_to_feedback");
+                feedbackReady = true;
+            }
+
+            hs_fp_feedback_params_t params = {};
+            params.flags =
+                HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT |
+                HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT |
+                HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE |
+                HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE |
+                HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS;
+            params.max_bad_fragments = 8;
+            FeedbackDumpStats dump;
+            hs_fp_feedback_dump_callbacks_t callbacks = {};
+            callbacks.on_summary = feedbackDumpSummary;
+            callbacks.on_fragment = feedbackDumpFragment;
+            markProgress(progress,
+                         prefix + "_collector_to_feedback_with_dump");
+            err = hs_fp_collector_to_feedback_with_dump(
+                merged.value, &params, &callbacks, &dump,
+                &dumpFeedback.value);
+            if (err != HS_SUCCESS || !dumpFeedback.value) {
+                if (err == HS_SUCCESS) {
+                    stats.error(prefix + "_collector_to_feedback_with_dump",
+                                "successful call returned null feedback");
+                } else {
+                    stats.error(prefix + "_collector_to_feedback_with_dump",
+                                err);
+                }
+                ok = false;
+            } else {
+                dumpFeedbackReady = validateFeedbackDump(
+                    prefix + "_collector_to_feedback_with_dump", dump);
+                if (!dumpFeedbackReady) {
+                    ok = false;
+                }
+            }
+        }
+
+        if (!compileFeedbackVariant(
+                testCase, mode, data, normalMatches, nullptr, false,
+                prefix + "_compile_multi_null_feedback", progress)) {
+            ok = false;
+        }
+        if (!compileFeedbackVariant(
+                testCase, mode, data, normalMatches, nullptr, true,
+                prefix + "_compile_ext_multi_null_feedback", progress)) {
+            ok = false;
+        }
+        if (feedbackReady &&
+            !compileFeedbackVariant(
+                testCase, mode, data, normalMatches, feedback.value, false,
+                prefix + "_compile_multi_with_feedback", progress)) {
+            ok = false;
+        }
+        if (dumpFeedbackReady &&
+            !compileFeedbackVariant(
+                testCase, mode, data, normalMatches, dumpFeedback.value, true,
+                prefix + "_compile_ext_multi_with_feedback", progress)) {
+            ok = false;
+        }
+
+        if (!releaseFeedback(prefix + "_reset_feedback_free",
+                             resetFeedback)) {
+            ok = false;
+        }
+        if (!releaseFeedback(prefix + "_dump_feedback_free",
+                             dumpFeedback)) {
+            ok = false;
+        }
+        if (!releaseFeedback(prefix + "_feedback_free", feedback)) {
+            ok = false;
+        }
+        if (!releaseCollector(prefix + "_merged_collector_free", merged)) {
+            ok = false;
+        }
+        if (!releaseCollector(prefix + "_second_collector_free",
+                              collectorB)) {
+            ok = false;
+        }
+        if (!releaseCollector(prefix + "_collector_free", collectorA)) {
+            ok = false;
+        }
+        return ok;
+    }
+
+    bool exerciseFalsePositiveFeedbackParameterInvalidArgs() {
+        FuzzTestCase testCase;
+        testCase.pattern = "abc";
+        testCase.flags = 0;
+        testCase.id = 7001;
+        LocalDatabase database;
+        bool compiled = false;
+        if (!compileLocalDatabase(testCase, HS_MODE_BLOCK,
+                                  "fp_feedback_invalid_params", database,
+                                  compiled)) {
+            return false;
+        }
+        if (!compiled) {
+            stats.error("fp_feedback_invalid_params",
+                        "fixed validation expression did not compile");
+            return false;
+        }
+
+        bool ok = true;
+        ScopedCollector collector;
+        hs_error_t err =
+            hs_fp_collector_create(database.db, &collector.value);
+        if (isFeedbackDisabled(err)) {
+            stats.expectedFail(
+                "fp_feedback_invalid_params_collector_create",
+                "false-positive feedback disabled");
+            return true;
+        }
+        if (err != HS_SUCCESS || !collector.value) {
+            if (err == HS_SUCCESS) {
+                stats.error("fp_feedback_invalid_params_collector_create",
+                            "successful call returned null collector");
+            } else {
+                stats.error("fp_feedback_invalid_params_collector_create",
+                            err);
+            }
+            return false;
+        }
+        stats.ok("fp_feedback_invalid_params_collector_create");
+
+        auto checkInvalidParams =
+            [this, &collector](const std::string &api,
+                               const hs_fp_feedback_params_t &params,
+                               bool withDump) {
+                bool caseOk = true;
+                ScopedFeedback output;
+                hs_error_t callErr;
+                if (withDump) {
+                    callErr = hs_fp_collector_to_feedback_with_dump(
+                        collector.value, &params, nullptr, nullptr,
+                        &output.value);
+                } else {
+                    callErr = hs_fp_collector_to_feedback(
+                        collector.value, &params, &output.value);
+                }
+                if (!recordExpectedInvalid(api, callErr, false)) {
+                    caseOk = false;
+                }
+                if (output.value) {
+                    stats.error(api, "invalid call produced feedback");
+                    if (!releaseFeedback(api + "_unexpected_free", output)) {
+                        caseOk = false;
+                    }
+                    caseOk = false;
+                }
+                return caseOk;
+            };
+
+        hs_fp_feedback_params_t params = {};
+        params.flags = 0x80000000U;
+        ok &= checkInvalidParams(
+            "hs_fp_collector_to_feedback_bad_flags", params, false);
+
+        params = {};
+        params.flags = HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE;
+        params.min_false_positive_rate = HS_FP_FEEDBACK_RATE_SCALE + 1;
+        ok &= checkInvalidParams(
+            "hs_fp_collector_to_feedback_bad_fp_rate", params, false);
+
+        params = {};
+        params.flags = HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE;
+        params.min_waste_share = HS_FP_FEEDBACK_RATE_SCALE + 1;
+        ok &= checkInvalidParams(
+            "hs_fp_collector_to_feedback_bad_waste_share", params, true);
+
+        params = {};
+        params.flags = HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS;
+        params.max_bad_fragments = 0;
+        ok &= checkInvalidParams(
+            "hs_fp_collector_to_feedback_bad_topk", params, false);
+
+        ScopedFeedback validFeedback;
+        err = hs_fp_collector_to_feedback(collector.value, nullptr,
+                                          &validFeedback.value);
+        if (err != HS_SUCCESS || !validFeedback.value) {
+            if (err == HS_SUCCESS) {
+                stats.error("hs_fp_collector_to_feedback_default_params",
+                            "successful call returned null feedback");
+            } else {
+                stats.error("hs_fp_collector_to_feedback_default_params",
+                            err);
+            }
+            ok = false;
+        } else {
+            stats.ok("hs_fp_collector_to_feedback_default_params");
+        }
+
+        if (!releaseFeedback("fp_feedback_invalid_params_feedback_free",
+                             validFeedback)) {
+            ok = false;
+        }
+        if (!releaseCollector("fp_feedback_invalid_params_collector_free",
+                              collector)) {
+            ok = false;
+        }
+        return ok;
+    }
+
+    bool exerciseFalsePositiveFeedbackDatabaseMismatchMode(
+            unsigned int mode, const char *modeName) {
+        const std::string prefix =
+            std::string("fp_feedback_mismatch_") + modeName;
+        FuzzTestCase caseA;
+        caseA.pattern = "abc";
+        caseA.flags = 0;
+        caseA.id = 7101;
+        FuzzTestCase caseB;
+        caseB.pattern = "def";
+        caseB.flags = 0;
+        caseB.id = 7102;
+        LocalDatabase databaseA;
+        LocalDatabase databaseB;
+        bool compiledA = false;
+        bool compiledB = false;
+        if (!compileLocalDatabase(caseA, mode, prefix + "_a", databaseA,
+                                  compiledA) ||
+            !compileLocalDatabase(caseB, mode, prefix + "_b", databaseB,
+                                  compiledB)) {
+            return false;
+        }
+        if (!compiledA || !compiledB) {
+            stats.error(prefix,
+                        "fixed mismatch validation expression did not compile");
+            return false;
+        }
+
+        bool ok = true;
+        ScopedCollector collectorA;
+        ScopedCollector collectorB;
+        hs_error_t err =
+            hs_fp_collector_create(databaseA.db, &collectorA.value);
+        if (isFeedbackDisabled(err)) {
+            stats.expectedFail(prefix + "_collector_create",
+                               "false-positive feedback disabled");
+            return true;
+        }
+        if (err != HS_SUCCESS || !collectorA.value) {
+            if (err == HS_SUCCESS) {
+                stats.error(prefix + "_collector_create",
+                            "successful call returned null collector");
+            } else {
+                stats.error(prefix + "_collector_create", err);
+            }
+            return false;
+        }
+        stats.ok(prefix + "_collector_create");
+
+        err = hs_fp_collector_create(databaseB.db, &collectorB.value);
+        if (err != HS_SUCCESS || !collectorB.value) {
+            if (err == HS_SUCCESS) {
+                stats.error(prefix + "_collector_create_second",
+                            "successful call returned null collector");
+            } else {
+                stats.error(prefix + "_collector_create_second", err);
+            }
+            return false;
+        }
+        stats.ok(prefix + "_collector_create_second");
+
+        MatchCapture capture;
+        if (mode == HS_MODE_BLOCK) {
+            err = hs_scan_with_collector(
+                databaseB.db, "def", 3, 0, databaseB.scratch, captureMatch,
+                &capture, collectorA.value);
+        } else if (mode == HS_MODE_VECTORED) {
+            const char *blocks[] = {"def"};
+            const unsigned int lengths[] = {3};
+            err = hs_scan_vector_with_collector(
+                databaseB.db, blocks, lengths, 1, 0, databaseB.scratch,
+                captureMatch, &capture, collectorA.value);
+        } else {
+            hs_stream_t *stream = nullptr;
+            err = hs_open_stream(databaseB.db, 0, &stream);
+            if (err != HS_SUCCESS) {
+                stats.error(prefix + "_open_stream", err);
+                ok = false;
+            } else {
+                err = hs_scan_stream_with_collector(
+                    stream, "def", 3, 0, databaseB.scratch, captureMatch,
+                    &capture, collectorA.value);
+                const hs_error_t closeErr = hs_close_stream(
+                    stream, databaseB.scratch, captureMatch, &capture);
+                if (closeErr != HS_SUCCESS) {
+                    stats.error(prefix + "_close_stream", closeErr);
+                    ok = false;
+                } else {
+                    stats.ok(prefix + "_close_stream");
+                }
+            }
+        }
+        if (!recordExpectedInvalid(prefix + "_scan_database_mismatch", err,
+                                   false)) {
+            ok = false;
+        }
+
+        hs_fp_collector_t *mergeInputs[] = {collectorA.value,
+                                            collectorB.value};
+        ScopedCollector merged;
+        err = hs_fp_collector_merge(mergeInputs, 2, &merged.value);
+        if (!recordExpectedInvalid(prefix + "_merge_database_mismatch", err,
+                                   false)) {
+            ok = false;
+        }
+        if (merged.value) {
+            stats.error(prefix + "_merge_database_mismatch",
+                        "invalid merge produced a collector");
+            ok = false;
+        }
+
+        if (!releaseCollector(prefix + "_collector_free_second",
+                              collectorB)) {
+            ok = false;
+        }
+        if (!releaseCollector(prefix + "_collector_free", collectorA)) {
+            ok = false;
+        }
+        return ok;
+    }
+
+    bool exerciseFalsePositiveFeedbackDatabaseMismatch() {
+        bool ok = true;
+        if (!exerciseFalsePositiveFeedbackDatabaseMismatchMode(
+                HS_MODE_BLOCK, "block")) {
+            ok = false;
+        }
+        if (!exerciseFalsePositiveFeedbackDatabaseMismatchMode(
+                HS_MODE_STREAM, "stream")) {
+            ok = false;
+        }
+        if (!exerciseFalsePositiveFeedbackDatabaseMismatchMode(
+                HS_MODE_VECTORED, "vector")) {
+            ok = false;
+        }
+        return ok;
     }
 
     hs_database_t* db;

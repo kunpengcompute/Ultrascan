@@ -2,13 +2,22 @@
 #include "data/data_generator.h"
 #include "../gtest/gtest.h"
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <climits>
 #include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
 #include <deque>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <streambuf>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -116,6 +125,160 @@ size_t readMultiLimit(size_t defaultValue) {
     return readSizeEnv("HS_FUZZ_MULTI_LIMIT", defaultValue);
 }
 
+int readFuzzCount(int defaultValue) {
+    const char *value = std::getenv("HS_FUZZ_COUNT");
+    if (!value || value[0] == '\0' || value[0] == '-') {
+        return defaultValue;
+    }
+
+    errno = 0;
+    char *end = nullptr;
+    const unsigned long parsed = std::strtoul(value, &end, 10);
+    if (errno == ERANGE || end == value || *end != '\0' || parsed == 0 ||
+        parsed > static_cast<unsigned long>(INT_MAX)) {
+        return defaultValue;
+    }
+    return static_cast<int>(parsed);
+}
+
+size_t readFpFeedbackLimit() {
+    const char *value = std::getenv("HS_FUZZ_FP_LIMIT");
+    if (!value || value[0] == '\0' || value[0] == '-') {
+        return 256;
+    }
+
+    errno = 0;
+    char *end = nullptr;
+    const unsigned long long parsed = std::strtoull(value, &end, 10);
+    if (errno == ERANGE || end == value || *end != '\0' ||
+        parsed > static_cast<unsigned long long>(
+                     std::numeric_limits<size_t>::max())) {
+        return 256;
+    }
+    return static_cast<size_t>(parsed);
+}
+
+bool traceCases() {
+    const char *value = std::getenv("HS_FUZZ_TRACE_CASE");
+    return value && value[0] != '\0' && value[0] != '0';
+}
+
+const char *traceCaseDir() {
+    const char *value = std::getenv("HS_FUZZ_TRACE_DIR");
+    return value && value[0] != '\0' ? value : nullptr;
+}
+
+bool isTracePrintable(unsigned char c) {
+    return c >= 0x20 && c <= 0x7e && c != '\\' && c != '"';
+}
+
+std::string escapeTraceString(const std::string &value) {
+    std::ostringstream out;
+    out << std::hex << std::setfill('0');
+    for (unsigned char c : value) {
+        if (isTracePrintable(c)) {
+            out << static_cast<char>(c);
+        } else if (c == '\\') {
+            out << "\\\\";
+        } else if (c == '"') {
+            out << "\\\"";
+        } else {
+            out << "\\x" << std::setw(2) << static_cast<unsigned int>(c);
+        }
+    }
+    return out.str();
+}
+
+std::string traceCaseFile(const char *dir, size_t workerId) {
+    std::string path(dir);
+    if (!path.empty() && path.back() != '/' && path.back() != '\\') {
+        path += '/';
+    }
+    path += "worker_" + std::to_string(workerId) + ".current";
+    return path;
+}
+
+void writeCurrentCase(const char *dir, size_t workerId,
+                      const FuzzTestCase &testCase,
+                      const std::string &stage) {
+    if (!dir) {
+        return;
+    }
+
+    std::ofstream out(traceCaseFile(dir, workerId).c_str(),
+                      std::ios::out | std::ios::trunc);
+    if (!out) {
+        return;
+    }
+
+    out << "worker=" << workerId << '\n';
+    out << "thread_id=" << std::this_thread::get_id() << '\n';
+    out << "case_id=" << testCase.id << '\n';
+    out << "stage=" << stage << '\n';
+    out << "flags=" << testCase.flags << '\n';
+    out << "pattern_length=" << testCase.pattern.size() << '\n';
+    out << "pattern=\"" << escapeTraceString(testCase.pattern) << "\"\n";
+}
+
+void clearCurrentCase(const char *dir, size_t workerId) {
+    if (dir) {
+        std::remove(traceCaseFile(dir, workerId).c_str());
+    }
+}
+
+void traceCaseEvent(size_t workerId, const char *phase,
+                    const FuzzTestCase &testCase) {
+    static std::mutex traceMutex;
+    if (!traceCases()) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(traceMutex);
+    std::cout << "[case] worker=" << workerId << " " << phase
+              << " id=" << testCase.id << " flags=" << testCase.flags
+              << " pattern=\"" << escapeTraceString(testCase.pattern)
+              << "\"" << std::endl;
+}
+
+void reportFpFeedbackFailure(size_t workerId,
+                             const FuzzTestCase &testCase,
+                             const std::vector<std::string> &data) {
+    static std::mutex failureMutex;
+    std::lock_guard<std::mutex> lock(failureMutex);
+    std::cerr << "[fp-feedback-failure] worker=" << workerId
+              << " id=" << testCase.id << " flags=" << testCase.flags
+              << " pattern=\"" << escapeTraceString(testCase.pattern)
+              << "\"" << std::endl;
+    const size_t limit = std::min<size_t>(data.size(), 4);
+    for (size_t i = 0; i < limit; i++) {
+        std::cerr << "  data[" << i << "] length=" << data[i].size()
+                  << " value=\"" << escapeTraceString(data[i]) << "\""
+                  << std::endl;
+    }
+}
+
+std::string stageWithMode(const char *stage, unsigned int mode) {
+    std::ostringstream out;
+    out << stage << "(mode=0x" << std::hex << mode << ")";
+    return out.str();
+}
+
+std::string stageWithData(const char *stage, size_t index,
+                          const std::string &data) {
+    std::ostringstream out;
+    out << stage << "(data_index=" << index << ", length=" << data.size()
+        << ", data=\"" << escapeTraceString(data) << "\")";
+    return out.str();
+}
+
+int HS_CDECL quietMatchCallback(unsigned int, unsigned long long,
+                                unsigned long long, unsigned int,
+                                void *context) {
+    size_t *matchCount = static_cast<size_t *>(context);
+    ++*matchCount;
+    return 0;
+}
+
 } // namespace
 
 // 测试参数
@@ -129,9 +292,23 @@ class HyperscanFuzzTest : public ::testing::TestWithParam<FuzzTestParams> {
 protected:
     void SetUp() override {
         params = GetParam();
+        params.count = readFuzzCount(params.count);
+        fpFeedbackLimit = readFpFeedbackLimit();
         generator = createGenerator();
         runner = createRunner();
         dataGenerator = std::make_unique<DataGenerator>();
+
+        const hs_error_t capability =
+            runner->falsePositiveFeedbackCapability();
+        if (capability == HS_SUCCESS) {
+            fpFeedbackAvailable = true;
+        } else if (capability == HS_ARCH_ERROR) {
+            fpFeedbackAvailable = false;
+        } else {
+            fpFeedbackAvailable = false;
+            FAIL() << "false-positive feedback capability probe failed: "
+                   << capability;
+        }
 
         // 配置生成器
         generator->configure(
@@ -151,11 +328,17 @@ protected:
     }
 
     void runSingleCase(Runner& activeRunner, const FuzzTestCase& testCase,
-                       const unsigned int* fatModes, size_t fatModeCount) {
+                       const unsigned int* fatModes, size_t fatModeCount,
+                       const char* traceDir, size_t workerId) {
+        const FuzzProgressCallback markStage = [&](const std::string& stage) {
+            writeCurrentCase(traceDir, workerId, testCase, stage);
+        };
+        markStage("case_start");
         detailOut() << "\n=== 测试用例 " << testCase.id << " ===" << std::endl;
 
         // 1. 测试hs_compile接口
         detailOut() << "测试 hs_compile..." << std::endl;
+        markStage("hs_compile");
         activeRunner.compile(testCase);
         activeRunner.reset();
 
@@ -163,29 +346,35 @@ protected:
         for (size_t i = 0; i < fatModeCount; i++) {
             unsigned int mode = fatModes[i];
             detailOut() << "测试 fat_hs_compile, mode=" << mode << "..." << std::endl;
+            markStage(stageWithMode("fat_hs_compile", mode));
             activeRunner.fatCompile(testCase, mode);
             activeRunner.reset();
         }
 
         // 2. 测试hs_scan接口
         detailOut() << "测试 hs_scan..." << std::endl;
+        markStage("hs_scan_compile");
         activeRunner.compile(testCase);
-        for (const auto& data : testData) {
-            activeRunner.scan(data);
+        for (size_t i = 0; i < testData.size(); i++) {
+            markStage(stageWithData("hs_scan", i, testData[i]));
+            activeRunner.scan(testData[i]);
         }
         activeRunner.reset();
 
         // 3. 测试hs_scan_stream接口
         detailOut() << "测试 hs_scan_stream..." << std::endl;
+        markStage("hs_scan_stream_compile");
         activeRunner.compile(testCase, HS_MODE_STREAM);
-        for (const auto& data : testData) {
-            activeRunner.streamScan(data);
+        for (size_t i = 0; i < testData.size(); i++) {
+            markStage(stageWithData("hs_scan_stream", i, testData[i]));
+            activeRunner.streamScan(testData[i]);
         }
         activeRunner.reset();
 
         // 4. 测试hs_compile_lit接口
         detailOut() << "测试 hs_compile_lit..." << std::endl;
         size_t length = testCase.pattern.length();
+        markStage("hs_compile_lit");
         activeRunner.compileLit(testCase, length);
         activeRunner.reset();
 
@@ -193,82 +382,139 @@ protected:
         for (size_t i = 0; i < fatModeCount; i++) {
             unsigned int mode = fatModes[i];
             detailOut() << "测试 fat_hs_compile_lit, mode=" << mode << "..." << std::endl;
+            markStage(stageWithMode("fat_hs_compile_lit", mode));
             activeRunner.fatCompileLit(testCase, length, mode);
             activeRunner.reset();
         }
 
         // 5. 测试hs_expression_info接口
         detailOut() << "测试 hs_expression_info..." << std::endl;
+        markStage("hs_expression_info");
         activeRunner.expressionInfo(testCase);
         activeRunner.reset();
 
         // 6. 测试hs_expression_ext_info接口
         detailOut() << "测试 hs_expression_ext_info..." << std::endl;
+        markStage("hs_expression_ext_info");
         activeRunner.expressionExtInfo(testCase);
         activeRunner.reset();
 
         // 7. 测试hs_reset_stream接口
         detailOut() << "测试 hs_reset_stream..." << std::endl;
+        markStage("hs_reset_stream_compile");
         activeRunner.compile(testCase, HS_MODE_STREAM);
+        markStage("hs_reset_stream");
         activeRunner.resetStream();
         activeRunner.reset();
 
         // 8. 测试hs_copy_stream接口
         detailOut() << "测试 hs_copy_stream..." << std::endl;
+        markStage("hs_copy_stream_compile");
         activeRunner.compile(testCase, HS_MODE_STREAM);
+        markStage("hs_copy_stream");
         activeRunner.copyStream();
         activeRunner.reset();
 
         // 9. 测试hs_reset_and_copy_stream接口
         detailOut() << "测试 hs_reset_and_copy_stream..." << std::endl;
+        markStage("hs_reset_and_copy_stream_compile");
         activeRunner.compile(testCase, HS_MODE_STREAM);
+        markStage("hs_reset_and_copy_stream");
         activeRunner.resetAndCopyStream();
         activeRunner.reset();
 
         // 10. 测试hs_compress_stream接口
         detailOut() << "测试 hs_compress_stream..." << std::endl;
+        markStage("hs_compress_stream_compile");
         activeRunner.compile(testCase, HS_MODE_STREAM);
+        markStage("hs_compress_stream");
         activeRunner.compressStream();
         activeRunner.reset();
 
         // 11. 测试hs_expand_stream接口
         detailOut() << "测试 hs_expand_stream..." << std::endl;
+        markStage("hs_expand_stream_compile");
         activeRunner.compile(testCase, HS_MODE_STREAM);
+        markStage("hs_expand_stream");
         activeRunner.expandStream();
         activeRunner.reset();
 
         // 12. 测试hs_reset_and_expand_stream接口
         detailOut() << "测试 hs_reset_and_expand_stream..." << std::endl;
+        markStage("hs_reset_and_expand_stream_compile");
         activeRunner.compile(testCase, HS_MODE_STREAM);
+        markStage("hs_reset_and_expand_stream");
         activeRunner.resetAndExpandStream();
         activeRunner.reset();
 
         // 13. 测试hs_scan_vector接口
         detailOut() << "测试 hs_scan_vector..." << std::endl;
-        activeRunner.compile(testCase);
+        markStage("hs_scan_vector_compile");
+        activeRunner.compile(testCase, HS_MODE_VECTORED);
         std::vector<std::string> vectorData;
         for (size_t i = 0; i < 5; i++) {
             vectorData.push_back(testData[i % testData.size()]);
         }
+        markStage("hs_scan_vector");
         activeRunner.scanVector(vectorData);
         activeRunner.reset();
 
         // 14. 测试hs_clone_scratch接口
         detailOut() << "测试 hs_clone_scratch..." << std::endl;
+        markStage("hs_clone_scratch_compile");
         activeRunner.compile(testCase);
+        markStage("hs_clone_scratch");
         activeRunner.cloneScratch();
         activeRunner.reset();
 
         // 15. 测试hs_scratch_size接口
         detailOut() << "测试 hs_scratch_size..." << std::endl;
+        markStage("hs_scratch_size_compile");
         activeRunner.compile(testCase);
+        markStage("hs_scratch_size");
         activeRunner.getScratchSize();
         activeRunner.reset();
+
+        if (claimFpFeedbackCase()) {
+            markStage("fp_feedback");
+            if (!activeRunner.falsePositiveFeedback(testCase, testData,
+                                                    markStage)) {
+                reportFpFeedbackFailure(workerId, testCase, testData);
+                fpFeedbackFailureCount.fetch_add(1,
+                                                 std::memory_order_relaxed);
+            }
+            activeRunner.reset();
+        }
+
+        markStage("case_done");
+    }
+
+    bool claimFpFeedbackCase() {
+        if (!fpFeedbackAvailable || fpFeedbackLimit == 0) {
+            return false;
+        }
+
+        size_t current =
+            fpFeedbackCaseCount.load(std::memory_order_relaxed);
+        while (current < fpFeedbackLimit) {
+            if (fpFeedbackCaseCount.compare_exchange_weak(
+                    current, current + 1, std::memory_order_relaxed,
+                    std::memory_order_relaxed)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     void runSingleCasesSerial(const unsigned int* fatModes, size_t fatModeCount) {
+        const char* traceDir = traceCaseDir();
         for (const auto& testCase : testCases) {
-            runSingleCase(*runner, testCase, fatModes, fatModeCount);
+            writeCurrentCase(traceDir, 0, testCase, "queued");
+            traceCaseEvent(0, "begin", testCase);
+            runSingleCase(*runner, testCase, fatModes, fatModeCount,
+                          traceDir, 0);
+            traceCaseEvent(0, "end", testCase);
+            clearCurrentCase(traceDir, 0);
         }
     }
 
@@ -289,10 +535,15 @@ protected:
         for (size_t workerId = 0; workerId < threadCount; workerId++) {
             workers.emplace_back([&, workerId]() {
                 Runner& workerRunner = *workerRunners[workerId];
+                const char* traceDir = traceCaseDir();
                 FuzzTestCase testCase;
                 while (queue.pop(testCase)) {
+                    writeCurrentCase(traceDir, workerId, testCase, "queued");
+                    traceCaseEvent(workerId, "begin", testCase);
                     runSingleCase(workerRunner, testCase, fatModes,
-                                  fatModeCount);
+                                  fatModeCount, traceDir, workerId);
+                    traceCaseEvent(workerId, "end", testCase);
+                    clearCurrentCase(traceDir, workerId);
                 }
                 workerRunner.reset();
             });
@@ -436,6 +687,7 @@ protected:
 
             if (testCases.empty()) {
                 printSummary(threadCount, workerRunners);
+                ADD_FAILURE() << "fuzz generator produced no test cases";
                 return;
             }
 
@@ -466,10 +718,18 @@ protected:
 
             if (generatedCaseCount == 0) {
                 printSummary(threadCount, workerRunners);
+                ADD_FAILURE() << "fuzz generator produced no test cases";
                 return;
             }
 
             runMultiInterfaces(multiCases, fatModes, fatModeCount);
+        }
+
+        const size_t fpFailures =
+            fpFeedbackFailureCount.load(std::memory_order_relaxed);
+        if (fpFailures != 0) {
+            ADD_FAILURE() << fpFailures
+                          << " false-positive feedback fuzz case(s) failed";
         }
 
         // 测试fat_hs_compile参数校验路径（只需要测试一次）
@@ -477,6 +737,16 @@ protected:
         detailOut() << "测试 fat_hs_compile invalid args..." << std::endl;
         runner->fatCompileInvalidArgs();
         runner->reset();
+
+        if (fpFeedbackAvailable) {
+            detailOut() << "\n=== Testing false-positive feedback invalid "
+                           "args ===" << std::endl;
+            if (!runner->falsePositiveFeedbackInvalidArgs()) {
+                ADD_FAILURE() << "false-positive feedback invalid-argument "
+                                 "checks failed";
+            }
+            runner->reset();
+        }
 
         // 测试平台接口（只需要测试一次）
         detailOut() << "\n=== 测试平台接口 ===" << std::endl;
@@ -493,11 +763,83 @@ protected:
     std::vector<FuzzTestCase> testCases;
     std::vector<std::string> testData;
     size_t generatedCaseCount = 0;
+    bool fpFeedbackAvailable = false;
+    size_t fpFeedbackLimit = 256;
+    std::atomic<size_t> fpFeedbackCaseCount{0};
+    std::atomic<size_t> fpFeedbackFailureCount{0};
 };
 
 // 测试所有接口
 TEST_P(HyperscanFuzzTest, AllInterfaces) {
     testAllInterfaces();
+}
+
+TEST(QuietOnlyFuzzRegression, BlockStreamVectoredNoCallbacks) {
+    const char *expression = "Q";
+    const unsigned int flags = HS_FLAG_QUIET | HS_FLAG_PREFILTER |
+                               HS_FLAG_ALLOWEMPTY | HS_FLAG_MULTILINE;
+    const unsigned int id = 2001;
+    const unsigned int modes[] = {
+        HS_MODE_BLOCK, HS_MODE_STREAM, HS_MODE_VECTORED
+    };
+    const char data[] = "QQQQQQQQQQ";
+    const unsigned int dataLength = sizeof(data) - 1;
+
+    for (unsigned int mode : modes) {
+        SCOPED_TRACE(::testing::Message() << "mode=" << mode);
+
+        hs_database_t *database = nullptr;
+        hs_compile_error_t *compileError = nullptr;
+        hs_error_t err = hs_compile_multi(&expression, &flags, &id, 1, mode,
+                                          nullptr, &database, &compileError);
+        if (err != HS_SUCCESS) {
+            const std::string message = compileError && compileError->message
+                                            ? compileError->message
+                                            : "no compile error message";
+            if (compileError) {
+                hs_free_compile_error(compileError);
+            }
+            FAIL() << "quiet-only compile failed: " << message
+                   << " (error=" << err << ")";
+        }
+        if (compileError) {
+            hs_free_compile_error(compileError);
+        }
+        ASSERT_NE(nullptr, database);
+
+        hs_scratch_t *scratch = nullptr;
+        err = hs_alloc_scratch(database, &scratch);
+        ASSERT_EQ(HS_SUCCESS, err);
+        ASSERT_NE(nullptr, scratch);
+
+        size_t matchCount = 0;
+        if (mode == HS_MODE_BLOCK) {
+            err = hs_scan(database, data, dataLength, 0, scratch,
+                          quietMatchCallback, &matchCount);
+            EXPECT_EQ(HS_SUCCESS, err);
+        } else if (mode == HS_MODE_STREAM) {
+            hs_stream_t *stream = nullptr;
+            err = hs_open_stream(database, 0, &stream);
+            ASSERT_EQ(HS_SUCCESS, err);
+            ASSERT_NE(nullptr, stream);
+            err = hs_scan_stream(stream, data, dataLength, 0, scratch,
+                                 quietMatchCallback, &matchCount);
+            EXPECT_EQ(HS_SUCCESS, err);
+            err = hs_close_stream(stream, scratch, quietMatchCallback,
+                                  &matchCount);
+            EXPECT_EQ(HS_SUCCESS, err);
+        } else {
+            const char *vectors[] = {data, data + 5};
+            const unsigned int lengths[] = {5, dataLength - 5};
+            err = hs_scan_vector(database, vectors, lengths, 2, 0, scratch,
+                                 quietMatchCallback, &matchCount);
+            EXPECT_EQ(HS_SUCCESS, err);
+        }
+
+        EXPECT_EQ(0U, matchCount);
+        EXPECT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+        EXPECT_EQ(HS_SUCCESS, hs_free_database(database));
+    }
 }
 
 // 实例化测试
