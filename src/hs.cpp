@@ -744,6 +744,19 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
         }
     }
 
+    // A native database must only contain engines that this runtime can
+    // execute. The Lily compiler is built on every architecture to support
+    // FAT/cross compilation, but the Lily runtime is only available in NEON
+    // builds. Ignore a forced Grey override on other native platforms and
+    // fall back to the regular Rose literal paths.
+    Grey native_grey = g;
+#if !defined(HAVE_NEON)
+    if (native_grey.allowLily) {
+        DEBUG_PRINTF("Lily runtime unavailable; disabling native Lily\n");
+    }
+    native_grey.allowLily = false;
+#endif
+
     try {
 #ifdef HS_ENABLE_FP_FEEDBACK
         hs_compile_context_t *mutable_fp_ctx =
@@ -763,15 +776,22 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
                 &mutable_fp_ctx->fp_matcher_build_hit_capacity;
         }
 
-        CompileContext cc(isStreaming, isVectored, target_info, g,
+        CompileContext cc(isStreaming, isVectored, target_info, native_grey,
                           fp_ctx ? fp_ctx->fp_feedback : nullptr,
                           fp_checkpoint_info, fp_matcher_hits,
                           fp_matcher_hit_count, fp_matcher_hit_dropped_count,
                           fp_matcher_hit_capacity);
 #else
-        CompileContext cc(isStreaming, isVectored, target_info, g);
+        CompileContext cc(isStreaming, isVectored, target_info, native_grey);
 #endif
         NG ng(cc, elements, somPrecision);
+
+#if !defined(HAVE_NEON)
+        // Keep the NG-level switch consistent with the effective Grey. This
+        // also prevents future short-literal paths from selecting LilyForTeddy
+        // without checking allowLily first.
+        ng.allowLilyForTeddy = false;
+#endif
 
         if (count_2_4_byte_literals > 8) {
             DEBUG_PRINTF(
