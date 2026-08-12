@@ -111,9 +111,9 @@ struct Options {
     string threadSpec;
     string greyOverrides;
     vector<unsigned> cpuList;
-    unsigned baselineRounds = 1;
+    unsigned baselineRounds = 20;
     unsigned collectRounds = 1;
-    unsigned measureRounds = 5;
+    unsigned measureRounds = 20;
     unsigned threadCount = 1;
     unsigned top = 0;
     ScanMode scanMode = ScanMode::STREAMING;
@@ -219,13 +219,14 @@ void usage(const char *error) {
         << "Usage: hspgo [OPTIONS...]\n\n"
         << "Options:\n\n"
         << "  -h, --help              Display help and exit.\n"
-        << "  -G OVERRIDES            Overrides for the grey box.\n"
+        << "  -G OVERRIDES            Overrides for the grey box; "
+           "allowNeoFdr is forced to 0.\n"
         << "  -e PATH                 Load hsbench expression file/directory.\n"
         << "  -c FILE                 Load hsbench sqlite corpus.\n"
         << "  -b N                    Run N normal hs_scan() baseline rounds "
-           "(default 1).\n"
+           "(default 20).\n"
         << "  -n N                    Run N measurement rounds after DB switch "
-           "(default 5).\n"
+           "(default 20).\n"
         << "  -N                      Run in block mode (default: streaming).\n"
         << "  -V                      Run in vectored mode (default: "
            "streaming).\n"
@@ -509,6 +510,68 @@ bool greyOverridesHaveNegativeValue(const char *text) {
     return false;
 }
 
+// True when value is all digits and represents a non-zero number.
+bool isNonZeroDigitString(const string &value) {
+    if (value.empty()) {
+        return false;
+    }
+
+    bool anyNonZero = false;
+    for (char c : value) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) {
+            return false;
+        }
+        if (c != '0') {
+            anyNonZero = true;
+        }
+    }
+    return anyNonZero;
+}
+
+// Rewrites every non-zero allowNeoFdr value in an override string of the
+// "key:value;..." form (the same format the library applies) to 0. Returns
+// true if the string was changed. hspgo's feedback scenario must keep the
+// NeoFdr false-positive blocking switch disabled.
+bool forceNeoFdrOff(string *overrides) {
+    if (!overrides || overrides->empty()) {
+        return false;
+    }
+
+    bool changed = false;
+    string out;
+    out.reserve(overrides->size());
+
+    size_t pos = 0;
+    while (pos < overrides->size()) {
+        const size_t semi = overrides->find(';', pos);
+        const size_t end = semi == string::npos ? overrides->size() : semi;
+        const size_t colon = overrides->find(':', pos);
+        bool replaced = false;
+        if (colon != string::npos && colon < end) {
+            const string key = overrides->substr(pos, colon - pos);
+            const string value = overrides->substr(colon + 1, end - colon - 1);
+            if (key == "allowNeoFdr" && isNonZeroDigitString(value)) {
+                out += "allowNeoFdr:0";
+                replaced = true;
+                changed = true;
+            }
+        }
+        if (!replaced) {
+            out += overrides->substr(pos, end - pos);
+        }
+        if (semi == string::npos) {
+            break;
+        }
+        out.push_back(';');
+        pos = semi + 1;
+    }
+
+    if (changed) {
+        overrides->assign(out);
+    }
+    return changed;
+}
+
 bool appendCpu(unsigned cpu, vector<unsigned> *out, string *error) {
     if (out->size() >= MAX_HSPGO_WORKERS) {
         if (error) {
@@ -657,10 +720,17 @@ bool processArgs(int argc, char **argv, Options *opts) {
                 usage("grey override values must be non-negative");
                 return false;
             }
-            opts->greyOverrides.assign(optarg);
-            if (hs_set_grey_overrides(optarg) != HS_SUCCESS) {
-                usage("Invalid grey overrides");
-                return false;
+            {
+                string overrides(optarg);
+                if (forceNeoFdrOff(&overrides)) {
+                    cerr << "Warning: allowNeoFdr forced to 0 (hspgo "
+                            "feedback scenario)\n";
+                }
+                opts->greyOverrides.assign(overrides);
+                if (hs_set_grey_overrides(overrides.c_str()) != HS_SUCCESS) {
+                    usage("Invalid grey overrides");
+                    return false;
+                }
             }
             break;
         case 'b':

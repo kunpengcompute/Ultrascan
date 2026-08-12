@@ -1,9 +1,10 @@
 # Ultrascan介绍
 
 ## 最新消息
-\[2026-06-30\]: 发布Ultrascan 5.7.1, 新增mcsheng算法性能优化, 提升触发状态机的匹配性能。
 
-\[2026-06-30\]: 原Hyperscan正式更名为Ultrascan，同时发布Ultrascan 5.7.0。新增通用字节码功能和HAO算法引擎，支持规则集字节码跨平台部署，并提升多模匹配性能。
+\[2026-09-30\]: 发布Ultrascan 5.8.0，新增mcsheng算法性能优化和正则匹配反馈优化技术；优化Grey配置方式，支持通过公开API设置与复位进程级Grey配置。
+
+\[2026-06-30\]: 原Hyperscan正式更名为Ultrascan，同时发布Ultrascan 5.7.0。新增通用字节码功能，支持规则集字节码跨平台部署。
 
 \[2026-03-30\]: 发布Hyperscan 2.6.0。新增基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短规则匹配算法。
 
@@ -11,7 +12,7 @@
 
 ## 项目介绍
 
-Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的大部分语法的前提下，增加了特定的语法和工作模式来保证其在真实网络场景下的实用性。Ultrascan针对不同使用场景设计了短规则旁路、HAO算法引擎、假阳性阻断等高效匹配算法，以及结合SIMD指令，实现了正则表达式的高性能匹配。Ultrascan适用于部署在诸如DPI/IPS/IDS/FW等场景中。在鲲鹏平台上，基于NEON指令集对Ultrascan进行了改造，以适配Aarch64架构，同时针对算法进行了优化。
+Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的大部分语法的前提下，增加了特定的语法和工作模式来保证其在真实网络场景下的实用性。Ultrascan针对不同使用场景设计了短规则旁路、假阳性阻断等高效匹配算法，并结合SIMD指令实现正则表达式的高性能匹配；同时提供通用字节码和正则匹配反馈优化技术。Ultrascan适用于部署在诸如DPI/IPS/IDS/FW等场景中。在鲲鹏平台上，基于NEON指令集对Ultrascan进行了改造，以适配Aarch64架构，同时针对算法进行了优化。
 
 ## 特性介绍
 
@@ -19,8 +20,8 @@ Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 |--|--|
 | 短规则旁路技术 | 短规则旁路技术特性包括单字节短规则算法和2~4字节短规则算法，通过将导致性能瓶颈的短规则从常规规则中分离，用旁路规则算法消除冗余操作，从而大幅提升整体匹配性能。 |
 | 假阳性阻断技术 | 假阳性阻断技术特性能够减少解释器大量无用的调用，进而大幅提高Ultrascan匹配性能。  |
-| HAO算法引擎 | HAO算法是基于并行位提取的多模匹配加速算法。其基本原理是在编译期选择规则字节的关键bit位组成哈希key，并构建哈希表；运行期从输入窗口中并行提取相关bit位生成哈希key，快速过滤候选并进行后端校验，从而降低无效匹配开销。 |
 | 通用字节码技术 | 通用字节码技术特性能够将Ultrascan的正则表达式编译为跨平台支持格式，该格式支持一套规则集字节码能够在x86和鲲鹏计算平台上运行，无需重新编译。 |
+| 正则匹配反馈优化技术 | 根据真实扫描语料采集低效fragment反馈，并使用feedback重新编译规则数据库，形成面向业务负载的优化闭环。 |
 
 ## 目录结构
 
@@ -39,6 +40,7 @@ Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │       ├── quick_start.md                                    # 快速入门
 │       ├── release_notes.md                                  # 版本说明书
 │       ├── installation_guide.md                              # 安装指南
+│       ├── api_reference.md                                  # API参考
 │       ├── developer_guide.md                                # 开发指南
 │       ├── user_guide.md                                     # 用户指南
 ├── examples                                                   # 示例代码目录
@@ -51,7 +53,7 @@ Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │   └── boost-patched/                                        # Boost库补丁版本
 ├── src                                                        # 核心源代码目录
 │   ├── compiler/                                             # 编译器模块，负责将正则表达式编译为内部表示
-│   ├── fdr/                                                  # FDR引擎，包含HAO算法引擎实现
+│   ├── fdr/                                                  # FDR引擎
 │   ├── hwlm/                                                 # HWLM引擎
 │   ├── kunpeng-enhanced/                                     # 鲲鹏平台增强实现，包含Lily引擎
 │   ├── nfa/                                                  # NFA引擎
@@ -68,6 +70,7 @@ Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │   │   └── ...                                               # 其他源文件
 │   ├── hscheck/                                              # Ultrascan检查工具
 │   ├── hscollider/                                           # 对比pcre的正确性测试工具
+│   ├── hspgo/                                                # 正则匹配反馈优化技术闭环工具
 │   └── hsdump/                                               # Ultrascan转储工具
 ├── unit                                                       # 单元测试目录
 │   ├── chimera/                                              # Chimera接口单元测试
@@ -84,7 +87,6 @@ Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │   ├── ng_corpus_generator.cpp                               # 语料库生成器
 │   └── ...                                                   # 其他实用工具
 ├── README.md                                                  # 项目说明文档
-├── config.txt                                                 # 配置文件
 └── ...                                                        # 其他根级文件
 ```
 
@@ -100,7 +102,7 @@ lily单字节、2-4字节短规则匹配引擎各自仅能处理至多8条单字
 在单条语料中，lily引擎所负责匹配的单字节规则命中次数合计应不大于4096，否则将停止匹配，并返回HS_SCAN_TERMINATED错误码。
 在单条语料中，lily引擎所负责匹配的2-4字节短规则命中次数合计应不大于4096，否则将停止匹配，并返回HS_SCAN_TERMINATED错误码。
 
-HAO算法引擎作为基于并行位提取的多模匹配加速路径启用，规则集、目标平台或编译配置不满足HAO构建条件时，将自动回退到原有匹配引擎。HAO的BEXT路径依赖AArch64 SVE2 BitPerm能力；在仅支持SVE的平台上不使用BEXT路径。
+正则匹配反馈优化技术当前仅支持AArch64，默认关闭，需在构建时显式设置`-DHS_ENABLE_FP_FEEDBACK=ON`。
 
 ## 环境部署
 
@@ -108,7 +110,7 @@ HAO算法引擎作为基于并行位提取的多模匹配加速路径启用，�
 
 ## 快速入门
 
-介绍基于Ultrascan官方提供的性能Benchmark工具hsbench的快速入门，具体请参见《[快速入门](./docs/zh/quick_start.md)》。
+介绍通用字节码工具、性能Benchmark工具和正则匹配反馈优化技术工具的快速入门，具体请参见《[快速入门](./docs/zh/quick_start.md)》。
 
 ## 学习文档
 
@@ -118,7 +120,8 @@ HAO算法引擎作为基于并行位提取的多模匹配加速路径启用，�
 |[安装指南](./docs/zh/installation_guide.md)|指导用户如何安装部署及编译软件。|
 |[快速入门](./docs/zh/quick_start.md)|提供快速上手验证指导。|
 |[用户指南](./docs/zh/user_guide.md)|提供Ultrascan特性使用指导。|
-|[开发指南](./docs/zh/developer_guide.md)|提供Ultrascan特性相关接口说明及定义等。|
+|[开发指南](./docs/zh/developer_guide.md)|提供Ultrascan内部接口和特性实现的开发指导。|
+|[API参考](./docs/zh/api_reference.md)|汇总Ultrascan新增公开API的定义及使用说明。|
 
 ## 贡献声明
 
