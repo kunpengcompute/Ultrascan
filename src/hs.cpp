@@ -54,21 +54,28 @@
 #include "util/target_info.h"
 
 #include <cassert>
+#include <cctype>
 #include <cstddef>
 #include <cstring>
 #include <limits.h>
+#include <set>
 #include <string>
 #include <vector>
 
 using namespace std;
 using namespace ue2;
 
+#ifdef HS_ENABLE_FP_FEEDBACK
 struct hs_compile_context {
     hs_fp_feedback_t *fp_feedback;
     u32 fp_observe_checked_count;
     u32 fp_observe_hit_count;
     hs_compile_context_checkpoint_info_t
         fp_checkpoint_info[HS_FP_COMPILE_CHECKPOINT_COUNT];
+    u32 fp_matcher_build_hit_count;
+    u32 fp_matcher_build_hit_capacity;
+    u32 fp_matcher_build_hit_dropped_count;
+    hs_compile_context_matcher_build_hit_info_t *fp_matcher_build_hits;
 };
 
 static void resetCompileContextObserve(const hs_compile_context_t *ctx) {
@@ -90,6 +97,8 @@ static void resetCompileContextDiagnostics(const hs_compile_context_t *ctx) {
     hs_compile_context_t *mutable_ctx = const_cast<hs_compile_context_t *>(ctx);
     memset(mutable_ctx->fp_checkpoint_info, 0,
            sizeof(mutable_ctx->fp_checkpoint_info));
+    mutable_ctx->fp_matcher_build_hit_count = 0;
+    mutable_ctx->fp_matcher_build_hit_dropped_count = 0;
 }
 
 static void observeCompileFeedback(const hs_compile_context_t *ctx,
@@ -109,6 +118,7 @@ static void observeCompileFeedback(const hs_compile_context_t *ctx,
     mutable_ctx->fp_observe_checked_count = checked_count;
     mutable_ctx->fp_observe_hit_count = hit_count;
 }
+#endif /* HS_ENABLE_FP_FEEDBACK */
 
 /** \brief Cheap check that no unexpected mode flags are on. */
 static bool validModeFlags(unsigned int mode) {
@@ -280,6 +290,46 @@ static hs_error_t validate_fat_compile_args(fat_hs_database_t **db,
     return HS_SUCCESS;
 }
 
+/**
+ * Collect the set of sub-expression report IDs referenced by
+ * HS_FLAG_COMBINATION expressions.  A combination expression string is a
+ * logical formula such as "1 & 2" or "1001 | 1002 & 1003" whose integers are
+ * the external report IDs of the sub-expressions consumed by the combination.
+ *
+ * This is used to identify QUIET expressions that are NOT consumed by any
+ * combination and can therefore be safely skipped at compile time.
+ */
+static std::set<unsigned>
+collectCombinationSubRefs(const char *const *expressions, const unsigned *flags,
+                          unsigned elements) {
+    std::set<unsigned> refs;
+    if (!flags || !expressions) {
+        return refs;
+    }
+    for (unsigned i = 0; i < elements; i++) {
+        if (!(flags[i] & HS_FLAG_COMBINATION)) {
+            continue;
+        }
+        const char *s = expressions[i];
+        if (!s) {
+            continue;
+        }
+        while (*s) {
+            if (isdigit((unsigned char)*s)) {
+                unsigned val = 0;
+                while (isdigit((unsigned char)*s)) {
+                    val = val * 10 + (unsigned)(*s - '0');
+                    s++;
+                }
+                refs.insert(val);
+            } else {
+                s++;
+            }
+        }
+    }
+    return refs;
+}
+
 hs_error_t fat_hs_compile_multi_int(
     const char *const *expressions, const unsigned *flags, const unsigned *ids,
     const hs_expr_ext *const *ext, unsigned elements, unsigned mode,
@@ -344,6 +394,12 @@ hs_error_t fat_hs_compile_multi_int(
         NG x86_ng(x86_cc, elements, somPrecision);
         x86_ng.allowLilyForTeddy = false;
 
+        // Build the set of sub-expression report IDs referenced by logical
+        // combinations.  This set is architecture-independent and is shared
+        // by the x86 and ARM compilation passes below.
+        const std::set<unsigned> comb_sub_refs =
+            collectCombinationSubRefs(expressions, flags, elements);
+
         // First pass: process all HS_FLAG_COMBINATION rules to populate
         // toLogicalKeyMap
         for (unsigned int i = 0; i < elements; i++) {
@@ -364,10 +420,18 @@ hs_error_t fat_hs_compile_multi_int(
         // Second pass: process all non-HS_FLAG_COMBINATION rules
         for (unsigned int i = 0; i < elements; i++) {
             if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
+                const unsigned rid = ids ? ids[i] : i;
+                if ((flags[i] & HS_FLAG_QUIET) &&
+                    comb_sub_refs.find(rid) == comb_sub_refs.end()) {
+                    DEBUG_PRINTF("skipping QUIET expr %u (rid=%u) without "
+                                 "logical combination consumer\n",
+                                 i, rid);
+                    continue;
+                }
                 try {
                     x86_addExpression(x86_ng, i, expressions[i],
                                       flags ? flags[i] : 0,
-                                      ext ? ext[i] : nullptr, ids ? ids[i] : 0);
+                                      ext ? ext[i] : nullptr, rid);
                 } catch (CompileError &e) {
                     /* Caught a parse error:
                      * throw it upstream as a CompileError with a specific index
@@ -423,10 +487,18 @@ hs_error_t fat_hs_compile_multi_int(
         // Second pass: process all non-HS_FLAG_COMBINATION rules
         for (unsigned int i = 0; i < elements; i++) {
             if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
+                const unsigned rid = ids ? ids[i] : i;
+                if ((flags[i] & HS_FLAG_QUIET) &&
+                    comb_sub_refs.find(rid) == comb_sub_refs.end()) {
+                    DEBUG_PRINTF("skipping QUIET expr %u (rid=%u) without "
+                                 "logical combination consumer\n",
+                                 i, rid);
+                    continue;
+                }
                 try {
                     addExpression(arm_ng, i, expressions[i],
                                   flags ? flags[i] : 0, ext ? ext[i] : nullptr,
-                                  ids ? ids[i] : 0);
+                                  rid);
                 } catch (CompileError &e) {
                     /* Caught a parse error:
                      * throw it upstream as a CompileError with a specific index
@@ -591,7 +663,11 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
                                 hs_database_t **db,
                                 hs_compile_error_t **comp_error, const Grey &g,
                                 const hs_compile_context_t *fp_ctx) {
+#ifdef HS_ENABLE_FP_FEEDBACK
     resetCompileContextDiagnostics(fp_ctx);
+#else
+    (void)fp_ctx;
+#endif
 
     // Check the args: note that it's OK for flags, ids or ext to be null.
     if (!comp_error) {
@@ -668,14 +744,54 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
         }
     }
 
+    // A native database must only contain engines that this runtime can
+    // execute. The Lily compiler is built on every architecture to support
+    // FAT/cross compilation, but the Lily runtime is only available in NEON
+    // builds. Ignore a forced Grey override on other native platforms and
+    // fall back to the regular Rose literal paths.
+    Grey native_grey = g;
+#if !defined(HAVE_NEON)
+    if (native_grey.allowLily) {
+        DEBUG_PRINTF("Lily runtime unavailable; disabling native Lily\n");
+    }
+    native_grey.allowLily = false;
+#endif
+
     try {
+#ifdef HS_ENABLE_FP_FEEDBACK
         hs_compile_context_t *mutable_fp_ctx =
             const_cast<hs_compile_context_t *>(fp_ctx);
-        CompileContext cc(isStreaming, isVectored, target_info, g,
+        hs_compile_context_checkpoint_info_t *fp_checkpoint_info = nullptr;
+        hs_compile_context_matcher_build_hit_info_t **fp_matcher_hits = nullptr;
+        u32 *fp_matcher_hit_count = nullptr;
+        u32 *fp_matcher_hit_dropped_count = nullptr;
+        u32 *fp_matcher_hit_capacity = nullptr;
+        if (mutable_fp_ctx) {
+            fp_checkpoint_info = mutable_fp_ctx->fp_checkpoint_info;
+            fp_matcher_hits = &mutable_fp_ctx->fp_matcher_build_hits;
+            fp_matcher_hit_count = &mutable_fp_ctx->fp_matcher_build_hit_count;
+            fp_matcher_hit_dropped_count =
+                &mutable_fp_ctx->fp_matcher_build_hit_dropped_count;
+            fp_matcher_hit_capacity =
+                &mutable_fp_ctx->fp_matcher_build_hit_capacity;
+        }
+
+        CompileContext cc(isStreaming, isVectored, target_info, native_grey,
                           fp_ctx ? fp_ctx->fp_feedback : nullptr,
-                          mutable_fp_ctx ? mutable_fp_ctx->fp_checkpoint_info
-                                         : nullptr);
+                          fp_checkpoint_info, fp_matcher_hits,
+                          fp_matcher_hit_count, fp_matcher_hit_dropped_count,
+                          fp_matcher_hit_capacity);
+#else
+        CompileContext cc(isStreaming, isVectored, target_info, native_grey);
+#endif
         NG ng(cc, elements, somPrecision);
+
+#if !defined(HAVE_NEON)
+        // Keep the NG-level switch consistent with the effective Grey. This
+        // also prevents future short-literal paths from selecting LilyForTeddy
+        // without checking allowLily first.
+        ng.allowLilyForTeddy = false;
+#endif
 
         if (count_2_4_byte_literals > 8) {
             DEBUG_PRINTF(
@@ -700,12 +816,27 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
             }
         }
 
+        // Build the set of sub-expression report IDs referenced by logical
+        // combinations so that QUIET expressions without a consumer can be
+        // safely skipped (they produce empty Rose programs with no observable
+        // effect).
+        const std::set<unsigned> comb_sub_refs =
+            collectCombinationSubRefs(expressions, flags, elements);
+
         // Second pass: process all non-HS_FLAG_COMBINATION rules
         for (unsigned int i = 0; i < elements; i++) {
             if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
+                const unsigned rid = ids ? ids[i] : i;
+                if ((flags[i] & HS_FLAG_QUIET) &&
+                    comb_sub_refs.find(rid) == comb_sub_refs.end()) {
+                    DEBUG_PRINTF("skipping QUIET expr %u (rid=%u) without "
+                                 "logical combination consumer\n",
+                                 i, rid);
+                    continue;
+                }
                 try {
                     addExpression(ng, i, expressions[i], flags ? flags[i] : 0,
-                                  ext ? ext[i] : nullptr, ids ? ids[i] : 0);
+                                  ext ? ext[i] : nullptr, rid);
                 } catch (CompileError &e) {
                     /* Caught a parse error:
                      * throw it upstream as a CompileError with a specific index
@@ -958,32 +1089,99 @@ extern "C" hs_error_t HS_CDECL hs_compile_context_set_fp_feedback(
 
 extern "C" hs_error_t HS_CDECL
 hs_compile_context_free(hs_compile_context_t *ctx) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+#else
     if (ctx) {
         hs_fp_feedback_free(ctx->fp_feedback);
+        hs_misc_free(ctx->fp_matcher_build_hits);
         hs_misc_free(ctx);
     }
+#endif
     return HS_SUCCESS;
 }
 
 extern "C" unsigned int HS_CDECL
 hs_compile_context_observe_checked_count(const hs_compile_context_t *ctx) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    return 0;
+#else
     return ctx ? ctx->fp_observe_checked_count : 0;
+#endif
 }
 
 extern "C" unsigned int HS_CDECL
 hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    return 0;
+#else
     return ctx ? ctx->fp_observe_hit_count : 0;
+#endif
 }
 
 extern "C" hs_error_t HS_CDECL hs_compile_context_get_checkpoint_info(
     const hs_compile_context_t *ctx, unsigned int checkpoint,
     hs_compile_context_checkpoint_info_t *info) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    (void)checkpoint;
+    if (!info) {
+        return HS_INVALID;
+    }
+    memset(info, 0, sizeof(*info));
+    return HS_ARCH_ERROR;
+#else
     if (!ctx || !info || checkpoint >= HS_FP_COMPILE_CHECKPOINT_COUNT) {
         return HS_INVALID;
     }
 
     *info = ctx->fp_checkpoint_info[checkpoint];
     return HS_SUCCESS;
+#endif
+}
+
+extern "C" unsigned int HS_CDECL
+hs_compile_context_matcher_build_hit_count(const hs_compile_context_t *ctx) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    return 0;
+#else
+    return ctx ? ctx->fp_matcher_build_hit_count : 0;
+#endif
+}
+
+extern "C" unsigned int HS_CDECL
+hs_compile_context_matcher_build_hit_dropped_count(
+    const hs_compile_context_t *ctx) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    return 0;
+#else
+    return ctx ? ctx->fp_matcher_build_hit_dropped_count : 0;
+#endif
+}
+
+extern "C" hs_error_t HS_CDECL hs_compile_context_get_matcher_build_hit_info(
+    const hs_compile_context_t *ctx, unsigned int index,
+    hs_compile_context_matcher_build_hit_info_t *info) {
+#if !defined(HS_ENABLE_FP_FEEDBACK)
+    (void)ctx;
+    (void)index;
+    if (!info) {
+        return HS_INVALID;
+    }
+    memset(info, 0, sizeof(*info));
+    return HS_ARCH_ERROR;
+#else
+    if (!ctx || !info || index >= ctx->fp_matcher_build_hit_count) {
+        return HS_INVALID;
+    }
+
+    *info = ctx->fp_matcher_build_hits[index];
+    return HS_SUCCESS;
+#endif
 }
 
 extern "C" HS_PUBLIC_API hs_error_t HS_CDECL hs_compile_multi(

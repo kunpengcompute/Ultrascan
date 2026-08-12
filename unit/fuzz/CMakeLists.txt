@@ -6,7 +6,7 @@ project(hyperscan_fuzz_test)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(HS_BUILD_DIR "${CMAKE_SOURCE_DIR}/../../build" CACHE PATH "Hyperscan build directory")
+set(HS_BUILD_DIR "${CMAKE_SOURCE_DIR}/../../build_cov" CACHE PATH "Hyperscan build directory")
 find_package(Threads REQUIRED)
 
 # 包含头文件目录
@@ -32,7 +32,18 @@ set(SOURCES
 )
 
 # 链接库
-find_library(HS_LIBRARY hs PATHS ${HS_BUILD_DIR}/lib)
+find_library(HS_LIBRARY hs
+    PATHS "${HS_BUILD_DIR}/lib"
+    NO_DEFAULT_PATH
+)
+
+if(NOT HS_LIBRARY)
+    message(FATAL_ERROR
+        "Unable to find libhs under ${HS_BUILD_DIR}/lib. "
+        "Set HS_BUILD_DIR to the Hyperscan build being tested.")
+endif()
+
+message(STATUS "Fuzz tests use Hyperscan library: ${HS_LIBRARY}")
 
 # 创建可执行文件
 add_executable(hyperscan_fuzz_test ${SOURCES})

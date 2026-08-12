@@ -2997,6 +2997,7 @@ static void buildLiteralPrograms(const RoseBuildImpl &build,
     updateLitProgramOffset(fragments, fproto, drproto, eproto, sbproto);
 }
 
+#ifdef HS_ENABLE_FP_FEEDBACK
 static u64a hashFpFragmentByte(u64a hash, u8 value) {
     static constexpr u64a FNV_PRIME = 1099511628211ULL;
     return (hash ^ value) * FNV_PRIME;
@@ -3108,7 +3109,6 @@ static void addFpFragmentMeta(vector<RoseFpFragmentMeta> &out, set<u32> &seen,
 
 static pair<u32, u32> writeFpFragmentMeta(RoseEngineBlob &engine_blob,
                                           const LitProto *fproto,
-                                          const LitProto *drproto,
                                           const LitProto *eproto,
                                           const LitProto *sbproto) {
     vector<RoseFpFragmentMeta> meta;
@@ -3117,7 +3117,6 @@ static pair<u32, u32> writeFpFragmentMeta(RoseEngineBlob &engine_blob,
     addFpFragmentMeta(meta, seen, fproto, ROSE_FP_TABLE_FLOATING);
     addFpFragmentMeta(meta, seen, eproto, ROSE_FP_TABLE_EOD_ANCHORED);
     addFpFragmentMeta(meta, seen, sbproto, ROSE_FP_TABLE_SMALL_BLOCK);
-    addFpFragmentMeta(meta, seen, drproto, ROSE_FP_TABLE_DELAY_REBUILD);
 
     if (meta.empty()) {
         return make_pair(0U, 0U);
@@ -3130,6 +3129,7 @@ static pair<u32, u32> writeFpFragmentMeta(RoseEngineBlob &engine_blob,
 
     return make_pair(engine_blob.add_range(meta), verify_u32(meta.size()));
 }
+#endif /* HS_ENABLE_FP_FEEDBACK */
 
 /**
  * \brief Write delay replay programs to the bytecode.
@@ -3872,9 +3872,11 @@ bytecode_ptr<RoseEngine> RoseBuildImpl::arm_buildFinalEngine(u32 minWidth) {
     buildLiteralPrograms(*this, fragments, bc, prog_build, fproto.get(),
                          drproto.get(), eproto.get(), sbproto.get());
 
+#ifdef HS_ENABLE_FP_FEEDBACK
     tie(proto.fpFragmentMetaOffset, proto.fpFragmentMetaCount) =
-        writeFpFragmentMeta(bc.engine_blob, fproto.get(), drproto.get(),
-                            eproto.get(), sbproto.get());
+        writeFpFragmentMeta(bc.engine_blob, fproto.get(), eproto.get(),
+                            sbproto.get());
+#endif
 
     auto eod_prog = makeEodProgram(*this, bc, prog_build, eodNfaIterOffset);
     proto.eodProgramOffset = writeProgram(bc, move(eod_prog));
@@ -4178,9 +4180,11 @@ bytecode_ptr<x86_RoseEngine> RoseBuildImpl::x86_buildFinalEngine(u32 minWidth) {
     buildLiteralPrograms(*this, fragments, bc, prog_build, fproto.get(),
                          drproto.get(), eproto.get(), sbproto.get());
 
+#ifdef HS_ENABLE_FP_FEEDBACK
     tie(proto.fpFragmentMetaOffset, proto.fpFragmentMetaCount) =
-        writeFpFragmentMeta(bc.engine_blob, fproto.get(), drproto.get(),
-                            eproto.get(), sbproto.get());
+        writeFpFragmentMeta(bc.engine_blob, fproto.get(), eproto.get(),
+                            sbproto.get());
+#endif
 
     auto eod_prog = makeEodProgram(*this, bc, prog_build, eodNfaIterOffset);
     proto.eodProgramOffset = writeProgram(bc, move(eod_prog));

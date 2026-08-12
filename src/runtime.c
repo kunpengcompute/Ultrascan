@@ -139,10 +139,12 @@ populateCoreInfo(struct hs_scratch *s, const struct RoseEngine *rose,
     s->core_info.hbuf = history;
     s->core_info.hlen = hlen;
     s->core_info.buf_offset = offset;
+#ifdef HS_ENABLE_FP_FEEDBACK
     s->core_info.fp_collector = NULL;
     s->core_info.fp_current_trigger_key = 0;
     s->core_info.fp_current_trigger_active = 0;
     s->core_info.fp_current_trigger_reported = 0;
+#endif
 
     /* and some stuff not actually in core info */
     s->som_set_now_offset = ~0ULL;
@@ -362,7 +364,11 @@ static hs_error_t hs_scan_internal(const hs_database_t *db, const char *data,
     /* populate core info in scratch */
     populateCoreInfo(scratch, rose, scratch->bstate, onEvent, userCtx, data,
                      length, NULL, 0, 0, 0, flags);
+#ifdef HS_ENABLE_FP_FEEDBACK
     scratch->core_info.fp_collector = collector;
+#else
+    (void)collector;
+#endif
 
     clearEvec(rose, scratch->core_info.exhaustionVector);
     if (rose->ckeyCount) {
@@ -702,7 +708,11 @@ static really_inline void report_eod_matches(hs_stream_t *id,
     populateCoreInfo(scratch, rose, state, onEvent, context, NULL, 0,
                      getHistory(state, rose, id->offset),
                      getHistoryAmount(rose, id->offset), id->offset, status, 0);
+#ifdef HS_ENABLE_FP_FEEDBACK
     scratch->core_info.fp_collector = collector;
+#else
+    (void)collector;
+#endif
 
     if (rose->ckeyCount) {
         scratch->core_info.logicalVector =
@@ -784,7 +794,9 @@ static really_inline hs_error_t report_eod_matches_if_needed(
     }
 
     report_eod_matches(id, scratch, onEvent, context, collector);
+#ifdef HS_ENABLE_FP_FEEDBACK
     hs_fp_collector_flush(collector);
+#endif
     if (unlikely(internal_matching_error(scratch))) {
         unmarkScratchInUse(scratch);
         return HS_UNKNOWN_ERROR;
@@ -985,7 +997,11 @@ hs_scan_stream_internal(hs_stream_t *id, const char *data, unsigned length,
     populateCoreInfo(scratch, rose, state, onEvent, context, data, length,
                      getHistory(state, rose, id->offset), historyAmount,
                      id->offset, status, flags);
+#ifdef HS_ENABLE_FP_FEEDBACK
     scratch->core_info.fp_collector = collector;
+#else
+    (void)collector;
+#endif
     if (rose->ckeyCount) {
         scratch->core_info.logicalVector =
             state + rose->stateOffsets.logicalVec;

@@ -212,9 +212,7 @@ int roseAnchoredCallback(u64a start, u64a end, u32 id, void *ctx) {
 
     // Note that the "id" we have been handed is the program offset.
     const u8 flags = ROSE_PROG_FLAG_IN_ANCHORED;
-    hs_fp_collector_begin_trigger(scratch, id);
     hwlmcb_rv_t rv = roseRunProgram(t, scratch, id, start, real_end, flags);
-    hs_fp_collector_end_trigger(scratch);
     if (rv == HWLM_TERMINATE_MATCHING) {
         assert(can_stop_matching(scratch));
         DEBUG_PRINTF("caller requested termination\n");
@@ -505,9 +503,13 @@ static really_inline hwlmcb_rv_t roseCallback_i(size_t end, u32 id,
         return HWLM_TERMINATE_MATCHING;
     }
 
+#ifdef HS_ENABLE_FP_FEEDBACK
     hs_fp_collector_begin_trigger(scratch, id);
+#endif
     rv = roseProcessMatchInline(t, scratch, real_end, id);
+#ifdef HS_ENABLE_FP_FEEDBACK
     hs_fp_collector_end_trigger(scratch);
+#endif
 
     DEBUG_PRINTF("DONE groups=0x%016llx\n", tctx->groups);
 

@@ -35,52 +35,48 @@
 #include "shufti.h"
 #include "truffle.h"
 #include "ue2common.h"
-#include "vermicelli.h"
-#include "vermicelli_run.h"
 #include "util/multibit.h"
 #include "util/partial_store.h"
 #include "util/simd_utils.h"
 #include "util/unaligned.h"
+#include "vermicelli.h"
+#include "vermicelli_run.h"
 
 #include <string.h>
 
 #define MIN_SKIP_REPEAT 32
 
 typedef struct mpv_pq_item PQ_T;
-#define PQ_COMP(pqc_items, a, b) \
+#define PQ_COMP(pqc_items, a, b)                                               \
     ((pqc_items)[a].trigger_loc < (pqc_items)[b].trigger_loc)
-#define PQ_COMP_B(pqc_items, a, b_fixed) \
+#define PQ_COMP_B(pqc_items, a, b_fixed)                                       \
     ((pqc_items)[a].trigger_loc < (b_fixed).trigger_loc)
 
 #include "util/pqueue.h"
 
-static really_inline
-u64a *get_counter_n(struct mpv_decomp_state *s,
-                    const struct mpv *m, u32 n) {
+static really_inline u64a *get_counter_n(struct mpv_decomp_state *s,
+                                         const struct mpv *m, u32 n) {
     return (u64a *)((char *)s + get_counter_info(m)[n].counter_offset);
 }
 
-static really_inline
-u64a *get_counter_for_kilo(struct mpv_decomp_state *s,
-                           const struct mpv_kilopuff *kp) {
+static really_inline u64a *get_counter_for_kilo(struct mpv_decomp_state *s,
+                                                const struct mpv_kilopuff *kp) {
     return (u64a *)((char *)s + kp->counter_offset);
 }
 
-static really_inline
-u64a get_counter_value_for_kilo(struct mpv_decomp_state *s,
-                                const struct mpv_kilopuff *kp) {
+static really_inline u64a get_counter_value_for_kilo(
+    struct mpv_decomp_state *s, const struct mpv_kilopuff *kp) {
     return *get_counter_for_kilo(s, kp) + s->counter_adj;
 }
 
-static really_inline
-const u64a *get_counter_for_kilo_c(const struct mpv_decomp_state *s,
-                             const struct mpv_kilopuff *kp) {
+static really_inline const u64a *
+get_counter_for_kilo_c(const struct mpv_decomp_state *s,
+                       const struct mpv_kilopuff *kp) {
     return (const u64a *)((const char *)s + kp->counter_offset);
 }
 
-
-static never_inline
-void normalize_counters(struct mpv_decomp_state *dstate, const struct mpv *m) {
+static never_inline void normalize_counters(struct mpv_decomp_state *dstate,
+                                            const struct mpv *m) {
     u64a adj = dstate->counter_adj;
     u64a *counters = get_counter_n(dstate, m, 0);
 
@@ -97,11 +93,11 @@ void normalize_counters(struct mpv_decomp_state *dstate, const struct mpv *m) {
     dstate->counter_adj = 0;
 }
 
-static really_inline
-char processReports(const struct mpv *m, u8 *reporters,
-                    const struct mpv_decomp_state *dstate, u64a counter_adj,
-                    u64a report_offset, NfaCallback cb, void *ctxt,
-                    ReportID *rl, u32 *rl_count_out) {
+static really_inline char processReports(const struct mpv *m, u8 *reporters,
+                                         const struct mpv_decomp_state *dstate,
+                                         u64a counter_adj, u64a report_offset,
+                                         NfaCallback cb, void *ctxt,
+                                         ReportID *rl, u32 *rl_count_out) {
     DEBUG_PRINTF("reporting at offset %llu\n", report_offset);
     const struct mpv_kilopuff *kp = (const void *)(m + 1);
     u32 rl_count = 0;
@@ -109,8 +105,8 @@ char processReports(const struct mpv *m, u8 *reporters,
     for (u32 i = mmbit_iterate(reporters, m->kilo_count, MMB_INVALID);
          i != MMB_INVALID; i = mmbit_iterate(reporters, m->kilo_count, i)) {
         const struct mpv_puffette *curr = dstate->active[i].curr;
-        u64a curr_counter_val = *get_counter_for_kilo_c(dstate, &kp[i])
-                              + counter_adj;
+        u64a curr_counter_val =
+            *get_counter_for_kilo_c(dstate, &kp[i]) + counter_adj;
         DEBUG_PRINTF("kilo %u, underlying counter: %llu current: %llu\n", i,
                      *get_counter_for_kilo_c(dstate, &kp[i]), curr_counter_val);
         assert(curr_counter_val != MPV_DEAD_VALUE); /* counter_adj should take
@@ -122,7 +118,7 @@ char processReports(const struct mpv *m, u8 *reporters,
             assert(curr_counter_val >= curr->repeats);
             if (curr->unbounded || curr_counter_val == curr->repeats) {
                 DEBUG_PRINTF("report %u at %llu\n", curr->report,
-                              report_offset);
+                             report_offset);
 
                 if (curr->unbounded && !curr->simple_exhaust) {
                     assert(rl_count < m->puffette_count);
@@ -151,15 +147,15 @@ char processReports(const struct mpv *m, u8 *reporters,
     return MO_CONTINUE_MATCHING;
 }
 
-static
-ReportID *get_report_list(const struct mpv *m, struct mpv_decomp_state *s) {
+static ReportID *get_report_list(const struct mpv *m,
+                                 struct mpv_decomp_state *s) {
     return (ReportID *)((char *)s + m->report_list_offset);
 }
 
-static really_inline
-char processReportsForRange(const struct mpv *m, u8 *reporters,
-                            struct mpv_decomp_state *dstate, u64a first_offset,
-                            size_t length, NfaCallback cb, void *ctxt) {
+static really_inline char
+processReportsForRange(const struct mpv *m, u8 *reporters,
+                       struct mpv_decomp_state *dstate, u64a first_offset,
+                       size_t length, NfaCallback cb, void *ctxt) {
     if (!length) {
         return MO_CONTINUE_MATCHING;
     }
@@ -192,10 +188,9 @@ char processReportsForRange(const struct mpv *m, u8 *reporters,
 }
 
 /* returns last puffette that we have satisfied */
-static
-const struct mpv_puffette *get_curr_puff(const struct mpv *m,
-                                         const struct mpv_kilopuff *kp,
-                                         struct mpv_decomp_state *dstate) {
+static const struct mpv_puffette *
+get_curr_puff(const struct mpv *m, const struct mpv_kilopuff *kp,
+              struct mpv_decomp_state *dstate) {
     u64a counter = *get_counter_for_kilo(dstate, kp);
     assert(counter != MPV_DEAD_VALUE);
 
@@ -211,9 +206,8 @@ const struct mpv_puffette *get_curr_puff(const struct mpv *m,
     return p - 1;
 }
 
-static
-const struct mpv_puffette *get_init_puff(const struct mpv *m,
-                                         const struct mpv_kilopuff *kp) {
+static const struct mpv_puffette *get_init_puff(const struct mpv *m,
+                                                const struct mpv_kilopuff *kp) {
     const struct mpv_puffette *p = get_puff_array(m, kp);
     while (p->repeats == 1) {
         ++p;
@@ -221,13 +215,10 @@ const struct mpv_puffette *get_init_puff(const struct mpv *m,
     return p - 1;
 }
 
-
 /* returns the last puffette whose repeats have been satisfied */
-static really_inline
-const struct mpv_puffette *update_curr_puff(const struct mpv *m, u8 *reporters,
-                                            u64a counter,
-                                            const struct mpv_puffette *in,
-                                            u32 kilo_index) {
+static really_inline const struct mpv_puffette *
+update_curr_puff(const struct mpv *m, u8 *reporters, u64a counter,
+                 const struct mpv_puffette *in, u32 kilo_index) {
     assert(counter != MPV_DEAD_VALUE);
 
     const struct mpv_puffette *p = in;
@@ -246,9 +237,8 @@ const struct mpv_puffette *update_curr_puff(const struct mpv *m, u8 *reporters,
     return p;
 }
 
-static really_inline
-size_t limitByReach(const struct mpv_kilopuff *kp, const u8 *buf,
-                    size_t length) {
+static really_inline size_t limitByReach(const struct mpv_kilopuff *kp,
+                                         const u8 *buf, size_t length) {
     if (kp->type == MPV_VERM) {
         return vermicelliExec(kp->u.verm.c, 0, buf, buf + length) - buf;
     } else if (kp->type == MPV_SHUFTI) {
@@ -256,7 +246,9 @@ size_t limitByReach(const struct mpv_kilopuff *kp, const u8 *buf,
         m128 mask_hi = kp->u.shuf.mask_hi;
         return shuftiExec(mask_lo, mask_hi, buf, buf + length) - buf;
     } else if (kp->type == MPV_TRUFFLE) {
-        return truffleExec(kp->u.truffle.mask1, kp->u.truffle.mask2, buf, buf + length) - buf;
+        return truffleExec(kp->u.truffle.mask1, kp->u.truffle.mask2, buf,
+                           buf + length) -
+               buf;
     } else if (kp->type == MPV_NVERM) {
         return nvermicelliExec(kp->u.verm.c, 0, buf, buf + length) - buf;
     }
@@ -265,10 +257,11 @@ size_t limitByReach(const struct mpv_kilopuff *kp, const u8 *buf,
     return length;
 }
 
-static never_inline
-void fillLimits(const struct mpv *m, u8 *active, u8 *reporters,
-                struct mpv_decomp_state *dstate, struct mpv_pq_item *pq,
-                const u8 *buf, size_t length) {
+static never_inline void fillLimits(const struct mpv *m, u8 *active,
+                                    u8 *reporters,
+                                    struct mpv_decomp_state *dstate,
+                                    struct mpv_pq_item *pq, const u8 *buf,
+                                    size_t length) {
     DEBUG_PRINTF("filling limits %zu\n", length);
     assert(!dstate->pq_size);
 
@@ -312,7 +305,6 @@ void fillLimits(const struct mpv *m, u8 *active, u8 *reporters,
 
             lim = limitByReach(&kp[i], buf + 1, length - 1) + 1;
 
-
             /* restart active counters */
             dstate->active[i].curr = get_init_puff(m, &kp[i]);
             assert(dstate->active[i].curr[0].report == INVALID_REPORT);
@@ -327,17 +319,14 @@ void fillLimits(const struct mpv *m, u8 *active, u8 *reporters,
             continue;
         }
         if (dstate->active[i].curr[1].report != INVALID_REPORT) {
-            u32 next_trigger = dstate->active[i].curr[1].repeats - 1ULL
-                             - *get_counter_for_kilo(dstate, &kp[i]);
+            u32 next_trigger = dstate->active[i].curr[1].repeats - 1ULL -
+                               *get_counter_for_kilo(dstate, &kp[i]);
             DEBUG_PRINTF("next trigger %u\n", next_trigger);
             lim = MIN(lim, next_trigger);
         }
 
         if (lim != length) {
-            struct mpv_pq_item temp = {
-                .trigger_loc = lim,
-                .kilo = i
-            };
+            struct mpv_pq_item temp = {.trigger_loc = lim, .kilo = i};
 
             DEBUG_PRINTF("push for %u at %llu\n", i, lim);
             pq_insert(pq, dstate->pq_size, temp);
@@ -351,10 +340,11 @@ void fillLimits(const struct mpv *m, u8 *active, u8 *reporters,
     dstate->filled = 1;
 }
 
-static never_inline
-void handleTopN(const struct mpv *m, s64a loc, u8 *active, u8 *reporters,
-                struct mpv_decomp_state *dstate, struct mpv_pq_item *pq,
-                const u8 *buf, size_t length, u32 i) {
+static never_inline void handleTopN(const struct mpv *m, s64a loc, u8 *active,
+                                    u8 *reporters,
+                                    struct mpv_decomp_state *dstate,
+                                    struct mpv_pq_item *pq, const u8 *buf,
+                                    size_t length, u32 i) {
     assert(i < m->kilo_count);
     DEBUG_PRINTF("MQE_TOP + %u @%lld\n", i, loc);
     if (mmbit_set(active, m->kilo_count, i)) {
@@ -399,8 +389,8 @@ void handleTopN(const struct mpv *m, s64a loc, u8 *active, u8 *reporters,
         lim = MIN(lim, next_trigger);
     }
 
-    assert(dstate->active[i].curr[0].repeats == 1
-           || dstate->active[i].curr[0].report == INVALID_REPORT);
+    assert(dstate->active[i].curr[0].repeats == 1 ||
+           dstate->active[i].curr[0].report == INVALID_REPORT);
     if (dstate->active[i].curr[0].repeats == 1) {
         DEBUG_PRINTF("yippee\n");
         mmbit_set(reporters, m->kilo_count, i);
@@ -410,10 +400,7 @@ void handleTopN(const struct mpv *m, s64a loc, u8 *active, u8 *reporters,
 
     /* add to pq */
     if (lim != length) {
-        struct mpv_pq_item temp = {
-            .trigger_loc = lim,
-            .kilo = i
-        };
+        struct mpv_pq_item temp = {.trigger_loc = lim, .kilo = i};
 
         DEBUG_PRINTF("push for %u at %llu\n", i, lim);
         pq_insert(pq, dstate->pq_size, temp);
@@ -421,11 +408,12 @@ void handleTopN(const struct mpv *m, s64a loc, u8 *active, u8 *reporters,
     }
 }
 
-static really_inline
-void killKilo(const struct mpv *m, u8 *active, u8 *reporters,
-              struct mpv_decomp_state *dstate, struct mpv_pq_item *pq, u32 i) {
-    DEBUG_PRINTF("squashing kilo %u (progress %llu, limit %llu)\n",
-                 i, pq_top(pq)->trigger_loc, dstate->active[i].limit);
+static really_inline void killKilo(const struct mpv *m, u8 *active,
+                                   u8 *reporters,
+                                   struct mpv_decomp_state *dstate,
+                                   struct mpv_pq_item *pq, u32 i) {
+    DEBUG_PRINTF("squashing kilo %u (progress %llu, limit %llu)\n", i,
+                 pq_top(pq)->trigger_loc, dstate->active[i].limit);
     mmbit_unset(active, m->kilo_count, i);
     mmbit_unset(reporters, m->kilo_count, i);
 
@@ -433,22 +421,23 @@ void killKilo(const struct mpv *m, u8 *active, u8 *reporters,
     dstate->pq_size--;
 }
 
-static really_inline
-void updateKiloChains(const struct mpv *m, u8 *reporters,
-                      struct mpv_decomp_state *dstate, struct mpv_pq_item *pq,
-                      u64a curr_loc, size_t buf_length, u32 i) {
+static really_inline void updateKiloChains(const struct mpv *m, u8 *reporters,
+                                           struct mpv_decomp_state *dstate,
+                                           struct mpv_pq_item *pq,
+                                           u64a curr_loc, size_t buf_length,
+                                           u32 i) {
     const struct mpv_kilopuff *kp = (const void *)(m + 1);
     u64a counter = get_counter_value_for_kilo(dstate, &kp[i]);
 
     DEBUG_PRINTF("updating active puff for kilo %u\n", i);
-    dstate->active[i].curr = update_curr_puff(m, reporters, counter,
-                                              dstate->active[i].curr, i);
+    dstate->active[i].curr =
+        update_curr_puff(m, reporters, counter, dstate->active[i].curr, i);
 
     u64a next_trigger = dstate->active[i].limit;
 
     if (dstate->active[i].curr[1].report != INVALID_REPORT) {
-        u64a next_rep_trigger = dstate->active[i].curr[1].repeats - 1 - counter
-                             + curr_loc;
+        u64a next_rep_trigger =
+            dstate->active[i].curr[1].repeats - 1 - counter + curr_loc;
 
         next_trigger = MIN(next_trigger, next_rep_trigger);
     } else if (kp[i].dead_point != MPV_DEAD_VALUE) {
@@ -465,10 +454,7 @@ void updateKiloChains(const struct mpv *m, u8 *reporters,
     if (next_trigger < buf_length) {
         assert(dstate->pq_size <= m->kilo_count);
         assert(next_trigger > pq_top(pq)->trigger_loc);
-        struct mpv_pq_item temp = {
-            .trigger_loc = next_trigger,
-            .kilo = i
-        };
+        struct mpv_pq_item temp = {.trigger_loc = next_trigger, .kilo = i};
 
         DEBUG_PRINTF("(replace) push for %u at %llu\n", i, next_trigger);
         pq_replace_top(pq, dstate->pq_size, temp);
@@ -481,29 +467,32 @@ void updateKiloChains(const struct mpv *m, u8 *reporters,
                  pq_top(pq)->trigger_loc);
 }
 
-static really_inline
-u8 do_single_shufti(const m128 l, const m128 h, u8 c) {
+static really_inline u8 do_single_shufti(const m128 l, const m128 h, u8 c) {
     const u8 *lo = (const u8 *)&l;
     const u8 *hi = (const u8 *)&h;
     return lo[c & 0xf] & hi[c >> 4];
 }
 
-static really_inline
-size_t find_last_bad(const struct mpv_kilopuff *kp, const u8 *buf,
-                     size_t length, size_t curr, u32 min_rep) {
+static really_inline size_t find_last_bad(const struct mpv_kilopuff *kp,
+                                          const u8 *buf, size_t length,
+                                          size_t curr, u32 min_rep) {
     assert(kp->type != MPV_DOT);
 
     DEBUG_PRINTF("repeats = %u\n", min_rep);
     /* TODO: this should be replace by some sort of simd stuff */
+    /* Verm storage is char, but direct buffer comparisons are byte-valued. */
 
     if (kp->type == MPV_VERM) {
         if (min_rep < MIN_SKIP_REPEAT) {
             return find_nverm_run(kp->u.verm.c, 0, min_rep, buf, buf + curr,
-                                  buf + length) - buf - 1;
+                                  buf + length) -
+                   buf - 1;
         }
 
+        const u8 c = (u8)kp->u.verm.c;
+
     verm_restart:;
-        assert(buf[curr] == kp->u.verm.c);
+        assert(buf[curr] == c);
         size_t test = curr;
         if (curr + min_rep < length) {
             test = curr + min_rep;
@@ -512,7 +501,7 @@ size_t find_last_bad(const struct mpv_kilopuff *kp, const u8 *buf,
         }
 
         while (test > curr) {
-            if (buf[test] == kp->u.verm.c) {
+            if (buf[test] == c) {
                 curr = test;
                 if (curr == length - 1) {
                     return curr;
@@ -556,7 +545,8 @@ size_t find_last_bad(const struct mpv_kilopuff *kp, const u8 *buf,
         }
 
         while (test > curr) {
-            const u8 *rv = truffleExec(mask1, mask2, buf + test, buf + test + 1);
+            const u8 *rv =
+                truffleExec(mask1, mask2, buf + test, buf + test + 1);
             if (rv == buf + test) {
                 curr = test;
                 if (curr == length - 1) {
@@ -569,11 +559,14 @@ size_t find_last_bad(const struct mpv_kilopuff *kp, const u8 *buf,
     } else if (kp->type == MPV_NVERM) {
         if (min_rep < MIN_SKIP_REPEAT) {
             return find_verm_run(kp->u.verm.c, 0, min_rep, buf, buf + curr,
-                                 buf + length) - buf - 1;
+                                 buf + length) -
+                   buf - 1;
         }
 
+        const u8 c = (u8)kp->u.verm.c;
+
     nverm_restart:;
-        assert(buf[curr] != kp->u.verm.c);
+        assert(buf[curr] != c);
         size_t test = curr;
         if (curr + min_rep < length) {
             test = curr + min_rep;
@@ -582,7 +575,7 @@ size_t find_last_bad(const struct mpv_kilopuff *kp, const u8 *buf,
         }
 
         while (test > curr) {
-            if (buf[test] != kp->u.verm.c) {
+            if (buf[test] != c) {
                 curr = test;
                 if (curr == length - 1) {
                     return curr;
@@ -598,10 +591,10 @@ size_t find_last_bad(const struct mpv_kilopuff *kp, const u8 *buf,
     return curr;
 }
 
-static really_inline
-void restartKilo(const struct mpv *m, UNUSED u8 *active, u8 *reporters,
-                 struct mpv_decomp_state *dstate, struct mpv_pq_item *pq,
-                 const u8 *buf, u64a prev_limit, size_t buf_length, u32 i) {
+static really_inline void
+restartKilo(const struct mpv *m, UNUSED u8 *active, u8 *reporters,
+            struct mpv_decomp_state *dstate, struct mpv_pq_item *pq,
+            const u8 *buf, u64a prev_limit, size_t buf_length, u32 i) {
     const struct mpv_kilopuff *kp = (const void *)(m + 1);
     assert(kp[i].auto_restart);
     assert(mmbit_isset(active, m->kilo_count, i));
@@ -634,10 +627,7 @@ void restartKilo(const struct mpv *m, UNUSED u8 *active, u8 *reporters,
             /* there is no point in getting restarted at this location */
             dstate->active[i].limit = last_bad;
             assert(dstate->pq_size <= m->kilo_count);
-            struct mpv_pq_item temp = {
-                .trigger_loc = last_bad,
-                .kilo = i
-            };
+            struct mpv_pq_item temp = {.trigger_loc = last_bad, .kilo = i};
 
             pq_replace_top(pq, dstate->pq_size, temp);
             return;
@@ -670,10 +660,7 @@ void restartKilo(const struct mpv *m, UNUSED u8 *active, u8 *reporters,
     if (lim < buf_length) {
         assert(dstate->pq_size <= m->kilo_count);
         assert(lim >= prev_limit);
-        struct mpv_pq_item temp = {
-            .trigger_loc = lim,
-            .kilo = i
-        };
+        struct mpv_pq_item temp = {.trigger_loc = lim, .kilo = i};
 
         pq_replace_top(pq, dstate->pq_size, temp);
     } else {
@@ -682,10 +669,11 @@ void restartKilo(const struct mpv *m, UNUSED u8 *active, u8 *reporters,
     }
 }
 
-static really_inline
-void handle_events(const struct mpv *m, u8 *active, u8 *reporters,
-                   struct mpv_decomp_state *dstate, struct mpv_pq_item *pq,
-                   u64a loc,  const u8 *buf, size_t buf_length) {
+static really_inline void handle_events(const struct mpv *m, u8 *active,
+                                        u8 *reporters,
+                                        struct mpv_decomp_state *dstate,
+                                        struct mpv_pq_item *pq, u64a loc,
+                                        const u8 *buf, size_t buf_length) {
     const struct mpv_kilopuff *kp = (const void *)(m + 1);
 
     while (dstate->pq_size && pq_top(pq)->trigger_loc <= loc) {
@@ -697,7 +685,7 @@ void handle_events(const struct mpv *m, u8 *active, u8 *reporters,
                      pq_top(pq)->trigger_loc);
 
         if (dstate->active[kilo].limit <= loc) {
-           if (!kp[kilo].auto_restart) {
+            if (!kp[kilo].auto_restart) {
                 killKilo(m, active, reporters, dstate, pq, kilo);
             } else {
                 restartKilo(m, active, reporters, dstate, pq, buf, loc,
@@ -709,11 +697,12 @@ void handle_events(const struct mpv *m, u8 *active, u8 *reporters,
     }
 }
 
-static really_inline
-u64a find_next_limit(const struct mpv *m, u8 *active, u8 *reporters,
-                     struct mpv_decomp_state *dstate, struct mpv_pq_item *pq,
-                     const u8 *buf, u64a prev_limit, u64a ep,
-                     size_t buf_length) {
+static really_inline u64a find_next_limit(const struct mpv *m, u8 *active,
+                                          u8 *reporters,
+                                          struct mpv_decomp_state *dstate,
+                                          struct mpv_pq_item *pq, const u8 *buf,
+                                          u64a prev_limit, u64a ep,
+                                          size_t buf_length) {
     u64a limit = ep;
 
     DEBUG_PRINTF("length %llu (prev %llu), pq %u\n", limit, prev_limit,
@@ -731,11 +720,12 @@ u64a find_next_limit(const struct mpv *m, u8 *active, u8 *reporters,
     return limit;
 }
 
-static really_inline
-char mpvExec(const struct mpv *m, u8 *active, u8 *reporters,
-             struct mpv_decomp_state *dstate, struct mpv_pq_item *pq,
-             const u8 *buf, s64a start, size_t length, size_t buf_length,
-             u64a offsetAdj, NfaCallback cb, void *ctxt) {
+static really_inline char mpvExec(const struct mpv *m, u8 *active,
+                                  u8 *reporters,
+                                  struct mpv_decomp_state *dstate,
+                                  struct mpv_pq_item *pq, const u8 *buf,
+                                  s64a start, size_t length, size_t buf_length,
+                                  u64a offsetAdj, NfaCallback cb, void *ctxt) {
     DEBUG_PRINTF("running mpv (s %lliu, l %zu, o %llu)\n",
                  *get_counter_n(dstate, m, 0) + dstate->counter_adj, length,
                  offsetAdj);
@@ -753,9 +743,9 @@ char mpvExec(const struct mpv *m, u8 *active, u8 *reporters,
         DEBUG_PRINTF("incr = %llu\n", incr);
 
         /* report matches upto next limit */
-        char rv = processReportsForRange(m, reporters, dstate,
-                                         offsetAdj + progress, limit - progress,
-                                         cb, ctxt);
+        char rv =
+            processReportsForRange(m, reporters, dstate, offsetAdj + progress,
+                                   limit - progress, cb, ctxt);
 
         if (rv != MO_CONTINUE_MATCHING) {
             DEBUG_PRINTF("mpvExec done %llu/%zu\n", progress, length);
@@ -772,9 +762,8 @@ char mpvExec(const struct mpv *m, u8 *active, u8 *reporters,
     return MO_CONTINUE_MATCHING;
 }
 
-static really_inline
-void mpvLoadState(struct mpv_decomp_state *out, const struct NFA *n,
-                  const char *state) {
+static really_inline void mpvLoadState(struct mpv_decomp_state *out,
+                                       const struct NFA *n, const char *state) {
     assert(16 >= sizeof(struct mpv_decomp_kilo));
     assert(sizeof(*out) <= n->scratchStateSize);
     assert(ISALIGNED(out));
@@ -800,15 +789,15 @@ void mpvLoadState(struct mpv_decomp_state *out, const struct NFA *n,
     mmbit_clear(reporters, m->kilo_count);
 }
 
-static really_inline
-void mpvStoreState(const struct NFA *n, char *state,
-                   const struct mpv_decomp_state *in) {
+static really_inline void mpvStoreState(const struct NFA *n, char *state,
+                                        const struct mpv_decomp_state *in) {
     assert(ISALIGNED(in));
     const struct mpv *m = getImplNfa(n);
     const struct mpv_counter_info *counter_info = get_counter_info(m);
 
-    const u64a *counters = (const u64a *)((const char *)in
-                                       + get_counter_info(m)[0].counter_offset);
+    const u64a *counters =
+        (const u64a *)((const char *)in +
+                       get_counter_info(m)[0].counter_offset);
     u64a adj = in->counter_adj;
     char *comp_counter = state;
     for (u32 i = 0; i < m->counter_count; i++) {
@@ -819,7 +808,8 @@ void mpvStoreState(const struct NFA *n, char *state,
         partial_store_u64a(comp_counter, curr_counter, counter_size);
         DEBUG_PRINTF("stored %llu counter %u (orig %llu)\n", curr_counter, i,
                      counters[i]);
-        /* assert(counters[i] != MPV_DEAD_VALUE); /\* should have process 1 byte */
+        /* assert(counters[i] != MPV_DEAD_VALUE); /\* should have process 1 byte
+         */
         /*                                         * since a clear *\/ */
         comp_counter += counter_size;
     }
@@ -895,8 +885,8 @@ char nfaExecMpv_initCompressedState(const struct NFA *n, u64a offset,
     }
 }
 
-static really_inline
-char nfaExecMpv_Q_i(const struct NFA *n, struct mq *q, s64a end) {
+static really_inline char nfaExecMpv_Q_i(const struct NFA *n, struct mq *q,
+                                         s64a end) {
     u64a offset = q->offset;
     const u8 *buffer = q->buffer;
     size_t length = q->length;
@@ -1013,8 +1003,8 @@ char nfaExecMpv_Q_i(const struct NFA *n, struct mq *q, s64a end) {
             }
         }
     } else {
-        alive
-            = mmbit_iterate(active, m->kilo_count, MMB_INVALID) != MMB_INVALID;
+        alive =
+            mmbit_iterate(active, m->kilo_count, MMB_INVALID) != MMB_INVALID;
     }
 
     DEBUG_PRINTF("finished %d\n", (int)alive);
@@ -1038,8 +1028,8 @@ s64a nfaExecMpv_QueueExecRaw(const struct NFA *nfa, struct mq *q, s64a end) {
     assert(q->cur < q->end);
     assert(q->end <= MAX_MQE_LEN);
     assert(ISALIGNED_16(nfa) && ISALIGNED_16(getImplNfa(nfa)));
-    assert(end < q->items[q->end - 1].location
-           || q->items[q->end - 1].type == MQE_END);
+    assert(end < q->items[q->end - 1].location ||
+           q->items[q->end - 1].type == MQE_END);
 
     if (q->items[q->cur].location > end) {
         return 1;
@@ -1080,8 +1070,8 @@ s64a nfaExecMpv_QueueExecRaw(const struct NFA *nfa, struct mq *q, s64a end) {
             }
 
             struct mpv_decomp_state *s = (struct mpv_decomp_state *)q->state;
-            struct mpv_pq_item *pq
-                = (struct mpv_pq_item *)(q->state + m->pq_offset);
+            struct mpv_pq_item *pq =
+                (struct mpv_pq_item *)(q->state + m->pq_offset);
             if (s->pq_size) {
                 next_pq = pq_top(pq)->trigger_loc;
             }

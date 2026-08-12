@@ -82,83 +82,137 @@ static inline void fpFeedbackBuildMatcherMask(const ue2_literal &lit,
     normaliseLiteralMask(lit, msk, cmp);
 }
 
+static inline bool fpFeedbackCanMatch(const CompileContext &cc,
+                                      unsigned int table) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)cc;
+    (void)table;
+    return false;
+#else
+    return cc.fp_feedback && table != HS_FP_TABLE_UNKNOWN;
+#endif
+}
+
+/**
+ * Match an identity that is already in the exact form consumed by HWLM.
+ * This helper deliberately has no diagnostic or blocking side effects.
+ */
+static inline bool fpFeedbackMatchesFinalRoseFragment(
+    const CompileContext &cc, unsigned int table, const std::string &s,
+    bool nocase, const std::vector<u8> &msk, const std::vector<u8> &cmp,
+    u32 *feedback_index = nullptr) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)cc;
+    (void)table;
+    (void)s;
+    (void)nocase;
+    (void)msk;
+    (void)cmp;
+    if (feedback_index) {
+        *feedback_index = HS_FP_FEEDBACK_INDEX_INVALID;
+    }
+    return false;
+#else
+    if (feedback_index) {
+        *feedback_index = HS_FP_FEEDBACK_INDEX_INVALID;
+    }
+    if (!fpFeedbackCanMatch(cc, table) || msk.size() != cmp.size()) {
+        return false;
+    }
+
+    const u8 *mask_ptr = msk.empty() ? nullptr : msk.data();
+    const u8 *cmp_ptr = cmp.empty() ? nullptr : cmp.data();
+    return hs_fp_feedback_fragment_match_index(
+        cc.fp_feedback, table, s.data(), s.size(), nocase, mask_ptr, cmp_ptr,
+        msk.size(), feedback_index);
+#endif
+}
+
+/**
+ * Convert a Rose literal candidate to its final HWLM identity and match it.
+ * This helper deliberately has no diagnostic or blocking side effects.
+ */
+static inline bool fpFeedbackMatchesRoseFragment(
+    const CompileContext &cc, unsigned int table, const ue2_literal &lit,
+    const std::vector<u8> *msk, const std::vector<u8> *cmp,
+    u32 *feedback_index = nullptr) {
+    if (!fpFeedbackCanMatch(cc, table)) {
+        if (feedback_index) {
+            *feedback_index = HS_FP_FEEDBACK_INDEX_INVALID;
+        }
+        return false;
+    }
+
+    const ue2_literal final_lit = fpFeedbackFinalRoseFragment(lit);
+    std::vector<u8> matcher_msk = msk ? *msk : std::vector<u8>();
+    std::vector<u8> matcher_cmp = cmp ? *cmp : std::vector<u8>();
+    fpFeedbackBuildMatcherMask(lit, matcher_msk, matcher_cmp);
+
+    return fpFeedbackMatchesFinalRoseFragment(
+        cc, table, final_lit.get_string(), final_lit.any_nocase(), matcher_msk,
+        matcher_cmp, feedback_index);
+}
+
 static inline bool fpFeedbackBlocksRoseFragment(const CompileContext &cc,
+                                                unsigned int table,
                                                 const ue2_literal &lit,
                                                 const std::vector<u8> *msk,
                                                 const std::vector<u8> *cmp,
                                                 unsigned int checkpoint) {
-    if (!cc.fp_feedback) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)cc;
+    (void)table;
+    (void)lit;
+    (void)msk;
+    (void)cmp;
+    (void)checkpoint;
+    return false;
+#else
+    if (!fpFeedbackCanMatch(cc, table)) {
         return false;
     }
 
-    ue2_literal final_lit = fpFeedbackFinalRoseFragment(lit);
     fpCompileRecordCheck(cc, checkpoint);
-
-    std::vector<u8> matcher_msk = msk ? *msk : std::vector<u8>();
-    std::vector<u8> matcher_cmp = cmp ? *cmp : std::vector<u8>();
-    fpFeedbackBuildMatcherMask(lit, matcher_msk, matcher_cmp);
-
-    const std::string &s = final_lit.get_string();
-    const u8 *mask_ptr = matcher_msk.empty() ? nullptr : matcher_msk.data();
-    const u8 *cmp_ptr = matcher_cmp.empty() ? nullptr : matcher_cmp.data();
-    const size_t mask_len = matcher_msk.size();
-    if (!hs_fp_feedback_fragment_is_bad(cc.fp_feedback, s.data(), s.size(),
-                                        final_lit.any_nocase(), mask_ptr,
-                                        cmp_ptr, mask_len)) {
+    if (!fpFeedbackMatchesRoseFragment(cc, table, lit, msk, cmp)) {
         return false;
     }
 
     fpCompileRecordHit(cc, checkpoint);
+    const std::string s = fpFeedbackFinalRoseFragment(lit).get_string();
     DEBUG_PRINTF("rejecting Rose literal fragment due to fp feedback: '%s'\n",
                  escapeString(s).c_str());
     fpCompileRecordBlocked(cc, checkpoint);
     return true;
+#endif
 }
 
 static inline bool fpFeedbackBlocksRoseLiteral(const CompileContext &cc,
+                                               unsigned int table,
                                                const ue2_literal &lit,
                                                unsigned int checkpoint) {
-    return fpFeedbackBlocksRoseFragment(cc, lit, nullptr, nullptr, checkpoint);
+    return fpFeedbackBlocksRoseFragment(cc, table, lit, nullptr, nullptr,
+                                        checkpoint);
 }
 
-static inline bool fpFeedbackObservesRoseFragment(const CompileContext &cc,
-                                                  const ue2_literal &lit,
-                                                  const std::vector<u8> *msk,
-                                                  const std::vector<u8> *cmp,
-                                                  unsigned int checkpoint) {
-    if (!cc.fp_feedback) {
-        return false;
+/**
+ * Resolve the table used by a literal passed directly to RoseBuild::add().
+
+ * * Anchored literals beyond the anchored matcher region necessarily fall back
+
+ * * to the floating table in tryForAnchoredVertex(). Shorter anchored literals
+
+ * * are outside the feedback collection scope and therefore remain unknown.
+ */
+static inline unsigned int
+fpFeedbackTableForDirectRoseLiteral(const CompileContext &cc, bool anchored,
+                                    bool eod, const ue2_literal &lit) {
+    if (eod) {
+        return HS_FP_TABLE_EOD_ANCHORED;
     }
-
-    ue2_literal final_lit = fpFeedbackFinalRoseFragment(lit);
-    fpCompileRecordCheck(cc, checkpoint);
-
-    std::vector<u8> matcher_msk = msk ? *msk : std::vector<u8>();
-    std::vector<u8> matcher_cmp = cmp ? *cmp : std::vector<u8>();
-    fpFeedbackBuildMatcherMask(lit, matcher_msk, matcher_cmp);
-
-    const std::string &s = final_lit.get_string();
-    const u8 *mask_ptr = matcher_msk.empty() ? nullptr : matcher_msk.data();
-    const u8 *cmp_ptr = matcher_cmp.empty() ? nullptr : matcher_cmp.data();
-    const size_t mask_len = matcher_msk.size();
-    if (!hs_fp_feedback_fragment_is_bad(cc.fp_feedback, s.data(), s.size(),
-                                        final_lit.any_nocase(), mask_ptr,
-                                        cmp_ptr, mask_len)) {
-        return false;
+    if (!anchored || lit.length() > cc.grey.maxAnchoredRegion) {
+        return HS_FP_TABLE_FLOATING;
     }
-
-    fpCompileRecordHit(cc, checkpoint);
-    fpCompileRecordPassed(cc, checkpoint);
-    DEBUG_PRINTF("observed Rose literal rewrite feedback hit: '%s'\n",
-                 escapeString(s).c_str());
-    return true;
-}
-
-static inline bool fpFeedbackObservesRoseLiteral(const CompileContext &cc,
-                                                 const ue2_literal &lit,
-                                                 unsigned int checkpoint) {
-    return fpFeedbackObservesRoseFragment(cc, lit, nullptr, nullptr,
-                                          checkpoint);
+    return HS_FP_TABLE_UNKNOWN;
 }
 
 } // namespace ue2

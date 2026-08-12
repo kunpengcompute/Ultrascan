@@ -38,7 +38,6 @@
 #include "nfagraph/ng_mcclellan_internal.h"
 #include "nfagraph/ng_repeat.h"
 #include "nfagraph/ng_util.h"
-#include "rose_build_fp_feedback.h"
 #include "rose_build_impl.h"
 #include "rose_build_matchers.h"
 #include "rose_internal.h"
@@ -653,13 +652,6 @@ static int finalise_out(RoseBuildImpl &build, const NGHolder &h,
     u32 simple_report = MO_INVALID_IDX;
     if (isSimple(h, &min_bound, &max_bound, &lit, &simple_report)) {
         assert(simple_report != MO_INVALID_IDX);
-        if (!remap &&
-            fpFeedbackBlocksRoseLiteral(
-                build.cc, lit, HS_FP_COMPILE_CHECKPOINT_ANCHORED_ACYCLIC)) {
-            DEBUG_PRINTF("not adding anchored acyclic simple literal due to "
-                         "fp feedback\n");
-            return ANCHORED_FAIL;
-        }
         if (check_dupe_simple(build, min_bound, max_bound, lit, remap)) {
             DEBUG_PRINTF("found duplicate remapping to %u\n", *remap);
             return ANCHORED_REMAP;

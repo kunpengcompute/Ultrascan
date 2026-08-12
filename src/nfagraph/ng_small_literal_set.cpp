@@ -38,6 +38,7 @@
 #include "ng_literal_quality.h"
 #include "ng_util.h"
 #include "rose/rose_build.h"
+#include "rose/rose_build_fp_feedback.h"
 #include "ue2common.h"
 #include "util/compare.h"
 #include "util/compile_context.h"
@@ -100,30 +101,18 @@ static bool operator<(const sls_literal &a, const sls_literal &b) {
 } // namespace
 
 static bool fpFeedbackLiteralIsBad(const CompileContext &cc,
-                                   const ue2_literal &lit) {
-    if (!cc.fp_feedback) {
-        return false;
-    }
-
-    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
-
-    if (!hs_fp_feedback_literal_is_bad(cc.fp_feedback, lit.c_str(),
-                                       lit.length(), lit.any_nocase())) {
-        return false;
-    }
-
-    DEBUG_PRINTF("rejecting small literal set due to fp feedback: '%s'\n",
-                 dumpString(lit).c_str());
-    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
-    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
-    return true;
+                                   const sls_literal &lit) {
+    const unsigned int table =
+        fpFeedbackTableForDirectRoseLiteral(cc, lit.anchored, lit.eod, lit.s);
+    return fpFeedbackBlocksRoseLiteral(
+        cc, table, lit.s, HS_FP_COMPILE_CHECKPOINT_SMALL_LITERAL_SET);
 }
 
 static bool fpFeedbackLiteralSetHasBad(
     const CompileContext &cc,
     const map<sls_literal, flat_set<ReportID>> &literals) {
     for (const auto &m : literals) {
-        if (fpFeedbackLiteralIsBad(cc, m.first.s)) {
+        if (fpFeedbackLiteralIsBad(cc, m.first)) {
             return true;
         }
     }

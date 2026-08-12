@@ -41,6 +41,7 @@
 #include "nfagraph/ng_width.h"
 #include "rose_build_add_internal.h"
 #include "rose_build_anchored.h"
+#include "rose_build_fp_feedback.h"
 #include "rose_in_util.h"
 #include "ue2common.h"
 #include "util/charreach.h"
@@ -455,8 +456,14 @@ static void buildMatcherLiteralMask(const ue2_literal &lit,
     normaliseLiteralMask(lit, msk, cmp);
 }
 
-static bool feedbackBlocksTransientMask(const vector<CharReach> &mask,
+static bool feedbackBlocksTransientMask(const vector<CharReach> &mask, bool eod,
                                         const CompileContext &cc) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)mask;
+    (void)eod;
+    (void)cc;
+    return false;
+#else
     if (!cc.fp_feedback) {
         return false;
     }
@@ -478,59 +485,26 @@ static bool feedbackBlocksTransientMask(const vector<CharReach> &mask,
         vector<u8> msk, cmp;
         buildMatcherLiteralMask(lit, literal_msk, literal_cmp, msk, cmp);
 
-        ue2_literal final_lit(lit);
-        if (final_lit.length() > ROSE_SHORT_LITERAL_LEN_MAX) {
-            final_lit.erase(0, final_lit.length() - ROSE_SHORT_LITERAL_LEN_MAX);
+        if (fpFeedbackBlocksRoseFragment(
+                cc, eod ? HS_FP_TABLE_EOD_ANCHORED : HS_FP_TABLE_FLOATING, lit,
+                &msk, &cmp, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL)) {
+            DEBUG_PRINTF("rejecting transient masked literal due to fp "
+                         "feedback: '%s'\n",
+                         escapeString(lit).c_str());
+            return true;
         }
-
-        fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
-
-        const string &s = final_lit.get_string();
-        const u8 *mask_ptr = msk.empty() ? nullptr : msk.data();
-        const u8 *cmp_ptr = cmp.empty() ? nullptr : cmp.data();
-        if (!hs_fp_feedback_fragment_is_bad(cc.fp_feedback, s.data(), s.size(),
-                                            final_lit.any_nocase(), mask_ptr,
-                                            cmp_ptr, msk.size())) {
-            continue;
-        }
-
-        DEBUG_PRINTF("rejecting transient masked literal due to fp feedback: "
-                     "'%s'\n",
-                     escapeString(s).c_str());
-        fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
-        fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
-        return true;
     }
 
     return false;
+#endif
 }
 
 static bool feedbackBlocksUnmaskedMaskLiteral(const ue2_literal &lit,
+                                              unsigned int table,
                                               const CompileContext &cc) {
-    if (!cc.fp_feedback) {
-        return false;
-    }
-
-    ue2_literal final_lit(lit);
-    if (final_lit.length() > ROSE_SHORT_LITERAL_LEN_MAX) {
-        final_lit.erase(0, final_lit.length() - ROSE_SHORT_LITERAL_LEN_MAX);
-    }
-
-    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
-
-    const string &s = final_lit.get_string();
-    if (!hs_fp_feedback_fragment_is_bad(cc.fp_feedback, s.data(), s.size(),
-                                        final_lit.any_nocase(), nullptr,
-                                        nullptr, 0)) {
-        return false;
-    }
-
-    DEBUG_PRINTF("rejecting fixed-width mask literal due to fp feedback: "
-                 "'%s'\n",
-                 escapeString(s).c_str());
-    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
-    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
-    return true;
+    return fpFeedbackBlocksRoseFragment(
+        cc, table, lit, nullptr, nullptr,
+        HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL);
 }
 
 static bool maskIsNeeded(const ue2_literal &lit, const NGHolder &g) {
@@ -730,8 +704,7 @@ static bool doAddMask(RoseBuildImpl &tbi, bool anchored,
             findMaskLiteral(mask2, tbi.cc.streaming, &lit2, &lit2_offset,
                             tbi.cc.grey);
 
-            if (lit2.length() >= MIN_MASK_LIT_LEN &&
-                !feedbackBlocksUnmaskedMaskLiteral(lit2, tbi.cc)) {
+            if (lit2.length() >= MIN_MASK_LIT_LEN) {
                 u32 prefix2_len = lit2_offset + lit2.length();
                 assert(prefix2_len < minBound);
                 RoseInVertex u =
@@ -786,7 +759,7 @@ do_rhs:
 }
 
 static bool checkAllowMask(const vector<CharReach> &mask, ue2_literal *lit,
-                           u32 *prefix_len, u32 *suffix_len,
+                           u32 *prefix_len, u32 *suffix_len, bool anchored,
                            const CompileContext &cc) {
     assert(!mask.empty());
     u32 lit_offset;
@@ -802,7 +775,8 @@ static bool checkAllowMask(const vector<CharReach> &mask, ue2_literal *lit,
         return false;
     }
 
-    if (feedbackBlocksUnmaskedMaskLiteral(*lit, cc)) {
+    if (!anchored &&
+        feedbackBlocksUnmaskedMaskLiteral(*lit, HS_FP_TABLE_FLOATING, cc)) {
         return false;
     }
 
@@ -835,7 +809,7 @@ static bool checkAllowMask(const vector<CharReach> &mask, ue2_literal *lit,
 bool RoseBuildImpl::add(bool anchored, const vector<CharReach> &mask,
                         const flat_set<ReportID> &reports) {
     if (validateTransientMask(mask, anchored, false, cc.grey)) {
-        if (feedbackBlocksTransientMask(mask, cc)) {
+        if (feedbackBlocksTransientMask(mask, false, cc)) {
             return false;
         }
         bool eod = false;
@@ -847,7 +821,7 @@ bool RoseBuildImpl::add(bool anchored, const vector<CharReach> &mask,
     u32 prefix_len = 0;
     u32 suffix_len = 0;
 
-    if (!checkAllowMask(mask, &lit, &prefix_len, &suffix_len, cc)) {
+    if (!checkAllowMask(mask, &lit, &prefix_len, &suffix_len, anchored, cc)) {
         return false;
     }
 
@@ -864,7 +838,7 @@ bool RoseBuildImpl::validateMask(const vector<CharReach> &mask,
         return false;
     }
 
-    return !feedbackBlocksTransientMask(mask, cc);
+    return !feedbackBlocksTransientMask(mask, eod, cc);
 }
 
 static unique_ptr<NGHolder> makeAnchoredGraph(const vector<CharReach> &mask,

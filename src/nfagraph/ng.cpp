@@ -32,7 +32,6 @@
 #include "ng.h"
 
 #include "compiler/compiler.h"
-#include "fp_collector.h"
 #include "grey.h"
 #include "nfa/goughcompile.h"
 #include "ng_anchored_acyclic.h"
@@ -67,6 +66,7 @@
 #include "ng_violet.h"
 #include "ng_width.h"
 #include "rose/rose_build.h"
+#include "rose/rose_build_fp_feedback.h"
 #include "rose/rose_build_impl.h"
 #include "smallwrite/smallwrite_build.h"
 #include "ue2common.h"
@@ -577,29 +577,9 @@ bool NG::addHolder(NGHolder &g) {
 
 static bool feedbackBlocksShortcutLiteral(const CompileContext &cc,
                                           const ue2_literal &literal) {
-    if (!cc.fp_feedback) {
-        return false;
-    }
-
-    ue2_literal final_lit(literal);
-    if (final_lit.length() > ROSE_SHORT_LITERAL_LEN_MAX) {
-        final_lit.erase(0, final_lit.length() - ROSE_SHORT_LITERAL_LEN_MAX);
-    }
-
-    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
-
-    const string &s = final_lit.get_string();
-    if (!hs_fp_feedback_fragment_is_bad(cc.fp_feedback, s.data(), s.size(),
-                                        final_lit.any_nocase(), nullptr,
-                                        nullptr, 0)) {
-        return false;
-    }
-
-    DEBUG_PRINTF("skipping shortcut literal due to fp feedback: '%s'\n",
-                 escapeString(s).c_str());
-    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
-    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
-    return true;
+    return fpFeedbackBlocksRoseLiteral(
+        cc, HS_FP_TABLE_FLOATING, literal,
+        HS_FP_COMPILE_CHECKPOINT_SHORTCUT_LITERAL);
 }
 
 bool NG::addLiteral(const ue2_literal &literal, u32 expr_index,

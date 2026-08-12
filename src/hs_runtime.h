@@ -64,12 +64,14 @@ struct hs_scratch;
  */
 typedef struct hs_scratch hs_scratch_t;
 
-/** Values reported in @ref hs_fp_fragment_info_t::table. */
+/** Fragment table values; reserved values below are not reported. */
 #define HS_FP_TABLE_UNKNOWN 0U
 #define HS_FP_TABLE_FLOATING 1U
 #define HS_FP_TABLE_EOD_ANCHORED 2U
 #define HS_FP_TABLE_SMALL_BLOCK 3U
+/** Reserved legacy value; not collected or used for compile-time blocking. */
 #define HS_FP_TABLE_DELAY_REBUILD 4U
+/** Reserved legacy value; not collected or used for compile-time blocking. */
 #define HS_FP_TABLE_ANCHORED 5U
 
 /** Values reported in @ref hs_fp_fragment_info_t::engine. */

@@ -6,7 +6,7 @@ endif()
 
 add_executable(simplegrep simplegrep.c)
 set_source_files_properties(simplegrep.c PROPERTIES COMPILE_FLAGS
-    "-Wall -Wno-unused-parameter")
+    "-Wall -Wno-unused-parameter -D_POSIX_C_SOURCE=200809L")
 target_link_libraries(simplegrep hs)
 
 if (PCAP_LIBRARY)

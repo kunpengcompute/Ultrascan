@@ -1,8 +1,8 @@
 #ifndef HAO_COMPILE_H
 #define HAO_COMPILE_H
 
-#include "ue2common.h"
 #include "hwlm/hwlm_literal.h"
+#include "ue2common.h"
 #include "util/bytecode_ptr.h"
 
 #include <array>
@@ -41,8 +41,7 @@ enum : u32 {
     HAO_ARTIFACT_FLAG_PARTIAL_ENTRY_OVERFLOW = 1U << 2,
     HAO_LAYOUT_KEY_BITS = HAO_KEY_BITS,
     HAO_LAYOUT_L1_OFFSET_BITS = 22U,
-    HAO_LAYOUT_L1_OFFSET_MASK =
-        (1U << HAO_LAYOUT_L1_OFFSET_BITS) - 1U,
+    HAO_LAYOUT_L1_OFFSET_MASK = (1U << HAO_LAYOUT_L1_OFFSET_BITS) - 1U,
     HAO_LAYOUT_L1_COUNT_SHIFT = HAO_LAYOUT_L1_OFFSET_BITS,
     HAO_LAYOUT_RULE_SLOTS_PER_ENTRY = 4U,
     HAO_LAYOUT_BYTES_PER_RULE_SLOT = 8U,
@@ -144,6 +143,8 @@ struct HAOVerifierFragment {
 /* Compile-time rule plan used as the core HAO build input. */
 struct HAOCompiledRulePlan {
     u32 ruleIndex = 0;
+    u32 reportId = 0;
+    u32 reportOrder = 0;
     HAORuleCategory category = HAORuleCategory::HAO_RULE_UNSUPPORTED;
     u32 flags = 0;
     HAOKeyExpansionInfo keyExpansion;
@@ -225,11 +226,7 @@ struct HAOCompileArtifacts {
     std::vector<HAOCompileRuleMeta> meta;
 };
 
-enum class HAODumpMode : u8 {
-    None = 0,
-    SummaryIfEnabled,
-    Full
-};
+enum class HAODumpMode : u8 { None = 0, SummaryIfEnabled, Full };
 
 enum class HAOFeasibilityReason : u32 {
     OK = 0,
@@ -254,7 +251,8 @@ struct HAOFeasibilityResult {
 bool analyzeHAOFeasibility(const target_t &target,
                            const std::vector<hwlmLiteral> &lits,
                            const Grey &grey, HAOFeasibilityResult *result,
-                           HAOCompileArtifacts *artifacts);
+                           HAOCompileArtifacts *artifacts,
+                           const std::vector<u32> *reportOrder = nullptr);
 
 const char *haoFeasibilityReasonName(HAOFeasibilityReason reason);
 
@@ -267,7 +265,8 @@ bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
 
 bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
                        HAOCompileArtifacts *artifacts,
-                       HAODumpMode dumpMode = HAODumpMode::Full);
+                       HAODumpMode dumpMode = HAODumpMode::Full,
+                       const std::vector<u32> *reportOrder = nullptr);
 
 void dumpHAOCompileStats(const HAOCompileArtifacts &artifacts);
 

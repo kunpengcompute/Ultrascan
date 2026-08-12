@@ -41,6 +41,7 @@
 #include "ng_prune.h"
 #include "ng_util.h"
 #include "rose/rose_build.h"
+#include "rose/rose_build_fp_feedback.h"
 #include "ue2common.h"
 #include "util/compile_context.h"
 #include "util/container.h"
@@ -186,17 +187,12 @@ static bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v,
     }
 
     ue2_literal rose_literal(literal, nocase);
-    if (ng.cc.fp_feedback) {
-        fpCompileRecordCheck(ng.cc, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT);
-        if (hs_fp_feedback_literal_is_bad(
-                ng.cc.fp_feedback, rose_literal.c_str(), rose_literal.length(),
-                rose_literal.any_nocase())) {
-            DEBUG_PRINTF("skipping literal split due to fp feedback\n");
-            fpCompileRecordHit(ng.cc, HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT);
-            fpCompileRecordBlocked(ng.cc,
-                                   HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT);
-            return false;
-        }
+    const unsigned int fp_table =
+        fpFeedbackTableForDirectRoseLiteral(ng.cc, anchored, eod, rose_literal);
+    if (fpFeedbackBlocksRoseLiteral(ng.cc, fp_table, rose_literal,
+                                    HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT)) {
+        DEBUG_PRINTF("skipping literal split due to fp feedback\n");
+        return false;
     }
 
     ng.rose->add(anchored, eod, rose_literal, g[u].reports);

@@ -52,6 +52,8 @@
 #include "ng_util.h"
 #include "ng_width.h"
 #include "rose/rose_build.h"
+#include "rose/rose_build_add_internal.h"
+#include "rose/rose_build_fp_feedback.h"
 #include "rose/rose_build_util.h"
 #include "rose/rose_in_dump.h"
 #include "rose/rose_in_graph.h"
@@ -200,32 +202,64 @@ struct VertLitInfo {
 
 #define LAST_CHANCE_STRONG_LEN 1
 
-static bool fpFeedbackLiteralIsBad(const CompileContext &cc,
+static bool fpFeedbackLiteralIsBad(const CompileContext &cc, unsigned int table,
                                    const ue2_literal &lit) {
-    if (!cc.fp_feedback) {
-        return false;
-    }
-
-    fpCompileRecordCheck(cc, HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
-
-    if (!hs_fp_feedback_literal_is_bad(cc.fp_feedback, lit.c_str(),
-                                       lit.length(), lit.any_nocase())) {
-        return false;
-    }
-
-    fpCompileRecordHit(cc, HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
-    fpCompileRecordBlocked(cc, HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
-    return true;
+    return fpFeedbackBlocksRoseLiteral(cc, table, lit,
+                                       HS_FP_COMPILE_CHECKPOINT_VIOLET_SPLIT);
 }
 
 static bool fpFeedbackLiteralSetHasBad(const CompileContext &cc,
+                                       unsigned int table,
                                        const set<ue2_literal> &lits) {
     for (const auto &lit : lits) {
-        if (fpFeedbackLiteralIsBad(cc, lit)) {
+        if (fpFeedbackLiteralIsBad(cc, table, lit)) {
             return true;
         }
     }
     return false;
+}
+
+static bool fpFeedbackVioletLiteralIsBad(const CompileContext &cc,
+                                         const ue2_literal &lit) {
+    return fpFeedbackLiteralIsBad(cc, HS_FP_TABLE_FLOATING, lit);
+}
+
+static bool fpFeedbackVioletLiteralSetHasBad(const CompileContext &cc,
+                                             const set<ue2_literal> &lits) {
+    for (const auto &lit : lits) {
+        if (fpFeedbackVioletLiteralIsBad(cc, lit)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void
+fpFeedbackDropBadVertLitInfos(const CompileContext &cc,
+                              vector<unique_ptr<VertLitInfo>> *lits) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)cc;
+    (void)lits;
+#else
+    if (!cc.fp_feedback) {
+        return;
+    }
+
+    for (auto it = lits->begin(); it != lits->end();) {
+        if (!*it) {
+            ++it;
+            continue;
+        }
+
+        if (fpFeedbackVioletLiteralSetHasBad(cc, (*it)->lit)) {
+            DEBUG_PRINTF("dropping Violet literal candidate due to fp "
+                         "feedback\n");
+            it = lits->erase(it);
+        } else {
+            ++it;
+        }
+    }
+#endif
 }
 
 static bool neoFdrLiteralSetHasBad(const CompileContext &cc,
@@ -249,29 +283,6 @@ static void neoFdrDropBadVertLitInfos(const CompileContext &cc,
         if (neoFdrLiteralSetHasBad(cc, (*it)->lit)) {
             DEBUG_PRINTF("dropping Violet literal candidate due to a "
                          "low-quality NeoFDR literal\n");
-            it = lits->erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-static void
-fpFeedbackDropBadVertLitInfos(const CompileContext &cc,
-                              vector<unique_ptr<VertLitInfo>> *lits) {
-    if (!cc.fp_feedback) {
-        return;
-    }
-
-    for (auto it = lits->begin(); it != lits->end();) {
-        if (!*it) {
-            ++it;
-            continue;
-        }
-
-        if (fpFeedbackLiteralSetHasBad(cc, (*it)->lit)) {
-            DEBUG_PRINTF("dropping Violet literal candidate due to fp "
-                         "feedback\n");
             it = lits->erase(it);
         } else {
             ++it;
@@ -1003,7 +1014,7 @@ static unique_ptr<VertLitInfo> findSimplePrefixSplit(const NGHolder &g,
         return nullptr;
     }
 
-    if (fpFeedbackLiteralIsBad(cc, best_lit)) {
+    if (fpFeedbackVioletLiteralIsBad(cc, best_lit)) {
         DEBUG_PRINTF("rejecting prefix literal due to fp feedback: '%s'\n",
                      dumpString(best_lit).c_str());
         return nullptr;
@@ -1103,7 +1114,7 @@ static bool splitRoseEdge(const NGHolder &base_graph, RoseInGraph &vg,
     const vector<NFAVertex> &splitters = split.vv;
     assert(!splitters.empty());
 
-    if (fpFeedbackLiteralSetHasBad(cc, split.lit)) {
+    if (fpFeedbackVioletLiteralSetHasBad(cc, split.lit)) {
         DEBUG_PRINTF("skipping Violet literal split due to fp feedback\n");
         return false;
     }
@@ -1467,7 +1478,7 @@ static bool doNetflowCut(NGHolder &h, const vector<NFAVertexDepth> *depths,
         set<ue2_literal> lits = getLiteralSet(h, e);
         sanitizeAndCompressAndScore(lits);
 
-        if (fpFeedbackLiteralSetHasBad(cc, lits)) {
+        if (fpFeedbackVioletLiteralSetHasBad(cc, lits)) {
             DEBUG_PRINTF("skipping netflow cut due to fp feedback\n");
             cut_lits.clear();
             return false;
@@ -1997,22 +2008,6 @@ static bool makeTransientFromLongLiteral(NGHolder &h, RoseInGraph &vg,
         graphs[v] = h_new;
     }
 
-    for (const RoseInEdge &e : ee) {
-        RoseInVertex t = target(e, vg);
-        const ue2_literal &orig_lit = vg[t].s;
-        ue2_literal head_lit(orig_lit.begin(), orig_lit.end() - delta);
-        ue2_literal tail_lit(orig_lit.end() - delta, orig_lit.end());
-
-        if (fpFeedbackLiteralIsBad(cc, head_lit) ||
-            fpFeedbackLiteralIsBad(cc, tail_lit)) {
-            DEBUG_PRINTF("not splitting long literal due to fp feedback: "
-                         "head='%s', tail='%s'\n",
-                         dumpString(head_lit).c_str(),
-                         dumpString(tail_lit).c_str());
-            return false;
-        }
-    }
-
     /* add .{repeats} from prefixes to long literals */
     for (const RoseInEdge &e : ee) {
         RoseInVertex s = source(e, vg);
@@ -2463,7 +2458,7 @@ static bool replaceSuffixWithInfix(const NGHolder &h, RoseInGraph &vg,
             DEBUG_PRINTF("candidate is too shitty\n");
             return false;
         }
-        if (fpFeedbackLiteralSetHasBad(cc, ss)) {
+        if (fpFeedbackLiteralSetHasBad(cc, HS_FP_TABLE_FLOATING, ss)) {
             DEBUG_PRINTF("skipping suffix split due to fp feedback\n");
             return false;
         }
@@ -2490,7 +2485,7 @@ static bool replaceSuffixWithInfix(const NGHolder &h, RoseInGraph &vg,
             DEBUG_PRINTF("candidate is too shitty\n");
             return false;
         }
-        if (fpFeedbackLiteralSetHasBad(cc, ss)) {
+        if (fpFeedbackLiteralSetHasBad(cc, HS_FP_TABLE_EOD_ANCHORED, ss)) {
             DEBUG_PRINTF("skipping suffix split due to fp feedback\n");
             return false;
         }
@@ -2623,7 +2618,7 @@ static bool leadingDotStartLiteral(const NGHolder &h, VertLitInfo *out,
 
     DEBUG_PRINTF("%zu found %s\n", h[v].index, dumpString(lit).c_str());
 
-    if (fpFeedbackLiteralIsBad(cc, lit)) {
+    if (fpFeedbackLiteralIsBad(cc, HS_FP_TABLE_FLOATING, lit)) {
         DEBUG_PRINTF("rejecting leading dot-start literal due to fp feedback: "
                      "'%s'\n",
                      dumpString(lit).c_str());

@@ -65,8 +65,16 @@ typedef struct hs_compile_context hs_compile_context_t;
 #define HS_FP_COMPILE_CHECKPOINT_REWRITE_ANCHORED_REHOME 8U
 #define HS_FP_COMPILE_CHECKPOINT_REWRITE_FLOOD_SUFFIX 9U
 #define HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK 10U
+/* Retired compatibility slot; anchored fragments are not collected. */
 #define HS_FP_COMPILE_CHECKPOINT_ANCHORED_ACYCLIC 11U
-#define HS_FP_COMPILE_CHECKPOINT_COUNT 12U
+#define HS_FP_COMPILE_CHECKPOINT_MIXED_SENSITIVITY 12U
+/* Retired compatibility slot; delay rebuild is outside feedback scope. */
+#define HS_FP_COMPILE_CHECKPOINT_DELAY_TRANSFORM 13U
+#define HS_FP_COMPILE_CHECKPOINT_COUNT 14U
+
+#define HS_FP_FEEDBACK_INDEX_INVALID 0xffffffffU
+#define HS_FP_MATCHER_BUILD_HIT_DETAIL_INITIAL_CAPACITY 64U
+#define HS_FP_MATCHER_BUILD_SOURCE_LITERAL_LIMIT 64U
 
 typedef struct hs_compile_context_checkpoint_info {
     unsigned int checked_count;
@@ -74,6 +82,20 @@ typedef struct hs_compile_context_checkpoint_info {
     unsigned int blocked_count;
     unsigned int passed_count;
 } hs_compile_context_checkpoint_info_t;
+
+typedef struct hs_compile_context_matcher_build_hit_info {
+    u32 feedback_index;
+    u32 table;
+    u32 fragment_id;
+    u32 lit_id;
+    u32 source_table;
+    u32 source_delay;
+    u32 source_length;
+    u32 source_copied_length;
+    u32 source_nocase;
+    u32 occurrences;
+    u8 source_suffix[HS_FP_MATCHER_BUILD_SOURCE_LITERAL_LIMIT];
+} hs_compile_context_matcher_build_hit_info_t;
 
 hs_error_t hs_fp_collector_check_db(const hs_fp_collector_t *collector,
                                     const hs_database_t *db);
@@ -155,14 +177,21 @@ u32 hs_fp_feedback_count_matches_in_rose(const hs_fp_feedback_t *feedback,
                                          const struct RoseEngine *rose,
                                          u32 *checked_count);
 
-char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
+char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback, u32 table,
                                    const char *bytes, size_t length,
                                    char nocase);
 
-char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
+char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback, u32 table,
                                     const char *bytes, size_t length,
                                     char nocase, const u8 *mask, const u8 *cmp,
                                     size_t mask_length);
+
+char hs_fp_feedback_fragment_match_index(const hs_fp_feedback_t *feedback,
+                                         u32 table, const char *bytes,
+                                         size_t length, char nocase,
+                                         const u8 *mask, const u8 *cmp,
+                                         size_t mask_length,
+                                         u32 *feedback_index);
 
 unsigned int
 hs_compile_context_observe_checked_count(const hs_compile_context_t *ctx);
@@ -173,6 +202,16 @@ hs_compile_context_observe_hit_count(const hs_compile_context_t *ctx);
 hs_error_t hs_compile_context_get_checkpoint_info(
     const hs_compile_context_t *ctx, unsigned int checkpoint,
     hs_compile_context_checkpoint_info_t *info);
+
+unsigned int
+hs_compile_context_matcher_build_hit_count(const hs_compile_context_t *ctx);
+
+unsigned int hs_compile_context_matcher_build_hit_dropped_count(
+    const hs_compile_context_t *ctx);
+
+hs_error_t hs_compile_context_get_matcher_build_hit_info(
+    const hs_compile_context_t *ctx, unsigned int index,
+    hs_compile_context_matcher_build_hit_info_t *info);
 
 hs_error_t hs_compile_context_create(hs_compile_context_t **ctx);
 

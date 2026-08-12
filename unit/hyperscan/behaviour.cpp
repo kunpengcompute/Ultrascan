@@ -32,9 +32,9 @@
 #include <sstream>
 #include <string>
 
-#include "gtest/gtest.h"
 #include "hs.h"
 #include "test_util.h"
+#include "gtest/gtest.h"
 
 using namespace std;
 using namespace testing;
@@ -42,8 +42,8 @@ using namespace testing;
 namespace /* anonymous */ {
 
 // Dummy callback: does nothing, returns 0 (keep matching)
-int dummyHandler(unsigned, unsigned long long, unsigned long long,
-                 unsigned, void *) {
+int dummyHandler(unsigned, unsigned long long, unsigned long long, unsigned,
+                 void *) {
     // empty
     return 0;
 }
@@ -55,8 +55,8 @@ unsigned lastMatchFlags = 0;
 void *lastMatchCtx = nullptr;
 
 // Single match Callback: record all the details from a single match
-int singleHandler(unsigned id, unsigned long long from,
-                  unsigned long long to, unsigned flags, void *ctx) {
+int singleHandler(unsigned id, unsigned long long from, unsigned long long to,
+                  unsigned flags, void *ctx) {
     lastMatchId = id;
     lastMatchFrom = from;
     lastMatchTo = to;
@@ -68,15 +68,15 @@ int singleHandler(unsigned id, unsigned long long from,
 unsigned matchCount = 0;
 
 // Counter callback: just counts the number of calls
-int countHandler(unsigned, unsigned long long, unsigned long long,
-                 unsigned, void *) {
+int countHandler(unsigned, unsigned long long, unsigned long long, unsigned,
+                 void *) {
     matchCount++;
     return 0;
 }
 
 // Stop handler: take one match and tell Hyperscan to not deliver any more.
-int stopHandler(unsigned, unsigned long long, unsigned long long,
-                unsigned, void *) {
+int stopHandler(unsigned, unsigned long long, unsigned long long, unsigned,
+                void *) {
     matchCount++;
     return 1;
 }
@@ -91,8 +91,8 @@ TEST(HyperscanTestBehaviour, ScanSeveralGigabytesNoMatch) {
     // build a database
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    err = hs_compile("hatstand.*teakettle.*badgerbrush",
-                     HS_FLAG_DOTALL, HS_MODE_STREAM, nullptr, &db, &compile_err);
+    err = hs_compile("hatstand.*teakettle.*badgerbrush", HS_FLAG_DOTALL,
+                     HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     // alloc some scratch
@@ -126,20 +126,21 @@ TEST(HyperscanTestBehaviour, ScanSeveralGigabytesNoMatch) {
 struct HugeScanMatchingData {
     const char *pattern;
     unsigned int flags;
-    const char *preBlock; // scan before 5GB of X's
+    const char *preBlock;  // scan before 5GB of X's
     const char *postBlock; // scan after 5GB of X's, single match at end
 };
 
 class HyperscanScanGigabytesMatch : public TestWithParam<HugeScanMatchingData> {
 };
 
-// Can we scan 5GB of data (pushing past the uint32_t limit) and get a real match
+// Can we scan 5GB of data (pushing past the uint32_t limit) and get a real
+// match
 TEST_P(HyperscanScanGigabytesMatch, StreamingMatch) {
     const HugeScanMatchingData &params = GetParam();
     SCOPED_TRACE(params.pattern);
 
     hs_error_t err;
-    const size_t datalen = 1024*1024;
+    const size_t datalen = 1024 * 1024;
     vector<char> data(datalen, 'X');
 
     // build a database
@@ -217,8 +218,8 @@ void allocAndScanBlock(const HugeScanMatchingData &params,
 
     // write pre-block at the start and post-block at the end
     memcpy(data, params.preBlock, strlen(params.preBlock));
-    memcpy(data+len - strlen(params.postBlock), params.postBlock,
-            strlen(params.postBlock));
+    memcpy(data + len - strlen(params.postBlock), params.postBlock,
+           strlen(params.postBlock));
 
     lastMatchTo = 0;
     hs_error_t err;
@@ -231,7 +232,7 @@ void allocAndScanBlock(const HugeScanMatchingData &params,
 }
 
 // Define to run even more huge block tests
-//#define BIG_BLOCKS
+// #define BIG_BLOCKS
 
 // Can we scan gigabytes of data in a block and get a real match
 TEST_P(HyperscanScanGigabytesMatch, BlockMatch) {
@@ -254,18 +255,17 @@ TEST_P(HyperscanScanGigabytesMatch, BlockMatch) {
     EXPECT_TRUE(scratch != nullptr);
 
     // try various data sizes (in kilobytes)
-    size_t blockSizes[] = {
-        // kilobytes
-        1, 4, 8, 16, 32, 64, 128, 256, 512,
-        // megabytes
-        1*1024,
+    size_t blockSizes[] = {// kilobytes
+                           1, 4, 8, 16, 32, 64, 128, 256, 512,
+                           // megabytes
+                           1 * 1024,
 #ifdef BIG_BLOCKS
-        4*1024, 32*1024, 128*1024, 512*1024,
-        // gigabytes
-        1024*1024,
+                           4 * 1024, 32 * 1024, 128 * 1024, 512 * 1024,
+                           // gigabytes
+                           1024 * 1024,
 #ifdef ARCH_X86_64
-        // big cases for big beefy machines
-        2048*1024, 3072*1024
+                           // big cases for big beefy machines
+                           2048 * 1024, 3072 * 1024
 #endif // ARCH_X86_64
 #endif // BIG_BLOCKS
     };
@@ -285,7 +285,8 @@ TEST_P(HyperscanScanGigabytesMatch, BlockMatch) {
         allocAndScanBlock(params, db, scratch, bytes + 4);
 
         // Third test: block size plus the length of post-block.
-        allocAndScanBlock(params, db, scratch, bytes + strlen(params.postBlock));
+        allocAndScanBlock(params, db, scratch,
+                          bytes + strlen(params.postBlock));
     }
 
     // teardown
@@ -295,19 +296,25 @@ TEST_P(HyperscanScanGigabytesMatch, BlockMatch) {
 }
 
 static const HugeScanMatchingData gigTests[] = {
-    { "foobar", 0, "flibble", "foobar" },
-    { "longliteralislongerthanlong", 0, "precursor", "longliteralislongerthanlong" },
-    { "foobar\\z", 0, "flibble", "foobar" },
-    { "hatstand.*teakettle.*badgerbrush", HS_FLAG_DOTALL, "hatstand teakettle", "_badgerbrush" },
-    { "hatstand.*teakettle.*badgerbrush\\z", HS_FLAG_DOTALL, "hatstand teakettle", "_badgerbrush" },
-    { "a.*(([0123][56789]){3,6}|flibble|xyz{1,2}y)", 0, "a", "051629" },
-    { "^a.*(([0123][56789]){3,6}|flibble|xyz{1,2}y)", 0, "a", "051629" },
-    { "(badger.*){3,}mushroom.*mushroom", HS_FLAG_DOTALL, "badger badger badger", "mushroom! mushroom" },
-    { "(badger.*){3,}mushroom.*mushroom$", HS_FLAG_DOTALL, "badger badger badger", "mushroom! mushroom" },
-    { "foo[^X]{16}", HS_FLAG_SINGLEMATCH, "preblock", "foo0123456789abcdef" },
-    { "foobar.*bazbaz[^X]{16}", HS_FLAG_DOTALL|HS_FLAG_SINGLEMATCH, "foobar", "bazbaz0123456789abcdef" },
-    { "t?((w.(u|t|.)){6,10}|[dqnt]|e|va)", 0, "~~~~", "tva" },
-    { "HTTP.*foobar.*blah", HS_FLAG_DOTALL, "bing", "HTTP foobar blah" },
+    {"foobar", 0, "flibble", "foobar"},
+    {"longliteralislongerthanlong", 0, "precursor",
+     "longliteralislongerthanlong"},
+    {"foobar\\z", 0, "flibble", "foobar"},
+    {"hatstand.*teakettle.*badgerbrush", HS_FLAG_DOTALL, "hatstand teakettle",
+     "_badgerbrush"},
+    {"hatstand.*teakettle.*badgerbrush\\z", HS_FLAG_DOTALL,
+     "hatstand teakettle", "_badgerbrush"},
+    {"a.*(([0123][56789]){3,6}|flibble|xyz{1,2}y)", 0, "a", "051629"},
+    {"^a.*(([0123][56789]){3,6}|flibble|xyz{1,2}y)", 0, "a", "051629"},
+    {"(badger.*){3,}mushroom.*mushroom", HS_FLAG_DOTALL, "badger badger badger",
+     "mushroom! mushroom"},
+    {"(badger.*){3,}mushroom.*mushroom$", HS_FLAG_DOTALL,
+     "badger badger badger", "mushroom! mushroom"},
+    {"foo[^X]{16}", HS_FLAG_SINGLEMATCH, "preblock", "foo0123456789abcdef"},
+    {"foobar.*bazbaz[^X]{16}", HS_FLAG_DOTALL | HS_FLAG_SINGLEMATCH, "foobar",
+     "bazbaz0123456789abcdef"},
+    {"t?((w.(u|t|.)){6,10}|[dqnt]|e|va)", 0, "~~~~", "tva"},
+    {"HTTP.*foobar.*blah", HS_FLAG_DOTALL, "bing", "HTTP foobar blah"},
 };
 
 INSTANTIATE_TEST_CASE_P(HyperscanTestBehaviour, HyperscanScanGigabytesMatch,
@@ -322,8 +329,7 @@ TEST(HyperscanTestBehaviour, StreamingThereCanBeOnlyOne) {
     // build a database
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    err = hs_compile(".ck",
-                     HS_FLAG_CASELESS | HS_FLAG_SINGLEMATCH,
+    err = hs_compile(".ck", HS_FLAG_CASELESS | HS_FLAG_SINGLEMATCH,
                      HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
@@ -360,14 +366,14 @@ TEST(HyperscanTestBehaviour, StreamingThereCanBeOnlyOne) {
 // Do we actually only get a single match back from HS_FLAG_SINGLEMATCH?
 TEST(HyperscanTestBehaviour, BlockThereCanBeOnlyOne) {
     hs_error_t err;
-    const std::string data1("hackhackHACKhackHACkhAcKzofunvuynlslijlnikshvb ar yhtkubq45ytvb iuyh "
-                            "ackeruniou viytdfjhg nvldkrjgnal");
+    const std::string data1(
+        "hackhackHACKhackHACkhAcKzofunvuynlslijlnikshvb ar yhtkubq45ytvb iuyh "
+        "ackeruniou viytdfjhg nvldkrjgnal");
 
     // build a database
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    err = hs_compile(".ck",
-                     HS_FLAG_CASELESS | HS_FLAG_SINGLEMATCH,
+    err = hs_compile(".ck", HS_FLAG_CASELESS | HS_FLAG_SINGLEMATCH,
                      HS_MODE_BLOCK, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
@@ -378,7 +384,8 @@ TEST(HyperscanTestBehaviour, BlockThereCanBeOnlyOne) {
     EXPECT_TRUE(scratch != nullptr);
 
     matchCount = 0;
-    err = hs_scan(db, data1.c_str(), data1.size(), 0, scratch, countHandler, nullptr);
+    err = hs_scan(db, data1.c_str(), data1.size(), 0, scratch, countHandler,
+                  nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_EQ(1U, matchCount); // only one match
 
@@ -390,9 +397,7 @@ TEST(HyperscanTestBehaviour, BlockThereCanBeOnlyOne) {
 
 class HyperscanLiteralLengthTest : public TestWithParam<size_t> {
 protected:
-    virtual void SetUp() {
-        literal_len = GetParam();
-    }
+    virtual void SetUp() { literal_len = GetParam(); }
 
     size_t literal_len;
 };
@@ -419,13 +424,15 @@ TEST_P(HyperscanLiteralLengthTest, FloatingBlock) {
     EXPECT_TRUE(scratch != nullptr);
 
     matchCount = 0;
-    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler, nullptr);
+    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler,
+                  nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_EQ(5U, matchCount); // five matches
 
     // Should see no match from five bytes in
     matchCount = 0;
-    err = hs_scan(db, data.c_str() + 5, data.size() - 5, 0, scratch, countHandler, nullptr);
+    err = hs_scan(db, data.c_str() + 5, data.size() - 5, 0, scratch,
+                  countHandler, nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_EQ(0U, matchCount); // no matches
 
@@ -457,16 +464,17 @@ TEST_P(HyperscanLiteralLengthTest, AnchoredBlock) {
     EXPECT_TRUE(scratch != nullptr);
 
     matchCount = 0;
-    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler, nullptr);
+    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler,
+                  nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_EQ(1U, matchCount); // one match
 
     // Should see no match from five bytes in
     matchCount = 0;
-    err = hs_scan(db, data.c_str() + 5, data.size() - 5, 0, scratch, countHandler, nullptr);
+    err = hs_scan(db, data.c_str() + 5, data.size() - 5, 0, scratch,
+                  countHandler, nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_EQ(0U, matchCount); // no matches
-
 
     // teardown
     err = hs_free_scratch(scratch);
@@ -479,13 +487,12 @@ INSTANTIATE_TEST_CASE_P(HyperscanLiteralLength, HyperscanLiteralLengthTest,
                                4096, 8192, 15000, 15999));
 
 struct CallbackStopData {
-   const char *pattern;
-   unsigned int flags;
-   const char *corpus;
+    const char *pattern;
+    unsigned int flags;
+    const char *corpus;
 };
 
-class CallbackReturnStop : public TestWithParam<CallbackStopData> {
-};
+class CallbackReturnStop : public TestWithParam<CallbackStopData> {};
 
 TEST_P(CallbackReturnStop, Block) {
     const CallbackStopData &params = GetParam();
@@ -495,8 +502,8 @@ TEST_P(CallbackReturnStop, Block) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
     hs_error_t err;
-    err = hs_compile(params.pattern, params.flags,
-                     HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
+    err = hs_compile(params.pattern, params.flags, HS_MODE_NOSTREAM, nullptr,
+                     &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     // alloc some scratch
@@ -525,8 +532,8 @@ TEST_P(CallbackReturnStop, Streaming) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
     hs_error_t err;
-    err = hs_compile(params.pattern, params.flags,
-                     HS_MODE_STREAM, nullptr, &db, &compile_err);
+    err = hs_compile(params.pattern, params.flags, HS_MODE_STREAM, nullptr, &db,
+                     &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     // alloc some scratch
@@ -542,8 +549,8 @@ TEST_P(CallbackReturnStop, Streaming) {
 
     matchCount = 0;
 
-    err = hs_scan_stream(stream, params.corpus, strlen(params.corpus),
-                         0, scratch, stopHandler, nullptr);
+    err = hs_scan_stream(stream, params.corpus, strlen(params.corpus), 0,
+                         scratch, stopHandler, nullptr);
     ASSERT_EQ(1U, matchCount) << "One match exactly should be recorded.";
     ASSERT_EQ(HS_SCAN_TERMINATED, err);
 
@@ -564,8 +571,8 @@ TEST_P(CallbackReturnStop, Vectored) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
     hs_error_t err;
-    err = hs_compile(params.pattern, params.flags,
-                     HS_MODE_VECTORED, nullptr, &db, &compile_err);
+    err = hs_compile(params.pattern, params.flags, HS_MODE_VECTORED, nullptr,
+                     &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     // alloc some scratch
@@ -576,8 +583,8 @@ TEST_P(CallbackReturnStop, Vectored) {
 
     matchCount = 0;
 
-    const char *data[] = { params.corpus };
-    unsigned int len[] = { (unsigned int)strlen(params.corpus) };
+    const char *data[] = {params.corpus};
+    unsigned int len[] = {(unsigned int)strlen(params.corpus)};
 
     err = hs_scan_vector(db, data, len, 1, 0, scratch, stopHandler, nullptr);
     ASSERT_EQ(1U, matchCount) << "One match exactly should be recorded.";
@@ -590,15 +597,16 @@ TEST_P(CallbackReturnStop, Vectored) {
 }
 
 static const CallbackStopData callbackStopTests[] = {
-    { "foobar", 0, "xxxfoobarxxxfoobarxxxfoobar" },
-    { "a", 0, "xxxaaaaaaaaaaaaaaaaaaa" },
-    { "a", HS_FLAG_CASELESS, "xxxAaAaAaAa" },
-    { ".", 0, "acbdef" },
-    { ".", HS_FLAG_DOTALL, "abcdef" },
-    { "foo.*bar.*foo", HS_FLAG_DOTALL, "foobarfoobarfoobarfoobarfoo" },
-    { "(badger.*){3,}", HS_FLAG_DOTALL, "badger badger badger badger badger badger badger badger" },
-    { "foobar.*", 0, "foobarxxx" },
-    { "[012]{3,7}.*abba", 0, "0120120120abbaabba" },
+    {"foobar", 0, "xxxfoobarxxxfoobarxxxfoobar"},
+    {"a", 0, "xxxaaaaaaaaaaaaaaaaaaa"},
+    {"a", HS_FLAG_CASELESS, "xxxAaAaAaAa"},
+    {".", 0, "acbdef"},
+    {".", HS_FLAG_DOTALL, "abcdef"},
+    {"foo.*bar.*foo", HS_FLAG_DOTALL, "foobarfoobarfoobarfoobarfoo"},
+    {"(badger.*){3,}", HS_FLAG_DOTALL,
+     "badger badger badger badger badger badger badger badger"},
+    {"foobar.*", 0, "foobarxxx"},
+    {"[012]{3,7}.*abba", 0, "0120120120abbaabba"},
 };
 
 INSTANTIATE_TEST_CASE_P(HyperscanTestBehaviour, CallbackReturnStop,
@@ -664,29 +672,14 @@ TEST(HyperscanTestBehaviour, SerializedDogfood2) {
     hs_compile_error_t *compile_err = nullptr;
     hs_error_t err;
 
-    static const vector<const char *> expressions {
-        "puppy treats!",
-        "foobar",
-        "foo.*bar.*foo",
-        "(badger.*){3,}",
-        "[012]{3,7}.*abba"
-    };
+    static const vector<const char *> expressions{
+        "puppy treats!", "foobar", "foo.*bar.*foo", "(badger.*){3,}",
+        "[012]{3,7}.*abba"};
 
-    static const vector<unsigned int> flags {
-        0,
-        0,
-        HS_FLAG_DOTALL,
-        HS_FLAG_DOTALL,
-        0
-    };
+    static const vector<unsigned int> flags{0, 0, HS_FLAG_DOTALL,
+                                            HS_FLAG_DOTALL, 0};
 
-    static const vector<unsigned int> ids {
-        1000,
-        1001,
-        1002,
-        1003,
-        1004
-    };
+    static const vector<unsigned int> ids{1000, 1001, 1002, 1003, 1004};
 
     size_t num = expressions.size();
     ASSERT_EQ(num, flags.size());
@@ -880,8 +873,8 @@ TEST(HyperscanTestBehaviour, NoMainCB) {
 
     matchCount = 0;
     const string data("foo        bar");
-    err = hs_scan_stream(stream, data.c_str(), data.size(), 0, scratch,
-                         nullptr, nullptr);
+    err = hs_scan_stream(stream, data.c_str(), data.size(), 0, scratch, nullptr,
+                         nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_EQ(0U, matchCount); // hasn't matched until stream end
 
@@ -894,7 +887,6 @@ TEST(HyperscanTestBehaviour, NoMainCB) {
     ASSERT_EQ(HS_SUCCESS, err);
     hs_free_database(db);
 }
-
 
 // Test that we don't get a match that's pending on stream close when we use
 // hs_close_stream with no event handler.
@@ -973,8 +965,8 @@ TEST(HyperscanTestBehaviour, Vectored1) {
     hs_error_t err;
 
     // build a database
-    hs_database_t *db = buildDB("^foo.*bar", HS_FLAG_DOTALL, 0,
-                                HS_MODE_VECTORED);
+    hs_database_t *db =
+        buildDB("^foo.*bar", HS_FLAG_DOTALL, 0, HS_MODE_VECTORED);
     ASSERT_TRUE(db != nullptr);
 
     // alloc some scratch
@@ -983,8 +975,8 @@ TEST(HyperscanTestBehaviour, Vectored1) {
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_TRUE(scratch != nullptr);
 
-    const char *data[] = { "foo", "   ", "bar" };
-    unsigned int len[] = { 3, 3, 3};
+    const char *data[] = {"foo", "   ", "bar"};
+    unsigned int len[] = {3, 3, 3};
 
     matchCount = 0;
     err = hs_scan_vector(db, data, len, 3, 0, scratch, countHandler, nullptr);
@@ -1002,8 +994,8 @@ TEST(HyperscanTestBehaviour, Vectored2) {
     hs_error_t err;
 
     // build a database
-    hs_database_t *db = buildDB("^foo.*bar", HS_FLAG_DOTALL, 0,
-                                HS_MODE_VECTORED);
+    hs_database_t *db =
+        buildDB("^foo.*bar", HS_FLAG_DOTALL, 0, HS_MODE_VECTORED);
     ASSERT_TRUE(db != nullptr);
 
     // alloc some scratch
@@ -1012,8 +1004,8 @@ TEST(HyperscanTestBehaviour, Vectored2) {
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_TRUE(scratch != nullptr);
 
-    const char *data[] = { "", "foo", "   ", "bar" };
-    unsigned int len[] = { 0, 3, 3, 3};
+    const char *data[] = {"", "foo", "   ", "bar"};
+    unsigned int len[] = {0, 3, 3, 3};
 
     matchCount = 0;
     err = hs_scan_vector(db, data, len, 4, 0, scratch, countHandler, nullptr);
@@ -1031,8 +1023,8 @@ TEST(HyperscanTestBehaviour, Vectored3) {
     hs_error_t err;
 
     // build a database
-    hs_database_t *db = buildDB("^foo.*bar", HS_FLAG_DOTALL, 0,
-                                HS_MODE_VECTORED);
+    hs_database_t *db =
+        buildDB("^foo.*bar", HS_FLAG_DOTALL, 0, HS_MODE_VECTORED);
     ASSERT_TRUE(db != nullptr);
 
     // alloc some scratch
@@ -1041,8 +1033,8 @@ TEST(HyperscanTestBehaviour, Vectored3) {
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_TRUE(scratch != nullptr);
 
-    const char *data[] = { "foo", "   ", "", "bar" };
-    unsigned int len[] = { 3, 3, 0, 3};
+    const char *data[] = {"foo", "   ", "", "bar"};
+    unsigned int len[] = {3, 3, 0, 3};
 
     matchCount = 0;
     err = hs_scan_vector(db, data, len, 4, 0, scratch, countHandler, nullptr);
@@ -1060,8 +1052,8 @@ TEST(HyperscanTestBehaviour, Vectored4) {
     hs_error_t err;
 
     // build a database
-    hs_database_t *db = buildDB("^foo.*bar", HS_FLAG_DOTALL, 0,
-                                HS_MODE_VECTORED);
+    hs_database_t *db =
+        buildDB("^foo.*bar", HS_FLAG_DOTALL, 0, HS_MODE_VECTORED);
     ASSERT_TRUE(db != nullptr);
 
     // alloc some scratch
@@ -1070,8 +1062,8 @@ TEST(HyperscanTestBehaviour, Vectored4) {
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_TRUE(scratch != nullptr);
 
-    const char *data[] = { "foo", "   ", "bar", "" };
-    unsigned int len[] = { 3, 3, 3, 0};
+    const char *data[] = {"foo", "   ", "bar", ""};
+    unsigned int len[] = {3, 3, 3, 0};
 
     matchCount = 0;
     err = hs_scan_vector(db, data, len, 4, 0, scratch, countHandler, nullptr);
@@ -1089,8 +1081,8 @@ TEST(HyperscanTestBehaviour, Vectored5) {
     hs_error_t err;
 
     // build a database
-    hs_database_t *db = buildDB("^foo.*bar", HS_FLAG_DOTALL, 0,
-                                HS_MODE_VECTORED);
+    hs_database_t *db =
+        buildDB("^foo.*bar", HS_FLAG_DOTALL, 0, HS_MODE_VECTORED);
     ASSERT_TRUE(db != nullptr);
 
     // alloc some scratch
@@ -1099,8 +1091,8 @@ TEST(HyperscanTestBehaviour, Vectored5) {
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_TRUE(scratch != nullptr);
 
-    const char *data[] = { "", "foo", "   ", "bar" };
-    unsigned int len[] = { 0, 3, 3, 3};
+    const char *data[] = {"", "foo", "   ", "bar"};
+    unsigned int len[] = {0, 3, 3, 3};
 
     matchCount = 0;
     err = hs_scan_vector(db, data, len, 0, 0, scratch, countHandler, nullptr);
@@ -1118,8 +1110,8 @@ TEST(HyperscanTestBehaviour, Vectored6) {
     hs_error_t err;
 
     // build a database
-    hs_database_t *db = buildDB("^", HS_FLAG_DOTALL | HS_FLAG_ALLOWEMPTY, 0,
-                                HS_MODE_VECTORED);
+    hs_database_t *db =
+        buildDB("^", HS_FLAG_DOTALL | HS_FLAG_ALLOWEMPTY, 0, HS_MODE_VECTORED);
     ASSERT_TRUE(db != nullptr);
 
     // alloc some scratch
@@ -1128,8 +1120,8 @@ TEST(HyperscanTestBehaviour, Vectored6) {
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_TRUE(scratch != nullptr);
 
-    const char *data[] = { "", "foo", "   ", "bar" };
-    unsigned int len[] = { 0, 3, 3, 3};
+    const char *data[] = {"", "foo", "   ", "bar"};
+    unsigned int len[] = {0, 3, 3, 3};
 
     matchCount = 0;
     err = hs_scan_vector(db, data, len, 0, 0, scratch, countHandler, nullptr);
@@ -1147,8 +1139,8 @@ TEST(HyperscanTestBehaviour, Vectored7) {
     hs_error_t err;
 
     // build a database
-    hs_database_t *db = buildDB("$", HS_FLAG_DOTALL | HS_FLAG_ALLOWEMPTY, 0,
-                                HS_MODE_VECTORED);
+    hs_database_t *db =
+        buildDB("$", HS_FLAG_DOTALL | HS_FLAG_ALLOWEMPTY, 0, HS_MODE_VECTORED);
     ASSERT_TRUE(db != nullptr);
 
     // alloc some scratch
@@ -1157,8 +1149,8 @@ TEST(HyperscanTestBehaviour, Vectored7) {
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_TRUE(scratch != nullptr);
 
-    const char *data[] = { "", "foo", "   ", "bar" };
-    unsigned int len[] = { 0, 3, 3, 3};
+    const char *data[] = {"", "foo", "   ", "bar"};
+    unsigned int len[] = {0, 3, 3, 3};
 
     matchCount = 0;
     err = hs_scan_vector(db, data, len, 0, 0, scratch, countHandler, nullptr);
@@ -1275,12 +1267,12 @@ TEST(HyperscanTestBehaviour, MultiStream2) {
 TEST(regression, UE_1005) {
     hs_error_t err;
     vector<pattern> patterns;
-    patterns.push_back(pattern("match[^Z]*", HS_FLAG_DOTALL|HS_FLAG_SINGLEMATCH,
-                               1));
-    patterns.push_back(pattern("[^X]+\\z", HS_FLAG_DOTALL|HS_FLAG_SINGLEMATCH,
-                               2));
-    patterns.push_back(pattern("[^Y]+\\z", HS_FLAG_DOTALL|HS_FLAG_SINGLEMATCH,
-                               3));
+    patterns.push_back(
+        pattern("match[^Z]*", HS_FLAG_DOTALL | HS_FLAG_SINGLEMATCH, 1));
+    patterns.push_back(
+        pattern("[^X]+\\z", HS_FLAG_DOTALL | HS_FLAG_SINGLEMATCH, 2));
+    patterns.push_back(
+        pattern("[^Y]+\\z", HS_FLAG_DOTALL | HS_FLAG_SINGLEMATCH, 3));
     hs_database_t *db = buildDB(patterns, HS_MODE_STREAM);
     ASSERT_NE(nullptr, db);
 
@@ -1305,12 +1297,12 @@ TEST(regression, UE_1005) {
     ASSERT_EQ(HS_SUCCESS, err);
 
     ASSERT_EQ(3U, c.matches.size());
-    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(5, 1))
-              != c.matches.end());
-    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(5, 2))
-              != c.matches.end());
-    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(5, 3))
-              != c.matches.end());
+    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(5, 1)) !=
+                c.matches.end());
+    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(5, 2)) !=
+                c.matches.end());
+    ASSERT_TRUE(find(c.matches.begin(), c.matches.end(), MatchRecord(5, 3)) !=
+                c.matches.end());
 
     // teardown
     err = hs_free_scratch(scratch);
@@ -1319,7 +1311,8 @@ TEST(regression, UE_1005) {
 }
 
 TEST(regression, UE_2425) {
-    const char regex[] = "(b|[cd](\\B|a){14}|[ba]cd.[^ece]b.[da]cbe|d[cad]cb.[da](cd|[abedc])|\\ba.edbac){18}";
+    const char regex[] = "(b|[cd](\\B|a){14}|[ba]cd.[^ece]b.[da]cbe|d[cad]cb.["
+                         "da](cd|[abedc])|\\ba.edbac){18}";
     unsigned flags = HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_SINGLEMATCH |
                      HS_FLAG_UTF8 | HS_FLAG_PREFILTER;
     vector<pattern> patterns;
@@ -1334,9 +1327,11 @@ TEST(regression, UE_2425) {
 }
 
 TEST(regression, UE_2485) {
-    const char regex[] = "(?:(.EeEa|((a{2}BD[bc]Bd[eae]|[DCd]|c|ebCa|d)){7,21})(E{5,}A{4,}[Cc].cc{3,6}|eCec|e+CaBEd|[Bb])){10}DB(a|[AAda])..A?DE?E";
-    unsigned flags = HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8 |
-                     HS_FLAG_PREFILTER;
+    const char regex[] =
+        "(?:(.EeEa|((a{2}BD[bc]Bd[eae]|[DCd]|c|ebCa|d)){7,21})(E{5,}A{4,}[Cc]."
+        "cc{3,6}|eCec|e+CaBEd|[Bb])){10}DB(a|[AAda])..A?DE?E";
+    unsigned flags =
+        HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8 | HS_FLAG_PREFILTER;
     vector<pattern> patterns;
     patterns.push_back(pattern(regex, flags, 1));
 
@@ -1350,7 +1345,9 @@ TEST(regression, UE_2485) {
 }
 
 TEST(regression, UE_2452) {
-    const char regex[] = "/ab.b[bca]{2,}ca((?:c|(abc(?sxmi-xm)){10,14}|c|b|[abcb])){4,23}acbcbb*ba((?:(a|.{4,}|.|[acba])){3,16}a)+";
+    const char regex[] =
+        "/ab.b[bca]{2,}ca((?:c|(abc(?sxmi-xm)){10,14}|c|b|[abcb])){4,23}acbcbb*"
+        "ba((?:(a|.{4,}|.|[acba])){3,16}a)+";
     unsigned flags = HS_FLAG_MULTILINE | HS_FLAG_CASELESS | HS_FLAG_UTF8 |
                      HS_FLAG_UCP | HS_FLAG_PREFILTER;
     vector<pattern> patterns;
@@ -1365,7 +1362,9 @@ TEST(regression, UE_2452) {
 }
 
 TEST(regression, UE_2595) {
-    const char regex[] = "(?:(?:acAa|c[EAA]aEb|((?:CC[bdd].cE((?x-msix)BE){32}(?:\\B)){16,19}CdD.E(E|E|B)){3,6}|E(a|d|.)(?:(?xs-isxm)|b|.|C))){17,}";
+    const char regex[] =
+        "(?:(?:acAa|c[EAA]aEb|((?:CC[bdd].cE((?x-msix)BE){32}(?:\\B)){16,19}"
+        "CdD.E(E|E|B)){3,6}|E(a|d|.)(?:(?xs-isxm)|b|.|C))){17,}";
     unsigned flags = HS_FLAG_MULTILINE | HS_FLAG_CASELESS |
                      HS_FLAG_SINGLEMATCH | HS_FLAG_PREFILTER;
     vector<pattern> patterns;
@@ -1467,8 +1466,7 @@ TEST(regression, UE_2763) {
 TEST(regression, UE_2798) {
     const vector<pattern> patterns = {
         pattern("([ab]b|aab+)$", HS_FLAG_DOTALL, 1),
-        pattern("ab+", HS_FLAG_SOM_LEFTMOST, 2),
-        pattern("a(b.)?ba+b", 0, 3)};
+        pattern("ab+", HS_FLAG_SOM_LEFTMOST, 2), pattern("a(b.)?ba+b", 0, 3)};
 
     hs_database_t *db =
         buildDB(patterns, HS_MODE_STREAM | HS_MODE_SOM_HORIZON_LARGE);
@@ -1510,6 +1508,41 @@ TEST(regression, UE_2798) {
     hs_free_database(db);
 }
 
+TEST(regression, HighBitMpvVermRestart) {
+    const char *expressions[] = {"[^\\x80]{32}", "[^\\xff]{32}"};
+    const unsigned char excluded_bytes[] = {0x80, 0xff};
+
+    for (size_t i = 0; i < 2; i++) {
+        SCOPED_TRACE(testing::Message()
+                     << "excluded byte: "
+                     << static_cast<unsigned int>(excluded_bytes[i]));
+
+        hs_database_t *db = nullptr;
+        hs_compile_error_t *compile_err = nullptr;
+        ASSERT_EQ(HS_SUCCESS,
+                  hs_compile(expressions[i], HS_FLAG_SINGLEMATCH, HS_MODE_BLOCK,
+                             nullptr, &db, &compile_err));
+        ASSERT_NE(nullptr, db);
+
+        hs_scratch_t *scratch = nullptr;
+        ASSERT_EQ(HS_SUCCESS, hs_alloc_scratch(db, &scratch));
+
+        // The excluded prefix forces the auto-restarting MPV_VERM path.
+        string data(1, static_cast<char>(excluded_bytes[i]));
+        data.append(32, 'A');
+        CallBackContext matches;
+        ASSERT_EQ(HS_SUCCESS, hs_scan(db, data.data(),
+                                      static_cast<unsigned int>(data.size()), 0,
+                                      scratch, record_cb, &matches));
+        ASSERT_EQ(1U, matches.matches.size());
+        EXPECT_EQ(MatchRecord(33, 0), matches.matches[0]);
+
+        ASSERT_EQ(HS_SUCCESS, hs_free_scratch(scratch));
+        ASSERT_EQ(HS_SUCCESS, hs_free_database(db));
+        hs_free_compile_error(compile_err);
+    }
+}
+
 TEST(PcreSpace, NewPcre) {
     const char regex[] = "\\s";
     const string data = "\x09\x0a\x0b\x0c\x0d\x20"; /* aka "\t\n\v\f\r " */
@@ -1526,7 +1559,8 @@ TEST(PcreSpace, NewPcre) {
     EXPECT_TRUE(scratch != nullptr);
 
     matchCount = 0;
-    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler, nullptr);
+    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler,
+                  nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_EQ(data.size(), matchCount); // all are spaces
 
@@ -1552,7 +1586,8 @@ TEST(PcreSpace, NewPcreClass) {
     EXPECT_TRUE(scratch != nullptr);
 
     matchCount = 0;
-    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler, nullptr);
+    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler,
+                  nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_EQ(data.size(), matchCount); // all are spaces
 
@@ -1578,7 +1613,8 @@ TEST(PcreSpace, NewPcreNeg) {
     EXPECT_TRUE(scratch != nullptr);
 
     matchCount = 0;
-    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler, nullptr);
+    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler,
+                  nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_EQ(0, matchCount); // no matches, all are spaces
 
@@ -1604,7 +1640,8 @@ TEST(PcreSpace, NewPcreClassNeg) {
     EXPECT_TRUE(scratch != nullptr);
 
     matchCount = 0;
-    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler, nullptr);
+    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler,
+                  nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_EQ(0, matchCount); // no matches, all are spaces
 
@@ -1616,9 +1653,8 @@ TEST(PcreSpace, NewPcreClassNeg) {
 
 TEST(Parser, NewlineTerminatedComment) {
     // Extended mode comments and whitespace should be stripped.
-    const vector<pattern> patterns = {
-        pattern("(?x)foo # initial comment \n bar # second comment \n baz",
-                0, 1)};
+    const vector<pattern> patterns = {pattern(
+        "(?x)foo # initial comment \n bar # second comment \n baz", 0, 1)};
     const string data = "foobarbaz";
 
     hs_database_t *db = buildDB(patterns, HS_MODE_BLOCK);
@@ -1629,7 +1665,8 @@ TEST(Parser, NewlineTerminatedComment) {
     EXPECT_TRUE(scratch != nullptr);
 
     matchCount = 0;
-    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler, nullptr);
+    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, countHandler,
+                  nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
     EXPECT_EQ(1, matchCount);
 

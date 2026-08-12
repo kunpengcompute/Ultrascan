@@ -35,6 +35,11 @@ using namespace std;
 
 namespace {
 
+class ScopedGreyOverridesReset {
+public:
+    ~ScopedGreyOverridesReset() { hs_reset_grey_overrides(); }
+};
+
 // ======================================================================
 // hs_set_grey_overrides - Success Cases
 // ======================================================================
@@ -113,18 +118,21 @@ TEST(GreyOverrides, NullResets) {
 }
 
 TEST(GreyOverrides, CompilationWithLilyEnabled) {
+    ScopedGreyOverridesReset reset;
+
     // Enable Lily and verify compilation still works
     hs_error_t err = hs_set_grey_overrides("allowLily:1;");
     ASSERT_EQ(HS_SUCCESS, err);
 
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    const char *expr[] = {"abc", "def", "ghi"};
-    unsigned flags[] = {0, 0, 0};
-    unsigned ids[] = {10, 20, 30};
+    const char *expr[] = {"a", "bc", "def", "ghij"};
+    unsigned flags[] = {0, 0, 0, 0};
+    unsigned ids[] = {10, 20, 30, 40};
+    const unsigned pattern_count = 4;
 
-    err = hs_compile_multi(expr, flags, ids, 3, HS_MODE_BLOCK, nullptr, &db,
-                           &compile_err);
+    err = hs_compile_multi(expr, flags, ids, pattern_count, HS_MODE_BLOCK,
+                           nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -134,13 +142,12 @@ TEST(GreyOverrides, CompilationWithLilyEnabled) {
     ASSERT_EQ(HS_SUCCESS, err);
 
     CallBackContext c;
-    err = hs_scan(db, "abcdefghi", 9, 0, scratch, record_cb, &c);
+    err = hs_scan(db, "abcdefghij", 10, 0, scratch, record_cb, &c);
     ASSERT_EQ(HS_SUCCESS, err);
-    ASSERT_EQ(3U, c.matches.size());
+    EXPECT_EQ(pattern_count, c.matches.size());
 
     hs_free_scratch(scratch);
     hs_free_database(db);
-    hs_reset_grey_overrides();
 }
 
 TEST(GreyOverrides, CompilationWithHaoEnabled) {

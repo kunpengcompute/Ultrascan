@@ -37,7 +37,8 @@
  *
  * Build instructions:
  *
- *     g++ -std=c++11 -O2 -o pcapscan pcapscan.cc $(pkg-config --cflags --libs libhs) -lpcap
+ *     g++ -std=c++11 -O2 -o pcapscan pcapscan.cc $(pkg-config --cflags --libs
+ * libhs) -lpcap
  *
  * Usage:
  *
@@ -49,9 +50,9 @@
  *
  */
 
-#include <cstring>
 #include <chrono>
 #include <climits>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -63,14 +64,14 @@
 
 // We use the BSD primitives throughout as they exist on both BSD and Linux.
 #define __FAVOR_BSD
+#include <arpa/inet.h>
+#include <net/ethernet.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <netinet/ip_icmp.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
-#include <netinet/ip_icmp.h>
-#include <net/ethernet.h>
-#include <arpa/inet.h>
 
 #include <pcap.h>
 
@@ -127,9 +128,8 @@ static bool payloadOffset(const unsigned char *pkt_data, unsigned int *offset,
                           unsigned int *length);
 
 // Match event handler: called every time Hyperscan finds a match.
-static
-int onMatch(unsigned int id, unsigned long long from, unsigned long long to,
-            unsigned int flags, void *ctx) {
+static int onMatch(unsigned int id, unsigned long long from,
+                   unsigned long long to, unsigned int flags, void *ctx) {
     // Our context points to a size_t storing the match count
     size_t *matches = (size_t *)ctx;
     (*matches)++;
@@ -139,18 +139,15 @@ int onMatch(unsigned int id, unsigned long long from, unsigned long long to,
 // Simple timing class
 class Clock {
 public:
-    void start() {
-        time_start = std::chrono::system_clock::now();
-    }
+    void start() { time_start = std::chrono::system_clock::now(); }
 
-    void stop() {
-        time_end = std::chrono::system_clock::now();
-    }
+    void stop() { time_end = std::chrono::system_clock::now(); }
 
     double seconds() const {
         std::chrono::duration<double> delta = time_end - time_start;
         return delta.count();
     }
+
 private:
     std::chrono::time_point<std::chrono::system_clock> time_start, time_end;
 };
@@ -214,7 +211,7 @@ public:
         pcap_t *pcapHandle = pcap_open_offline(pcapFile, errbuf);
         if (pcapHandle == nullptr) {
             cerr << "ERROR: Unable to open pcap file \"" << pcapFile
-                << "\": " << errbuf << endl;
+                 << "\": " << errbuf << endl;
             return false;
         }
 
@@ -227,12 +224,14 @@ public:
             }
 
             // Valid TCP or UDP packet
-            const struct ip *iphdr = (const struct ip *)(pktData
-                    + sizeof(struct ether_header));
+            const struct ip *iphdr =
+                (const struct ip *)(pktData + sizeof(struct ether_header));
             const char *payload = (const char *)pktData + offset;
 
-            size_t id = stream_map.insert(std::make_pair(FiveTuple(iphdr),
-                                          stream_map.size())).first->second;
+            size_t id =
+                stream_map
+                    .insert(std::make_pair(FiveTuple(iphdr), stream_map.size()))
+                    .first->second;
 
             packets.push_back(string(payload, length));
             stream_ids.push_back(id);
@@ -252,14 +251,10 @@ public:
     }
 
     // Return the number of matches found.
-    size_t matches() const {
-        return matchCount;
-    }
+    size_t matches() const { return matchCount; }
 
     // Clear the number of matches found.
-    void clearMatches() {
-        matchCount = 0;
-    }
+    void clearMatches() { matchCount = 0; }
 
     // Open a Hyperscan stream for each stream in stream_ids
     void openStreams() {
@@ -277,8 +272,8 @@ public:
     // end-anchored matches)
     void closeStreams() {
         for (auto &stream : streams) {
-            hs_error_t err = hs_close_stream(stream, scratch, onMatch,
-                                             &matchCount);
+            hs_error_t err =
+                hs_close_stream(stream, scratch, onMatch, &matchCount);
             if (err != HS_SUCCESS) {
                 cerr << "ERROR: Unable to close stream. Exiting." << endl;
                 exit(-1);
@@ -291,9 +286,9 @@ public:
     void scanStreams() {
         for (size_t i = 0; i != packets.size(); ++i) {
             const std::string &pkt = packets[i];
-            hs_error_t err = hs_scan_stream(streams[stream_ids[i]],
-                                            pkt.c_str(), pkt.length(), 0,
-                                            scratch, onMatch, &matchCount);
+            hs_error_t err =
+                hs_scan_stream(streams[stream_ids[i]], pkt.c_str(),
+                               pkt.length(), 0, scratch, onMatch, &matchCount);
             if (err != HS_SUCCESS) {
                 cerr << "ERROR: Unable to scan packet. Exiting." << endl;
                 exit(-1);
@@ -346,8 +341,7 @@ public:
             cout << "Block mode Hyperscan database size        : "
                  << dbBlock_size << " bytes." << endl;
         } else {
-            cout << "Error getting block mode Hyperscan database size"
-                 << endl;
+            cout << "Error getting block mode Hyperscan database size" << endl;
         }
 
         size_t stream_size = 0;
@@ -426,7 +420,7 @@ static void databasesFromFile(const char *filename,
     // Turn our vector of strings into a vector of char*'s to pass in to
     // hs_compile_multi. (This is just using the vector of strings as dynamic
     // storage.)
-    vector<const char*> cstrPatterns;
+    vector<const char *> cstrPatterns;
     for (const auto &pattern : patterns) {
         cstrPatterns.push_back(pattern.c_str());
     }
@@ -439,7 +433,8 @@ static void databasesFromFile(const char *filename,
 }
 
 static void usage(const char *prog) {
-    cerr << "Usage: " << prog << " [-n repeats] <pattern file> <pcap file>" << endl;
+    cerr << "Usage: " << prog
+         << " [-n repeats] [-G OVERRIDES] <pattern file> <pcap file>" << endl;
 }
 
 // Main entry point.
@@ -448,10 +443,17 @@ int main(int argc, char **argv) {
 
     // Process command line arguments.
     int opt;
-    while ((opt = getopt(argc, argv, "n:")) != -1) {
+    while ((opt = getopt(argc, argv, "n:G:")) != -1) {
         switch (opt) {
         case 'n':
             repeatCount = atoi(optarg);
+            break;
+        case 'G':
+            if (hs_set_grey_overrides(optarg) != HS_SUCCESS) {
+                cerr << "ERROR: Invalid grey overrides." << endl;
+                usage(argv[0]);
+                exit(-1);
+            }
             break;
         default:
             usage(argv[0]);
@@ -517,9 +519,11 @@ int main(int argc, char **argv) {
     // Collect data from streaming mode scans.
     size_t bytes = bench.bytes();
     double tputStreamScanning = (bytes * 8 * repeatCount) / secsStreamingScan;
-    double tputStreamOverhead = (bytes * 8 * repeatCount) / (secsStreamingScan + secsStreamingOpenClose);
+    double tputStreamOverhead = (bytes * 8 * repeatCount) /
+                                (secsStreamingScan + secsStreamingOpenClose);
     size_t matchesStream = bench.matches();
-    double matchRateStream = matchesStream / ((bytes * repeatCount) / 1024.0); // matches per kilobyte
+    double matchRateStream = matchesStream / ((bytes * repeatCount) /
+                                              1024.0); // matches per kilobyte
 
     // Scan all our packets in block mode.
     bench.clearMatches();
@@ -533,30 +537,36 @@ int main(int argc, char **argv) {
     // Collect data from block mode scans.
     double tputBlockScanning = (bytes * 8 * repeatCount) / secsScanBlock;
     size_t matchesBlock = bench.matches();
-    double matchRateBlock = matchesBlock / ((bytes * repeatCount) / 1024.0); // matches per kilobyte
+    double matchRateBlock =
+        matchesBlock / ((bytes * repeatCount) / 1024.0); // matches per kilobyte
 
     cout << endl << "Streaming mode:" << endl << endl;
     cout << "  Total matches: " << matchesStream << endl;
     cout << std::fixed << std::setprecision(4);
-    cout << "  Match rate:    " << matchRateStream << " matches/kilobyte" << endl;
+    cout << "  Match rate:    " << matchRateStream << " matches/kilobyte"
+         << endl;
     cout << std::fixed << std::setprecision(2);
     cout << "  Throughput (with stream overhead): "
-              << tputStreamOverhead/1000000 << " megabits/sec" << endl;
+         << tputStreamOverhead / 1000000 << " megabits/sec" << endl;
     cout << "  Throughput (no stream overhead):   "
-              << tputStreamScanning/1000000 << " megabits/sec" << endl;
+         << tputStreamScanning / 1000000 << " megabits/sec" << endl;
 
     cout << endl << "Block mode:" << endl << endl;
     cout << "  Total matches: " << matchesBlock << endl;
     cout << std::fixed << std::setprecision(4);
-    cout << "  Match rate:    " << matchRateBlock << " matches/kilobyte" << endl;
+    cout << "  Match rate:    " << matchRateBlock << " matches/kilobyte"
+         << endl;
     cout << std::fixed << std::setprecision(2);
-    cout << "  Throughput:    "
-              << tputBlockScanning/1000000 << " megabits/sec" << endl;
+    cout << "  Throughput:    " << tputBlockScanning / 1000000
+         << " megabits/sec" << endl;
 
     cout << endl;
-    if (bytes < (2*1024*1024)) {
-        cout << endl << "WARNING: Input PCAP file is less than 2MB in size." << endl
-                  << "This test may have been too short to calculate accurate results." << endl;
+    if (bytes < (2 * 1024 * 1024)) {
+        cout << endl
+             << "WARNING: Input PCAP file is less than 2MB in size." << endl
+             << "This test may have been too short to calculate accurate "
+                "results."
+             << endl;
     }
 
     // Close Hyperscan databases
@@ -582,7 +592,7 @@ static bool payloadOffset(const unsigned char *pkt_data, unsigned int *offset,
     }
 
     // Ignore fragmented packets.
-    if (iph->ip_off & htons(IP_MF|IP_OFFMASK)) {
+    if (iph->ip_off & htons(IP_MF | IP_OFFMASK)) {
         return false;
     }
 
@@ -613,19 +623,26 @@ static unsigned parseFlags(const string &flagsStr) {
     for (const auto &c : flagsStr) {
         switch (c) {
         case 'i':
-            flags |= HS_FLAG_CASELESS; break;
+            flags |= HS_FLAG_CASELESS;
+            break;
         case 'm':
-            flags |= HS_FLAG_MULTILINE; break;
+            flags |= HS_FLAG_MULTILINE;
+            break;
         case 's':
-            flags |= HS_FLAG_DOTALL; break;
+            flags |= HS_FLAG_DOTALL;
+            break;
         case 'H':
-            flags |= HS_FLAG_SINGLEMATCH; break;
+            flags |= HS_FLAG_SINGLEMATCH;
+            break;
         case 'V':
-            flags |= HS_FLAG_ALLOWEMPTY; break;
+            flags |= HS_FLAG_ALLOWEMPTY;
+            break;
         case '8':
-            flags |= HS_FLAG_UTF8; break;
+            flags |= HS_FLAG_UTF8;
+            break;
         case 'W':
-            flags |= HS_FLAG_UCP; break;
+            flags |= HS_FLAG_UCP;
+            break;
         case '\r': // stray carriage-return
             break;
         default:
@@ -683,4 +700,3 @@ static void parseFile(const char *filename, vector<string> &patterns,
         ids.push_back(id);
     }
 }
-

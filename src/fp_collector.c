@@ -84,6 +84,7 @@ struct hs_fp_report {
 };
 
 struct hs_fp_feedback_entry {
+    u8 table;
     u8 flags;
     u8 length;
     u8 mask_length;
@@ -386,6 +387,7 @@ count_bad_fragments(const hs_fp_report_t *report, u64a total_false_positive,
 static void
 fill_feedback_entry_from_report(struct hs_fp_feedback_entry *dst,
                                 const struct hs_fp_report_entry *src) {
+    dst->table = src->table;
     dst->flags = src->flags;
     dst->length = src->length;
     dst->mask_length = src->mask_length;
@@ -817,7 +819,7 @@ hs_error_t hs_fp_feedback_build_ext(const hs_fp_report_t *report,
 static char
 feedback_entry_matches_report_entry(const struct hs_fp_feedback_entry *feedback,
                                     const struct hs_fp_report_entry *report) {
-    if (feedback->flags != report->flags ||
+    if (feedback->table != report->table || feedback->flags != report->flags ||
         feedback->length != report->length ||
         feedback->mask_length != report->mask_length) {
         return 0;
@@ -962,6 +964,7 @@ hs_error_t hs_fp_feedback_get_fragment(const hs_fp_feedback_t *feedback,
 
     const struct hs_fp_feedback_entry *entry = feedback->entries + index;
     memset(fragment, 0, sizeof(*fragment));
+    fragment->table = entry->table;
     fragment->flags = entry->flags;
     fragment->bytes = entry->bytes;
     fragment->length = entry->length;
@@ -1004,6 +1007,9 @@ hs_error_t hs_fp_feedback_clone(const hs_fp_feedback_t *src,
 static char import_fragment_is_valid(
     const struct hs_fp_feedback_import_fragment *fragment) {
     if (!fragment || !fragment->bytes || !fragment->length ||
+        (fragment->table != HS_FP_TABLE_FLOATING &&
+         fragment->table != HS_FP_TABLE_EOD_ANCHORED &&
+         fragment->table != HS_FP_TABLE_SMALL_BLOCK) ||
         fragment->length > ROSE_FP_FRAGMENT_BYTES_MAX ||
         fragment->mask_length > ROSE_FP_FRAGMENT_BYTES_MAX) {
         return 0;
@@ -1047,6 +1053,7 @@ hs_error_t hs_fp_feedback_create_from_fragments(
         }
 
         struct hs_fp_feedback_entry *dst = f->entries + i;
+        dst->table = (u8)src->table;
         dst->flags = (u8)src->flags;
         dst->length = (u8)src->length;
         dst->mask_length = (u8)src->mask_length;
@@ -1064,7 +1071,8 @@ hs_error_t hs_fp_feedback_create_from_fragments(
 static char
 feedback_entry_matches_meta(const struct hs_fp_feedback_entry *entry,
                             const struct RoseFpFragmentMeta *meta) {
-    if (entry->flags != meta->flags || entry->length != meta->length ||
+    if (entry->table != meta->table || entry->flags != meta->flags ||
+        entry->length != meta->length ||
         entry->mask_length != meta->maskLength) {
         return 0;
     }
@@ -1115,10 +1123,11 @@ u32 hs_fp_feedback_count_matches_in_rose(const hs_fp_feedback_t *feedback,
     return hit_count;
 }
 
-char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
+char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback, u32 table,
                                    const char *bytes, size_t length,
                                    char nocase) {
-    if (!feedback || !feedback->bad_fragment_count || !bytes || !length) {
+    if (!feedback || !feedback->bad_fragment_count ||
+        table == HS_FP_TABLE_UNKNOWN || !bytes || !length) {
         return 0;
     }
 
@@ -1126,13 +1135,13 @@ char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
 
     for (u32 i = 0; i < feedback->bad_fragment_count; i++) {
         const struct hs_fp_feedback_entry *entry = feedback->entries + i;
-        if (!entry->length || entry->length > length || entry->mask_length ||
+        if (entry->table != table || entry->length != length ||
+            entry->mask_length ||
             ((entry->flags & ROSE_FP_FRAGMENT_FLAG_NOCASE) != flags)) {
             continue;
         }
 
-        const char *suffix = bytes + length - entry->length;
-        if (bytes_equal_short_neon(entry->bytes, (const u8 *)suffix,
+        if (bytes_equal_short_neon(entry->bytes, (const u8 *)bytes,
                                    entry->length)) {
             return 1;
         }
@@ -1141,11 +1150,25 @@ char hs_fp_feedback_literal_is_bad(const hs_fp_feedback_t *feedback,
     return 0;
 }
 
-char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
+char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback, u32 table,
                                     const char *bytes, size_t length,
                                     char nocase, const u8 *mask, const u8 *cmp,
                                     size_t mask_length) {
-    if (!feedback || !feedback->bad_fragment_count || !bytes || !length) {
+    return hs_fp_feedback_fragment_match_index(
+        feedback, table, bytes, length, nocase, mask, cmp, mask_length, NULL);
+}
+
+char hs_fp_feedback_fragment_match_index(const hs_fp_feedback_t *feedback,
+                                         u32 table, const char *bytes,
+                                         size_t length, char nocase,
+                                         const u8 *mask, const u8 *cmp,
+                                         size_t mask_length,
+                                         u32 *feedback_index) {
+    if (feedback_index) {
+        *feedback_index = HS_FP_FEEDBACK_INDEX_INVALID;
+    }
+    if (!feedback || !feedback->bad_fragment_count ||
+        table == HS_FP_TABLE_UNKNOWN || !bytes || !length) {
         return 0;
     }
     if (mask_length && (!mask || !cmp)) {
@@ -1156,13 +1179,12 @@ char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
 
     for (u32 i = 0; i < feedback->bad_fragment_count; i++) {
         const struct hs_fp_feedback_entry *entry = feedback->entries + i;
-        if (!entry->length || entry->length > length ||
+        if (entry->table != table || entry->length != length ||
             ((entry->flags & ROSE_FP_FRAGMENT_FLAG_NOCASE) != nocase_flag)) {
             continue;
         }
 
-        const char *suffix = bytes + length - entry->length;
-        if (!bytes_equal_short_neon(entry->bytes, (const u8 *)suffix,
+        if (!bytes_equal_short_neon(entry->bytes, (const u8 *)bytes,
                                     entry->length)) {
             continue;
         }
@@ -1177,6 +1199,9 @@ char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback,
             continue;
         }
 
+        if (feedback_index) {
+            *feedback_index = i;
+        }
         return 1;
     }
 

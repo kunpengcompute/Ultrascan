@@ -54,6 +54,7 @@
 #include "util/report_manager.h"
 #include "util/verify_types.h"
 
+#include <algorithm>
 #include <iomanip>
 #include <sstream>
 
@@ -66,6 +67,23 @@ using boost::adaptors::map_values;
 namespace ue2 {
 
 static const size_t MAX_ACCEL_STRING_LEN = 16;
+
+#ifdef HS_ENABLE_FP_FEEDBACK
+static unsigned int fpTableForMatcherSource(rose_literal_table table) {
+    switch (table) {
+    case ROSE_ANCHORED:
+        return HS_FP_TABLE_ANCHORED;
+    case ROSE_FLOATING:
+        return HS_FP_TABLE_FLOATING;
+    case ROSE_EOD_ANCHORED:
+        return HS_FP_TABLE_EOD_ANCHORED;
+    case ROSE_ANCHORED_SMALL_BLOCK:
+        return HS_FP_TABLE_SMALL_BLOCK;
+    default:
+        return HS_FP_TABLE_UNKNOWN;
+    }
+}
+#endif
 
 #if defined(DEBUG) || defined(DUMP_SUPPORT)
 static UNUSED string dumpMask(const vector<u8> &v) {
@@ -365,8 +383,22 @@ void findMoreLiteralMasks(RoseBuildImpl &build) {
         }
         DEBUG_PRINTF("found surrounding mask for lit_id=%u (%s)\n", id,
                      dumpString(lit.s).c_str());
+        unsigned int fp_table = HS_FP_TABLE_UNKNOWN;
+        switch (lit.table) {
+        case ROSE_FLOATING:
+            fp_table = HS_FP_TABLE_FLOATING;
+            break;
+        case ROSE_EOD_ANCHORED:
+            fp_table = HS_FP_TABLE_EOD_ANCHORED;
+            break;
+        case ROSE_ANCHORED_SMALL_BLOCK:
+            fp_table = HS_FP_TABLE_SMALL_BLOCK;
+            break;
+        default:
+            break;
+        }
         if (fpFeedbackBlocksRoseFragment(
-                build.cc, lit.s, &msk, &cmp,
+                build.cc, fp_table, lit.s, &msk, &cmp,
                 HS_FP_COMPILE_CHECKPOINT_MASKED_LITERAL)) {
             DEBUG_PRINTF("not replacing literal with surrounding mask due to "
                          "fp feedback\n");
@@ -698,35 +730,69 @@ struct MatcherProto {
 } // namespace
 
 static void checkFpFeedbackMatcherFragment(const RoseBuildImpl &build,
-                                           UNUSED const LitFragment &f,
-                                           UNUSED const rose_literal_id &lit,
-                                           const string &s_final, bool nocase,
-                                           const vector<u8> &msk,
+                                           const LitFragment &f, u32 table,
+                                           u32 lit_id, const string &s_final,
+                                           bool nocase, const vector<u8> &msk,
                                            const vector<u8> &cmp) {
+#ifndef HS_ENABLE_FP_FEEDBACK
+    (void)build;
+    (void)f;
+    (void)table;
+    (void)lit_id;
+    (void)s_final;
+    (void)nocase;
+    (void)msk;
+    (void)cmp;
+#else
     if (!build.cc.fp_feedback) {
         return;
     }
 
     fpCompileRecordCheck(build.cc, HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD);
 
-    const u8 *mask_ptr = msk.empty() ? nullptr : msk.data();
-    const u8 *cmp_ptr = cmp.empty() ? nullptr : cmp.data();
-    if (!hs_fp_feedback_fragment_is_bad(build.cc.fp_feedback, s_final.data(),
-                                        s_final.size(), nocase, mask_ptr,
-                                        cmp_ptr, msk.size())) {
+    u32 feedback_index = HS_FP_FEEDBACK_INDEX_INVALID;
+    if (!fpFeedbackMatchesFinalRoseFragment(build.cc, table, s_final, nocase,
+                                            msk, cmp, &feedback_index)) {
         return;
     }
 
     fpCompileRecordHit(build.cc, HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD);
     fpCompileRecordPassed(build.cc, HS_FP_COMPILE_CHECKPOINT_MATCHER_BUILD);
-    DEBUG_PRINTF("fp feedback matcher fallback hit: fragment_id=%u, "
-                 "table=%u, lit_ids=%zu, s='%s'\n",
-                 f.fragment_id, (u32)lit.table, f.lit_ids.size(),
-                 escapeString(s_final).c_str());
+
+    hs_compile_context_matcher_build_hit_info_t info = {};
+    info.feedback_index = feedback_index;
+    info.table = table;
+    info.fragment_id = f.fragment_id;
+    info.lit_id = lit_id;
+    const rose_literal_id &source = build.literals.at(lit_id);
+    info.source_table = fpTableForMatcherSource(source.table);
+    info.source_delay = source.delay;
+    info.source_length = verify_u32(source.s.length());
+    info.source_nocase = source.s.any_nocase();
+    info.occurrences = 1;
+    info.source_copied_length =
+        min(info.source_length, HS_FP_MATCHER_BUILD_SOURCE_LITERAL_LIMIT);
+    const string &source_bytes = source.s.get_string();
+    const size_t source_offset =
+        source_bytes.size() - info.source_copied_length;
+    copy(source_bytes.begin() + source_offset, source_bytes.end(),
+         info.source_suffix);
+    fpCompileRecordMatcherBuildHit(build.cc, info);
+
+    DEBUG_PRINTF("fp feedback matcher fallback hit: feedback_index=%u, "
+                 "fragment_id=%u, table=%u, lit_id=%u, lit_ids=%zu, s='%s', "
+                 "source_table=%u, source_len=%u, source_delay=%u, "
+                 "source='%s'\n",
+                 feedback_index, f.fragment_id, info.table, lit_id,
+                 f.lit_ids.size(), escapeString(s_final).c_str(),
+                 info.source_table, info.source_length, info.source_delay,
+                 escapeString(source_bytes).c_str());
+#endif
 }
 
 static void addFragmentLiteral(const RoseBuildImpl &build, MatcherProto &mp,
-                               const LitFragment &f, u32 id, size_t max_len) {
+                               const LitFragment &f, u32 id, u32 fp_table,
+                               size_t max_len, bool diagnose_feedback) {
     const rose_literal_id &lit = build.literals.at(id);
 
     DEBUG_PRINTF("lit='%s' (len %zu)\n", dumpString(lit.s).c_str(),
@@ -763,7 +829,10 @@ static void addFragmentLiteral(const RoseBuildImpl &build, MatcherProto &mp,
         return;
     }
 
-    checkFpFeedbackMatcherFragment(build, f, lit, s_final, nocase, msk, cmp);
+    if (diagnose_feedback) {
+        checkFpFeedbackMatcherFragment(build, f, fp_table, id, s_final, nocase,
+                                       msk, cmp);
+    }
 
     const auto &groups = f.groups;
 
@@ -804,11 +873,10 @@ static void addAccelLiteral(MatcherProto &mp, const rose_literal_id &lit,
  * If max_offset is specified (and not ROSE_BOUND_INF), then literals that can
  * only lead to a pattern match after max_offset may be excluded.
  */
-static MatcherProto makeMatcherProto(const RoseBuildImpl &build,
-                                     const vector<LitFragment> &fragments,
-                                     rose_literal_table table,
-                                     bool delay_rebuild, size_t max_len,
-                                     u32 max_offset = ROSE_BOUND_INF) {
+static MatcherProto makeMatcherProto(
+    const RoseBuildImpl &build, const vector<LitFragment> &fragments,
+    rose_literal_table table, bool delay_rebuild, u32 fp_table, size_t max_len,
+    u32 max_offset = ROSE_BOUND_INF, bool diagnose_feedback = true) {
     MatcherProto mp;
 
     if (delay_rebuild) {
@@ -863,7 +931,8 @@ static MatcherProto makeMatcherProto(const RoseBuildImpl &build,
         }
 
         // Build our fragment (for the HWLM matcher) from the first literal.
-        addFragmentLiteral(build, mp, f, used_lit_ids.front(), max_len);
+        addFragmentLiteral(build, mp, f, used_lit_ids.front(), fp_table,
+                           max_len, diagnose_feedback);
 
         for (u32 id : used_lit_ids) {
             const rose_literal_id &lit = build.literals.at(id);
@@ -942,7 +1011,7 @@ buildFloatingMatcherProto(const RoseBuildImpl &build,
     *fgroups = 0;
 
     auto mp = makeMatcherProto(build, fragments, ROSE_FLOATING, false,
-                               longLitLengthThreshold);
+                               HS_FP_TABLE_FLOATING, longLitLengthThreshold);
     if (mp.lits.empty()) {
         DEBUG_PRINTF("empty floating matcher\n");
         return nullptr;
@@ -979,7 +1048,8 @@ buildDelayRebuildMatcherProto(const RoseBuildImpl &build,
     }
 
     auto mp = makeMatcherProto(build, fragments, ROSE_FLOATING, true,
-                               longLitLengthThreshold);
+                               HS_FP_TABLE_UNKNOWN, longLitLengthThreshold,
+                               ROSE_BOUND_INF, false);
     if (mp.lits.empty()) {
         DEBUG_PRINTF("empty delay rebuild matcher\n");
         return nullptr;
@@ -1012,7 +1082,8 @@ buildSmallBlockMatcherProto(const RoseBuildImpl &build,
     }
 
     auto mp = makeMatcherProto(build, fragments, ROSE_FLOATING, false,
-                               ROSE_SMALL_BLOCK_LEN, ROSE_SMALL_BLOCK_LEN);
+                               HS_FP_TABLE_SMALL_BLOCK, ROSE_SMALL_BLOCK_LEN,
+                               ROSE_SMALL_BLOCK_LEN, false);
     if (mp.lits.empty()) {
         DEBUG_PRINTF("no floating table\n");
         return nullptr;
@@ -1023,7 +1094,8 @@ buildSmallBlockMatcherProto(const RoseBuildImpl &build,
 
     auto mp_anchored =
         makeMatcherProto(build, fragments, ROSE_ANCHORED_SMALL_BLOCK, false,
-                         ROSE_SMALL_BLOCK_LEN, ROSE_SMALL_BLOCK_LEN);
+                         HS_FP_TABLE_SMALL_BLOCK, ROSE_SMALL_BLOCK_LEN,
+                         ROSE_SMALL_BLOCK_LEN, false);
     if (mp_anchored.lits.empty()) {
         DEBUG_PRINTF("no small-block anchored literals\n");
         return nullptr;
@@ -1042,6 +1114,34 @@ buildSmallBlockMatcherProto(const RoseBuildImpl &build,
         return nullptr;
     }
 
+#ifdef HS_ENABLE_FP_FEEDBACK
+    for (const hwlmLiteral &lit : mp.lits) {
+        if (!fpFeedbackCanMatch(build.cc, HS_FP_TABLE_SMALL_BLOCK)) {
+            break;
+        }
+
+        fpCompileRecordCheck(build.cc,
+                             HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
+        if (!fpFeedbackMatchesFinalRoseFragment(build.cc,
+                                                HS_FP_TABLE_SMALL_BLOCK, lit.s,
+                                                lit.nocase, lit.msk, lit.cmp)) {
+            continue;
+        }
+
+        fpCompileRecordHit(build.cc,
+                           HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
+        fpCompileRecordBlocked(build.cc,
+                               HS_FP_COMPILE_CHECKPOINT_REWRITE_SMALL_BLOCK);
+        // Small-block execution replaces the anchored and floating scans, so
+        // dropping only this literal would be unsafe. Reject the whole
+        // optional matcher and let block runtime use those normal paths.
+        DEBUG_PRINTF("disabling small-block matcher due to fp feedback: "
+                     "'%s'\n",
+                     escapeString(lit.s).c_str());
+        return nullptr;
+    }
+#endif
+
     auto proto = hwlmBuildProto(mp.lits, false, build.cc);
 
     if (!proto) {
@@ -1055,8 +1155,9 @@ unique_ptr<LitProto>
 buildEodAnchoredMatcherProto(const RoseBuildImpl &build,
                              const vector<LitFragment> &fragments) {
     DEBUG_PRINTF("Eod anchored literal matcher\n");
-    auto mp = makeMatcherProto(build, fragments, ROSE_EOD_ANCHORED, false,
-                               build.ematcher_region_size);
+    auto mp =
+        makeMatcherProto(build, fragments, ROSE_EOD_ANCHORED, false,
+                         HS_FP_TABLE_EOD_ANCHORED, build.ematcher_region_size);
 
     if (mp.lits.empty()) {
         DEBUG_PRINTF("no eod anchored literals\n");
