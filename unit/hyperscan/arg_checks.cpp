@@ -28,12 +28,15 @@
 
 #include "config.h"
 
-#include "gtest/gtest.h"
+#include "allocator.h"
 #include "hs.h"
 #include "test_util.h"
+#include "gtest/gtest.h"
 
-static char garbage[] = "TEST(HyperscanArgChecks, DatabaseSizeNoDatabase) {" \
-                        "    size_t sz = hs_database_size(0);" \
+#include <string>
+
+static char garbage[] = "TEST(HyperscanArgChecks, DatabaseSizeNoDatabase) {"
+                        "    size_t sz = hs_database_size(0);"
                         "    ASSERT_EQ(0, sz);";
 
 static unsigned lastMatchId = 0;
@@ -43,9 +46,8 @@ static unsigned lastMatchFlags = 0;
 static void *lastMatchCtx = nullptr;
 
 // Single match callback: record all the details from a single match
-static
-int singleHandler(unsigned id, unsigned long long from,
-                  unsigned long long to, unsigned flags, void *ctx) {
+static int singleHandler(unsigned id, unsigned long long from,
+                         unsigned long long to, unsigned flags, void *ctx) {
     lastMatchId = id;
     lastMatchFrom = from;
     lastMatchTo = to;
@@ -94,16 +96,44 @@ TEST(HyperscanArgChecks, ValidPlatform) {
 TEST(HyperscanArgChecks, Version) {
     const char *version = hs_version();
     ASSERT_TRUE(version != nullptr);
-    ASSERT_TRUE(version[0] >= '0' && version[0] <= '9') << "First byte should be a digit.";
+    ASSERT_TRUE(version[0] >= '0' && version[0] <= '9')
+        << "First byte should be a digit.";
     ASSERT_EQ('.', version[1]) << "Second byte should be a dot.";
+}
+
+TEST(HyperscanArgChecks, DatabaseInfoVersionMatchesLibraryVersion) {
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_BLOCK, nullptr, &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_NE(nullptr, db);
+
+    char *info = nullptr;
+    err = hs_database_info(db, &info);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_NE(nullptr, info);
+
+    const char *version = hs_version();
+    ASSERT_NE(nullptr, version);
+    const std::string library_version(version);
+    const size_t version_end = library_version.find(' ');
+    ASSERT_NE(std::string::npos, version_end);
+    const std::string expected =
+        "Version: " + library_version.substr(0, version_end) + " ";
+    EXPECT_EQ(0U, std::string(info).find(expected));
+
+    hs_misc_free(info);
+    hs_free_database(db);
+    hs_free_compile_error(compile_err);
 }
 
 // hs_compile: Compile a NULL pattern (block mode)
 TEST(HyperscanArgChecks, SingleCompileBlockNoPattern) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile(nullptr, 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile(nullptr, 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     EXPECT_EQ(HS_COMPILER_ERROR, err);
     EXPECT_TRUE(db == nullptr);
     EXPECT_TRUE(compile_err != nullptr);
@@ -114,8 +144,8 @@ TEST(HyperscanArgChecks, SingleCompileBlockNoPattern) {
 TEST(HyperscanArgChecks, SingleCompileStreamingNoPattern) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile(nullptr, 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile(nullptr, 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     EXPECT_EQ(HS_COMPILER_ERROR, err);
     EXPECT_TRUE(db == nullptr);
     EXPECT_TRUE(compile_err != nullptr);
@@ -135,8 +165,8 @@ TEST(HyperscanArgChecks, SingleCompileBlockNoDatabase) {
 // hs_compile: Compile a pattern to a NULL database ptr (streaming mode)
 TEST(HyperscanArgChecks, SingleCompileStreamingNoDatabase) {
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, nullptr,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, nullptr, &compile_err);
     EXPECT_EQ(HS_COMPILER_ERROR, err);
     EXPECT_TRUE(compile_err != nullptr);
     hs_free_compile_error(compile_err);
@@ -167,13 +197,14 @@ TEST(HyperscanArgChecks, SingleCompileSeveralModes1) {
 TEST(HyperscanArgChecks, SingleCompileBogusFlags) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0xdeadbeef, HS_MODE_NOSTREAM,
-                                nullptr, &db, &compile_err);
+    hs_error_t err = hs_compile("foobar", 0xdeadbeef, HS_MODE_NOSTREAM, nullptr,
+                                &db, &compile_err);
     EXPECT_EQ(HS_COMPILER_ERROR, err);
     EXPECT_TRUE(compile_err != nullptr);
     EXPECT_STREQ("only HS_FLAG_QUIET and HS_FLAG_SINGLEMATCH "
                  "are supported in combination "
-                 "with HS_FLAG_COMBINATION.", compile_err->message);
+                 "with HS_FLAG_COMBINATION.",
+                 compile_err->message);
 
     hs_free_compile_error(compile_err);
 }
@@ -199,8 +230,8 @@ TEST(HyperscanArgChecks, SingleCompileBadTune) {
     hs_platform_info_t plat;
     plat.cpu_features = 0;
     plat.tune = 42;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, &plat, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, &plat, &db, &compile_err);
     EXPECT_EQ(HS_COMPILER_ERROR, err);
     EXPECT_TRUE(compile_err != nullptr);
     EXPECT_STREQ("Invalid tuning value specified in the platform information.",
@@ -215,8 +246,8 @@ TEST(HyperscanArgChecks, SingleCompileBadFeatures) {
     hs_platform_info_t plat;
     plat.cpu_features = 42;
     plat.tune = 0;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, &plat, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, &plat, &db, &compile_err);
     EXPECT_EQ(HS_COMPILER_ERROR, err);
     EXPECT_TRUE(compile_err != nullptr);
     EXPECT_STREQ("Invalid cpu features specified in the platform information.",
@@ -233,20 +264,18 @@ TEST(HyperscanArgChecks, SingleCompileSOMFlag) {
     hs_compile_error_t *compile_err = nullptr;
     hs_error_t err = hs_compile("foobar", HS_FLAG_SOM_LEFTMOST, HS_MODE_STREAM,
                                 nullptr, &db, &compile_err);
-    ASSERT_EQ(HS_COMPILER_ERROR, err) << "should have failed with flag "
-                                      << HS_FLAG_SOM_LEFTMOST;
+    ASSERT_EQ(HS_COMPILER_ERROR, err)
+        << "should have failed with flag " << HS_FLAG_SOM_LEFTMOST;
     ASSERT_TRUE(compile_err != nullptr);
     hs_free_compile_error(compile_err);
 }
 
 // hs_compile: Check SOM mode validation.
 TEST(HyperscanArgChecks, SingleCompileSOMModes) {
-    static const unsigned som_modes[] = {
-            HS_MODE_SOM_HORIZON_LARGE,
-            HS_MODE_SOM_HORIZON_MEDIUM,
-            HS_MODE_SOM_HORIZON_SMALL
-    };
-    const size_t num_modes = sizeof(som_modes)/sizeof(som_modes[0]);
+    static const unsigned som_modes[] = {HS_MODE_SOM_HORIZON_LARGE,
+                                         HS_MODE_SOM_HORIZON_MEDIUM,
+                                         HS_MODE_SOM_HORIZON_SMALL};
+    const size_t num_modes = sizeof(som_modes) / sizeof(som_modes[0]);
 
     // compilation of a trivial case with a single mode set should be fine.
     for (size_t i = 0; i < num_modes; i++) {
@@ -265,9 +294,9 @@ TEST(HyperscanArgChecks, SingleCompileSOMModes) {
             hs_database_t *db = nullptr;
             hs_compile_error_t *compile_err = nullptr;
             unsigned int mode = som_modes[i] | som_modes[j];
-            hs_error_t err = hs_compile("foobar", HS_FLAG_SOM_LEFTMOST,
-                                        HS_MODE_STREAM | mode, nullptr, &db,
-                                        &compile_err);
+            hs_error_t err =
+                hs_compile("foobar", HS_FLAG_SOM_LEFTMOST,
+                           HS_MODE_STREAM | mode, nullptr, &db, &compile_err);
             ASSERT_EQ(HS_COMPILER_ERROR, err)
                 << "should have failed with mode " << mode;
             ASSERT_TRUE(compile_err != nullptr);
@@ -280,8 +309,9 @@ TEST(HyperscanArgChecks, SingleCompileSOMModes) {
 TEST(HyperscanArgChecks, MultiCompileBlockNoPattern) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile_multi(nullptr, nullptr, nullptr, 1, HS_MODE_NOSTREAM,
-                                      nullptr, &db, &compile_err);
+    hs_error_t err =
+        hs_compile_multi(nullptr, nullptr, nullptr, 1, HS_MODE_NOSTREAM,
+                         nullptr, &db, &compile_err);
     EXPECT_EQ(HS_COMPILER_ERROR, err);
     EXPECT_TRUE(db == nullptr);
     EXPECT_TRUE(compile_err != nullptr);
@@ -292,8 +322,9 @@ TEST(HyperscanArgChecks, MultiCompileBlockNoPattern) {
 TEST(HyperscanArgChecks, MultiCompileStreamingNoPattern) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile_multi(nullptr, nullptr, nullptr, 1, HS_MODE_STREAM,
-                                      nullptr, &db, &compile_err);
+    hs_error_t err =
+        hs_compile_multi(nullptr, nullptr, nullptr, 1, HS_MODE_STREAM, nullptr,
+                         &db, &compile_err);
     EXPECT_EQ(HS_COMPILER_ERROR, err);
     EXPECT_TRUE(db == nullptr);
     EXPECT_TRUE(compile_err != nullptr);
@@ -305,8 +336,9 @@ TEST(HyperscanArgChecks, MultiCompileZeroPatterns) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
     const char *expr[] = {"foobar"};
-    hs_error_t err = hs_compile_multi(expr, nullptr, nullptr, 0, HS_MODE_NOSTREAM,
-                                      nullptr, &db, &compile_err);
+    hs_error_t err =
+        hs_compile_multi(expr, nullptr, nullptr, 0, HS_MODE_NOSTREAM, nullptr,
+                         &db, &compile_err);
     EXPECT_EQ(HS_COMPILER_ERROR, err);
     EXPECT_TRUE(db == nullptr);
     EXPECT_TRUE(compile_err != nullptr);
@@ -317,8 +349,9 @@ TEST(HyperscanArgChecks, MultiCompileZeroPatterns) {
 TEST(HyperscanArgChecks, MultiCompileBlockNoDatabase) {
     hs_compile_error_t *compile_err = nullptr;
     const char *expr[] = {"foobar"};
-    hs_error_t err = hs_compile_multi(expr, nullptr, nullptr, 1, HS_MODE_NOSTREAM,
-                                      nullptr, nullptr, &compile_err);
+    hs_error_t err =
+        hs_compile_multi(expr, nullptr, nullptr, 1, HS_MODE_NOSTREAM, nullptr,
+                         nullptr, &compile_err);
     EXPECT_EQ(HS_COMPILER_ERROR, err);
     EXPECT_TRUE(compile_err != nullptr);
     hs_free_compile_error(compile_err);
@@ -347,8 +380,8 @@ TEST(HyperscanArgChecks, OpenStreamNoDatabase) {
 TEST(HyperscanArgChecks, OpenStreamNoStreamId) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     err = hs_open_stream(db, 0, nullptr);
@@ -363,8 +396,8 @@ TEST(HyperscanArgChecks, OpenStreamWithBlockDatabase) {
     hs_stream_t *stream = nullptr;
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     err = hs_open_stream(db, 0, &stream);
@@ -380,8 +413,8 @@ TEST(HyperscanArgChecks, OpenStreamWithBrokenDatabaseBytecode) {
     hs_stream_t *stream = nullptr;
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     breakDatabaseBytecode(db);
@@ -398,8 +431,8 @@ TEST(HyperscanArgChecks, OpenStreamWithBrokenDatabaseBytecode) {
 TEST(HyperscanArgChecks, ScanStreamNoStreamID) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -421,8 +454,8 @@ TEST(HyperscanArgChecks, ScanStreamNoStreamID) {
 TEST(HyperscanArgChecks, ScanStreamNoData) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -450,8 +483,8 @@ TEST(HyperscanArgChecks, ScanStreamNoData) {
 TEST(HyperscanArgChecks, ScanStreamNoScratch) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -479,8 +512,8 @@ TEST(HyperscanArgChecks, ScanStreamNoScratch) {
 TEST(HyperscanArgChecks, CloseStreamNoStream) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -501,8 +534,8 @@ TEST(HyperscanArgChecks, CloseStreamNoStream) {
 TEST(HyperscanArgChecks, CloseStreamNoScratch) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_stream_t *stream = nullptr;
@@ -525,8 +558,8 @@ TEST(HyperscanArgChecks, CloseStreamNoScratch) {
 TEST(HyperscanArgChecks, CloseStreamNoScratchNoCallback) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_stream_t *stream = nullptr;
@@ -545,8 +578,8 @@ TEST(HyperscanArgChecks, CloseStreamNoScratchNoCallback) {
 TEST(HyperscanArgChecks, CloseStreamNoMatchNoStream) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -568,8 +601,8 @@ TEST(HyperscanArgChecks, ChangeStreamContext) {
     const char *str = "foobar";
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile(str, 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile(str, 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -595,7 +628,7 @@ TEST(HyperscanArgChecks, ChangeStreamContext) {
                          (void *)stream);
     ASSERT_EQ(HS_SUCCESS, err);
 
-    ASSERT_EQ(lastMatchTo, 2*strlen(str));
+    ASSERT_EQ(lastMatchTo, 2 * strlen(str));
     ASSERT_EQ(lastMatchCtx, stream);
 
     err = hs_close_stream(stream, scratch, nullptr, nullptr);
@@ -611,8 +644,8 @@ TEST(HyperscanArgChecks, ChangeStreamContext) {
 TEST(HyperscanArgChecks, ResetStreamNoId) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -632,8 +665,8 @@ TEST(HyperscanArgChecks, ResetStreamNoScratch) {
     hs_stream_t *stream = nullptr;
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -666,8 +699,8 @@ TEST(HyperscanArgChecks, CopyStreamNoToId) {
     hs_stream_t *stream = nullptr;
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     err = hs_open_stream(db, 0, &stream);
@@ -691,8 +724,8 @@ TEST(HyperscanArgChecks, ResetAndCopyStreamNoToId) {
     hs_stream_t *stream = nullptr;
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     hs_scratch_t *scratch = nullptr;
@@ -717,8 +750,8 @@ TEST(HyperscanArgChecks, ResetAndCopyStreamNoFromId) {
     hs_stream_t *stream = nullptr;
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     hs_scratch_t *scratch = nullptr;
@@ -743,8 +776,8 @@ TEST(HyperscanArgChecks, ResetAndCopyStreamSameToId) {
     hs_stream_t *stream = nullptr;
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     hs_scratch_t *scratch = nullptr;
@@ -772,8 +805,8 @@ TEST(HyperscanArgChecks, ResetAndCopyStreamNoCallbackOrScratch) {
     hs_stream_t *stream_to = nullptr;
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     hs_scratch_t *scratch = nullptr;
@@ -786,7 +819,8 @@ TEST(HyperscanArgChecks, ResetAndCopyStreamNoCallbackOrScratch) {
     err = hs_open_stream(db, 0, &stream_to);
     ASSERT_EQ(HS_SUCCESS, err);
 
-    err = hs_reset_and_copy_stream(stream_to, stream, nullptr, nullptr, nullptr);
+    err =
+        hs_reset_and_copy_stream(stream_to, stream, nullptr, nullptr, nullptr);
     ASSERT_EQ(HS_SUCCESS, err);
 
     err = hs_close_stream(stream_to, scratch, nullptr, nullptr);
@@ -805,8 +839,8 @@ TEST(HyperscanArgChecks, ResetAndCopyStreamNoScratch) {
     hs_stream_t *stream_to = nullptr;
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     hs_scratch_t *scratch = nullptr;
@@ -819,8 +853,8 @@ TEST(HyperscanArgChecks, ResetAndCopyStreamNoScratch) {
     err = hs_open_stream(db, 0, &stream_to);
     ASSERT_EQ(HS_SUCCESS, err);
 
-    err = hs_reset_and_copy_stream(stream_to, stream, nullptr, dummy_cb,
-                                   nullptr);
+    err =
+        hs_reset_and_copy_stream(stream_to, stream, nullptr, dummy_cb, nullptr);
     ASSERT_EQ(HS_INVALID, err);
 
     err = hs_close_stream(stream_to, scratch, nullptr, nullptr);
@@ -838,8 +872,8 @@ TEST(HyperscanArgChecks, ResetAndCopyStreamDiffDb) {
     hs_database_t *db = nullptr;
     hs_database_t *db2 = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     err = hs_compile("barfoo", 0, HS_MODE_STREAM, nullptr, &db2, &compile_err);
@@ -857,8 +891,8 @@ TEST(HyperscanArgChecks, ResetAndCopyStreamDiffDb) {
     err = hs_open_stream(db2, 0, &stream_to);
     ASSERT_EQ(HS_SUCCESS, err);
 
-    err = hs_reset_and_copy_stream(stream_to, stream, scratch, nullptr,
-                                   nullptr);
+    err =
+        hs_reset_and_copy_stream(stream_to, stream, scratch, nullptr, nullptr);
     ASSERT_EQ(HS_INVALID, err);
 
     err = hs_close_stream(stream_to, scratch, nullptr, nullptr);
@@ -875,8 +909,8 @@ TEST(HyperscanArgChecks, ResetAndCopyStreamDiffDb) {
 TEST(HyperscanArgChecks, ScanBlockNoDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -897,8 +931,8 @@ TEST(HyperscanArgChecks, ScanBlockNoDatabase) {
 TEST(HyperscanArgChecks, ScanBlockBrokenDatabaseMagic) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -922,8 +956,8 @@ TEST(HyperscanArgChecks, ScanBlockBrokenDatabaseMagic) {
 TEST(HyperscanArgChecks, ScanBlockBrokenDatabaseVersion) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -947,8 +981,8 @@ TEST(HyperscanArgChecks, ScanBlockBrokenDatabaseVersion) {
 TEST(HyperscanArgChecks, ScanBlockBrokenDatabaseBytecode) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -972,8 +1006,8 @@ TEST(HyperscanArgChecks, ScanBlockBrokenDatabaseBytecode) {
 TEST(HyperscanArgChecks, ScanBlockStreamingDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -993,8 +1027,8 @@ TEST(HyperscanArgChecks, ScanBlockStreamingDatabase) {
 TEST(HyperscanArgChecks, ScanBlockVectoredDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1011,13 +1045,12 @@ TEST(HyperscanArgChecks, ScanBlockVectoredDatabase) {
     hs_free_database(db);
 }
 
-
 // hs_scan: Call with no data
 TEST(HyperscanArgChecks, ScanBlockNoData) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1038,8 +1071,8 @@ TEST(HyperscanArgChecks, ScanBlockNoData) {
 TEST(HyperscanArgChecks, ScanBlockNoScratch) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     err = hs_scan(db, "data", 4, 0, nullptr, dummy_cb, nullptr);
@@ -1054,8 +1087,8 @@ TEST(HyperscanArgChecks, ScanBlockNoScratch) {
 TEST(HyperscanArgChecks, ScanBlockNoHandler) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1076,8 +1109,8 @@ TEST(HyperscanArgChecks, ScanBlockNoHandler) {
 TEST(HyperscanArgChecks, ScanVectorNoDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1100,8 +1133,8 @@ TEST(HyperscanArgChecks, ScanVectorNoDatabase) {
 TEST(HyperscanArgChecks, ScanVectorBrokenDatabaseMagic) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1127,8 +1160,8 @@ TEST(HyperscanArgChecks, ScanVectorBrokenDatabaseMagic) {
 TEST(HyperscanArgChecks, ScanVectorBrokenDatabaseVersion) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1154,8 +1187,8 @@ TEST(HyperscanArgChecks, ScanVectorBrokenDatabaseVersion) {
 TEST(HyperscanArgChecks, ScanVectorBrokenDatabaseBytecode) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1181,8 +1214,8 @@ TEST(HyperscanArgChecks, ScanVectorBrokenDatabaseBytecode) {
 TEST(HyperscanArgChecks, ScanVectorStreamingDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1204,8 +1237,8 @@ TEST(HyperscanArgChecks, ScanVectorStreamingDatabase) {
 TEST(HyperscanArgChecks, ScanVectorBlockDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_BLOCK, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_BLOCK, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1228,8 +1261,8 @@ TEST(HyperscanArgChecks, ScanVectorBlockDatabase) {
 TEST(HyperscanArgChecks, ScanVectorNoDataArray) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1251,8 +1284,8 @@ TEST(HyperscanArgChecks, ScanVectorNoDataArray) {
 TEST(HyperscanArgChecks, ScanVectorNoDataBlock) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1275,8 +1308,8 @@ TEST(HyperscanArgChecks, ScanVectorNoDataBlock) {
 TEST(HyperscanArgChecks, ScanVectorNoLenArray) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1299,8 +1332,8 @@ TEST(HyperscanArgChecks, ScanVectorNoLenArray) {
 TEST(HyperscanArgChecks, ScanVectorNoScratch) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     const char *data[] = {"data", "data"};
@@ -1317,8 +1350,8 @@ TEST(HyperscanArgChecks, ScanVectorNoScratch) {
 TEST(HyperscanArgChecks, ScanVectorNoHandler) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *scratch = nullptr;
@@ -1349,8 +1382,8 @@ TEST(HyperscanArgChecks, AllocScratchNoDatabase) {
 TEST(HyperscanArgChecks, AllocScratchNullScratchPtr) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1365,8 +1398,8 @@ TEST(HyperscanArgChecks, AllocScratchNullScratchPtr) {
 TEST(HyperscanArgChecks, AllocScratchBogusScratch) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     hs_scratch_t *blah = (hs_scratch_t *)malloc(100);
@@ -1384,8 +1417,8 @@ TEST(HyperscanArgChecks, AllocScratchBogusScratch) {
 TEST(HyperscanArgChecks, AllocScratchBadDatabaseMagic) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1403,8 +1436,8 @@ TEST(HyperscanArgChecks, AllocScratchBadDatabaseMagic) {
 TEST(HyperscanArgChecks, AllocScratchBadDatabaseVersion) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1422,8 +1455,8 @@ TEST(HyperscanArgChecks, AllocScratchBadDatabaseVersion) {
 TEST(HyperscanArgChecks, AllocScratchBadDatabasePlatform) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1441,8 +1474,8 @@ TEST(HyperscanArgChecks, AllocScratchBadDatabasePlatform) {
 TEST(HyperscanArgChecks, AllocScratchBadDatabaseBytecode) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1460,8 +1493,8 @@ TEST(HyperscanArgChecks, AllocScratchBadDatabaseBytecode) {
 TEST(HyperscanArgChecks, AllocScratchBadDatabaseCRC) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1478,7 +1511,7 @@ TEST(HyperscanArgChecks, AllocScratchBadDatabaseCRC) {
     ASSERT_EQ(HS_SUCCESS, err);
 
     // for want of a better case, corrupt the "middle byte" of the database.
-    char *mid = (char *)db + len/2;
+    char *mid = (char *)db + len / 2;
     *mid += 17;
 
     scratch = nullptr;
@@ -1510,8 +1543,8 @@ TEST(HyperscanArgChecks, SerializeNoDatabase) {
 TEST(HyperscanArgChecks, SerializeNoBuffer) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1528,8 +1561,8 @@ TEST(HyperscanArgChecks, SerializeNoBuffer) {
 TEST(HyperscanArgChecks, SerializeNoLength) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1553,8 +1586,8 @@ TEST(HyperscanArgChecks, StreamSizeNoDatabase) {
 TEST(HyperscanArgChecks, StreamSizeBogusDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     size_t len;
@@ -1575,8 +1608,8 @@ TEST(HyperscanArgChecks, StreamSizeBogusDatabase) {
 TEST(HyperscanArgChecks, StreamSizeBlockDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1590,8 +1623,8 @@ TEST(HyperscanArgChecks, StreamSizeBlockDatabase) {
 TEST(HyperscanArgChecks, StreamSizeVectoredDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1605,8 +1638,8 @@ TEST(HyperscanArgChecks, StreamSizeVectoredDatabase) {
 TEST(HyperscanArgChecks, OpenStreamBlockDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1620,8 +1653,8 @@ TEST(HyperscanArgChecks, OpenStreamBlockDatabase) {
 TEST(HyperscanArgChecks, OpenStreamVectoredDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1632,13 +1665,12 @@ TEST(HyperscanArgChecks, OpenStreamVectoredDatabase) {
     hs_free_database(db);
 }
 
-
 // hs_stream_size: Call with a real database
 TEST(HyperscanArgChecks, StreamSizeRealDatabase) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1654,8 +1686,8 @@ TEST(HyperscanArgChecks, StreamSizeRealDatabase) {
 TEST(HyperscanArgChecks, StreamSizeNoSize) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1675,8 +1707,8 @@ TEST(HyperscanArgChecks, DatabaseSizeNoDatabase) {
 TEST(HyperscanArgChecks, DatabaseSizeNoSize) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1714,7 +1746,8 @@ TEST(HyperscanArgChecks, DatabaseInfoNullInfo) {
     hs_compile_error_t *c_err;
     static const char *pattern = "hatstand.*(badgerbrush|teakettle)";
 
-    hs_error_t err = hs_compile(pattern, 0, HS_MODE_NOSTREAM, nullptr, &db, &c_err);
+    hs_error_t err =
+        hs_compile(pattern, 0, HS_MODE_NOSTREAM, nullptr, &db, &c_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1729,7 +1762,8 @@ TEST(HyperscanArgChecks, SerializedDatabaseSizeBadLen) {
     hs_compile_error_t *c_err;
     static const char *pattern = "hatstand.*(badgerbrush|teakettle)";
 
-    hs_error_t err = hs_compile(pattern, 0, HS_MODE_NOSTREAM, nullptr, &db, &c_err);
+    hs_error_t err =
+        hs_compile(pattern, 0, HS_MODE_NOSTREAM, nullptr, &db, &c_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1751,7 +1785,7 @@ TEST(HyperscanArgChecks, SerializedDatabaseSizeBadLen) {
     err = hs_serialized_database_size(bytes, 16, &ser_len);
     ASSERT_EQ(HS_INVALID, err);
 
-   free(bytes);
+    free(bytes);
 }
 
 TEST(HyperscanArgChecks, SerializedDatabaseSizeNoSize) {
@@ -1759,7 +1793,8 @@ TEST(HyperscanArgChecks, SerializedDatabaseSizeNoSize) {
     hs_compile_error_t *c_err;
     static const char *pattern = "hatstand.*(badgerbrush|teakettle)";
 
-    hs_error_t err = hs_compile(pattern, 0, HS_MODE_NOSTREAM, nullptr, &db, &c_err);
+    hs_error_t err =
+        hs_compile(pattern, 0, HS_MODE_NOSTREAM, nullptr, &db, &c_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1780,7 +1815,7 @@ TEST(HyperscanArgChecks, SerializedDatabaseSizeNoSize) {
     err = hs_serialized_database_size(bytes, bytes_len, nullptr);
     ASSERT_EQ(HS_INVALID, err);
 
-   free(bytes);
+    free(bytes);
 }
 
 TEST(HyperscanArgChecks, SerializedDatabaseSizeNoBytes) {
@@ -1794,7 +1829,8 @@ TEST(HyperscanArgChecks, SerializedDatabaseInfoBadLen) {
     hs_compile_error_t *c_err;
     static const char *pattern = "hatstand.*(badgerbrush|teakettle)";
 
-    hs_error_t err = hs_compile(pattern, 0, HS_MODE_NOSTREAM, nullptr, &db, &c_err);
+    hs_error_t err =
+        hs_compile(pattern, 0, HS_MODE_NOSTREAM, nullptr, &db, &c_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1817,7 +1853,7 @@ TEST(HyperscanArgChecks, SerializedDatabaseInfoBadLen) {
     ASSERT_EQ(HS_INVALID, err);
     ASSERT_TRUE(nullptr == info);
 
-   free(bytes);
+    free(bytes);
 }
 
 TEST(HyperscanArgChecks, SerializedDatabaseInfoNoInfo) {
@@ -1825,7 +1861,8 @@ TEST(HyperscanArgChecks, SerializedDatabaseInfoNoInfo) {
     hs_compile_error_t *c_err;
     static const char *pattern = "hatstand.*(badgerbrush|teakettle)";
 
-    hs_error_t err = hs_compile(pattern, 0, HS_MODE_NOSTREAM, nullptr, &db, &c_err);
+    hs_error_t err =
+        hs_compile(pattern, 0, HS_MODE_NOSTREAM, nullptr, &db, &c_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -1846,7 +1883,7 @@ TEST(HyperscanArgChecks, SerializedDatabaseInfoNoInfo) {
     err = hs_serialized_database_info(bytes, bytes_len, nullptr);
     ASSERT_EQ(HS_INVALID, err);
 
-   free(bytes);
+    free(bytes);
 }
 
 TEST(HyperscanArgChecks, SerializedDatabaseInfoNoBytes) {
@@ -1868,8 +1905,7 @@ TEST(HyperscanArgChecks, DeserializeDatabaseAtNoBytes) {
     ASSERT_EQ(HS_INVALID, err);
 }
 
-static
-void makeSerializedDatabase(char **bytes, size_t *length) {
+static void makeSerializedDatabase(char **bytes, size_t *length) {
     hs_database_t *db = buildDB("(foo.*bar){3,}", 0, 0, HS_MODE_BLOCK);
     ASSERT_NE(nullptr, db);
     hs_error_t err = hs_serialize_database(db, bytes, length);
@@ -2001,7 +2037,8 @@ TEST(HyperscanArgChecks, ScratchSizeNoSize) {
     // build a database
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    err = hs_compile("foo.*bar$", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
+    err =
+        hs_compile("foo.*bar$", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
 
     // alloc some scratch
@@ -2048,8 +2085,8 @@ TEST(HyperscanArgChecks, CloneBadScratch) {
 TEST(HyperscanArgChecks, ScanBadScratch) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
 
@@ -2070,8 +2107,8 @@ TEST(HyperscanArgChecks, ScanBadScratch) {
 TEST(HyperscanArgChecks, ScanStreamBadScratch) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     void *local_garbage = malloc(sizeof(garbage));
@@ -2106,8 +2143,8 @@ TEST(HyperscanArgChecks, ScanStreamBadScratch) {
 TEST(HyperscanArgChecks, ResetStreamBadScratch) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_STREAM, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     void *local_garbage = malloc(sizeof(garbage));
@@ -2142,8 +2179,8 @@ TEST(HyperscanArgChecks, ResetStreamBadScratch) {
 TEST(HyperscanArgChecks, ScanVectorBadScratch) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_VECTORED, nullptr, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != nullptr);
     void *local_garbage = malloc(sizeof(garbage));
@@ -2151,8 +2188,8 @@ TEST(HyperscanArgChecks, ScanVectorBadScratch) {
     memcpy(local_garbage, garbage, sizeof(garbage));
     hs_scratch_t *scratch = (hs_scratch_t *)local_garbage;
 
-    const char *data[] = { "data" };
-    unsigned int len[] = { 4 };
+    const char *data[] = {"data"};
+    unsigned int len[] = {4};
 
     err = hs_scan_vector(db, data, len, 1, 0, scratch, dummy_cb, nullptr);
 
@@ -2170,8 +2207,8 @@ TEST(HyperscanArgChecks, ScanVectorBadScratch) {
 TEST(HyperscanArgChecks, ScanFreedScratch) {
     hs_database_t *db = 0;
     hs_compile_error_t *compile_err = 0;
-    hs_error_t err = hs_compile("foobar", 0, HS_MODE_NOSTREAM, NULL, &db,
-                                &compile_err);
+    hs_error_t err =
+        hs_compile("foobar", 0, HS_MODE_NOSTREAM, NULL, &db, &compile_err);
     ASSERT_EQ(HS_SUCCESS, err);
     ASSERT_TRUE(db != NULL);
     hs_scratch_t *scratch = 0;
@@ -2544,7 +2581,6 @@ TEST(HyperscanArgChecks, ResetAndExpandNoBuf) {
     ASSERT_EQ(HS_SUCCESS, err);
 }
 
-
 TEST(HyperscanArgChecks, ResetAndExpandSmallBuf) {
     hs_database_t *db = buildDB("(foo.*bar){3,}", 0, 0, HS_MODE_STREAM);
     ASSERT_NE(nullptr, db);
@@ -2640,7 +2676,8 @@ static const unsigned badModeValues[] = {
     HS_MODE_VECTORED | HS_MODE_SOM_HORIZON_MEDIUM,
     HS_MODE_VECTORED | HS_MODE_SOM_HORIZON_SMALL,
     // Can't specify more than one SOM horizon.
-    HS_MODE_STREAM | HS_MODE_SOM_HORIZON_LARGE | HS_MODE_SOM_HORIZON_MEDIUM | HS_MODE_SOM_HORIZON_SMALL,
+    HS_MODE_STREAM | HS_MODE_SOM_HORIZON_LARGE | HS_MODE_SOM_HORIZON_MEDIUM |
+        HS_MODE_SOM_HORIZON_SMALL,
     HS_MODE_STREAM | HS_MODE_SOM_HORIZON_LARGE | HS_MODE_SOM_HORIZON_SMALL,
     HS_MODE_STREAM | HS_MODE_SOM_HORIZON_LARGE | HS_MODE_SOM_HORIZON_MEDIUM,
     HS_MODE_STREAM | HS_MODE_SOM_HORIZON_MEDIUM | HS_MODE_SOM_HORIZON_SMALL,
@@ -2650,4 +2687,3 @@ INSTANTIATE_TEST_CASE_P(HyperscanArgChecks, BadModeTest,
                         testing::ValuesIn(badModeValues));
 
 } // namespace
-

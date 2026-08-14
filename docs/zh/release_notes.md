@@ -4,7 +4,7 @@
 
 |发布日期|修改说明|
 |--|--|
-|2026-09-30|第三次正式发布，基于鲲鹏920新型号处理器新增mcsheng算法性能优化, 默认使能该优化|
+|2026-09-30|发布Ultrascan V5.8.0，新增mcsheng算法性能优化和正则匹配反馈优化技术。|
 |2026-06-30|第二次正式发布，基于鲲鹏920新型号处理器新增通用字节码功能。|
 |2026-03-30|第一次正式发布，基于鲲鹏920新型号处理器优化Ultrascan 2~4字节短字节规则匹配算法，新增KHSEL_BuildLilyForTeddy、KHSEL_LilyForTeddyRunExec算法。|
 
@@ -30,7 +30,7 @@
 </tr>
 <tr id="row5497143514612"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.4.1"><p id="p162251517551"><a name="p162251517551"></a><a name="p162251517551"></a>软件版本</p>
 </th>
-<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.4.1 "><p id="p6225131165519"><a name="p6225131165519"></a><a name="p6225131165519"></a>5.7.1</p>
+<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.4.1 "><p id="p6225131165519"><a name="p6225131165519"></a><a name="p6225131165519"></a>5.8.0</p>
 </td>
 </tr>
 </tbody>
@@ -47,7 +47,7 @@
 
 本特性以源码的形式发布，不涉及软件包，因此暂不需要病毒扫描。
 
-## V5.7.1
+## V5.8.0
 
 ### 更新说明
 
@@ -56,6 +56,7 @@
 |特性描述| 更新说明                                     |
 |--|------------------------------------------|
 |mcsheng算法优化| 基于鲲鹏920新型号处理器新增mcsheng算法优化。  |
+|正则匹配反馈优化技术| 在AArch64平台新增运行期采集、feedback生成和反馈编译闭环；该能力默认关闭，需在构建时显式开启。 |
 
 ## V5.7.0
 
@@ -66,7 +67,6 @@
 |特性描述| 更新说明                                     |
 |--|------------------------------------------|
 |通用字节码特性| 基于鲲鹏920新型号处理器新增通用字节码功能。  |
-|HAO算法引擎| 基于鲲鹏920新型号处理器新增基于并行位提取的多模匹配加速算法，提升匹配性能。  |
 
 ## V2.6.0
 
@@ -192,6 +192,11 @@
     <tr>
       <td style="text-align: left;">开发指南</td>
       <td style="text-align: left;">提供Ultrascan的开发指导。</td>
+      <td style="text-align: left;">开源仓</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">API参考</td>
+      <td style="text-align: left;">提供Ultrascan新增公开API说明。</td>
       <td style="text-align: left;">开源仓</td>
     </tr>
   </tbody>

@@ -28,24 +28,22 @@
 
 /** \file
  * \brief Runtime code for hs_database manipulation.
-  */
+ */
 
 #include <stdio.h>
 #include <string.h>
-#include <stdio.h>
 
 #include "allocator.h"
+#include "crc32.h"
+#include "database.h"
 #include "hs_common.h"
 #include "hs_internal.h"
 #include "hs_version.h"
-#include "ue2common.h"
-#include "database.h"
-#include "crc32.h"
 #include "rose/rose_internal.h"
+#include "ue2common.h"
 #include "util/unaligned.h"
 
-static really_inline
-int db_correctly_aligned(const void *db) {
+static really_inline int db_correctly_aligned(const void *db) {
     return ISALIGNED_N(db, alignof(unsigned long long));
 }
 
@@ -112,12 +110,11 @@ hs_error_t HS_CDECL hs_serialize_database(const hs_database_t *db, char **bytes,
 
 // check that the database header's platform is compatible with the current
 // runtime platform.
-static
-hs_error_t db_check_platform(const u64a p) {
-    if (p != hs_current_platform
-        && p != (hs_current_platform | hs_current_platform_no_avx2)
-        && p != (hs_current_platform | hs_current_platform_no_avx512)
-        && p != (hs_current_platform | hs_current_platform_no_avx512vbmi)) {
+static hs_error_t db_check_platform(const u64a p) {
+    if (p != hs_current_platform &&
+        p != (hs_current_platform | hs_current_platform_no_avx2) &&
+        p != (hs_current_platform | hs_current_platform_no_avx512) &&
+        p != (hs_current_platform | hs_current_platform_no_avx512vbmi)) {
         return HS_DB_PLATFORM_ERROR;
     }
     // passed all checks
@@ -127,9 +124,8 @@ hs_error_t db_check_platform(const u64a p) {
 // Decode and check the database header, returning appropriate errors or
 // HS_SUCCESS if it's OK. The header should be allocated on the stack
 // and later copied into the deserialized database.
-static
-hs_error_t db_decode_header(const char **bytes, const size_t length,
-                            struct hs_database *header) {
+static hs_error_t db_decode_header(const char **bytes, const size_t length,
+                                   struct hs_database *header) {
     if (!*bytes) {
         return HS_INVALID;
     }
@@ -175,8 +171,7 @@ hs_error_t db_decode_header(const char **bytes, const size_t length,
 }
 
 // Check the CRC on a database
-static
-hs_error_t db_check_crc(const hs_database_t *db) {
+static hs_error_t db_check_crc(const hs_database_t *db) {
     const char *bytecode = hs_get_bytecode(db);
     u32 crc = Crc32c_ComputeBuf(0, bytecode, db->length);
     if (crc != db->crc32) {
@@ -186,8 +181,7 @@ hs_error_t db_check_crc(const hs_database_t *db) {
     return HS_SUCCESS;
 }
 
-static
-void db_copy_bytecode(const char *serialized, hs_database_t *db) {
+static void db_copy_bytecode(const char *serialized, hs_database_t *db) {
     // we need to align things manually
     uintptr_t shift = (uintptr_t)db->bytes & 0x3f;
     db->bytecode = offsetof(struct hs_database, bytes) - shift;
@@ -362,8 +356,7 @@ hs_error_t dbIsValid(const hs_database_t *db) {
 
 /** Allocate a buffer and prints the database info into it. Returns an
  * appropriate error code on failure, or HS_SUCCESS on success. */
-static
-hs_error_t print_database_string(char **s, u32 version, u32 raw_mode) {
+static hs_error_t print_database_string(char **s, u32 version, u32 raw_mode) {
     assert(s);
     *s = NULL;
 
@@ -380,11 +373,6 @@ hs_error_t print_database_string(char **s, u32 version, u32 raw_mode) {
         assert(raw_mode == HS_MODE_BLOCK);
         mode = "BLOCK";
     }
-#if defined(__arm__) || defined(__aarch64__)
-    major = 1;
-    minor = 0;
-    release = 3;
-#endif
     // Initial allocation size, which should be large enough to print our info.
     // If it isn't, snprintf will tell us and we can resize appropriately.
     size_t len = 256;
@@ -399,7 +387,8 @@ hs_error_t print_database_string(char **s, u32 version, u32 raw_mode) {
 
         // Note: SNPRINTF_COMPAT is a macro defined above, to cope with systems
         // that don't have snprintf but have a workalike.
-        int p_len = SNPRINTF_COMPAT(buf, len, "Version: %u.%u.%u Mode: %s", major, minor, release, mode);
+        int p_len = SNPRINTF_COMPAT(buf, len, "Version: %u.%u.%u Mode: %s",
+                                    major, minor, release, mode);
         if (p_len < 0) {
             DEBUG_PRINTF("snprintf output error, returned %d\n", p_len);
             hs_misc_free(buf);
