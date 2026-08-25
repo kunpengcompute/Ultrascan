@@ -1616,7 +1616,7 @@ list(APPEND hs_compile_SRCS
     src/kunpeng-enhanced/lily.cpp
 )
 
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+if (HS_TARGET_AARCH64)
     list(APPEND hs_compile_SRCS
         src/kunpeng-enhanced/khsel_core.h
         src/kunpeng-enhanced/khsel_ops.h

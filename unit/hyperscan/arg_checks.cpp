@@ -28,11 +28,11 @@
 
 #include "config.h"
 
-#include "allocator.h"
 #include "hs.h"
 #include "test_util.h"
 #include "gtest/gtest.h"
 
+#include <cstdlib>
 #include <string>
 
 static char garbage[] = "TEST(HyperscanArgChecks, DatabaseSizeNoDatabase) {"
@@ -102,6 +102,11 @@ TEST(HyperscanArgChecks, Version) {
 }
 
 TEST(HyperscanArgChecks, DatabaseInfoVersionMatchesLibraryVersion) {
+    // Use a known misc allocator so the info string can be freed with free():
+    // hs_misc_free is internal to the library and is not exported from
+    // shared builds.
+    hs_set_misc_allocator(malloc, free);
+
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
     hs_error_t err =
@@ -123,9 +128,10 @@ TEST(HyperscanArgChecks, DatabaseInfoVersionMatchesLibraryVersion) {
         "Version: " + library_version.substr(0, version_end) + " ";
     EXPECT_EQ(0U, std::string(info).find(expected));
 
-    hs_misc_free(info);
+    free(info);
     hs_free_database(db);
     hs_free_compile_error(compile_err);
+    hs_set_misc_allocator(nullptr, nullptr);
 }
 
 // hs_compile: Compile a NULL pattern (block mode)

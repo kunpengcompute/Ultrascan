@@ -116,10 +116,9 @@ typedef void (*thread_func_t)(void *context);
 class ThreadContext : boost::noncopyable {
 public:
     ThreadContext(unsigned num_in, const Engine &db_in, thread_barrier &tb_in,
-                  thread_func_t function_in,
-                  const vector<DataBlock> &corpus_data_in)
+                  thread_func_t function_in, vector<DataBlock> corpus_data_in)
         : num(num_in), results(repeats), engine(db_in),
-          enginectx(db_in.makeContext()), corpus_data(corpus_data_in),
+          enginectx(db_in.makeContext()), corpus_data(move(corpus_data_in)),
           tb(tb_in), function(function_in) {}
 
     // Start the thread.
@@ -176,7 +175,7 @@ public:
     vector<ResultEntry> results;
     const Engine &engine;
     unique_ptr<EngineContext> enginectx;
-    const vector<DataBlock> &corpus_data;
+    vector<DataBlock> corpus_data;
 
 protected:
     thread_barrier &tb; // shared barrier for time sync
@@ -952,9 +951,9 @@ static void sqlResults(const vector<unique_ptr<ThreadContext>> &threads,
 /**
  * Construct a thread context for this scanning mode.
  *
- * Note: takes blocks by reference. This allows all threads to share the same
- * corpus data, reducing memory usage and improving performance for
- * multi-threaded benchmarks.
+ * Note: does not take blocks by reference. This is to give every thread their
+ * own copy of the data. It would be unrealistic for every thread to be scanning
+ * the same copy of the data.
  */
 static unique_ptr<ThreadContext>
 makeThreadContext(const Engine &db, const vector<DataBlock> &blocks,

@@ -1,5 +1,7 @@
 # Introduction to Ultrascan
 
+English | [简体中文](./README.md)
+
 ## Latest Updates
 
 [2026-06-30]: Renamed Hyperscan to Ultrascan, and released Ultrascan 5.7.0. Added the universal bytecode function to support cross-platform deployment of rule-set bytecode.

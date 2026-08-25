@@ -151,8 +151,8 @@ hs_error_t HS_CDECL fat_hs_compile_ext_multi(
 
 ```c
 hs_error_t HS_CDECL fat_hs_compile_lit(
-    const char *expression, unsigned int flags, size_t len,
-    unsigned int mode, const hs_platform_info_t *platform,
+    const char *expression, unsigned flags, const size_t len,
+    unsigned mode, const hs_platform_info_t *platform,
     fat_hs_database_t **db, hs_compile_error_t **error);
 ```
 
@@ -180,9 +180,9 @@ hs_error_t HS_CDECL fat_hs_compile_lit(
 
 ```c
 hs_error_t HS_CDECL fat_hs_compile_lit_multi(
-    const char *const *expressions, const unsigned int *flags,
-    const unsigned int *ids, const size_t *lens, unsigned int elements,
-    unsigned int mode, const hs_platform_info_t *platform,
+    const char *const *expressions, const unsigned *flags,
+    const unsigned *ids, const size_t *lens, unsigned elements,
+    unsigned mode, const hs_platform_info_t *platform,
     fat_hs_database_t **db, hs_compile_error_t **error);
 ```
 
@@ -191,7 +191,7 @@ hs_error_t HS_CDECL fat_hs_compile_lit_multi(
 | `expressions` | 纯字面量字节序列数组，不能为空。数组包含`elements`个元素，各元素可包含`\0`。 |
 | `flags` | 每个字面量对应的`HS_FLAG_*`标志数组；可为`NULL`，表示全部标志为0。 |
 | `ids` | 每个字面量对应的ID数组；可为`NULL`，表示使用默认ID。 |
-| `lens` | 每个字面量的字节长度数组，不能为空。 |
+| `lens` | 每个字面量的字节长度数组，不能为空。数组与`expressions`一一对应，`lens[i]`指定从`expressions[i]`读取的字节数；字面量可包含`\0`，接口只读取前`lens[i]`个字节。 |
 | `elements` | 字面量数量，必须大于0。 |
 | `mode` | 数据库模式。必须选择`HS_MODE_BLOCK`、`HS_MODE_STREAM`或`HS_MODE_VECTORED`之一，并可组合适用的模式标志。 |
 | `platform` | 可选目标平台信息；为`NULL`时按当前主机平台生成数据库。 |
@@ -257,7 +257,7 @@ hs_error_t HS_CDECL fat_hs_serialize_database(
 
 ```c
 hs_error_t HS_CDECL fat_hs_deserialize_database(
-    const char *bytes, size_t length, fat_hs_database_t **db);
+    const char *bytes, const size_t length, fat_hs_database_t **db);
 ```
 
 | 参数 | 说明 |
@@ -282,7 +282,7 @@ hs_error_t HS_CDECL fat_hs_deserialize_database(
 
 ```c
 hs_error_t HS_CDECL fat_hs_deserialize_database_at(
-    const char *bytes, size_t length, fat_hs_database_t *db);
+    const char *bytes, const size_t length, fat_hs_database_t *db);
 ```
 
 | 参数 | 说明 |
@@ -328,7 +328,7 @@ hs_error_t HS_CDECL fat_hs_database_size(
 
 ```c
 hs_error_t HS_CDECL fat_hs_serialized_database_size(
-    const char *bytes, size_t length, size_t *size);
+    const char *bytes, const size_t length, size_t *size);
 ```
 
 | 参数 | 说明 |

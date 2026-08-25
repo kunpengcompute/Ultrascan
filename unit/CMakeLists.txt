@@ -69,9 +69,6 @@ set(unit_hyperscan_SOURCES
     hyperscan/test_util.cpp
     hyperscan/test_util.h
     )
-if (HS_ENABLE_FP_FEEDBACK)
-    list(APPEND unit_hyperscan_SOURCES hyperscan/fp_collector.cpp)
-endif()
 add_executable(unit-hyperscan ${unit_hyperscan_SOURCES})
 if (BUILD_STATIC_AND_SHARED OR BUILD_SHARED_LIBS)
 target_link_libraries(unit-hyperscan hs_shared expressionutil)
@@ -144,6 +141,17 @@ set(unit_internal_SOURCES
     internal/main.cpp
     )
 
+if (HS_ENABLE_FP_FEEDBACK)
+    # Feedback coverage inspects private diagnostics declared in
+    # fp_collector.h, which are intentionally hidden from hs_shared.
+    list(APPEND unit_internal_SOURCES
+        hyperscan/fp_collector.cpp
+        hyperscan/test_util.cpp
+        hyperscan/test_util.h
+        internal/fp_collector.cpp
+    )
+endif()
+
 if (HS_UNIT_HAS_HSBENCH_CORPUS_DB)
 list(APPEND unit_internal_SOURCES
     ${PROJECT_SOURCE_DIR}/tools/hsbench/data_corpus.cpp
@@ -157,7 +165,7 @@ else()
 add_executable(unit-internal ${unit_internal_SOURCES})
 endif()
 set_target_properties(unit-internal PROPERTIES COMPILE_FLAGS "${HS_CXX_FLAGS}")
-target_link_libraries(unit-internal hs corpusomatic)
+target_link_libraries(unit-internal hs corpusomatic expressionutil)
 if (HS_UNIT_HAS_HSBENCH_CORPUS_DB)
 target_compile_definitions(unit-internal PRIVATE HS_UNIT_HAS_HSBENCH_CORPUS_DB=1)
 target_link_libraries(unit-internal ${SQLITE3_LDFLAGS})

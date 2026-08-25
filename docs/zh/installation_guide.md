@@ -62,25 +62,7 @@ Ultrascan当前适配鲲鹏920新型号处理器，操作系统为openEuler 22.0
     ```
 
     >![](public_sys-resources/icon-note.gif) **说明：**
-    >执行克隆前，请确保`/opt`所在文件系统具有数GB可用空间，并且目标路径`/opt/Ultrascan`不存在或为空。如果该路径中已经存在完整的Ultrascan Git仓库，请不要重复克隆，可直接执行下一步切换分支。
-
-3. 测试阶段切换到`dev_26_930`分支。
-
-    ```bash
-    git -C /opt/Ultrascan checkout dev_26_930
-    ```
-
-4. 确认当前分支。
-
-    ```bash
-    git -C /opt/Ultrascan branch --show-current
-    ```
-
-    正确输出：
-
-    ```text
-    dev_26_930
-    ```
+    >执行克隆前，请确保`/opt`所在文件系统具有数GB可用空间，并且目标路径`/opt/Ultrascan`不存在或为空。如果该路径中已经存在完整的Ultrascan Git仓库，请不要重复克隆，可直接跳过本步骤。
 
 ### 配置工作目录
 
@@ -474,3 +456,28 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
         - 不设置该选项时，库仍导出反馈相关公共符号，但功能调用返回`HS_ARCH_ERROR`。
         - `hspgo`依赖SQLite 3。已安装SQLite且反馈能力开启时，会生成`/opt/Ultrascan/build-feedback/bin/hspgo`；缺少SQLite时库仍可构建，但不会生成该工具。
         - 应用通过API集成时，请参考[正则匹配反馈优化技术API](./api_reference.md#4-正则匹配反馈优化技术api)。
+
+    - （可选）AArch64编译目标选择。
+
+        当CMake目标处理器为`aarch64`或`AARCH64`时，可使用`HS_ARM_MARCH`控制AArch64编译目标的指令集基线，支持以下取值：
+
+        - `AUTO`（默认）：原生构建时使用`-march=native -mtune=native`；交叉编译，或C/C++编译器不支持该组合标志时，自动回退为`PORTABLE`。适合构建机和部署机具备相同指令集基线的场景。
+        - `PORTABLE`：固定使用`-march=armv8-a+crc`。产物要求目标机支持Armv8-A和CRC32扩展，适合在满足该最低基线的不同机型间分发，也是性能对比测试的推荐基线。
+        - `native`：显式使用`-march=native -mtune=native`，与AUTO成功路径等价，但不带探测回退。
+        - 显式架构值（如`armv8.2-a+crc+sve`、`armv9-a+sve2`、`armv8.6-a+crc+sve2+sve2-bitperm`）：目标机型统一且已知指令集基线时使用。传入的是架构值本身，无需添加`-march=`前缀。
+
+        使用示例：
+
+        ```bash
+        mkdir -p /opt/Ultrascan/build-portable
+        cd /opt/Ultrascan/build-portable
+        cmake .. -DHS_ARM_MARCH=PORTABLE
+        make -j
+        ```
+
+        使用时注意：
+
+        - `AUTO`或`native`构建的产物只能部署到支持编译器所选全部指令集扩展的机器上；部署到较低指令集基线的机器可能触发非法指令错误。跨机型分发请使用`PORTABLE`，或按最低目标机型选择显式值。
+        - `PORTABLE`不将SVE/SVE2作为编译目标基线。需要SVE或SVE2指令集能力时，应显式选择包含相应扩展的架构值，并确保所有部署机均支持该值。
+        - 交叉编译时，工具链文件应将`CMAKE_SYSTEM_PROCESSOR`设置为`aarch64`；否则该选项不会生效。
+        - 配置阶段会输出`AARCH64 single-ISA build mode/flags`及`crc/sve/sve2/sve2-bitperm`特性探测结果，可据此核对实际生效的编译标志。
