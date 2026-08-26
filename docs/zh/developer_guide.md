@@ -32,14 +32,16 @@ KHSEL源码已集成在Ultrascan仓库的`src/kunpeng-enhanced`目录中，不�
 std::vector<u8> KHSEL_BuildLily(
     std::map<char, lilyReport> &lily,
     std::vector<u32> &reportVec,
-    std::vector<u32> &ekeyVec);
+    std::vector<u32> &ekeyVec,
+    u8 &flagsQuiet);
 ```
 
 | 参数 | 描述 | 输入/输出 |
 | --- | --- | --- |
 | `lily` | 单字节短规则集合。 | 输入 |
-| `reportVec` | 单字节短规则对应的report ID。 | 输入 |
-| `ekeyVec` | 单字节短规则对应的ekey。 | 输入 |
+| `reportVec` | 单字节短规则对应的report ID。 | 输出 |
+| `ekeyVec` | 单字节短规则对应的ekey。 | 输出 |
+| `flagsQuiet` | 单字节短规则中quiet模式的位掩码，每位对应一条规则。 | 输出 |
 
 返回规则编译后的mask。
 
@@ -57,11 +59,16 @@ hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose,
 | `rose` | 保存编译期输出结果的RoseEngine对象，必须非空。 | 输入 |
 | `scratch` | 本次扫描使用的临时内存空间，必须非空。 | 输入 |
 
-返回匹配结果错误码。
+返回值说明：
+
+| 返回值 | 说明 |
+| --- | --- |
+| `0`（`KHSEL_MATCHING_SUCCESS`） | 匹配正常完成。 |
+| `1`（`KHSEL_MATCHING_TERMINATED`） | 匹配被提前终止（例如用户回调函数请求停止匹配）。 |
 
 ### `KHSEL_BuildLilyForTeddy`
 
-函数功能：基于规则集内的2~4字节短规则进行规则编译，输出编译后的mask。
+函数功能：基于规则集内的2~4字节短规则进行规则编译，输出编译后的lilyTeddy字节码。
 
 ```c++
 ue2::bytecode_ptr<lilyTeddy> KHSEL_BuildLilyForTeddy(
@@ -78,11 +85,11 @@ ue2::bytecode_ptr<lilyTeddy> KHSEL_BuildLilyForTeddy(
 | --- | --- | --- |
 | `lilyForTeddy` | 2~4字节规则集合。 | 输入 |
 | `lilyForTeddyPQ` | 按规则长度排序的优先队列。 | 输入 |
-| `reportVec` | 规则对应的report ID。 | 输入 |
-| `ekeyVec` | 规则对应的ekey。 | 输入 |
-| `lenVec` | 规则对应的长度。 | 输入 |
+| `reportVec` | 规则对应的report ID。 | 输出 |
+| `ekeyVec` | 规则对应的ekey。 | 输出 |
+| `lenVec` | 规则对应的长度。 | 输出 |
 
-返回规则编译后的mask。
+返回规则编译后的lilyTeddy字节码。
 
 ### `KHSEL_LilyForTeddyRunExec`
 
@@ -98,7 +105,12 @@ hs_error_t KHSEL_LilyForTeddyRunExec(const struct RoseEngine *rose,
 | `rose` | 保存编译期输出结果的RoseEngine对象，必须非空。 | 输入 |
 | `scratch` | 本次扫描使用的临时内存空间，必须非空。 | 输入 |
 
-返回匹配结果错误码。
+返回值说明：
+
+| 返回值 | 说明 |
+| --- | --- |
+| `0`（`KHSEL_MATCHING_SUCCESS`） | 匹配正常完成。 |
+| `1`（`KHSEL_MATCHING_TERMINATED`） | 匹配被提前终止（例如用户回调函数请求停止匹配）。 |
 
 ## 修订记录
 

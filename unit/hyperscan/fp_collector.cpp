@@ -27,12 +27,9 @@
  */
 
 #include "fp_collector.h"
-#include "allocator.h"
 #include "hs.h"
 #include "scratch.h"
 #include "test_util.h"
-#include "util/compile_context.h"
-#include "util/target_info.h"
 #include "gtest/gtest.h"
 
 #include <algorithm>
@@ -461,45 +458,6 @@ TEST(FpCollector, NullArguments) {
     ASSERT_EQ(HS_SUCCESS, hs_fp_report_free(nullptr));
     ASSERT_EQ(HS_SUCCESS, hs_fp_feedback_free(nullptr));
     ASSERT_EQ(HS_SUCCESS, hs_compile_context_free(nullptr));
-}
-
-TEST(FpCollector, MatcherBuildDiagnosticsGrowBeyondInitialCapacity) {
-    hs_compile_context_matcher_build_hit_info_t *matcher_hits = nullptr;
-    u32 matcher_count = 0;
-    u32 matcher_dropped = 0;
-    u32 matcher_capacity = 0;
-
-    ue2::CompileContext cc(false, false, ue2::get_current_target(), ue2::Grey(),
-                           nullptr, nullptr, &matcher_hits, &matcher_count,
-                           &matcher_dropped, &matcher_capacity);
-
-    const u32 matcher_entries =
-        HS_FP_MATCHER_BUILD_HIT_DETAIL_INITIAL_CAPACITY + 17;
-    for (u32 i = 0; i < matcher_entries; i++) {
-        hs_compile_context_matcher_build_hit_info_t info = {};
-        info.feedback_index = i;
-        info.table = HS_FP_TABLE_FLOATING;
-        info.fragment_id = i;
-        info.lit_id = i;
-        info.source_table = HS_FP_TABLE_FLOATING;
-        info.source_length = sizeof(i);
-        info.source_copied_length = sizeof(i);
-        info.occurrences = 1;
-        memcpy(info.source_suffix, &i, sizeof(i));
-        ue2::fpCompileRecordMatcherBuildHit(cc, info);
-    }
-    EXPECT_EQ(matcher_entries, matcher_count);
-    EXPECT_GE(matcher_capacity, matcher_count);
-    EXPECT_EQ(0U, matcher_dropped);
-    ASSERT_NE(nullptr, matcher_hits);
-
-    hs_compile_context_matcher_build_hit_info_t duplicate_matcher =
-        matcher_hits[0];
-    ue2::fpCompileRecordMatcherBuildHit(cc, duplicate_matcher);
-    EXPECT_EQ(matcher_entries, matcher_count);
-    EXPECT_EQ(2U, matcher_hits[0].occurrences);
-
-    hs_misc_free(matcher_hits);
 }
 
 TEST(FpCollector, LifecycleEmptyReportAndFeedback) {

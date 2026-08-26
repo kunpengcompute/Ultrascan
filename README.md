@@ -1,14 +1,16 @@
 # Ultrascan介绍
 
+简体中文 | [English](./README_en.md)
+
 ## 最新消息
 
-\[2026-09-30\]: 发布Ultrascan 5.8.0，新增mcsheng算法性能优化和正则匹配反馈优化技术；优化Grey配置方式，支持通过公开API设置与复位进程级Grey配置。
+[2026-09-30]: 发布Ultrascan 5.8.0，新增mcsheng算法性能优化和正则匹配反馈优化技术；优化Grey配置方式，支持通过公开API设置与复位进程级Grey配置。
 
-\[2026-06-30\]: 原Hyperscan正式更名为Ultrascan，同时发布Ultrascan 5.7.0。新增通用字节码功能，支持规则集字节码跨平台部署。
+[2026-06-30]: 原Hyperscan正式更名为Ultrascan，同时发布Ultrascan 5.7.0。新增通用字节码功能，支持规则集字节码跨平台部署。
 
-\[2026-03-30\]: 发布Hyperscan 2.6.0。新增基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短规则匹配算法。
+[2026-03-30]: 发布Hyperscan 2.6.0。新增基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短规则匹配算法。
 
-\[2025-12-30\]: 发布Hyperscan KHSEL 2.5.3。优化Hyperscan多模匹配算法。优化Rose解释器后端长字符串校验。增加短规则旁路算法开关。
+[2025-12-30]: 发布Hyperscan KHSEL 2.5.3。优化Hyperscan多模匹配算法。优化Rose解释器后端长字符串校验。增加短规则旁路算法开关。
 
 ## 项目介绍
 
@@ -58,7 +60,9 @@ Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │   ├── kunpeng-enhanced/                                     # 鲲鹏平台增强实现，包含Lily引擎
 │   ├── nfa/                                                  # NFA引擎
 │   ├── nfagraph/                                             # NFA图构建和优化模块
+│   ├── parser/                                               # 正则表达式解析器模块
 │   ├── rose/                                                 # ROSE引擎相关模块
+│   ├── smallwrite/                                           # smallwrite引擎模块
 │   ├── som/                                                  # SOM（Start of Match）相关实现
 │   └── util/                                                 # 内部工具函数
 ├── tools                                                      # 工具目录
@@ -86,13 +90,21 @@ Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │   ├── ng_corpus_editor.cpp                                  # 语料库编辑器
 │   ├── ng_corpus_generator.cpp                               # 语料库生成器
 │   └── ...                                                   # 其他实用工具
-├── README.md                                                  # 项目说明文档
-└── ...                                                        # 其他根级文件
+├── CHANGELOG.md                                              # 变更记录文档
+├── CMakeLists.txt                                            # 项目根级构建配置
+├── COPYING                                                   # 许可证复制声明文件
+├── LICENSE                                                   # 项目许可证文件
+├── README.md                                                 # 项目说明文档
+├── README_en.md                                              # 项目英文说明文档
+├── ThirdPartyNotice.md                                       # 第三方声明文档
+├── hs.def                                                    # 导出符号定义
+├── hs_runtime.def                                            # 运行时导出符号定义
+└── ...                                                       # 其他根级文件
 ```
 
 ## 版本说明
 
-每个版本的特性变更详细信息，具体请参见《[版本说明书](docs/zh/release_notes.md)》。
+每个版本的特性变更详细信息，具体请参见《[版本说明书](./docs/zh/release_notes.md)》。
 
 ## 约束与限制
 
@@ -103,6 +115,8 @@ lily单字节、2-4字节短规则匹配引擎各自仅能处理至多8条单字
 在单条语料中，lily引擎所负责匹配的2-4字节短规则命中次数合计应不大于4096，否则将停止匹配，并返回HS_SCAN_TERMINATED错误码。
 
 正则匹配反馈优化技术当前仅支持AArch64，默认关闭，需在构建时显式设置`-DHS_ENABLE_FP_FEEDBACK=ON`。
+
+AArch64目标可通过`HS_ARM_MARCH`选择指令集基线（CMake目标处理器需为`aarch64`或`AARCH64`）：默认`AUTO`在原生构建时使用`-march=native -mtune=native`，交叉编译或编译器不支持该组合标志时回退为`PORTABLE`；`PORTABLE`固定使用`-march=armv8-a+crc`，仅可部署到支持Armv8-A和CRC32扩展的机器，适合在满足该基线的机型间分发及性能对比；也可传入显式架构值（如`armv8.2-a+crc+sve`、`armv9-a+sve2`）。`AUTO`、`native`和显式高阶架构值构建的产物只能部署到支持其全部指令集扩展的机器；详细说明请参见《[安装指南](./docs/zh/installation_guide.md)》。
 
 ## 环境部署
 
@@ -116,7 +130,7 @@ lily单字节、2-4字节短规则匹配引擎各自仅能处理至多8条单字
 
 |名称|简介|
 |--|--|
-|[版本说明书](docs/zh/release_notes.md)|提供Ultrascan每个发布版本的基础信息和特性更新信息。|
+|[版本说明书](./docs/zh/release_notes.md)|提供Ultrascan每个发布版本的基础信息和特性更新信息。|
 |[安装指南](./docs/zh/installation_guide.md)|指导用户如何安装部署及编译软件。|
 |[快速入门](./docs/zh/quick_start.md)|提供快速上手验证指导。|
 |[用户指南](./docs/zh/user_guide.md)|提供Ultrascan特性使用指导。|
@@ -135,4 +149,4 @@ lily单字节、2-4字节短规则匹配引擎各自仅能处理至多8条单字
 
 本项目采用BSD许可证。详见[LICENSE](LICENSE)文件。
 
-本项目的文档适用CC-BY 4.0许可证，具体请参见[LICENSE](docs/LICENSE)文件。
+本项目的文档适用CC-BY 4.0许可证，具体请参见[LICENSE](./docs/LICENSE)文件。
