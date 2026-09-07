@@ -421,7 +421,7 @@ hs_error_t fat_hs_compile_multi_int(
         for (unsigned int i = 0; i < elements; i++) {
             if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
                 const unsigned rid = ids ? ids[i] : i;
-                if ((flags[i] & HS_FLAG_QUIET) &&
+                if (flags && (flags[i] & HS_FLAG_QUIET) &&
                     comb_sub_refs.find(rid) == comb_sub_refs.end()) {
                     DEBUG_PRINTF("skipping QUIET expr %u (rid=%u) without "
                                  "logical combination consumer\n",
@@ -488,7 +488,7 @@ hs_error_t fat_hs_compile_multi_int(
         for (unsigned int i = 0; i < elements; i++) {
             if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
                 const unsigned rid = ids ? ids[i] : i;
-                if ((flags[i] & HS_FLAG_QUIET) &&
+                if (flags && (flags[i] & HS_FLAG_QUIET) &&
                     comb_sub_refs.find(rid) == comb_sub_refs.end()) {
                     DEBUG_PRINTF("skipping QUIET expr %u (rid=%u) without "
                                  "logical combination consumer\n",
@@ -827,7 +827,7 @@ hs_error_t hs_compile_multi_int(const char *const *expressions,
         for (unsigned int i = 0; i < elements; i++) {
             if (!flags || !(flags[i] & HS_FLAG_COMBINATION)) {
                 const unsigned rid = ids ? ids[i] : i;
-                if ((flags[i] & HS_FLAG_QUIET) &&
+                if (flags && (flags[i] & HS_FLAG_QUIET) &&
                     comb_sub_refs.find(rid) == comb_sub_refs.end()) {
                     DEBUG_PRINTF("skipping QUIET expr %u (rid=%u) without "
                                  "logical combination consumer\n",
@@ -995,7 +995,7 @@ hs_compile_lit_multi_int(const char *const *expressions, const unsigned *flags,
         *comp_error = const_cast<hs_compile_error_t *>(&hs_enomem);
         return HS_COMPILER_ERROR;
     } catch (...) {
-        assert(!"Internal errror, unexpected exception");
+        assert(!"Internal error, unexpected exception");
         *db = nullptr;
         *comp_error = const_cast<hs_compile_error_t *>(&hs_einternal);
         return HS_COMPILER_ERROR;
