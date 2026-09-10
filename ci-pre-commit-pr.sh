@@ -37,8 +37,6 @@ git clone ${REPO_URL} -b ${TARGET_BRANCH} ${SOURCE_CODE_DIR} # 克隆代码仓�
 cd ${SOURCE_CODE_DIR} # 切换到本地代码仓根目录
 
 # 通用Git配置
-git config --global user.email "openLingCI@gitcode.com"
-git config --global user.name "openlibing.ci"
 git config core.quotePath false # 配置 Git 中文文件名支持
 
 # 拉取PR源分支代码
