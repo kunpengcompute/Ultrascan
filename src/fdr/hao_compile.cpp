@@ -1681,6 +1681,11 @@ static bool haoParseDebugLiteral(const char *env, std::string *litOut) {
             litOut->push_back('\t');
             break;
         case 'x': {
+            /* Need two hex digits after '\x'; guard against the string ending
+             * at 'x' so p[2] does not read past the NUL terminator. */
+            if (p[1] == '\0') {
+                return false;
+            }
             const int hi = haoHexValue(p[1]);
             const int lo = haoHexValue(p[2]);
             if (hi < 0 || lo < 0) {

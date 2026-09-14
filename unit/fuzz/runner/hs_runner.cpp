@@ -150,15 +150,18 @@ struct MatchRecord {
     unsigned int flags = 0;
 
     bool operator<(const MatchRecord &other) const {
-        return std::tie(inputIndex, callbackPhase, id, from, to, flags) <
+        // Callback flags are currently unused by the public API. Debug builds
+        // may set internal diagnostic flags according to the generated report
+        // path, so they are not part of semantic match equivalence.
+        return std::tie(inputIndex, callbackPhase, id, from, to) <
                std::tie(other.inputIndex, other.callbackPhase, other.id,
-                        other.from, other.to, other.flags);
+                        other.from, other.to);
     }
 
     bool operator==(const MatchRecord &other) const {
         return inputIndex == other.inputIndex &&
                callbackPhase == other.callbackPhase && id == other.id &&
-               from == other.from && to == other.to && flags == other.flags;
+               from == other.from && to == other.to;
     }
 };
 
@@ -2285,8 +2288,8 @@ private:
         const std::string prefix = std::string("fp_feedback_") + modeName;
         bool ok = true;
         bool mergedReady = false;
-        bool feedbackReady = false;
-        bool dumpFeedbackReady = false;
+        bool defaultFeedbackReady = false;
+        bool selectedFeedbackReady = false;
         LocalDatabase database;
         bool compiled = false;
         markProgress(progress, prefix + "_compile");
@@ -2301,8 +2304,8 @@ private:
         ScopedCollector collectorA;
         ScopedCollector collectorB;
         ScopedCollector merged;
-        ScopedFeedback feedback;
-        ScopedFeedback dumpFeedback;
+        ScopedFeedback defaultFeedback;
+        ScopedFeedback selectedFeedback;
         ScopedFeedback resetFeedback;
 
         markProgress(progress, prefix + "_collector_create");
@@ -2438,8 +2441,8 @@ private:
         if (mergedReady) {
             markProgress(progress, prefix + "_collector_to_feedback");
             err = hs_fp_collector_to_feedback(merged.value, nullptr,
-                                              &feedback.value);
-            if (err != HS_SUCCESS || !feedback.value) {
+                                              &defaultFeedback.value);
+            if (err != HS_SUCCESS || !defaultFeedback.value) {
                 if (err == HS_SUCCESS) {
                     stats.error(prefix + "_collector_to_feedback",
                                 "successful call returned null feedback");
@@ -2449,7 +2452,7 @@ private:
                 ok = false;
             } else {
                 stats.ok(prefix + "_collector_to_feedback");
-                feedbackReady = true;
+                defaultFeedbackReady = true;
             }
 
             hs_fp_feedback_params_t params = {};
@@ -2465,8 +2468,9 @@ private:
             callbacks.on_fragment = feedbackDumpFragment;
             markProgress(progress, prefix + "_collector_to_feedback_with_dump");
             err = hs_fp_collector_to_feedback_with_dump(
-                merged.value, &params, &callbacks, &dump, &dumpFeedback.value);
-            if (err != HS_SUCCESS || !dumpFeedback.value) {
+                merged.value, &params, &callbacks, &dump,
+                &selectedFeedback.value);
+            if (err != HS_SUCCESS || !selectedFeedback.value) {
                 if (err == HS_SUCCESS) {
                     stats.error(prefix + "_collector_to_feedback_with_dump",
                                 "successful call returned null feedback");
@@ -2476,44 +2480,45 @@ private:
                 }
                 ok = false;
             } else {
-                dumpFeedbackReady = validateFeedbackDump(
+                selectedFeedbackReady = validateFeedbackDump(
                     prefix + "_collector_to_feedback_with_dump", dump);
-                if (!dumpFeedbackReady) {
+                if (!selectedFeedbackReady) {
                     ok = false;
                 }
             }
         }
 
-        if (!compileFeedbackVariant(
-                testCase, mode, data, normalMatches, nullptr, false,
-                prefix + "_compile_multi_null_feedback", progress)) {
-            ok = false;
+        auto compileFeedbackPair = [&](const hs_fp_feedback_t *value,
+                                       const std::string &name) {
+            if (!compileFeedbackVariant(
+                    testCase, mode, data, normalMatches, value, false,
+                    prefix + "_compile_multi_" + name, progress)) {
+                ok = false;
+            }
+            if (!compileFeedbackVariant(
+                    testCase, mode, data, normalMatches, value, true,
+                    prefix + "_compile_ext_multi_" + name, progress)) {
+                ok = false;
+            }
+        };
+
+        compileFeedbackPair(nullptr, "null_feedback");
+        if (defaultFeedbackReady) {
+            compileFeedbackPair(defaultFeedback.value, "default_feedback");
         }
-        if (!compileFeedbackVariant(
-                testCase, mode, data, normalMatches, nullptr, true,
-                prefix + "_compile_ext_multi_null_feedback", progress)) {
-            ok = false;
-        }
-        if (feedbackReady &&
-            !compileFeedbackVariant(
-                testCase, mode, data, normalMatches, feedback.value, false,
-                prefix + "_compile_multi_with_feedback", progress)) {
-            ok = false;
-        }
-        if (dumpFeedbackReady &&
-            !compileFeedbackVariant(
-                testCase, mode, data, normalMatches, dumpFeedback.value, true,
-                prefix + "_compile_ext_multi_with_feedback", progress)) {
-            ok = false;
+        if (selectedFeedbackReady) {
+            compileFeedbackPair(selectedFeedback.value, "selected_feedback");
         }
 
         if (!releaseFeedback(prefix + "_reset_feedback_free", resetFeedback)) {
             ok = false;
         }
-        if (!releaseFeedback(prefix + "_dump_feedback_free", dumpFeedback)) {
+        if (!releaseFeedback(prefix + "_selected_feedback_free",
+                             selectedFeedback)) {
             ok = false;
         }
-        if (!releaseFeedback(prefix + "_feedback_free", feedback)) {
+        if (!releaseFeedback(prefix + "_default_feedback_free",
+                             defaultFeedback)) {
             ok = false;
         }
         if (!releaseCollector(prefix + "_merged_collector_free", merged)) {

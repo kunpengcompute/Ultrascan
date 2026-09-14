@@ -33,13 +33,20 @@
 
 3. 查看输出结果。
 
-    hsdump会生成通用字节码文件`/opt/Ultrascan/build-debug/dump_output/db.raw`。
+    hsdump会生成通用字节码文件`/opt/Ultrascan/build-debug/dump_output/dump/db.raw`。
 
 ## hsbench通用字节码性能测试
 
 hsbench是Ultrascan提供的Benchmark性能测试工具，可用于观察指定规则集和语料上的匹配吞吐、命中数和数据库资源开销。
 
 1. 获取[hsbench规则集](https://cdrdv2.intel.com/v1/dl/getContent/739375)，并解压到`/opt/Ultrascan/hsbench-samples`目录。该目录由用户准备，不属于Ultrascan构建产物。
+
+    ```bash
+    cd /opt/Ultrascan/
+    wget -O hsbench-samples.zip https://cdrdv2.intel.com/v1/dl/getContent/739375
+    unzip hsbench-samples.zip
+    mv '[Hyperscan] hsbench-samples'  hsbench-samples
+    ```
 
 2. 运行hsbench。
 
@@ -56,7 +63,7 @@ hsbench是Ultrascan提供的Benchmark性能测试工具，可用于观察指定�
 
     ```bash
     ./bin/hsbench \
-        -U /opt/Ultrascan/build-debug/dump_output/db.raw \
+        -U /opt/Ultrascan/build-debug/dump_output/dump/db.raw \
         -c ../hsbench-samples/corpora/gutenberg.db \
         -N -n 1
     ```
@@ -83,6 +90,7 @@ hsbench是Ultrascan提供的Benchmark性能测试工具，可用于观察指定�
     - Matches per iteration：每次迭代，按规则集匹配命中的数量。
     - Mean throughput \(overall\)：平均吞吐量（Mbit每秒）。
     - Max throughput \(per core\)：所有CPU核中的最大吞吐量（Mbit每秒）。
+    - 由于db是通过序列化结果直接加载，所以无需编译，因此Compile time和Peak heap usage为0。
 
 ## hspgo正则匹配反馈优化技术工具
 

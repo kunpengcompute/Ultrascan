@@ -34,18 +34,17 @@
 #include <string.h>
 
 #include "allocator.h"
+#include "crc32.h"
+#include "fat_database.h"
 #include "hs_common.h"
 #include "hs_internal.h"
 #include "hs_version.h"
-#include "ue2common.h"
-#include "fat_database.h"
-#include "crc32.h"
 #include "rose/rose_internal.h"
+#include "ue2common.h"
 #include "util/unaligned.h"
 #include <stdio.h>
 
-static really_inline
-int fat_db_correctly_aligned(const void *db) {
+static really_inline int fat_db_correctly_aligned(const void *db) {
     return ISALIGNED_N(db, alignof(unsigned long long));
 }
 
@@ -60,7 +59,7 @@ hs_error_t HS_CDECL fat_hs_free_database(fat_hs_database_t *db) {
 }
 
 HS_PUBLIC_API
-hs_error_t HS_CDECL fat_hs_serialize_database(const fat_hs_database_t *db, 
+hs_error_t HS_CDECL fat_hs_serialize_database(const fat_hs_database_t *db,
                                               char **bytes,
                                               size_t *serialized_length) {
     if (!db || !bytes || !serialized_length) {
@@ -76,7 +75,7 @@ hs_error_t HS_CDECL fat_hs_serialize_database(const fat_hs_database_t *db,
         return ret;
     }
 
-    size_t total_length = db->x86_length + db->arm_length;
+    size_t total_length = (size_t)db->x86_length + (size_t)db->arm_length;
     size_t length = sizeof(struct fat_hs_database) + total_length;
 
     char *out = hs_misc_alloc(length);
@@ -129,17 +128,15 @@ hs_error_t HS_CDECL fat_hs_serialize_database(const fat_hs_database_t *db,
 
 // check that the database header's platform is compatible with the current
 // runtime platform.
-static
-hs_error_t fat_db_check_platform(const u64a p) {
-    (void) p;
+static hs_error_t fat_db_check_platform(const u64a p) {
+    (void)p;
     return HS_SUCCESS;
 }
 
 // Decode and check the database header, returning appropriate errors or
 // HS_SUCCESS if it's OK.
-static
-hs_error_t fat_db_decode_header(const char **bytes, const size_t length,
-                                struct fat_hs_database *header) {
+static hs_error_t fat_db_decode_header(const char **bytes, const size_t length,
+                                       struct fat_hs_database *header) {
     if (!*bytes) {
         return HS_INVALID;
     }
@@ -166,7 +163,7 @@ hs_error_t fat_db_decode_header(const char **bytes, const size_t length,
 
     header->x86_length = unaligned_load_u32(buf++);
     header->arm_length = unaligned_load_u32(buf++);
-    
+
     header->platform = unaligned_load_u64a(buf);
     buf += 2;
     header->arm_platform = unaligned_load_u64a(buf);
@@ -179,9 +176,11 @@ hs_error_t fat_db_decode_header(const char **bytes, const size_t length,
     buf += 2;
 
     // 序列化数据长度 = header字段 + x86_length + arm_length
-    size_t expected_length = header_fields_size + header->x86_length + header->arm_length;
+    size_t expected_length =
+        header_fields_size + header->x86_length + header->arm_length;
     if (length < expected_length) {
-        DEBUG_PRINTF("bad length %zu, expecting %zu\n", length, expected_length);
+        DEBUG_PRINTF("bad length %zu, expecting %zu\n", length,
+                     expected_length);
         return HS_INVALID;
     }
 
@@ -192,13 +191,13 @@ hs_error_t fat_db_decode_header(const char **bytes, const size_t length,
 }
 
 // Check the CRC on a fat database
-static
-hs_error_t fat_db_check_crc(const fat_hs_database_t *db) {
+static hs_error_t fat_db_check_crc(const fat_hs_database_t *db) {
     // 计算 x86 bytecode 的 CRC32
     const char *x86_bytecode = (const char *)db + db->x86_bytecode;
     u32 x86_crc = Crc32c_ComputeBuf(0, x86_bytecode, db->x86_length);
     if (x86_crc != db->x86_crc32) {
-        DEBUG_PRINTF("x86 crc mismatch! 0x%x != 0x%x\n", x86_crc, db->x86_crc32);
+        DEBUG_PRINTF("x86 crc mismatch! 0x%x != 0x%x\n", x86_crc,
+                     db->x86_crc32);
         return HS_INVALID;
     }
 
@@ -206,20 +205,22 @@ hs_error_t fat_db_check_crc(const fat_hs_database_t *db) {
     const char *arm_bytecode = (const char *)db + db->arm_bytecode;
     u32 arm_crc = Crc32c_ComputeBuf(0, arm_bytecode, db->arm_length);
     if (arm_crc != db->arm_crc32) {
-        DEBUG_PRINTF("arm crc mismatch! 0x%x != 0x%x\n", arm_crc, db->arm_crc32);
+        DEBUG_PRINTF("arm crc mismatch! 0x%x != 0x%x\n", arm_crc,
+                     db->arm_crc32);
         return HS_INVALID;
     }
 
     return HS_SUCCESS;
 }
 
-static void fat_db_copy_bytecode(const char *serialized, fat_hs_database_t *db) {
+static void fat_db_copy_bytecode(const char *serialized,
+                                 fat_hs_database_t *db) {
     // x86 字节码对齐
     uintptr_t shift = (uintptr_t)db->bytes & 0x3f;
     db->x86_bytecode = offsetof(struct fat_hs_database, bytes) - shift;
     char *x86_ptr = (char *)db + db->x86_bytecode;
     assert(ISALIGNED_CL(x86_ptr));
-    
+
     // 从序列化数据中读取 x86 字节码
     if (db->x86_length > 0) {
         memcpy(x86_ptr, serialized, db->x86_length);
@@ -228,14 +229,15 @@ static void fat_db_copy_bytecode(const char *serialized, fat_hs_database_t *db) 
     // arm 字节码对齐 - 基于 x86_ptr 的实际地址计算
     char *arm_ptr;
     if (db->x86_length > 0) {
-        uintptr_t arm_addr = ((uintptr_t)x86_ptr + db->x86_length + 63) & ~63ULL;
+        uintptr_t arm_addr =
+            ((uintptr_t)x86_ptr + db->x86_length + 63) & ~63ULL;
         arm_ptr = (char *)arm_addr;
     } else {
         arm_ptr = x86_ptr;
     }
     db->arm_bytecode = arm_ptr - (char *)db;
     assert(ISALIGNED_CL(arm_ptr));
-    
+
     // 从序列化数据中读取 arm 字节码
     if (db->arm_length > 0) {
         memcpy(arm_ptr, serialized + db->x86_length, db->arm_length);
@@ -264,8 +266,8 @@ hs_error_t HS_CDECL fat_hs_deserialize_database_at(const char *bytes,
         return ret;
     }
 
-    size_t dblength = sizeof(struct fat_hs_database) 
-                      + header.x86_length + header.arm_length + 128;
+    size_t dblength = sizeof(struct fat_hs_database) + header.x86_length +
+                      header.arm_length + 128;
     memset(db, 0, dblength);
 
     memcpy(db, &header, sizeof(header));
@@ -300,8 +302,8 @@ hs_error_t HS_CDECL fat_hs_deserialize_database(const char *bytes,
         return ret;
     }
 
-    size_t dblength = sizeof(struct fat_hs_database) 
-                      + header.x86_length + header.arm_length + 128;
+    size_t dblength = sizeof(struct fat_hs_database) + header.x86_length +
+                      header.arm_length + 128;
     struct fat_hs_database *tempdb = hs_database_alloc(dblength);
     ret = hs_check_alloc(tempdb);
     if (ret != HS_SUCCESS) {
@@ -325,7 +327,7 @@ hs_error_t HS_CDECL fat_hs_deserialize_database(const char *bytes,
 }
 
 HS_PUBLIC_API
-hs_error_t HS_CDECL fat_hs_database_size(const fat_hs_database_t *db, 
+hs_error_t HS_CDECL fat_hs_database_size(const fat_hs_database_t *db,
                                          size_t *size) {
     if (!size) {
         return HS_INVALID;
@@ -336,7 +338,8 @@ hs_error_t HS_CDECL fat_hs_database_size(const fat_hs_database_t *db,
         return ret;
     }
 
-    *size = sizeof(struct fat_hs_database) + db->x86_length + db->arm_length + 128;
+    *size =
+        sizeof(struct fat_hs_database) + db->x86_length + db->arm_length + 128;
     return HS_SUCCESS;
 }
 
@@ -354,7 +357,8 @@ hs_error_t HS_CDECL fat_hs_serialized_database_size(const char *bytes,
         return HS_INVALID;
     }
 
-    *size = sizeof(struct fat_hs_database) + header.x86_length + header.arm_length + 128;
+    *size = sizeof(struct fat_hs_database) + header.x86_length +
+            header.arm_length + 128;
     return HS_SUCCESS;
 }
 
@@ -389,8 +393,8 @@ hs_error_t fat_dbIsValid(const struct fat_hs_database *db) {
 #define SNPRINTF_COMPAT snprintf
 #endif
 
-static
-hs_error_t fat_print_database_string(char **s, u32 version, u32 raw_mode) {
+static hs_error_t fat_print_database_string(char **s, u32 version,
+                                            u32 raw_mode) {
     assert(s);
     *s = NULL;
 
@@ -419,9 +423,8 @@ hs_error_t fat_print_database_string(char **s, u32 version, u32 raw_mode) {
             return ret;
         }
 
-        int p_len = SNPRINTF_COMPAT(
-            buf, len, "Version: %u.%u.%u Mode: %s",
-            major, minor, release, mode);
+        int p_len = SNPRINTF_COMPAT(buf, len, "Version: %u.%u.%u Mode: %s",
+                                    major, minor, release, mode);
         if (p_len < 0) {
             DEBUG_PRINTF("snprintf output error, returned %d\n", p_len);
             hs_misc_free(buf);
@@ -440,7 +443,8 @@ hs_error_t fat_print_database_string(char **s, u32 version, u32 raw_mode) {
 }
 
 HS_PUBLIC_API
-hs_error_t HS_CDECL fat_hs_database_info(const fat_hs_database_t *db, char **info) {
+hs_error_t HS_CDECL fat_hs_database_info(const fat_hs_database_t *db,
+                                         char **info) {
     if (!info) {
         return HS_INVALID;
     }
@@ -449,7 +453,6 @@ hs_error_t HS_CDECL fat_hs_database_info(const fat_hs_database_t *db, char **inf
     if (!db || !fat_db_correctly_aligned(db) || db->magic != HS_DB_MAGIC) {
         return HS_INVALID;
     }
-
 
     const struct RoseEngine *rose = fat_hs_get_bytecode(db);
 

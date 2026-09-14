@@ -99,24 +99,55 @@ cmake .. -DCMAKE_BUILD_TYPE=Debug
 | 环境变量 | 默认值 | 作用 |
 | --- | --- | --- |
 | `HS_FUZZ_COUNT` | `10000000` | 每个 Python 生成器产生的 pattern 数；共有 3 个生成器。必须是正整数，`0` 或非法值会回退到默认值。 |
-| `HS_FUZZ_THREADS` | `1` | 单 pattern 用例的工作线程数；大于 `1` 时启用生产者/消费者并行执行。 |
-| `HS_FUZZ_QUEUE_SIZE` | `4096` | 并行模式下的待执行队列容量；单线程时无效，`0` 回退到默认值。 |
+| `HS_FUZZ_THREADS` | `1` | 工作线程总数；大于 `1` 时启用 lane 模式，不同 API 组分道并行执行（见下文）。 |
+| `HS_FUZZ_API_SAMPLE` | `10` | lane 模式下非 feedback lane 的采样分母：每 N 个用例取 1 个；`1` 表示全量，`0` 回退到默认值。 |
+| `HS_FUZZ_FEEDBACK_THREADS` | `HS_FUZZ_THREADS` 的一半（至少 1） | feedback lane 专属线程数；实际会夹在 `[1, HS_FUZZ_THREADS]` 区间。 |
+| `HS_FUZZ_QUEUE_SIZE` | `4096` | 并行模式下每条 lane 的待执行队列容量；单线程时无效，`0` 回退到默认值。 |
 | `HS_FUZZ_MULTI_LIMIT` | `1024` | 送入 multi 编译接口的 pattern 上限；`0` 禁用 multi 接口 fuzz。 |
 | `HS_FUZZ_FP_LIMIT` | `256` | 每个生成器执行完整 collector/feedback/recompile 流程的用例上限；`0` 禁用逐用例反馈流程。 |
 | `HS_FUZZ_PYTHON` | `python` | Python 命令或可执行文件路径，例如 `python3` 或 `/usr/bin/python3`。 |
 | `HS_FUZZ_VERBOSE` | `0` | 设为非 `0` 值时输出逐 API 详细日志；默认只输出进度、错误和汇总。 |
 | `HS_FUZZ_MAX_UNIQUE_ERRORS` | `30` | 汇总中每个 API 最多展示的不同错误信息数；只限制输出，不限制执行。 |
 | `HS_FUZZ_TRACE_CASE` | `0` | 设为非 `0` 值时，在标准输出打印每个用例的 begin/end、ID、flags 和 pattern。 |
-| `HS_FUZZ_TRACE_DIR` | 未设置 | 将各 worker 当前执行的用例和阶段写入 `<目录>/worker_N.current`；目录需预先创建，崩溃后可用残留文件定位。 |
+| `HS_FUZZ_TRACE_DIR` | 未设置 | 将各 worker 当前执行的用例和阶段写入 `<目录>/worker_N.current`（含 `lane=` 行）；目录需预先创建，崩溃后可用残留文件定位。 |
 
-常用运行示例：
+### 并行 lane 模式（不同 API 组并行）
+
+`HS_FUZZ_THREADS` 大于 1 时，单 pattern 用例不再整链路串行，而是按 API 拆成
+最多 4 条 lane 并行执行：
+
+| lane | 覆盖接口 | 采样 | 线程 |
+| --- | --- | --- | --- |
+| feedback | 假阳性反馈全链路（collector / feedback / 反馈重编译 / 带 collector 扫描对比） | 全量（受 `HS_FUZZ_FP_LIMIT` 限制总量） | `HS_FUZZ_FEEDBACK_THREADS`，默认 `HS_FUZZ_THREADS` 的一半 |
+| compile | `hs_compile`、`fat_hs_compile`、`hs_compile_lit`、`fat_hs_compile_lit`、`hs_expression_info`、`hs_expression_ext_info` | 每 `HS_FUZZ_API_SAMPLE` 个取 1 | 剩余线程按 5:3:2 分配 |
+| scan | `hs_scan`、`hs_scan_stream`、`hs_scan_vector` | 同上 | 同上 |
+| stream | stream 操作 6 个接口、`hs_clone_scratch`、`hs_scratch_size` | 同上 | 同上 |
+
+- 生产者按采样率把用例路由到各 lane 的独立队列（容量均为
+  `HS_FUZZ_QUEUE_SIZE`）；队列满时生产者阻塞形成背压，不会死锁。
+- 每 lane 每线程持有独立 `Runner`（独立 database/scratch/统计），lane 内各
+  阶段仍串行。
+- 线程不足时权重小的 lane 可能分到 0 线程而被跳过（例如 `HS_FUZZ_THREADS=2`
+  时只有 feedback 和 compile），启动时会打印每条 lane 的实际配置。
+- x86 或本体未开启 `HS_ENABLE_FP_FEEDBACK` 时自动去掉 feedback lane，其线程
+  配额按 5:3:2 分给其余 lane。
+- multi 编译接口仍在所有单用例结束后由主线程串行执行。
+- 单线程（`HS_FUZZ_THREADS=1`）保持原先的整链路串行行为。
+- 汇总输出按 `worker N (lane 名) ` 分组，可直接看出各 API 组的调用量。
+
+### 常用运行示例
 
 ```bash
 # 快速验证：每个生成器执行 100 个 pattern
 HS_FUZZ_COUNT=100 ./hyperscan_fuzz_test
 
-# 并行执行，并限制高开销的 multi 和反馈路径
+# 并行执行（lane 模式），并限制高开销的 multi 接口
 HS_FUZZ_THREADS=8 HS_FUZZ_MULTI_LIMIT=512 HS_FUZZ_FP_LIMIT=128 \
+  ./hyperscan_fuzz_test
+
+# 反馈优化接口重点跑：8 线程中 4 个给 feedback lane，反馈用例全量采样，
+# 其他 API 降采样到 1/10
+HS_FUZZ_THREADS=8 HS_FUZZ_FP_LIMIT=10000000 HS_FUZZ_API_SAMPLE=10 \
   ./hyperscan_fuzz_test
 
 # 为崩溃定位保留每个 worker 的当前用例和执行阶段
