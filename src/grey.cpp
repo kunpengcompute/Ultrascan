@@ -31,10 +31,10 @@
 
 #include <algorithm>
 #include <cstdlib> // exit
-#include <string>
-#include <limits.h>
 #include <cstring>
+#include <limits.h>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #define DEFAULT_MAX_HISTORY 110
@@ -62,137 +62,85 @@ std::string getGreyOverrides() {
     return g_overrides;
 }
 
-Grey::Grey(bool applyOverrides) :
-                   optimiseComponentTree(true),
-                   calcComponents(true),
-                   performGraphSimplification(true),
-                   prefilterReductions(true),
-                   removeEdgeRedundancy(true),
-                   allowGough(true),
-                   allowHaigLit(true),
-                   allowLitHaig(true),
-                   allowLbr(true),
-                   allowMcClellan(true),
-                   allowSheng(true),
-                   allowMcSheng(true),
-                   allowNeoFdr(false),
-                   allowHao(false),
-                   allowPuff(true),
-                   allowLiteral(true),
-                   allowViolet(true),
-                   allowExtendedNFA(true), /* bounded repeats of course */
-                   allowLimExNFA(true),
-                   allowLily(false),
-                   allowAnchoredAcyclic(true),
-                   allowSmallLiteralSet(true),
-                   allowCastle(true),
-                   allowDecoratedLiteral(true),
-                   allowApproximateMatching(true),
-                   allowNoodle(true),
-                   fdrAllowTeddy(true),
-                   fdrAllowFlood(true),
-                   violetAvoidSuffixes(true),
-                   violetAvoidWeakInfixes(true),
-                   violetDoubleCut(true),
-                   violetExtractStrongLiterals(true),
-                   violetLiteralChains(true),
-                   violetDoubleCutLiteralLen(3),
-                   violetEarlyCleanLiteralLen(6),
-                   puffImproveHead(true),
-                   castleExclusive(true),
-                   mergeSEP(true), /* short exhaustible passthroughs */
-                   mergeRose(true), // roses inside rose
-                   mergeSuffixes(true), // suffix nfas inside rose
-                   mergeOutfixes(true),
-                   onlyOneOutfix(false),
-                   allowShermanStates(true),
-                   allowMcClellan8(true),
-                   allowWideStates(true), // enable wide state for McClellan8
-                   highlanderPruneDFA(true),
-                   minimizeDFA(true),
-                   accelerateDFA(true),
-                   accelerateNFA(true),
-                   reverseAccelerate(true),
-                   squashNFA(true),
-                   compressNFAState(true),
-                   numberNFAStatesWrong(false), /* debugging only */
-                   highlanderSquash(true),
-                   allowZombies(true),
-                   floodAsPuffette(false),
-                   nfaForceSize(0),
-                   maxHistoryAvailable(DEFAULT_MAX_HISTORY),
-                   minHistoryAvailable(0), /* debugging only */
-                   maxAnchoredRegion(63), /* for rose's atable to run over */
-                   minRoseLiteralLength(3),
-                   minRoseNetflowLiteralLength(2),
-                   maxRoseNetflowEdges(50000), /* otherwise no netflow pass. */
-                   maxEditDistance(16),
-                   minExtBoundedRepeatSize(32),
-                   goughCopyPropagate(true),
-                   goughRegisterAllocate(true),
-                   shortcutLiterals(true),
-                   roseGraphReduction(true),
-                   roseRoleAliasing(true),
-                   roseMasks(true),
-                   roseConvertFloodProneSuffixes(true),
-                   roseMergeRosesDuringAliasing(true),
-                   roseMultiTopRoses(true),
-                   roseHamsterMasks(true),
-                   roseLookaroundMasks(true),
-                   roseMcClellanPrefix(1),
-                   roseMcClellanSuffix(1),
-                   roseMcClellanOutfix(2),
-                   roseTransformDelay(true),
-                   earlyMcClellanPrefix(true),
-                   earlyMcClellanInfix(true),
-                   earlyMcClellanSuffix(true),
-                   allowCountingMiracles(true),
-                   allowSomChain(true),
-                   somMaxRevNfaLength(126),
-                   hamsterAccelForward(true),
-                   hamsterAccelReverse(false),
-                   miracleHistoryBonus(16),
-                   equivalenceEnable(true),
+Grey::Grey(bool applyOverrides)
+    : optimiseComponentTree(true), calcComponents(true),
+      performGraphSimplification(true), prefilterReductions(true),
+      removeEdgeRedundancy(true), allowGough(true), allowHaigLit(true),
+      allowLitHaig(true), allowLbr(true), allowMcClellan(true),
+      allowSheng(true), allowMcSheng(true), allowNeoFdr(false), allowHao(false),
+      haoKeyBits(0), haoHashMode(0), haoSelectorMode(0), haoDebug(0),
+      haoDebugAuto(0), allowPuff(true), allowLiteral(true), allowViolet(true),
+      allowExtendedNFA(true), /* bounded repeats of course */
+      allowLimExNFA(true), allowLily(false), allowAnchoredAcyclic(true),
+      allowSmallLiteralSet(true), allowCastle(true),
+      allowDecoratedLiteral(true), allowApproximateMatching(true),
+      allowNoodle(true), fdrAllowTeddy(true), fdrAllowFlood(true),
+      violetAvoidSuffixes(true), violetAvoidWeakInfixes(true),
+      violetDoubleCut(true), violetExtractStrongLiterals(true),
+      violetLiteralChains(true), violetDoubleCutLiteralLen(3),
+      violetEarlyCleanLiteralLen(6), puffImproveHead(true),
+      castleExclusive(true),
+      mergeSEP(true),      /* short exhaustible passthroughs */
+      mergeRose(true),     // roses inside rose
+      mergeSuffixes(true), // suffix nfas inside rose
+      mergeOutfixes(true), onlyOneOutfix(false), allowShermanStates(true),
+      allowMcClellan8(true),
+      allowWideStates(true), // enable wide state for McClellan8
+      highlanderPruneDFA(true), minimizeDFA(true), accelerateDFA(true),
+      accelerateNFA(true), reverseAccelerate(true), squashNFA(true),
+      compressNFAState(true), numberNFAStatesWrong(false), /* debugging only */
+      highlanderSquash(true), allowZombies(true), floodAsPuffette(false),
+      nfaForceSize(0), maxHistoryAvailable(DEFAULT_MAX_HISTORY),
+      minHistoryAvailable(0), /* debugging only */
+      maxAnchoredRegion(63),  /* for rose's atable to run over */
+      minRoseLiteralLength(3), minRoseNetflowLiteralLength(2),
+      maxRoseNetflowEdges(50000), /* otherwise no netflow pass. */
+      maxEditDistance(16), minExtBoundedRepeatSize(32),
+      goughCopyPropagate(true), goughRegisterAllocate(true),
+      shortcutLiterals(true), roseGraphReduction(true), roseRoleAliasing(true),
+      roseMasks(true), roseConvertFloodProneSuffixes(true),
+      roseMergeRosesDuringAliasing(true), roseMultiTopRoses(true),
+      roseHamsterMasks(true), roseLookaroundMasks(true), roseMcClellanPrefix(1),
+      roseMcClellanSuffix(1), roseMcClellanOutfix(2), roseTransformDelay(true),
+      earlyMcClellanPrefix(true), earlyMcClellanInfix(true),
+      earlyMcClellanSuffix(true), allowCountingMiracles(true),
+      allowSomChain(true), somMaxRevNfaLength(126), hamsterAccelForward(true),
+      hamsterAccelReverse(false), miracleHistoryBonus(16),
+      equivalenceEnable(true),
 
-                   allowSmallWrite(true), // McClellan dfas for small patterns
-                   allowSmallWriteSheng(false), // allow use of Sheng for SMWR
+      allowSmallWrite(true),       // McClellan dfas for small patterns
+      allowSmallWriteSheng(false), // allow use of Sheng for SMWR
 
-                   smallWriteLargestBuffer(70), // largest buffer that can be
-                                                // considered a small write
-                                                // all blocks larger than this
-                                                // are given to rose &co
-                   smallWriteLargestBufferBad(35),
-                   limitSmallWriteOutfixSize(1048576), // 1 MB
-                   smallWriteMaxPatterns(10000),
-                   smallWriteMaxLiterals(10000),
-                   smallWriteMergeBatchSize(20),
-                   allowTamarama(true), // Tamarama engine
-                   tamaChunkSize(100),
-                   dumpFlags(0),
-                   limitPatternCount(8000000), // 8M patterns
-                   limitPatternLength(16000),  // 16K bytes
-                   limitGraphVertices(500000), // 500K vertices
-                   limitGraphEdges(1000000), // 1M edges
-                   limitReportCount(4*8000000),
-                   limitLiteralCount(8000000), // 8M literals
-                   limitLiteralLength(16000),
-                   limitLiteralMatcherChars(1073741824), // 1 GB
-                   limitLiteralMatcherSize(1073741824), // 1 GB
-                   limitRoseRoleCount(4*8000000),
-                   limitRoseEngineCount(8000000), // 8M engines
-                   limitRoseAnchoredSize(1073741824), // 1 GB
-                   limitEngineSize(1073741824), // 1 GB
-                   limitDFASize(1073741824), // 1 GB
-                   limitNFASize(1048576), // 1 MB
-                   limitLBRSize(1048576), // 1 MB
-                   limitApproxMatchingVertices(5000)
-{
+      smallWriteLargestBuffer(70), // largest buffer that can be
+                                   // considered a small write
+                                   // all blocks larger than this
+                                   // are given to rose &co
+      smallWriteLargestBufferBad(35),
+      limitSmallWriteOutfixSize(1048576), // 1 MB
+      smallWriteMaxPatterns(10000), smallWriteMaxLiterals(10000),
+      smallWriteMergeBatchSize(20), allowTamarama(true), // Tamarama engine
+      tamaChunkSize(100), dumpFlags(0),
+      limitPatternCount(8000000), // 8M patterns
+      limitPatternLength(16000),  // 16K bytes
+      limitGraphVertices(500000), // 500K vertices
+      limitGraphEdges(1000000),   // 1M edges
+      limitReportCount(4 * 8000000), limitLiteralCount(8000000), // 8M literals
+      limitLiteralLength(16000), limitLiteralMatcherChars(1073741824), // 1 GB
+      limitLiteralMatcherSize(1073741824),                             // 1 GB
+      limitRoseRoleCount(4 * 8000000),
+      limitRoseEngineCount(8000000),     // 8M engines
+      limitRoseAnchoredSize(1073741824), // 1 GB
+      limitEngineSize(1073741824),       // 1 GB
+      limitDFASize(1073741824),          // 1 GB
+      limitNFASize(1048576),             // 1 MB
+      limitLBRSize(1048576),             // 1 MB
+      limitApproxMatchingVertices(5000) {
     assert(maxAnchoredRegion < 64); /* a[lm]_log_sum have limited capacity */
-    
+
     if (!applyOverrides) {
         return;
     }
-    
+
     // Apply globally-set overrides instead of reading from config.txt file.
     std::string overrides;
     {
@@ -255,13 +203,17 @@ bool applyGreyOverrides(Grey *g, const string &s) {
 
         /* surely there exists a nice template to go with this macro to make
          * all the boring code disappear */
-#define G_UPDATE(k) do {                                                \
-            if (key == ""#k) { staged.k = value; done = 1;}            \
-            if (key == "help") {                                        \
-                printf("\t%-30s\tdefault: %s\n", #k,                    \
-                       lexical_cast<string>(defaultg.k).c_str());       \
-            }                                                           \
-        } while (0)
+#define G_UPDATE(k)                                                            \
+    do {                                                                       \
+        if (key == "" #k) {                                                    \
+            staged.k = value;                                                  \
+            done = 1;                                                          \
+        }                                                                      \
+        if (key == "help") {                                                   \
+            printf("\t%-30s\tdefault: %s\n", #k,                               \
+                   lexical_cast<string>(defaultg.k).c_str());                  \
+        }                                                                      \
+    } while (0)
 
         G_UPDATE(optimiseComponentTree);
         G_UPDATE(calcComponents);
@@ -277,6 +229,11 @@ bool applyGreyOverrides(Grey *g, const string &s) {
         G_UPDATE(allowMcSheng);
         G_UPDATE(allowNeoFdr);
         G_UPDATE(allowHao);
+        G_UPDATE(haoKeyBits);
+        G_UPDATE(haoHashMode);
+        G_UPDATE(haoSelectorMode);
+        G_UPDATE(haoDebug);
+        G_UPDATE(haoDebugAuto);
         G_UPDATE(allowPuff);
         G_UPDATE(allowLiteral);
         G_UPDATE(allowLily);
@@ -457,9 +414,17 @@ bool applyGreyOverrides(Grey *g, const string &s) {
         return false;
     }
 
-    assert(staged.maxAnchoredRegion < 64); /* a[lm]_log_sum have limited capacity */
+    assert(staged.maxAnchoredRegion <
+           64); /* a[lm]_log_sum have limited capacity */
     *g = staged;
     return true;
 }
 
 } // namespace ue2
+
+/* Runtime bridge for C scan-side code: reports whether the process-level
+ * grey overrides enable HAO runtime stats (haoDebug bit with value 4).
+ * A fresh Grey is built so the current global overrides are applied. */
+extern "C" int haoGreyRuntimeStatsEnabled(void) {
+    return (ue2::Grey().haoDebug & 4u) ? 1 : 0;
+}

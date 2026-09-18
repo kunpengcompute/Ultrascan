@@ -6,6 +6,7 @@
 #include "util/arch.h"
 #include "util/bitutils.h"
 #include "util/compare.h"
+#include "util/dump_util.h"
 #include "util/target_info.h"
 #include "util/verify_types.h"
 
@@ -455,25 +456,6 @@ static bool haoDotVectorHasNonZeroLane(
     return false;
 }
 
-static bool
-haoParseDotVectorEnv(std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> *dotVector) {
-    const char *env = getenv("HS_HAO_DOT_VECTOR");
-    unsigned values[HAO_LAYOUT_DOT_VECTOR_LANES] = {};
-
-    if (!dotVector || !env || !*env) {
-        return false;
-    }
-    if (sscanf(env, "%u,%u,%u,%u", &values[0], &values[1], &values[2],
-               &values[3]) != (int)HAO_LAYOUT_DOT_VECTOR_LANES) {
-        printf("[HAO][Dot] ignoring invalid HS_HAO_DOT_VECTOR=%s\n", env);
-        return false;
-    }
-    for (u32 i = 0; i < HAO_LAYOUT_DOT_VECTOR_LANES; i++) {
-        (*dotVector)[i] = verify_u16(values[i] & 0xffffU);
-    }
-    return true;
-}
-
 static std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES>
 haoApplyDotInputMaskToVector(
     const std::array<u16, HAO_LAYOUT_DOT_VECTOR_LANES> &dotVector,
@@ -514,75 +496,48 @@ haoClassifyLiteral(const hwlmLiteral &lit,
     return HAORuleCategory::HAO_RULE_EXACT;
 }
 
-static bool haoStatsDumpEnabled(void) {
-    const char *env = getenv("HS_HAO_STATS");
-    return env && *env && *env != '0';
-}
-
-static bool haoL2MapDumpEnabled(void) {
-    const char *env = getenv("HS_HAO_L2MAP");
-    return env && *env && *env != '0';
-}
-
-static HAOSelectorPolicy haoSelectorPolicy(void) {
-    static int policy = -1;
-    if (policy >= 0) {
-        return static_cast<HAOSelectorPolicy>(policy);
+/* HAO tuning knobs arrive via grey overrides (DLL API), never the process
+ * environment. Defaults (all zero) preserve the historical auto behaviour. */
+static HAOSelectorPolicy haoSelectorPolicy(const Grey &grey) {
+    switch (grey.haoSelectorMode) {
+    case 1:
+        return HAOSelectorPolicy::DEFAULT_ONLY;
+    case 2:
+        return HAOSelectorPolicy::DYNAMIC_ONLY;
+    case 3:
+        return HAOSelectorPolicy::HASH_OPT_ONLY;
+    case 4:
+        return HAOSelectorPolicy::HIGH_ALIGN_ONLY;
+    default:
+        return HAOSelectorPolicy::AUTO;
     }
-
-    const char *env = getenv("HS_HAO_SELECTOR_MODE");
-    if (!env || !env[0] || strcmp(env, "auto") == 0 ||
-        strcmp(env, "AUTO") == 0) {
-        policy = static_cast<int>(HAOSelectorPolicy::AUTO);
-    } else if (strcmp(env, "default") == 0 || strcmp(env, "DEFAULT") == 0 ||
-               strcmp(env, "0") == 0) {
-        policy = static_cast<int>(HAOSelectorPolicy::DEFAULT_ONLY);
-    } else if (strcmp(env, "dynamic") == 0 || strcmp(env, "DYNAMIC") == 0 ||
-               strcmp(env, "1") == 0) {
-        policy = static_cast<int>(HAOSelectorPolicy::DYNAMIC_ONLY);
-    } else if (strcmp(env, "high") == 0 || strcmp(env, "HIGH") == 0 ||
-               strcmp(env, "high_align") == 0 ||
-               strcmp(env, "HIGH_ALIGN") == 0 || strcmp(env, "3") == 0) {
-        policy = static_cast<int>(HAOSelectorPolicy::HIGH_ALIGN_ONLY);
-    } else if (strcmp(env, "hash_opt") == 0 || strcmp(env, "HASH_OPT") == 0 ||
-               strcmp(env, "hashopt") == 0 || strcmp(env, "HASHOPT") == 0 ||
-               strcmp(env, "weighted") == 0 || strcmp(env, "WEIGHTED") == 0 ||
-               strcmp(env, "2") == 0) {
-        policy = static_cast<int>(HAOSelectorPolicy::HASH_OPT_ONLY);
-    } else {
-        policy = static_cast<int>(HAOSelectorPolicy::AUTO);
-    }
-
-    return static_cast<HAOSelectorPolicy>(policy);
 }
 
-static HAOHashPolicy haoHashPolicy(void) {
-    static int policy = -1;
-    if (policy >= 0) {
-        return static_cast<HAOHashPolicy>(policy);
-    }
-
-    const char *env = getenv("HS_HAO_HASH_MODE");
-    if (env && *env &&
-        (strcmp(env, "dot") == 0 || strcmp(env, "DOT") == 0 ||
-         strcmp(env, "1") == 0)) {
-        policy = static_cast<int>(HAOHashPolicy::DOT);
-    } else if (env && *env &&
-               (strcmp(env, "bext") == 0 || strcmp(env, "BEXT") == 0 ||
-                strcmp(env, "0") == 0)) {
-        policy = static_cast<int>(HAOHashPolicy::BEXT);
-    } else {
-        policy = static_cast<int>(HAOHashPolicy::BEXT);
-    }
-
-    return static_cast<HAOHashPolicy>(policy);
+static HAOHashPolicy haoHashPolicy(const Grey &grey) {
+    return grey.haoHashMode == 2 ? HAOHashPolicy::DOT : HAOHashPolicy::BEXT;
 }
 
-static bool haoHashPolicyIsExplicit(void) {
-    const char *env = getenv("HS_HAO_HASH_MODE");
-
-    return env && *env && strcmp(env, "auto") != 0 && strcmp(env, "AUTO") != 0;
+static bool haoHashPolicyIsExplicit(const Grey &grey) {
+    return grey.haoHashMode != 0;
 }
+
+static u32 haoForcedKeyBits(const Grey &grey) {
+    return grey.haoKeyBits <= HAO_LAYOUT_KEY_BITS ? grey.haoKeyBits : 0;
+}
+
+#if defined(DUMP_SUPPORT)
+/* Debug knob: dump every auto candidate's raw build stats (one line per
+ * candidate) so the cost model can be calibrated offline. A value below
+ * HAO_AUTO_MIN_KEY_BITS also widens the scan range down to that value. */
+static u32 haoDebugAutoMinBits(const Grey &grey) {
+    return grey.haoDebugAuto <= HAO_LAYOUT_KEY_BITS ? grey.haoDebugAuto : 0;
+}
+#else
+static u32 haoDebugAutoMinBits(const Grey &grey) {
+    (void)grey;
+    return 0;
+}
+#endif
 
 static const char *haoHashModeName(u32 hashMode) {
     switch (hashMode) {
@@ -1472,70 +1427,76 @@ static void buildPrimaryBitmap(const HAOPrimaryHashTable &primaryHashTable,
     }
 }
 
-static void dumpRuleBits(const std::vector<hwlmLiteral> &lits) {
-    printf("[HAO][Rules-Bits] rule_count=%zu\n", lits.size());
+static void dumpRuleBits(const std::vector<hwlmLiteral> &lits, FILE *out) {
+    fprintf(out, "[HAO][Rules-Bits] rule_count=%zu\n", lits.size());
     for (size_t i = 0; i < lits.size(); i++) {
         const auto &lit = lits[i];
-        printf(
-            "  r%zu id=%u s=\"%s\" len=%zu nocase=%u noruns=%u groups=0x%llx\n",
-            i, lit.id, lit.s.c_str(), lit.s.size(), lit.nocase ? 1 : 0,
-            lit.noruns ? 1 : 0, (unsigned long long)lit.groups);
-        printf("    bytes(literal order): ");
+        fprintf(out,
+                "  r%zu id=%u s=\"%s\" len=%zu nocase=%u noruns=%u "
+                "groups=0x%llx\n",
+                i, lit.id, lit.s.c_str(), lit.s.size(), lit.nocase ? 1 : 0,
+                lit.noruns ? 1 : 0, (unsigned long long)lit.groups);
+        fprintf(out, "    bytes(literal order): ");
         for (size_t j = 0; j < lit.s.size(); j++) {
             const u8 c = verify_u8(lit.s[j]);
             const char pc = std::isprint((unsigned char)c) ? (char)c : '.';
-            printf("[%zu:'%c' 0x%02x %s]", j, pc, c, byteToBits(c).c_str());
+            fprintf(out, "[%zu:'%c' 0x%02x %s]", j, pc, c,
+                    byteToBits(c).c_str());
             if (j + 1 != lit.s.size()) {
-                printf(" ");
+                fprintf(out, " ");
             }
         }
-        printf("\n");
+        fprintf(out, "\n");
     }
 }
 
-static void dumpSelectors(const std::vector<HAOBitSelector> &selectors) {
-    printf("[HAO][Selectors] count=%zu\n", selectors.size());
+static void dumpSelectors(const std::vector<HAOBitSelector> &selectors,
+                          FILE *out) {
+    fprintf(out, "[HAO][Selectors] count=%zu\n", selectors.size());
     for (size_t i = 0; i < selectors.size(); i++) {
         const auto &s = selectors[i];
         const u32 bitIndex = haoSelectorBitIndex(s);
-        printf("  s%zu -> raw_bit=%u (byteOffset=%u, bitOffset=%u)\n", i,
-               bitIndex, (u32)s.byteOffset, (u32)s.bitOffset);
+        fprintf(out, "  s%zu -> raw_bit=%u (byteOffset=%u, bitOffset=%u)\n", i,
+                bitIndex, (u32)s.byteOffset, (u32)s.bitOffset);
     }
 }
 
 template <class ArtifactsT>
-static void dumpExtractDescriptor(const ArtifactsT &artifacts) {
-    printf("[HAO][Extract] mode=%s windowBytes=%u keyBits=%u",
-           haoHashModeName(artifacts.hashMode), HAO_LAYOUT_BYTES_PER_RULE_SLOT,
-           artifacts.hash.keyBits);
+static void dumpExtractDescriptor(const ArtifactsT &artifacts, FILE *out) {
+    fprintf(out, "[HAO][Extract] mode=%s windowBytes=%u keyBits=%u",
+            haoHashModeName(artifacts.hashMode), HAO_LAYOUT_BYTES_PER_RULE_SLOT,
+            artifacts.hash.keyBits);
     if (artifacts.hashMode == HAO_LAYOUT_HASH_DOT) {
-        printf(" dotVector=[%u,%u,%u,%u]\n", artifacts.dotVector[0],
-               artifacts.dotVector[1], artifacts.dotVector[2],
-               artifacts.dotVector[3]);
-        printf("[HAO][Extract] dotInputMask=0x%016llx bits=%u\n",
-               (unsigned long long)artifacts.dotInputMask,
-               popcount64(artifacts.dotInputMask));
+        fprintf(out, " dotVector=[%u,%u,%u,%u]\n", artifacts.dotVector[0],
+                artifacts.dotVector[1], artifacts.dotVector[2],
+                artifacts.dotVector[3]);
+        fprintf(out, "[HAO][Extract] dotInputMask=0x%016llx bits=%u\n",
+                (unsigned long long)artifacts.dotInputMask,
+                popcount64(artifacts.dotInputMask));
     } else {
-        printf(" bextMask=0x%llx\n", (unsigned long long)artifacts.bextMask);
+        fprintf(out, " bextMask=0x%llx\n",
+                (unsigned long long)artifacts.bextMask);
     }
 }
 
 static void dumpRuleKeys(const std::vector<hwlmLiteral> &lits,
                          const std::vector<HAOBitSelector> &selectors,
-                         u32 keyBits) {
-    printf("[HAO][Rule->KeyMask] key_bits=%u\n", keyBits);
+                         u32 keyBits, FILE *out) {
+    fprintf(out, "[HAO][Rule->KeyMask] key_bits=%u\n", keyBits);
     for (size_t i = 0; i < lits.size(); i++) {
         u32 keyValue = 0;
         u32 keyMask = 0;
         haoLitKeyMask(lits[i], selectors, &keyValue, &keyMask);
-        printf("  r%zu id=%u keyValue={dec=%u hex=0x%x bin=%s} keyMask={dec=%u "
-               "hex=0x%x bin=%s}\n",
-               i, lits[i].id, keyValue, keyValue,
-               keyToBits(keyValue, keyBits).c_str(), keyMask, keyMask,
-               keyToBits(keyMask, keyBits).c_str());
+        fprintf(out,
+                "  r%zu id=%u keyValue={dec=%u hex=0x%x bin=%s} "
+                "keyMask={dec=%u hex=0x%x bin=%s}\n",
+                i, lits[i].id, keyValue, keyValue,
+                keyToBits(keyValue, keyBits).c_str(), keyMask, keyMask,
+                keyToBits(keyMask, keyBits).c_str());
     }
 }
 
+#if defined(DUMP_SUPPORT)
 static std::string haoEscapeLiteral(const hwlmLiteral &lit) {
     std::string out;
 
@@ -1573,14 +1534,16 @@ static std::string haoEscapeLiteral(const hwlmLiteral &lit) {
 }
 
 static void dumpL2Map(const std::vector<hwlmLiteral> &lits,
-                      const HAOCompileArtifacts &artifacts) {
-    printf("[HAO][L2Map] entries=%zu keyBits=%u hashMode=%s selectorCount=%zu "
-           "bextMask=0x%016llx dotVector=[%u,%u,%u,%u]\n",
-           artifacts.hash.l2Meta.size(), artifacts.hash.keyBits,
-           haoHashModeName(artifacts.hashMode), artifacts.selectors.size(),
-           (unsigned long long)artifacts.bextMask, artifacts.dotVector[0],
-           artifacts.dotVector[1], artifacts.dotVector[2],
-           artifacts.dotVector[3]);
+                      const HAOCompileArtifacts &artifacts,
+                      const std::string &matcher, FILE *out) {
+    fprintf(out,
+            "[HAO][L2Map] matcher=%s entries=%zu keyBits=%u hashMode=%s "
+            "selectorCount=%zu bextMask=0x%016llx dotVector=[%u,%u,%u,%u]\n",
+            matcher.c_str(), artifacts.hash.l2Meta.size(),
+            artifacts.hash.keyBits, haoHashModeName(artifacts.hashMode),
+            artifacts.selectors.size(), (unsigned long long)artifacts.bextMask,
+            artifacts.dotVector[0], artifacts.dotVector[1],
+            artifacts.dotVector[2], artifacts.dotVector[3]);
     for (size_t entry = 1; entry < artifacts.hash.l2Meta.size(); entry++) {
         const auto &meta = artifacts.hash.l2Meta[entry];
 
@@ -1598,16 +1561,18 @@ static void dumpL2Map(const std::vector<hwlmLiteral> &lits,
                                        : nullptr;
             const u32 runtimeId = ruleMeta ? ruleMeta->id : lit.id;
             const u32 flags = ruleMeta ? ruleMeta->flags : 0U;
-            printf("  entry=%zu slot=%u ruleIndex=%u id=%u runtimeId=%u "
-                   "litId=%u flags=0x%x len=%zu nocase=%u lit=\"%s\"\n",
-                   entry, slot, ruleIndex, runtimeId, runtimeId, lit.id, flags,
-                   lit.s.size(), lit.nocase ? 1U : 0U,
-                   haoEscapeLiteral(lit).c_str());
+            fprintf(out,
+                    "  entry=%zu slot=%u ruleIndex=%u id=%u runtimeId=%u "
+                    "litId=%u flags=0x%x len=%zu nocase=%u lit=\"%s\"\n",
+                    entry, slot, ruleIndex, runtimeId, runtimeId, lit.id, flags,
+                    lit.s.size(), lit.nocase ? 1U : 0U,
+                    haoEscapeLiteral(lit).c_str());
         }
     }
 }
+#endif // defined(DUMP_SUPPORT)
 
-#define HAO_SUMMARY_FMT(label, fmt, val)                                       \
+#define HAO_SUMMARY_FMT(out, label, fmt, val)                                  \
     do {                                                                       \
         int _blen = (int)strlen(label);                                        \
         int _cjk = 0;                                                          \
@@ -1625,7 +1590,7 @@ static void dumpL2Map(const std::vector<hwlmLiteral> &lits,
         int _pad = 42 - (_blen - _cjk);                                        \
         if (_pad < 1)                                                          \
             _pad = 1;                                                          \
-        printf("  %s%*s: " fmt "\n", label, _pad, "", val);                    \
+        fprintf(out, "  %s%*s: " fmt "\n", label, _pad, "", val);              \
     } while (0)
 
 static double haoCompilePct(u64a num, u64a den) {
@@ -1635,202 +1600,8 @@ static double haoCompilePct(u64a num, u64a den) {
     return (100.0 * (double)num) / (double)den;
 }
 
-static int haoHexValue(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    if (c >= 'a' && c <= 'f') {
-        return c - 'a' + 10;
-    }
-    if (c >= 'A' && c <= 'F') {
-        return c - 'A' + 10;
-    }
-    return -1;
-}
-
-static bool haoParseDebugLiteral(const char *env, std::string *litOut) {
-    if (!env || !litOut) {
-        return false;
-    }
-
-    litOut->clear();
-    for (const char *p = env; *p; p++) {
-        if (*p != '\\') {
-            litOut->push_back(*p);
-            continue;
-        }
-
-        p++;
-        switch (*p) {
-        case '\0':
-            litOut->push_back('\\');
-            return true;
-        case '\\':
-            litOut->push_back('\\');
-            break;
-        case '"':
-            litOut->push_back('"');
-            break;
-        case 'n':
-            litOut->push_back('\n');
-            break;
-        case 'r':
-            litOut->push_back('\r');
-            break;
-        case 't':
-            litOut->push_back('\t');
-            break;
-        case 'x': {
-            /* Need two hex digits after '\x'; guard against the string ending
-             * at 'x' so p[2] does not read past the NUL terminator. */
-            if (p[1] == '\0') {
-                return false;
-            }
-            const int hi = haoHexValue(p[1]);
-            const int lo = haoHexValue(p[2]);
-            if (hi < 0 || lo < 0) {
-                return false;
-            }
-            litOut->push_back((char)((hi << 4) | lo));
-            p += 2;
-            break;
-        }
-        default:
-            litOut->push_back(*p);
-            break;
-        }
-    }
-
-    return true;
-}
-
-static bool haoDebugPrimaryKey(u32 *keyOut) {
-    const char *env = getenv("HS_HAO_DEBUG_KEY");
-    char *end = nullptr;
-    unsigned long long key;
-
-    if (!env || !*env || !keyOut) {
-        return false;
-    }
-
-    key = strtoull(env, &end, 0);
-    if (end == env || *end || key > std::numeric_limits<u32>::max()) {
-        printf("[HAO][PrimaryKey] invalid HS_HAO_DEBUG_KEY=%s\n", env);
-        return false;
-    }
-
-    *keyOut = verify_u32(key);
-    return true;
-}
-
 template <class ArtifactsT>
-static void haoDumpPrimaryKeyState(const ArtifactsT &artifacts, u32 key) {
-    const bool inRange = key < artifacts.hash.primary.offsets.size();
-    const u32 encoded = inRange ? artifacts.hash.primary.offsets[key] : 0U;
-    const u32 offset = encoded & HAO_LAYOUT_L1_OFFSET_MASK;
-    const u32 count = encoded >> HAO_LAYOUT_L1_COUNT_SHIFT;
-
-    HAO_SUMMARY_FMT("key", "%u", key);
-    HAO_SUMMARY_FMT("inRange", "%u", inRange ? 1U : 0U);
-    HAO_SUMMARY_FMT("encoded", "0x%08x", encoded);
-    HAO_SUMMARY_FMT("isEmpty", "%u", encoded ? 0U : 1U);
-    HAO_SUMMARY_FMT("l2Offset", "%u", offset);
-    HAO_SUMMARY_FMT("l2Count", "%u", count);
-}
-
-template <class ArtifactsT>
-static void haoDumpDebugLiteral(const ArtifactsT &artifacts) {
-    const char *env = getenv("HS_HAO_DEBUG_LIT");
-    if (!env || !*env) {
-        return;
-    }
-
-    std::string litString;
-    if (!haoParseDebugLiteral(env, &litString)) {
-        printf("[HAO][LiteralKey] invalid HS_HAO_DEBUG_LIT=%s\n", env);
-        return;
-    }
-    if (litString.size() > HAO_LAYOUT_BYTES_PER_RULE_SLOT) {
-        printf("[HAO][LiteralKey] len=%zu exceeds HAO window bytes=%u\n",
-               litString.size(), HAO_LAYOUT_BYTES_PER_RULE_SLOT);
-        return;
-    }
-
-    const char *nocaseEnv = getenv("HS_HAO_DEBUG_LIT_NOCASE");
-    const bool nocase = nocaseEnv && *nocaseEnv && strcmp(nocaseEnv, "0");
-    const hwlmLiteral lit(litString, nocase, false, 0, HWLM_ALL_GROUPS, {}, {});
-    u32 keyValue = 0;
-    u32 keyMask = 0;
-    HAOKeyExpansionInfo expansion;
-    if (artifacts.hashMode == HAO_LAYOUT_HASH_DOT) {
-        const HAORuleCategory category = nocase
-                                             ? HAORuleCategory::HAO_RULE_NOCASE
-                                             : HAORuleCategory::HAO_RULE_EXACT;
-        const HAOVerifierFragment verifier = haoBuildCheck(lit, category);
-        expansion =
-            haoExpandDotKeys(verifier, artifacts.dotVector,
-                             artifacts.dotInputMask, artifacts.hash.keyBits);
-        if (!expansion.expandedKeys.empty()) {
-            keyValue = expansion.expandedKeys.front().keyValue;
-        }
-    } else {
-        haoLitKeyMask(lit, artifacts.selectors, &keyValue, &keyMask);
-        expansion = haoExpandKeys(lit, artifacts.selectors);
-    }
-
-    u32 nonEmptyKeys = 0;
-    for (const auto &expanded : expansion.expandedKeys) {
-        const u32 key = expanded.keyValue;
-        if (key < artifacts.hash.primary.offsets.size() &&
-            artifacts.hash.primary.offsets[key]) {
-            nonEmptyKeys++;
-        }
-    }
-
-    printf("[HAO][LiteralKey]\n");
-    HAO_SUMMARY_FMT("lit", "\"%s\"", haoEscapeLiteral(lit).c_str());
-    HAO_SUMMARY_FMT("len", "%u", verify_u32(litString.size()));
-    HAO_SUMMARY_FMT("nocase", "%u", nocase ? 1U : 0U);
-    HAO_SUMMARY_FMT("keyBits", "%u", artifacts.hash.keyBits);
-    HAO_SUMMARY_FMT("hashMode", "%s", haoHashModeName(artifacts.hashMode));
-    if (artifacts.hashMode == HAO_LAYOUT_HASH_DOT) {
-        char vectorBuf[64];
-        snprintf(vectorBuf, sizeof(vectorBuf), "[%u,%u,%u,%u]",
-                 artifacts.dotVector[0], artifacts.dotVector[1],
-                 artifacts.dotVector[2], artifacts.dotVector[3]);
-        HAO_SUMMARY_FMT("dotVector", "%s", vectorBuf);
-        HAO_SUMMARY_FMT("dotInputMask", "0x%016llx",
-                        (unsigned long long)artifacts.dotInputMask);
-        HAO_SUMMARY_FMT("dotInputMaskBits", "%u",
-                        popcount64(artifacts.dotInputMask));
-        HAO_SUMMARY_FMT("firstKeyValue", "%u", keyValue);
-        HAO_SUMMARY_FMT("firstKeyValueHex", "0x%x", keyValue);
-    } else {
-        HAO_SUMMARY_FMT("keyValue", "%u", keyValue);
-        HAO_SUMMARY_FMT("keyValueHex", "0x%x", keyValue);
-        HAO_SUMMARY_FMT("keyMask", "0x%x", keyMask);
-    }
-    HAO_SUMMARY_FMT("selectedAmbigBits", "%u", expansion.selectedAmbigBits);
-    HAO_SUMMARY_FMT("expandedKeyCount", "%u", expansion.expandedKeyCount);
-    HAO_SUMMARY_FMT("nonEmptyExpandedKeys", "%u", nonEmptyKeys);
-
-    const u32 printLimit = 64U;
-    u32 printed = 0;
-    for (const auto &expanded : expansion.expandedKeys) {
-        if (printed >= printLimit) {
-            printf("[HAO][LiteralKeyPrimary] omitted remaining %u keys\n",
-                   expansion.expandedKeyCount - printed);
-            break;
-        }
-        printf("[HAO][LiteralKeyPrimary] variant=%u ambiguousMask=0x%x\n",
-               expanded.variantIndex, expanded.ambiguousSelectorMask);
-        haoDumpPrimaryKeyState(artifacts, expanded.keyValue);
-        printed++;
-    }
-}
-
-template <class ArtifactsT>
-static void dumpHAOSummary(const ArtifactsT &artifacts) {
+static void dumpHAOSummary(const ArtifactsT &artifacts, FILE *out) {
     const auto &s = artifacts.summary;
     const auto &h = artifacts.hash.stats;
     const double avgRulesPerBucket =
@@ -1843,115 +1614,109 @@ static void dumpHAOSummary(const ArtifactsT &artifacts) {
     const double avgLiteralLen =
         s.totalRules ? (double)s.totalLiteralBytes / (double)s.totalRules : 0.0;
 
-    printf("[HAO][Summary]\n");
-    HAO_SUMMARY_FMT("total", "%u", s.totalRules);
-    HAO_SUMMARY_FMT("fastPath", "%u", s.fastPathRules);
-    HAO_SUMMARY_FMT("unsupported", "%u", s.unsupportedRules);
-    HAO_SUMMARY_FMT("exact", "%u", s.exactRules);
-    HAO_SUMMARY_FMT("nocase", "%u", s.nocaseRules);
-    HAO_SUMMARY_FMT("maskRules", "%u", s.maskRules);
-    HAO_SUMMARY_FMT("maskMerged", "%u", s.maskMergedRules);
-    HAO_SUMMARY_FMT("maskConflict", "%u", s.maskConflictRules);
-    HAO_SUMMARY_FMT("maskConfirm", "%u", s.maskConfirmRules);
-    HAO_SUMMARY_FMT("keyExpanded", "%u", s.keyExpandedRules);
-    HAO_SUMMARY_FMT("expandedKeys", "%u", s.totalExpandedKeys);
-    HAO_SUMMARY_FMT("maxSelectedAmbigBits", "%u", s.maxSelectedAmbigBits);
+    fprintf(out, "[HAO][Summary]\n");
+    HAO_SUMMARY_FMT(out, "total", "%u", s.totalRules);
+    HAO_SUMMARY_FMT(out, "fastPath", "%u", s.fastPathRules);
+    HAO_SUMMARY_FMT(out, "unsupported", "%u", s.unsupportedRules);
+    HAO_SUMMARY_FMT(out, "exact", "%u", s.exactRules);
+    HAO_SUMMARY_FMT(out, "nocase", "%u", s.nocaseRules);
+    HAO_SUMMARY_FMT(out, "maskRules", "%u", s.maskRules);
+    HAO_SUMMARY_FMT(out, "maskMerged", "%u", s.maskMergedRules);
+    HAO_SUMMARY_FMT(out, "maskConflict", "%u", s.maskConflictRules);
+    HAO_SUMMARY_FMT(out, "maskConfirm", "%u", s.maskConfirmRules);
+    HAO_SUMMARY_FMT(out, "keyExpanded", "%u", s.keyExpandedRules);
+    HAO_SUMMARY_FMT(out, "expandedKeys", "%u", s.totalExpandedKeys);
+    HAO_SUMMARY_FMT(out, "maxSelectedAmbigBits", "%u", s.maxSelectedAmbigBits);
 
-    printf("[HAO][Extract]\n");
-    HAO_SUMMARY_FMT("extractMode", "%s", haoHashModeName(artifacts.hashMode));
-    HAO_SUMMARY_FMT("windowBytes", "%u", HAO_LAYOUT_BYTES_PER_RULE_SLOT);
+    fprintf(out, "[HAO][Extract]\n");
+    HAO_SUMMARY_FMT(out, "extractMode", "%s",
+                    haoHashModeName(artifacts.hashMode));
+    HAO_SUMMARY_FMT(out, "windowBytes", "%u", HAO_LAYOUT_BYTES_PER_RULE_SLOT);
     if (artifacts.hashMode == HAO_LAYOUT_HASH_DOT) {
         char vectorBuf[64];
         snprintf(vectorBuf, sizeof(vectorBuf), "[%u,%u,%u,%u]",
                  artifacts.dotVector[0], artifacts.dotVector[1],
                  artifacts.dotVector[2], artifacts.dotVector[3]);
-        HAO_SUMMARY_FMT("dotVector", "%s", vectorBuf);
-        HAO_SUMMARY_FMT("dotInputMask", "0x%016llx",
+        HAO_SUMMARY_FMT(out, "dotVector", "%s", vectorBuf);
+        HAO_SUMMARY_FMT(out, "dotInputMask", "0x%016llx",
                         (unsigned long long)artifacts.dotInputMask);
-        HAO_SUMMARY_FMT("dotInputMaskBits", "%u",
+        HAO_SUMMARY_FMT(out, "dotInputMaskBits", "%u",
                         popcount64(artifacts.dotInputMask));
     } else {
-        HAO_SUMMARY_FMT("bextMask(runtime)", "0x%016llx",
+        HAO_SUMMARY_FMT(out, "bextMask(runtime)", "0x%016llx",
                         (unsigned long long)artifacts.bextMask);
-        HAO_SUMMARY_FMT("primaryBitmapBytes", "%zu",
+        HAO_SUMMARY_FMT(out, "primaryBitmapBytes", "%zu",
                         artifacts.hash.bitmap.bits.size());
     }
-    HAO_SUMMARY_FMT("keyBits", "%u", artifacts.hash.keyBits);
-    HAO_SUMMARY_FMT("selectorCount", "%zu", artifacts.selectors.size());
+    HAO_SUMMARY_FMT(out, "keyBits", "%u", artifacts.hash.keyBits);
+    HAO_SUMMARY_FMT(out, "selectorCount", "%zu", artifacts.selectors.size());
 
-    printf("[HAO][Length]\n");
-    HAO_SUMMARY_FMT("minLiteralLen", "%u", s.minLiteralLen);
-    HAO_SUMMARY_FMT("maxLiteralLen", "%u", s.maxLiteralLen);
-    HAO_SUMMARY_FMT("avgLiteralLen", "%.5f", avgLiteralLen);
-    HAO_SUMMARY_FMT("literalLenLe4", "%u", s.literalLenLe4);
-    HAO_SUMMARY_FMT("literalLen5To8", "%u", s.literalLen5To8);
-
-    {
-        u32 debugKey = 0;
-        if (haoDebugPrimaryKey(&debugKey)) {
-            printf("[HAO][PrimaryKey]\n");
-            haoDumpPrimaryKeyState(artifacts, debugKey);
-        }
-    }
-    haoDumpDebugLiteral(artifacts);
+    fprintf(out, "[HAO][Length]\n");
+    HAO_SUMMARY_FMT(out, "minLiteralLen", "%u", s.minLiteralLen);
+    HAO_SUMMARY_FMT(out, "maxLiteralLen", "%u", s.maxLiteralLen);
+    HAO_SUMMARY_FMT(out, "avgLiteralLen", "%.5f", avgLiteralLen);
+    HAO_SUMMARY_FMT(out, "literalLenLe4", "%u", s.literalLenLe4);
+    HAO_SUMMARY_FMT(out, "literalLen5To8", "%u", s.literalLen5To8);
 
     if (!artifacts.hash.valid || !h.nonEmptyPrimary) {
         return;
     }
 
-    printf("[HAO][Hash]\n");
-    HAO_SUMMARY_FMT("nonEmptyPrimary", "%u", h.nonEmptyPrimary);
-    HAO_SUMMARY_FMT("collisionBuckets", "%u", h.collisionBuckets);
-    HAO_SUMMARY_FMT("collisionBucketPct", "%.5f",
+    fprintf(out, "[HAO][Hash]\n");
+    HAO_SUMMARY_FMT(out, "nonEmptyPrimary", "%u", h.nonEmptyPrimary);
+    HAO_SUMMARY_FMT(out, "collisionBuckets", "%u", h.collisionBuckets);
+    HAO_SUMMARY_FMT(out, "collisionBucketPct", "%.5f",
                     haoCompilePct(h.collisionBuckets, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("avgRulesPerBucket", "%.5f", avgRulesPerBucket);
-    HAO_SUMMARY_FMT("minRulesPerBucket", "%u", h.minRulesPerBucket);
-    HAO_SUMMARY_FMT("maxRulesPerBucket", "%u", h.maxRulesPerBucket);
-    HAO_SUMMARY_FMT("ruleBucketsEq1", "%u", h.ruleBucketsEq1);
-    HAO_SUMMARY_FMT("ruleBucketsEq1Pct", "%.5f",
+    HAO_SUMMARY_FMT(out, "avgRulesPerBucket", "%.5f", avgRulesPerBucket);
+    HAO_SUMMARY_FMT(out, "minRulesPerBucket", "%u", h.minRulesPerBucket);
+    HAO_SUMMARY_FMT(out, "maxRulesPerBucket", "%u", h.maxRulesPerBucket);
+    HAO_SUMMARY_FMT(out, "ruleBucketsEq1", "%u", h.ruleBucketsEq1);
+    HAO_SUMMARY_FMT(out, "ruleBucketsEq1Pct", "%.5f",
                     haoCompilePct(h.ruleBucketsEq1, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("ruleBuckets2To4", "%u", h.ruleBuckets2To4);
-    HAO_SUMMARY_FMT("ruleBuckets2To4Pct", "%.5f",
+    HAO_SUMMARY_FMT(out, "ruleBuckets2To4", "%u", h.ruleBuckets2To4);
+    HAO_SUMMARY_FMT(out, "ruleBuckets2To4Pct", "%.5f",
                     haoCompilePct(h.ruleBuckets2To4, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("ruleBucketsGt4", "%u", h.ruleBucketsGt4);
-    HAO_SUMMARY_FMT("ruleBucketsGt4Pct", "%.5f",
+    HAO_SUMMARY_FMT(out, "ruleBucketsGt4", "%u", h.ruleBucketsGt4);
+    HAO_SUMMARY_FMT(out, "ruleBucketsGt4Pct", "%.5f",
                     haoCompilePct(h.ruleBucketsGt4, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("logicalEntries", "%u", h.totalL2Entries);
-    HAO_SUMMARY_FMT("physicalEntries", "%u", h.l2PhysicalEntries);
-    HAO_SUMMARY_FMT("avgLogicalEntriesPerBucket", "%.5f",
+    HAO_SUMMARY_FMT(out, "logicalEntries", "%u", h.totalL2Entries);
+    HAO_SUMMARY_FMT(out, "physicalEntries", "%u", h.l2PhysicalEntries);
+    HAO_SUMMARY_FMT(out, "avgLogicalEntriesPerBucket", "%.5f",
                     avgLogicalEntriesPerBucket);
-    HAO_SUMMARY_FMT("minLogicalEntriesPerBucket", "%u", h.minEntriesPerBucket);
-    HAO_SUMMARY_FMT("maxLogicalEntriesPerBucket", "%u", h.maxEntriesPerKey);
-    HAO_SUMMARY_FMT("logicalEntryBucketsEq1", "%u", h.entryBucketsEq1);
-    HAO_SUMMARY_FMT("logicalEntryBucketsEq1Pct", "%.5f",
+    HAO_SUMMARY_FMT(out, "minLogicalEntriesPerBucket", "%u",
+                    h.minEntriesPerBucket);
+    HAO_SUMMARY_FMT(out, "maxLogicalEntriesPerBucket", "%u",
+                    h.maxEntriesPerKey);
+    HAO_SUMMARY_FMT(out, "logicalEntryBucketsEq1", "%u", h.entryBucketsEq1);
+    HAO_SUMMARY_FMT(out, "logicalEntryBucketsEq1Pct", "%.5f",
                     haoCompilePct(h.entryBucketsEq1, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("logicalEntryBuckets2To4", "%u", h.entryBuckets2To4);
-    HAO_SUMMARY_FMT("logicalEntryBuckets2To4Pct", "%.5f",
+    HAO_SUMMARY_FMT(out, "logicalEntryBuckets2To4", "%u", h.entryBuckets2To4);
+    HAO_SUMMARY_FMT(out, "logicalEntryBuckets2To4Pct", "%.5f",
                     haoCompilePct(h.entryBuckets2To4, h.nonEmptyPrimary));
-    HAO_SUMMARY_FMT("logicalEntryBucketsGt4", "%u", h.entryBucketsGt4);
-    HAO_SUMMARY_FMT("logicalEntryBucketsGt4Pct", "%.5f",
+    HAO_SUMMARY_FMT(out, "logicalEntryBucketsGt4", "%u", h.entryBucketsGt4);
+    HAO_SUMMARY_FMT(out, "logicalEntryBucketsGt4Pct", "%.5f",
                     haoCompilePct(h.entryBucketsGt4, h.nonEmptyPrimary));
 
-    printf("[HAO][L2-Intern]\n");
+    fprintf(out, "[HAO][L2-Intern]\n");
 #if HAO_L2_BUCKET_INTERN
-    HAO_SUMMARY_FMT("enabled", "%u", 1U);
+    HAO_SUMMARY_FMT(out, "enabled", "%u", 1U);
 #else
-    HAO_SUMMARY_FMT("enabled", "%u", 0U);
+    HAO_SUMMARY_FMT(out, "enabled", "%u", 0U);
 #endif
-    HAO_SUMMARY_FMT("logicalEntries", "%u", h.totalL2Entries);
-    HAO_SUMMARY_FMT("physicalEntries", "%u", h.l2PhysicalEntries);
-    HAO_SUMMARY_FMT("savedEntries", "%u", h.l2InternSavedEntries);
-    HAO_SUMMARY_FMT("savedEntryPct", "%.5f",
+    HAO_SUMMARY_FMT(out, "logicalEntries", "%u", h.totalL2Entries);
+    HAO_SUMMARY_FMT(out, "physicalEntries", "%u", h.l2PhysicalEntries);
+    HAO_SUMMARY_FMT(out, "savedEntries", "%u", h.l2InternSavedEntries);
+    HAO_SUMMARY_FMT(out, "savedEntryPct", "%.5f",
                     haoCompilePct(h.l2InternSavedEntries, h.totalL2Entries));
-    HAO_SUMMARY_FMT("uniqueBuckets", "%u", h.l2InternUniqueBuckets);
-    HAO_SUMMARY_FMT("hitBuckets", "%u", h.l2InternHitBuckets);
-    HAO_SUMMARY_FMT("savedSingleEntryBuckets", "%u",
+    HAO_SUMMARY_FMT(out, "uniqueBuckets", "%u", h.l2InternUniqueBuckets);
+    HAO_SUMMARY_FMT(out, "hitBuckets", "%u", h.l2InternHitBuckets);
+    HAO_SUMMARY_FMT(out, "savedSingleEntryBuckets", "%u",
                     h.l2InternSavedSingleEntryBuckets);
-    HAO_SUMMARY_FMT("savedMultiEntryBuckets", "%u",
+    HAO_SUMMARY_FMT(out, "savedMultiEntryBuckets", "%u",
                     h.l2InternSavedMultiEntryBuckets);
-    HAO_SUMMARY_FMT("maxRefCount", "%u", h.l2InternMaxRefCount);
-    HAO_SUMMARY_FMT("lookupChecks", "%u", h.l2InternLookupChecks);
-    HAO_SUMMARY_FMT("lookupMisses", "%u", h.l2InternLookupMisses);
+    HAO_SUMMARY_FMT(out, "maxRefCount", "%u", h.l2InternMaxRefCount);
+    HAO_SUMMARY_FMT(out, "lookupChecks", "%u", h.l2InternLookupChecks);
+    HAO_SUMMARY_FMT(out, "lookupMisses", "%u", h.l2InternLookupMisses);
 }
 
 static bool normalizeMaskCmp(const hwlmLiteral &lit, std::array<u8, 8> *mskOut,
@@ -2876,32 +2641,6 @@ static bool haoSelFixed(std::vector<HAOBitSelector> *selectors, u32 *keyBitsOut,
         finalizeBitSelectors(selectors, keyBitsOut);
     };
 
-    const char *env = getenv("HS_HAO_BEXT_MASK");
-    if (env && *env) {
-        char *end = nullptr;
-        const u64a mask = (u64a)strtoull(env, &end, 0);
-        const u32 bitCount = popcount64(mask);
-
-        selectors->clear();
-        if (keyBitsOut) {
-            *keyBitsOut = 0;
-        }
-
-        if (end == env || *end || !mask ||
-            bitCount > HAO_LAYOUT_MAX_SELECTORS) {
-            printf("[HAO][BEXT] invalid HS_HAO_BEXT_MASK=%s "
-                   "(popcount=%u targetBits=%u)\n",
-                   env, bitCount, targetBits);
-            return true;
-        }
-        if (bitCount != targetBits) {
-            return false;
-        }
-
-        buildSelectorsFromMask(mask);
-        return true;
-    }
-
 #if HAO_FIXED_BEXT_MASK
     const u64a mask = (u64a)HAO_FIXED_BEXT_MASK;
 
@@ -3026,33 +2765,23 @@ static bool haoCompileDotCore(const std::vector<hwlmLiteral> &lits,
     artifacts->hashMode = HAO_LAYOUT_HASH_DOT;
     artifacts->selectorName = "dot-forced";
     artifacts->dotVector = HAO_DOT_DEFAULT_VECTOR;
-    const bool forcedDotVector = haoParseDotVectorEnv(&artifacts->dotVector);
     if (!haoDotVectorHasNonZeroLane(artifacts->dotVector)) {
         artifacts->hash.flags |= HAO_ARTIFACT_FLAG_PARTIAL_COVERAGE;
         return false;
     }
-    HAODotHashChoice dotChoice;
-    if (forcedDotVector) {
-        dotChoice = haoEvaluateDotHashChoice(
-            lits, artifacts->dotVector, HAO_DOT_INPUT_MASK_MAX_BITS, false);
-    } else {
-        dotChoice = haoChooseDotHash(lits, artifacts->dotVector);
-    }
+    HAODotHashChoice dotChoice = haoChooseDotHash(lits, artifacts->dotVector);
     if (dotChoice.valid) {
         artifacts->dotInputMask = dotChoice.dotInputMask;
         artifacts->dotVector = dotChoice.dotVector;
     } else {
         artifacts->dotInputMask =
             haoChooseDotInputMask(lits, artifacts->dotVector);
-        if (!forcedDotVector) {
-            artifacts->dotVector = haoChooseDynamicDotVector(
-                lits, artifacts->dotInputMask, artifacts->dotVector);
-        }
+        artifacts->dotVector = haoChooseDynamicDotVector(
+            lits, artifacts->dotInputMask, artifacts->dotVector);
     }
-    if ((!haoDotVectorHasNonZeroLane(artifacts->dotVector) ||
-         !haoDotMaskBuilds(lits, artifacts->dotVector,
-                           artifacts->dotInputMask)) &&
-        !forcedDotVector) {
+    if (!haoDotVectorHasNonZeroLane(artifacts->dotVector) ||
+        !haoDotMaskBuilds(lits, artifacts->dotVector,
+                          artifacts->dotInputMask)) {
         artifacts->dotVector = haoBuildDotVectorForLits(lits);
         artifacts->dotInputMask =
             haoChooseDotInputMask(lits, artifacts->dotVector);
@@ -3165,16 +2894,26 @@ static double haoAutoStatsCost(const HAOCompileSummary &summary,
         haoPct(stats.entryBucketsGt4, stats.nonEmptyPrimary);
     const double avgRules = haoAvgRulesPerBucket(stats);
     const double avgEntries = haoAvgEntriesPerBucket(stats);
+    // Bit density: expanded keys per bitmap bit. Grows ~2x per dropped key
+    // bit and proxies the false-match pressure on L2 verification.
+    const double densPct = static_cast<double>(summary.totalExpandedKeys) *
+                           100.0 / static_cast<double>(1U << keyBits);
+    const double footMiB =
+        haoEstimateFootprintMiB(stats, summary.totalRules, keyBits);
+    // log2 of bitmap size in KiB; a linear weight here is an exponential
+    // penalty on bitmap growth, pricing the cache-tier gain of small tables.
+    const double memLog =
+        std::log2(static_cast<double>(1U << keyBits) / 8.0 / 1024.0);
 
-    // Compile-time proxy for runtime cost. Primary occupancy is useful but not
-    // dominant: measured corpora showed that collision depth and large rule
-    // buckets predict L2 pressure better than table density alone.
-    double cost =
-        haoPrimaryOccupancyPct(stats.nonEmptyPrimary, keyBits) * 25.0 +
-        collisionPct * 4.0 + ruleGt4Pct * 18.0 + entryGt4Pct * 12.0 +
-        avgRules * 8.0 + avgEntries * 4.0 + expansionAvg * 0.30 +
-        haoEstimateFootprintMiB(stats, summary.totalRules, keyBits) * 0.15 +
-        static_cast<double>(stats.maxRulesPerBucket) * 0.05;
+    // Compile-time proxy for runtime cost, weights calibrated offline
+    // against measured throughput peaks over 6 ruleset/corpus pairs (v4).
+    // Density and deep-bucket terms keep tiny tables honest; footprint and
+    // memLog reward cache-tier-friendly bitmap sizes.
+    double cost = collisionPct * 4.1344 + ruleGt4Pct * 7.9487 +
+                  entryGt4Pct * 24.9363 + avgRules * 4.688 +
+                  avgEntries * 6.1721 + expansionAvg * 0.3147 +
+                  densPct * 20.0545 + footMiB * 0.8799 + memLog * 6.5261 +
+                  static_cast<double>(stats.maxRulesPerBucket) * 0.0965;
 
     // Soft guardrails catch compact-but-noisy tables without forbidding
     // smaller key widths that still have clean bucket distributions.
@@ -3593,7 +3332,8 @@ static bool haoBuildWithMode(const std::vector<hwlmLiteral> &lits,
 
 static bool haoBuildAuto(const std::vector<hwlmLiteral> &lits,
                          HAOCompileArtifacts *artifacts,
-                         const std::vector<u32> *reportOrder) {
+                         const std::vector<u32> *reportOrder,
+                         const Grey &grey) {
     assert(artifacts);
 
     struct Candidate {
@@ -3614,14 +3354,41 @@ static bool haoBuildAuto(const std::vector<hwlmLiteral> &lits,
     HAOSelectorMode bestMode = HAOSelectorMode::DEFAULT;
     const char *bestName = nullptr;
     u32 bestKeyBits = 0;
-    const u32 minKeyBits =
-        std::min<u32>(HAO_AUTO_MIN_KEY_BITS, HAO_LAYOUT_KEY_BITS);
+    const u32 forcedBits = haoForcedKeyBits(grey);
+    const u32 debugMinBits = haoDebugAutoMinBits(grey);
+    u32 autoMinBits = std::min<u32>(HAO_AUTO_MIN_KEY_BITS, HAO_LAYOUT_KEY_BITS);
+    if (debugMinBits && debugMinBits < autoMinBits) {
+        autoMinBits = debugMinBits;
+    }
+    const u32 minKeyBits = forcedBits ? forcedBits : autoMinBits;
+    const u32 maxKeyBits = forcedBits ? forcedBits : HAO_LAYOUT_KEY_BITS;
 
-    for (u32 keyBits = minKeyBits; keyBits <= HAO_LAYOUT_KEY_BITS; keyBits++) {
+    for (u32 keyBits = minKeyBits; keyBits <= maxKeyBits; keyBits++) {
         for (const auto &candidate : candidates) {
             HAOCandidateStats current;
-            if (!haoBuildCandidateStats(lits, candidate.mode, candidate.name,
-                                        keyBits, &current)) {
+            const bool ok = haoBuildCandidateStats(
+                lits, candidate.mode, candidate.name, keyBits, &current);
+            if (debugMinBits) {
+                printf("[HAO][AutoCand] name=%s targetBits=%u keyBits=%u ok=%d "
+                       "cost=%.4f rules=%u expanded=%u nonEmpty=%u "
+                       "collision=%u rulesInB=%u l2=%u rGt4=%u eGt4=%u "
+                       "maxRules=%u physL2=%u footMiB=%.3f\n",
+                       candidate.name, keyBits, current.keyBits, ok ? 1 : 0,
+                       current.cost, current.summary.totalRules,
+                       current.summary.totalExpandedKeys,
+                       current.hashStats.nonEmptyPrimary,
+                       current.hashStats.collisionBuckets,
+                       current.hashStats.totalRulesInBuckets,
+                       current.hashStats.totalL2Entries,
+                       current.hashStats.ruleBucketsGt4,
+                       current.hashStats.entryBucketsGt4,
+                       current.hashStats.maxRulesPerBucket,
+                       current.hashStats.l2PhysicalEntries,
+                       haoEstimateFootprintMiB(current.hashStats,
+                                               current.summary.totalRules,
+                                               current.keyBits));
+            }
+            if (!ok) {
                 continue;
             }
 
@@ -3649,24 +3416,25 @@ static bool haoBuildAuto(const std::vector<hwlmLiteral> &lits,
 }
 
 void haoDumpArtifacts(const std::vector<hwlmLiteral> &lits,
-                      const HAOCompileArtifacts &artifacts) {
-    printf("\n========== [HAO][Build-Artifacts] Begin ==========\n");
-    printf("[HAO][Params] key_bits(fixed=%u, selector_count=%zu) "
-           "l2_key_bits=%u l2_capacity=%u l2_entry_capacity=%u\n",
-           artifacts.hash.keyBits, artifacts.selectors.size(),
-           HAO_BUILD_L2_KEY_BITS, HAO_BUILD_MAX_L2_ENTRIES,
-           HAO_LAYOUT_RULE_SLOTS_PER_ENTRY);
-    dumpRuleBits(lits);
+                      const HAOCompileArtifacts &artifacts, FILE *out) {
+    fprintf(out, "\n========== [HAO][Build-Artifacts] Begin ==========\n");
+    fprintf(out,
+            "[HAO][Params] key_bits(fixed=%u, selector_count=%zu) "
+            "l2_key_bits=%u l2_capacity=%u l2_entry_capacity=%u\n",
+            artifacts.hash.keyBits, artifacts.selectors.size(),
+            HAO_BUILD_L2_KEY_BITS, HAO_BUILD_MAX_L2_ENTRIES,
+            HAO_LAYOUT_RULE_SLOTS_PER_ENTRY);
+    dumpRuleBits(lits, out);
     if (artifacts.hashMode == HAO_LAYOUT_HASH_BEXT) {
-        dumpSelectors(artifacts.selectors);
+        dumpSelectors(artifacts.selectors, out);
     }
-    dumpExtractDescriptor(artifacts);
+    dumpExtractDescriptor(artifacts, out);
     if (artifacts.hashMode == HAO_LAYOUT_HASH_BEXT) {
-        dumpRuleKeys(lits, artifacts.selectors, artifacts.hash.keyBits);
+        dumpRuleKeys(lits, artifacts.selectors, artifacts.hash.keyBits, out);
     }
-    dumpHAOSummary(artifacts);
-    printf("[HAO][Flags] hash.flags=0x%x\n", artifacts.hash.flags);
-    printf("========== [HAO][Build-Artifacts] End ==========\n\n");
+    dumpHAOSummary(artifacts, out);
+    fprintf(out, "[HAO][Flags] hash.flags=0x%x\n", artifacts.hash.flags);
+    fprintf(out, "========== [HAO][Build-Artifacts] End ==========\n\n");
 }
 
 } // namespace
@@ -3722,12 +3490,13 @@ bool haoHasSveBitPermPrereq(const target_t &target) {
 #endif
 }
 
-static bool
-buildHAOArtifactsWithPolicy(const std::vector<hwlmLiteral> &lits,
-                            HAOCompileArtifacts *artifacts,
-                            HAODumpMode dumpMode, HAOHashPolicy hashPolicy,
-                            const char *selectorNameOverride = nullptr,
-                            const std::vector<u32> *reportOrder = nullptr) {
+static bool buildHAOArtifactsWithPolicy(const std::vector<hwlmLiteral> &lits,
+                                        HAOCompileArtifacts *artifacts,
+                                        HAODumpMode dumpMode,
+                                        HAOHashPolicy hashPolicy,
+                                        const char *selectorNameOverride,
+                                        const std::vector<u32> *reportOrder,
+                                        const Grey &grey) {
     if (!artifacts) {
         return false;
     }
@@ -3738,9 +3507,9 @@ buildHAOArtifactsWithPolicy(const std::vector<hwlmLiteral> &lits,
             return false;
         }
     } else {
-        const HAOSelectorPolicy policy = haoSelectorPolicy();
+        const HAOSelectorPolicy policy = haoSelectorPolicy(grey);
         if (policy == HAOSelectorPolicy::AUTO) {
-            if (!haoBuildAuto(lits, artifacts, reportOrder)) {
+            if (!haoBuildAuto(lits, artifacts, reportOrder, grey)) {
                 return false;
             }
         } else {
@@ -3759,23 +3528,23 @@ buildHAOArtifactsWithPolicy(const std::vector<hwlmLiteral> &lits,
 
     if (dumpMode == HAODumpMode::Full) {
         printf("[HAO][Selector] mode=%s\n", artifacts->selectorName);
-        haoDumpArtifacts(lits, *artifacts);
+        haoDumpArtifacts(lits, *artifacts, stdout);
     } else if (dumpMode == HAODumpMode::SummaryIfEnabled &&
-               haoStatsDumpEnabled()) {
-        printf("[HAO][Selector] mode=%s\n", artifacts->selectorName);
-        dumpHAOSummary(*artifacts);
+               (grey.haoDebug & 2)) {
+        fprintf(stderr, "[HAO][Selector] mode=%s\n", artifacts->selectorName);
+        dumpHAOSummary(*artifacts, stderr);
     }
     return true;
 }
 
 bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
                        HAOCompileArtifacts *artifacts, HAODumpMode dumpMode,
-                       const std::vector<u32> *reportOrder) {
-    HAOHashPolicy hashPolicy = haoHashPolicy();
+                       const std::vector<u32> *reportOrder, const Grey &grey) {
+    HAOHashPolicy hashPolicy = haoHashPolicy(grey);
     bool defaultMappedToDot = false;
 #if !defined(__ARM_FEATURE_SVE2_BITPERM)
     if (hashPolicy == HAOHashPolicy::BEXT) {
-        if (haoHashPolicyIsExplicit()) {
+        if (haoHashPolicyIsExplicit(grey)) {
             return false;
         }
         hashPolicy = HAOHashPolicy::DOT;
@@ -3784,19 +3553,60 @@ bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
 #endif
     return buildHAOArtifactsWithPolicy(
         lits, artifacts, dumpMode, hashPolicy,
-        defaultMappedToDot ? "default-auto" : nullptr, reportOrder);
+        defaultMappedToDot ? "default-auto" : nullptr, reportOrder, grey);
 }
 
-void dumpHAOCompileStats(const HAOCompileArtifacts &artifacts) {
-    printf("[HAO][Selector] mode=%s\n", artifacts.selectorName);
-    dumpHAOSummary(artifacts);
+#if defined(DUMP_SUPPORT)
+/* Sanitise a matcher name for use in dump file names: keep alnum and
+ * '.', '-', '_', replace anything else (e.g. '/') with '_'. */
+static std::string haoDumpMatcherTag(const char *matcher) {
+    std::string tag = (matcher && *matcher) ? matcher : "unknown";
+    for (char &c : tag) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') || c == '.' || c == '-' ||
+                        c == '_';
+        if (!ok) {
+            c = '_';
+        }
+    }
+    return tag;
+}
+#endif
+
+void dumpHAOCompileStats(const HAOCompileArtifacts &artifacts, const Grey &grey,
+                         const char *matcher) {
+#if defined(DUMP_SUPPORT)
+    if ((grey.dumpFlags & Grey::DUMP_HAO) && !grey.dumpPath.empty()) {
+        const std::string tag = haoDumpMatcherTag(matcher);
+        StdioFile f(grey.dumpPath + "hao_compile_stats_" + tag + ".txt", "w");
+        fprintf(f, "matcher: %s\n", tag.c_str());
+        fprintf(f, "[HAO][Selector] mode=%s\n", artifacts.selectorName);
+        dumpHAOSummary(artifacts, f);
+    }
+#else
+    (void)matcher;
+#endif
+    if (grey.haoDebug & 2) {
+        fprintf(stderr, "[HAO][Selector] mode=%s\n", artifacts.selectorName);
+        dumpHAOSummary(artifacts, stderr);
+    }
 }
 
 void dumpHAOL2MapIfEnabled(const std::vector<hwlmLiteral> &lits,
-                           const HAOCompileArtifacts &artifacts) {
-    if (haoL2MapDumpEnabled()) {
-        dumpL2Map(lits, artifacts);
+                           const HAOCompileArtifacts &artifacts,
+                           const Grey &grey, const char *matcher) {
+#if defined(DUMP_SUPPORT)
+    if ((grey.dumpFlags & Grey::DUMP_HAO) && !grey.dumpPath.empty()) {
+        const std::string tag = haoDumpMatcherTag(matcher);
+        StdioFile f(grey.dumpPath + "hao_l2map_" + tag + ".txt", "w");
+        dumpL2Map(lits, artifacts, tag, f);
     }
+#else
+    (void)lits;
+    (void)artifacts;
+    (void)grey;
+    (void)matcher;
+#endif
 }
 
 bool haoArtifactsOk(const HAOCompileArtifacts &artifacts) {
@@ -3876,8 +3686,8 @@ bool analyzeHAOFeasibility(const target_t &target,
         out = tempStorage.get();
     }
 
-    const HAOHashPolicy requestedHashPolicy = haoHashPolicy();
-    const bool explicitHashPolicy = haoHashPolicyIsExplicit();
+    const HAOHashPolicy requestedHashPolicy = haoHashPolicy(grey);
+    const bool explicitHashPolicy = haoHashPolicyIsExplicit(grey);
     const bool canUseBext = haoCanUseBextFastPath(target);
     HAOHashPolicy effectiveHashPolicy = requestedHashPolicy;
     bool defaultMappedToDot = false;
@@ -3896,9 +3706,9 @@ bool analyzeHAOFeasibility(const target_t &target,
         defaultMappedToDot = true;
     }
 
-    bool built =
-        buildHAOArtifactsWithPolicy(lits, out, HAODumpMode::None,
-                                    effectiveHashPolicy, nullptr, reportOrder);
+    bool built = buildHAOArtifactsWithPolicy(lits, out, HAODumpMode::None,
+                                             effectiveHashPolicy, nullptr,
+                                             reportOrder, grey);
     if (built && defaultMappedToDot) {
         out->selectorName = "default-auto";
     }

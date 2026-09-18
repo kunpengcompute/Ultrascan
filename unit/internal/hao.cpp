@@ -2123,18 +2123,12 @@ TEST(HAOCompile, AnalyzeHaoFeasibilityRejectsEmptyAndSveOnlyShortRules) {
 
 TEST(HAOCompile, AnalyzeHaoFeasibilityRejectsNoSelectors) {
 #if defined(__aarch64__)
-    const char *hashMode = getenv("HS_HAO_HASH_MODE");
-    if (hashMode && *hashMode &&
-        (!strcmp(hashMode, "dot") || !strcmp(hashMode, "DOT") ||
-         !strcmp(hashMode, "1"))) {
-        SUCCEED() << "NO_SELECTORS is a BEXT-only feasibility path";
-        return;
-    }
     if (!haoCurrentBinaryHasBitPerm()) {
         SUCCEED() << "NO_SELECTORS path requires BEXT-capable build";
         return;
     }
     auto grey = makeHaoGrey(true);
+    grey.haoHashMode = 1; /* force BEXT: NO_SELECTORS is a BEXT-only path */
     HAOFeasibilityResult result;
     HAOCompileArtifacts artifacts;
     hs_platform_info bitpermInfo = {};

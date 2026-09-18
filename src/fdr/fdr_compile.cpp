@@ -76,19 +76,19 @@ namespace ue2 {
 
 namespace {
 
-static bool haoStatsEnabled(void) {
-    const char *env = getenv("HS_HAO_STATS");
-    return env && *env && *env != '0';
+/* In fat (dual-arch) builds the same HAO matcher is compiled once per slice
+ * with identical artifacts; the x86 slice is tagged with an "x86/" debugName
+ * prefix. Dump stats only for the primary slice to avoid duplicate output. */
+static bool haoShouldDumpSlice(const HWLMProto &proto) {
+    return !proto.debugName || strncmp(proto.debugName, "x86/", 4) != 0;
 }
 
-static bool haoShouldPrintCompileStats(const HWLMProto &proto) {
-    if (!haoStatsEnabled()) {
+static bool haoShouldPrintCompileStats(const HWLMProto &proto,
+                                       const Grey &grey) {
+    if (!(grey.haoDebug & 2)) {
         return false;
     }
-    if (!proto.debugName) {
-        return true;
-    }
-    return strncmp(proto.debugName, "x86/", 4) != 0;
+    return haoShouldDumpSlice(proto);
 }
 
 static vector<u32> buildHaoReportOrderRank(
@@ -906,6 +906,45 @@ addIncludedInfo(vector<hwlmLiteral> &lits, u32 nBuckets,
 
 } // namespace
 
+/* HAO engine-selection thresholds (scale + length). */
+#define HAO_SEL_LITS_HIGH 4000
+#define HAO_SEL_LITS_LOW 1000
+#define HAO_SEL_MIN_AVG_LEN 7.5
+
+/** \brief Compile-time gate deciding whether allowHao may use HAO.
+ *
+ * Only compile-visible ruleset stats are used; corpus-correlated
+ * false-positive storms (qiming/short1b class) cannot be seen here, so
+ * grey allowHao:0 remains the operational override. */
+static bool haoEngineSelectionOk(const vector<hwlmLiteral> &lits,
+                                 const Grey &grey) {
+    const size_t count = lits.size();
+    size_t totalLen = 0;
+    for (const auto &lit : lits) {
+        totalLen += lit.s.size();
+    }
+    const double avgLen = count ? (double)totalLen / (double)count : 0.0;
+
+    bool ok;
+    const char *reason;
+    if (count >= HAO_SEL_LITS_HIGH) {
+        ok = true;
+        reason = "SCALE_ACCEPT";
+    } else if (count >= HAO_SEL_LITS_LOW) {
+        ok = avgLen >= HAO_SEL_MIN_AVG_LEN;
+        reason = ok ? "MID_LEN_ACCEPT" : "REJECT_LEN";
+    } else {
+        ok = false;
+        reason = "REJECT_SMALL";
+    }
+
+    if (grey.haoDebug & 1) {
+        fprintf(stderr, "[HAO][EngSel] lits=%zu avgLen=%.2f decision=%s\n",
+                count, avgLen, reason);
+    }
+    return ok;
+}
+
 static unique_ptr<HWLMProto>
 fdrBuildProtoInternal(u8 engType, vector<hwlmLiteral> &lits, bool make_small,
                       const target_t &target, const Grey &grey, u32 hint) {
@@ -928,6 +967,10 @@ fdrBuildProtoInternal(u8 engType, vector<hwlmLiteral> &lits, bool make_small,
         haoDes = getFdrDescription(hint);
     } else if (hint == HINT_INVALID) {
         haoDes = chooseHaoEngine(target, lits, make_small);
+        if (grey.allowHao && haoDes && haoDes->getID() == HAO_ENGINE_ID &&
+            !haoEngineSelectionOk(lits, grey)) {
+            haoDes.reset();
+        }
     }
 
     if (haoDes && haoDes->getID() == HAO_ENGINE_ID) {
@@ -1010,14 +1053,13 @@ static bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
     }
     bytecode_ptr<u8> matcherBlob = nullptr;
     if (proto.fdrEng && proto.fdrEng->getID() == HAO_ENGINE_ID) {
-        const bool printStats = haoShouldPrintCompileStats(proto);
-        if (printStats) {
-            printf("[HAO][Compile] matcher=%s proto=%p lits=%zu bits=%u "
-                   "stride=%u\n",
-                   proto.debugName ? proto.debugName : "unknown",
-                   (const void *)&proto, proto.lits.size(), proto.fdrEng->bits,
-                   proto.fdrEng->stride);
-            fflush(stdout);
+        if (haoShouldPrintCompileStats(proto, grey)) {
+            fprintf(stderr,
+                    "[HAO][Compile] matcher=%s proto=%p lits=%zu bits=%u "
+                    "stride=%u\n",
+                    proto.debugName ? proto.debugName : "unknown",
+                    (const void *)&proto, proto.lits.size(), proto.fdrEng->bits,
+                    proto.fdrEng->stride);
         }
 
         HAOCompileArtifacts *haoArtifacts = proto.haoArtifacts.get();
@@ -1029,10 +1071,10 @@ static bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
             assert(0 && "HAO report metadata mismatch");
             return nullptr;
         }
-        dumpHAOL2MapIfEnabled(proto.lits, *haoArtifacts);
-
-        if (printStats) {
-            dumpHAOCompileStats(*haoArtifacts);
+        if (haoShouldDumpSlice(proto)) {
+            dumpHAOL2MapIfEnabled(proto.lits, *haoArtifacts, grey,
+                                  proto.debugName);
+            dumpHAOCompileStats(*haoArtifacts, grey, proto.debugName);
         }
 
         if (!haoArtifactsOk(*haoArtifacts)) {
