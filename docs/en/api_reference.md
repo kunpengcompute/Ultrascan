@@ -1172,6 +1172,3 @@ feedback-compiled database created
 ```
 
 For the complete tool workflow, see the `hspgo` section in [Quick Start](./quick_start.md).
-
-
-
