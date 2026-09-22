@@ -483,3 +483,4 @@ In the Ultrascan source code directory, add the PCRE dependency library, and com
         - `PORTABLE` does not use SVE/SVE2 as the build target baseline. When SVE or SVE2 instruction set capability is required, explicitly select an architecture value that includes the corresponding extensions, and ensure that all deployment machines support that value.
         - In cross-compilation, the tool chain file should set `CMAKE_SYSTEM_PROCESSOR` to `aarch64`; otherwise, this option will not take effect.
         - During the configuration phase, `AARCH64 single-ISA build mode/flags` and `crc/sve/sve2/sve2-bitperm` are output, which can be used to verify the actual compilation flags in effect.
+        
