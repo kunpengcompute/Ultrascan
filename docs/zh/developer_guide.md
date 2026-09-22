@@ -10,7 +10,7 @@ Ultrascan新增公开API的函数定义、参数、返回值、生命周期和�
 
 ## KHSEL内部函数说明
 
->![](public_sys-resources/icon-notice.gif) **须知：**
+>![须知](public_sys-resources/icon-notice.gif) **须知：**
 >KHSEL中的函数（`KHSEL_xxx`）是Ultrascan内部接口，应用程序无需显式调用。
 
 KHSEL已优化函数如下：

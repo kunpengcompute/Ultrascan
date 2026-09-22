@@ -4,16 +4,26 @@
 
 本文基于鲲鹏920新型号处理器和openEuler操作系统，提供Ultrascan的安装和编译指导。
 
-Ultrascan是一款高性能的正则表达式匹配库，它是以PCRE（Perl-compatible regular expression）为原型开发，并以BSD（Berkeley Software Distribution）许可证开源，遵循libpcre库通用的正则表达式语法，拥有独立的C语言接口。在Ultrascan正式发布版本的基础上，参考鲲鹏微架构特征，重新设计核心接口的实现机制，并完成了开发和性能优化，推出适合鲲鹏计算平台的软件包。使用鲲鹏计算平台的用户可以根据自己业务需求下载本软件包，提升业务在鲲鹏平台上的稳定性和性能。
+Ultrascan是一款高性能的正则表达式匹配库，它是以PCRE（Perl-compatible regular
+expression）为原型开发，并以BSD（Berkeley Software Distribution）许可证开源，
+遵循libpcre库通用的正则表达式语法，拥有独立的C语言接口。在Ultrascan正式发布
+版本的基础上，参考鲲鹏微架构特征，重新设计核心接口的实现机制，并完成了开发
+和性能优化，推出适合鲲鹏计算平台的软件包。使用鲲鹏计算平台的用户可以根据自己
+业务需求下载本软件包，提升业务在鲲鹏平台上的稳定性和性能。
 
 Ultrascan鲲鹏计算平台软件版本主要增加了以下功能：
 
 - 增加鲲鹏计算平台分支，且完全兼容ARMv8-A，同时确保x86平台使用不受影响。
 - 通过使用NEON指令、内联汇编、数据对齐、指令对齐、内存数据预取、静态分支预测、代码结构优化等方法，实现在鲲鹏计算平台的性能提升。
 - 发布KHSEL（Kunpeng Hyperscan Enhanced Library）软件增强包，包括短规则旁路混合模型和假阳性阻断模型。
-    - KHSEL优化了大规模规则集匹配算法FDR，小规模快速匹配算法Shufti，增强了Ultrascan处理snort_literal，snort_pcre等数据集的scan性能，并且针对长规则校验的场景进行了优化。
-    - 提供短规则旁路混合模型，对包含短规则的规则集合能大幅提高匹配性能。
-    - 提供假阳性阻断模型，对包含坏字符串片段的规则集合能大幅提高匹配性能。其中的“坏字符串”指少量含特殊片段的规则，其导致多模匹配算法报告的假阳性过多，触发大量的解释器调用和低效的长规则校验，而最终无一真实匹配。大量无谓的解释器调用成为热点，多模匹配失去了应有的预过滤能力。
+  - KHSEL优化了大规模规则集匹配算法FDR，小规模快速匹配算法Shufti，增强了
+    Ultrascan处理snort_literal，snort_pcre等数据集的scan性能，并且针对长规则
+    校验的场景进行了优化。
+  - 提供短规则旁路混合模型，对包含短规则的规则集合能大幅提高匹配性能。
+  - 提供假阳性阻断模型，对包含坏字符串片段的规则集合能大幅提高匹配性能。
+    其中的“坏字符串”指少量含特殊片段的规则，其导致多模匹配算法报告的假阳性
+    过多，触发大量的解释器调用和低效的长规则校验，而最终无一真实匹配。大量
+    无谓的解释器调用成为热点，多模匹配失去了应有的预过滤能力。
 - 增加通用字节码功能，用户可以通过hsdump工具将规则集编译为通用字节码，该字节码支持在x86和鲲鹏计算平台运行。
 - 增加正则匹配反馈优化技术，在AArch64平台根据真实扫描语料采集反馈，并使用反馈重新编译规则数据库。
 
@@ -23,7 +33,9 @@ Ultrascan鲲鹏计算平台软件版本主要增加了以下功能：
 
 ### 已验证环境
 
-Ultrascan当前适配鲲鹏920新型号处理器，操作系统为openEuler 22.03 LTS SP4/openEuler 24.03 LTS SP3。若您在使用过程中遇到问题，请先检查使用的环境是否在已验证的环境范围内。
+Ultrascan当前适配鲲鹏920新型号处理器，操作系统为openEuler 22.03 LTS SP4/
+openEuler 24.03 LTS SP3。若您在使用过程中遇到问题，请先检查使用的环境
+是否在已验证的环境范围内。
 
 ### 软件要求
 
@@ -31,7 +43,7 @@ Ultrascan当前适配鲲鹏920新型号处理器，操作系统为openEuler 22.0
 
 软件要求如[**表 1** 软件要求](#软件要求)所示。
 
-**表 1** 软件要求<a id="软件要求"></a>
+**表 1** 软件要求
 
 |软件名称|版本|说明|获取方式|
 |--|--|--|--|
@@ -61,8 +73,10 @@ Ultrascan当前适配鲲鹏920新型号处理器，操作系统为openEuler 22.0
     git clone https://gitcode.com/boostkit/Ultrascan.git /opt/Ultrascan
     ```
 
-    >![](public_sys-resources/icon-note.gif) **说明：**
-    >执行克隆前，请确保`/opt`所在文件系统具有数GB可用空间，并且目标路径`/opt/Ultrascan`不存在或为空。如果该路径中已经存在完整的Ultrascan Git仓库，请不要重复克隆，可直接跳过本步骤。
+    >![说明](public_sys-resources/icon-note.gif) **说明：**
+    >执行克隆前，请确保`/opt`所在文件系统具有数GB可用空间，并且目标路径
+    >`/opt/Ultrascan`不存在或为空。如果该路径中已经存在完整的Ultrascan
+    >Git仓库，请不要重复克隆，可直接跳过本步骤。
 
 ### 配置工作目录
 
@@ -96,7 +110,7 @@ df -h /opt/Ultrascan
 
 ### （可选）配置本地源
 
->![](public_sys-resources/icon-note.gif) **说明：** 离线环境配置本地源，在线环境可以跳过这一步。
+>![说明](public_sys-resources/icon-note.gif) **说明：** 离线环境配置本地源，在线环境可以跳过这一步。
 
 正确配置Yum源，以便于后续能够正常安装所需依赖包和软件。
 
@@ -106,7 +120,7 @@ df -h /opt/Ultrascan
     mount YOUR_OS.iso /mnt -o loop
     ```
 
-    >![](public_sys-resources/icon-note.gif) **说明：** 
+    >![说明](public_sys-resources/icon-note.gif) **说明：**
     >**YOUR\_OS.iso**表示读者当前环境操作系统的镜像文件。
 
 2. 配置Yum本地源。
@@ -116,7 +130,7 @@ df -h /opt/Ultrascan
         vim /etc/yum.repos.d/openEuler.repo
         ```
 
-        >![](public_sys-resources/icon-note.gif) **说明：** 
+        >![说明](public_sys-resources/icon-note.gif) **说明：**
         >openEuler.repo文件需要自行创建，建议备份原有repo文件。
 
     2. 按“i“键进入编辑模式，在openEuler.repo文件中添加如下内容：
@@ -149,7 +163,7 @@ df -h /opt/Ultrascan
         http://www.colm.net/files/ragel/ragel-6.10.tar.gz
     ```
 
-    >![](public_sys-resources/icon-note.gif) **说明：** 
+    >![说明](public_sys-resources/icon-note.gif) **说明：**
     >对于服务器无法连接外网的情况，可以将软件包下载到本地再上传到服务器。软件包下载地址请参见[软件要求](#软件要求)。
 
 2. 解压源码包。
@@ -190,7 +204,7 @@ df -h /opt/Ultrascan
 
 以下是两种配置方法的具体步骤：
 
-**方法一：下载软件包并建立软链接**
+#### 方法一：下载软件包并建立软链接
 
 1. 获取Boost 1.87源码包。
 
@@ -207,16 +221,16 @@ df -h /opt/Ultrascan
     ```
 
 3. 建立软链接。
-    
+
     ```bash
     ln -s /opt/Ultrascan/deps/boost_1_87_0/boost \
         /opt/Ultrascan/include/boost
     ```
 
-    >![](public_sys-resources/icon-note.gif) **说明：** 
+    >![说明](public_sys-resources/icon-note.gif) **说明：**
     >编译依赖Boost头文件。以上命令将解压目录中的`boost`头文件目录链接到Ultrascan源码树。
 
-**方法二：下载软件包并安装**
+#### 方法二：下载软件包并安装
 
 1. 获取软件包。
 
@@ -258,7 +272,7 @@ df -h /opt/Ultrascan
 
     安装完成后，有类似如下提示则表示安装成功。
 
-    ![](figures/zh-cn_image_0000002518785776.png)
+    ![安装Boost成功提示](figures/zh-cn_image_0000002518785776.png)
 
 7. 更新系统的动态链接库。
 
@@ -277,8 +291,9 @@ Ultrascan tools工具hscollider的编译依赖PCRE 8.41及以上版本，本文�
         https://sourceforge.net/projects/pcre/files/pcre/8.43/pcre-8.43.tar.gz/download
     ```
 
-    >![](public_sys-resources/icon-note.gif) **说明：**
-    >对于服务器无法连接外网的情况，可以通过[软件要求](#软件要求)中的链接下载源码包，再将其上传到`/opt/Ultrascan/deps/pcre-8.43.tar.gz`。
+    >![说明](public_sys-resources/icon-note.gif) **说明：**
+    >对于服务器无法连接外网的情况，可以通过[软件要求](#软件要求)中的链接下载源码包，
+    >再将其上传到`/opt/Ultrascan/deps/pcre-8.43.tar.gz`。
 
 2. 解压源码。
 
@@ -289,7 +304,8 @@ Ultrascan tools工具hscollider的编译依赖PCRE 8.41及以上版本，本文�
 
 ### 安装SQLite
 
-Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装SQLite及SQLite开发套件，安装完成后进行版本验证。
+Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装SQLite
+及SQLite开发套件，安装完成后进行版本验证。
 
 1. 安装SQLite及开发套件。
 
@@ -334,7 +350,7 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
             Cflags: -I${includedir}
             ```
 
-            >![](public_sys-resources/icon-note.gif) **说明：** 
+            >![说明](public_sys-resources/icon-note.gif) **说明：**
             >其中libdir、includedir等以实际安装路径进行设置。
 
         3. 按“Esc“键，输入`:wq!`并按“Enter“键保存并退出编辑。
@@ -362,7 +378,8 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
         vim /opt/Ultrascan/pcre/CMakeLists.txt
         ```
 
-    3. 按“i“键进入编辑模式，在拷贝后的“pcre/CMakeLists.txt“文件中找到`CMAKE_POLICY(SET CMP0026 OLD)`并将其注释掉，如下所示。
+    3. 按“i“键进入编辑模式，在拷贝后的“pcre/CMakeLists.txt“文件中找到
+       `CMAKE_POLICY(SET CMP0026 OLD)`并将其注释掉，如下所示。
 
         ```bash
         CMAKE_MINIMUM_REQUIRED(VERSION 2.8.0)
@@ -375,7 +392,9 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
 
 3. 编译源码。
 
-    编译支持Release、Debug、动态库和反馈优化等配置。以下方式按需选择；需要同时保留多种构建结果时，使用各自独立的构建目录，避免CMake缓存中的选项相互影响。
+    编译支持Release、Debug、动态库和反馈优化等配置。以下方式按需选择；
+    需要同时保留多种构建结果时，使用各自独立的构建目录，避免CMake缓存中的
+    选项相互影响。
 
     - 编译默认Release静态库。
 
@@ -386,7 +405,8 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
         make -j
         ```
 
-        默认Release配置不生成`hsdump`。如需按照[快速入门](./quick_start.md)生成通用字节码，请使用下面的Debug模式完成构建。
+        默认Release配置不生成`hsdump`。如需按照[快速入门](./quick_start.md)
+        生成通用字节码，请使用下面的Debug模式完成构建。
 
     - （可选）编译Debug模式。
 
@@ -414,19 +434,19 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
 
         编译完成后，默认生成Ultrascan的静态库和测试程序：
 
-        ![](figures/zh-cn_image_0000002550305603.png)
+        ![编译完成生成的静态库和测试程序](figures/zh-cn_image_0000002550305603.png)
 
         编译完成生成的测试程序：
 
-        ![](figures/1.png)
+        ![编译生成的测试程序](figures/1.png)
 
         如果开启debug模式，则产生的测试程序如下：
 
-        ![](figures/6.png)
+        ![Debug模式生成的测试程序](figures/6.png)
 
         生成的静态库：
 
-        ![](figures/2.png)
+        ![生成的静态库](figures/2.png)
 
     - 编译动态库。
 
@@ -439,7 +459,7 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
 
         生成的动态库：
 
-        ![](figures/3.png)
+        ![生成的动态库](figures/3.png)
 
     - （可选）编译正则匹配反馈优化技术。该技术当前仅支持AArch64且默认关闭：
 
@@ -454,17 +474,26 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
 
         - 在x86等非AArch64平台设置`HS_ENABLE_FP_FEEDBACK=ON`会在CMake配置阶段报错。
         - 不设置该选项时，库仍导出反馈相关公共符号，但功能调用返回`HS_ARCH_ERROR`。
-        - `hspgo`依赖SQLite 3。已安装SQLite且反馈能力开启时，会生成`/opt/Ultrascan/build-feedback/bin/hspgo`；缺少SQLite时库仍可构建，但不会生成该工具。
+        - `hspgo`依赖SQLite 3。已安装SQLite且反馈能力开启时，会生成
+          `/opt/Ultrascan/build-feedback/bin/hspgo`；缺少SQLite时库仍可构建，
+          但不会生成该工具。
         - 应用通过API集成时，请参考[正则匹配反馈优化技术API](./api_reference.md#4-正则匹配反馈优化技术api)。
 
     - （可选）AArch64编译目标选择。
 
-        当CMake目标处理器为`aarch64`或`AARCH64`时，可使用`HS_ARM_MARCH`控制AArch64编译目标的指令集基线，支持以下取值：
+        当CMake目标处理器为`aarch64`或`AARCH64`时，可使用`HS_ARM_MARCH`控制
+        AArch64编译目标的指令集基线，支持以下取值：
 
-        - `AUTO`（默认）：原生构建时使用`-march=native -mtune=native`；交叉编译，或C/C++编译器不支持该组合标志时，自动回退为`PORTABLE`。适合构建机和部署机具备相同指令集基线的场景。
-        - `PORTABLE`：固定使用`-march=armv8-a+crc`。产物要求目标机支持Armv8-A和CRC32扩展，适合在满足该最低基线的不同机型间分发，也是性能对比测试的推荐基线。
+        - `AUTO`（默认）：原生构建时使用`-march=native -mtune=native`；
+          交叉编译，或C/C++编译器不支持该组合标志时，自动回退为`PORTABLE`。
+          适合构建机和部署机具备相同指令集基线的场景。
+        - `PORTABLE`：固定使用`-march=armv8-a+crc`。产物要求目标机支持
+          Armv8-A和CRC32扩展，适合在满足该最低基线的不同机型间分发，
+          也是性能对比测试的推荐基线。
         - `native`：显式使用`-march=native -mtune=native`，与AUTO成功路径等价，但不带探测回退。
-        - 显式架构值（如`armv8.2-a+crc+sve`、`armv9-a+sve2`、`armv8.6-a+crc+sve2+sve2-bitperm`）：目标机型统一且已知指令集基线时使用。传入的是架构值本身，无需添加`-march=`前缀。
+        - 显式架构值（如`armv8.2-a+crc+sve`、`armv9-a+sve2`、
+          `armv8.6-a+crc+sve2+sve2-bitperm`）：目标机型统一且已知指令集基线时
+          使用。传入的是架构值本身，无需添加`-march=`前缀。
 
         使用示例：
 
@@ -477,7 +506,11 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
 
         使用时注意：
 
-        - `AUTO`或`native`构建的产物只能部署到支持编译器所选全部指令集扩展的机器上；部署到较低指令集基线的机器可能触发非法指令错误。跨机型分发请使用`PORTABLE`，或按最低目标机型选择显式值。
-        - `PORTABLE`不将SVE/SVE2作为编译目标基线。需要SVE或SVE2指令集能力时，应显式选择包含相应扩展的架构值，并确保所有部署机均支持该值。
+        - `AUTO`或`native`构建的产物只能部署到支持编译器所选全部指令集扩展的
+          机器上；部署到较低指令集基线的机器可能触发非法指令错误。跨机型分发请
+          使用`PORTABLE`，或按最低目标机型选择显式值。
+        - `PORTABLE`不将SVE/SVE2作为编译目标基线。需要SVE或SVE2指令集能力时，
+          应显式选择包含相应扩展的架构值，并确保所有部署机均支持该值。
         - 交叉编译时，工具链文件应将`CMAKE_SYSTEM_PROCESSOR`设置为`aarch64`；否则该选项不会生效。
-        - 配置阶段会输出`AARCH64 single-ISA build mode/flags`及`crc/sve/sve2/sve2-bitperm`特性探测结果，可据此核对实际生效的编译标志。
+        - 配置阶段会输出`AARCH64 single-ISA build mode/flags`及
+          `crc/sve/sve2/sve2-bitperm`特性探测结果，可据此核对实际生效的编译标志。

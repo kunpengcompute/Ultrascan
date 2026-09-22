@@ -1214,6 +1214,15 @@ set (hs_exec_SRCS
     src/database.c
     src/database.h
     src/database_common.h
+    src/kunpeng-enhanced/khsel_core.h
+    src/kunpeng-enhanced/khsel_ops.h
+    src/kunpeng-enhanced/khsel_type.h
+    src/kunpeng-enhanced/khsel_typebase.h
+    src/kunpeng-enhanced/fdr_enhanced.c
+    src/kunpeng-enhanced/runtime_lily.c
+    src/kunpeng-enhanced/shufti.c
+    src/kunpeng-enhanced/compare.h
+    src/kunpeng-enhanced/core_precomp.h
 )
 
 set (hs_exec_avx2_SRCS
@@ -1622,9 +1631,6 @@ if (HS_TARGET_AARCH64)
         src/kunpeng-enhanced/khsel_ops.h
         src/kunpeng-enhanced/khsel_type.h
         src/kunpeng-enhanced/khsel_typebase.h
-        src/kunpeng-enhanced/fdr_enhanced.c
-        src/kunpeng-enhanced/runtime_lily.c
-        src/kunpeng-enhanced/shufti.c
         src/kunpeng-enhanced/compare.h
         src/kunpeng-enhanced/core_precomp.h
     )
