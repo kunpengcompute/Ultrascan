@@ -1,36 +1,31 @@
 # Release Notes<a name="EN-US_TOPIC_0000002518419160"></a>
 
+<!-- md-trans-meta sourceCommit=fd215461e79615cfea45605856a99c32a14a7e4b translatedAt=2026-08-27T01:40:30.570Z pushedAt=2026-09-08T08:41:20.747Z -->
+
 ## Change History<a name="EN-US_TOPIC_0000002549904611"></a>
 
 |Date|Description|
 |--|--|
-|2026-06-30|This issue is the second official release. Added the universal bytecode function based on the new Kunpeng 920 processor model.|
-|2026-03-30|This issue is the first official release. Optimized the Ultrascan short-byte (2–4 bytes) rule matching algorithm based on the new Kunpeng 920 processor model, and added the KHSEL_BuildLilyForTeddy and KHSEL_LilyForTeddyRunExec algorithms.|
+|2026-09-30|Released Ultrascan V5.8.0. Added mcsheng algorithm performance optimization and feedback-driven optimization for regular expression matching.|
+|2026-06-30|This is the second official release. Added the universal bytecode function based on the new Kunpeng 920 processor model.|
+|2026-03-30|This is the first official release. Optimized the Ultrascan short-byte (2–4 bytes) rule matching algorithm based on the new Kunpeng 920 processor model, and added the `KHSEL_BuildLilyForTeddy` and `KHSEL_LilyForTeddyRunExec` algorithms.|
 
 ## Version Mapping<a name="EN-US_TOPIC_0000002518405392"></a>
 
 ### Product Version Information<a name="EN-US_TOPIC_0000002518405384"></a>
 
 <a name="table62675726"></a>
-<table><tbody><tr id="row41561572"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.1.1"><p id="p11044137"><a name="p11044137"></a><a name="p11044137"></a>Product Name</p>
-</th>
-<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.1.1 "><p id="p1597721693713"><a name="p1597721693713"></a><a name="p1597721693713"></a>Kunpeng BoostKit</p>
-</td>
+<table><tbody><tr id="row41561572"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.1.1"><p id="p11044137"><a name="p11044137"></a><a name="p11044137"></a>Product Name</p></th>
+<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.1.1 "><p id="p1597721693713"><a name="p1597721693713"></a><a name="p1597721693713"></a>Kunpeng BoostKit</p></td>
 </tr>
-<tr id="row24726251"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.2.1"><p id="p56669300"><a name="p56669300"></a><a name="p56669300"></a>Product Version</p>
-</th>
-<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.2.1 "><p id="p11923034"><a name="p11923034"></a><a name="p11923034"></a><span id="text152431189308"><a name="text152431189308"></a><a name="text152431189308"></a>26.1.RC1</span></p>
-</td>
+<tr id="row24726251"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.2.1"><p id="p56669300"><a name="p56669300"></a><a name="p56669300"></a>Product Version</p></th>
+<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.2.1 "><p id="p11923034"><a name="p11923034"></a><a name="p11923034"></a><span id="text152431189308"><a name="text152431189308"></a><a name="text152431189308"></a>26.2.RC1</span></p></td>
 </tr>
-<tr id="row1930811171892"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.3.1"><p id="p2030912172097"><a name="p2030912172097"></a><a name="p2030912172097"></a>Software Name</p>
-</th>
-<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.3.1 "><p id="p1730912179911"><a name="p1730912179911"></a><a name="p1730912179911"></a>Ultrascan</p>
-</td>
+<tr id="row1930811171892"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.3.1"><p id="p2030912172097"><a name="p2030912172097"></a><a name="p2030912172097"></a>Software Name</p></th>
+<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.3.1 "><p id="p1730912179911"><a name="p1730912179911"></a><a name="p1730912179911"></a>Ultrascan</p></td>
 </tr>
-<tr id="row5497143514612"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.4.1"><p id="p162251517551"><a name="p162251517551"></a><a name="p162251517551"></a>Software Version</p>
-</th>
-<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.4.1 "><p id="p6225131165519"><a name="p6225131165519"></a><a name="p6225131165519"></a>5.8.0</p>
-</td>
+<tr id="row5497143514612"><th class="firstcol" valign="top" width="42.17%" id="mcps1.1.3.4.1"><p id="p162251517551"><a name="p162251517551"></a><a name="p162251517551"></a>Software Version</p></th>
+<td class="cellrowborder" valign="top" width="57.830000000000005%" headers="mcps1.1.3.4.1 "><p id="p6225131165519"><a name="p6225131165519"></a><a name="p6225131165519"></a>5.8.0</p></td>
 </tr>
 </tbody>
 </table>
@@ -39,12 +34,24 @@
 
 |OS|CPU|Compiler|
 |--|--|--|
-|openEuler 22.03 LTS SP4|Kunpeng 920 series|GCC 10.3.1|
-|openEuler 24.03 LTS SP3|Kunpeng 920 series|GCC 12.3.1|
+|openEuler 22.03 LTS SP4|New Kunpeng 920 processor model|GCC 10.3.1|
+|openEuler 24.03 LTS SP3|New Kunpeng 920 processor model|GCC 12.3.1|
 
 ### Virus Scan Results<a name="EN-US_TOPIC_0000002549885239"></a>
 
 This feature is released in the form of source code and does not involve software packages. Therefore, virus scanning is not required.
+
+## V5.8.0
+
+### Change Description
+
+**New Features**
+
+| Feature | Description                                     |
+|--|------------------------------------------|
+| mcsheng algorithm optimization | Added mcsheng algorithm optimization based on the new Kunpeng 920 processor model.  |
+| Feedback-driven optimization for regular expression matching | Added a closed-loop process spanning runtime collection, feedback generation, and feedback-based compilation on the AArch64 platform, which is disabled by default and must be explicitly enabled at build time. |
+| Grey configuration optimization | Optimized the Grey configuration method to support setting and resetting process-level Grey configuration through public APIs. |
 
 ## V5.7.0
 
@@ -52,9 +59,9 @@ This feature is released in the form of source code and does not involve softwar
 
 **New Features**
 
-|Feature| Description                                    |
+|Feature| Description                                     |
 |--|------------------------------------------|
-|Universal bytecode feature| New function based on the new Kunpeng 920 processor model. |
+|Universal bytecode feature| New function based on the new Kunpeng 920 processor model.  |
 
 ## V2.6.0
 
@@ -62,11 +69,11 @@ This feature is released in the form of source code and does not involve softwar
 
 **New Features**
 
-|Feature| Description                                    |
+|Feature| Description                                     |
 |--|------------------------------------------|
-|Short-rule bypass technology| Optimized the Ultrascan short-byte (2–4 bytes) rule matching algorithm based on the new Kunpeng 920 processor model. |
+|Short-rule bypass technology| Optimized the Ultrascan short-byte (2–4 bytes) rule matching algorithm based on the new Kunpeng 920 processor model.  |
 
-## V2.5.3<a name="EN-US_TOPIC_0000002518245468"></a>
+## V2.5.3<a name="ZH-CN_TOPIC_0000002518245468"></a>
 
 ### Change Description<a name="EN-US_TOPIC_0000002549765235"></a>
 
@@ -92,7 +99,7 @@ None
 
 None
 
-## V2.5.1<a name="EN-US_TOPIC_0000002518405390"></a>
+## V2.5.1<a name="ZH-CN_TOPIC_0000002518405390"></a>
 
 ### Change Description<a name="EN-US_TOPIC_0000002549765229"></a>
 
@@ -118,7 +125,7 @@ None
 
 None
 
-## V2.4.0<a name="EN-US_TOPIC_0000002549885233"></a>
+## V2.4.0<a name="ZH-CN_TOPIC_0000002549885233"></a>
 
 ### Change Description<a name="EN-US_TOPIC_0000002549765225"></a>
 
@@ -153,18 +160,18 @@ None
     <tr>
       <th style="text-align: left;">Document</th>
       <th style="text-align: left;">Description</th>
-      <th style="text-align: left;">Delivery Method</th>
+      <th style="text-align: left;">Delivery Mode</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td style="text-align: left;">Release Notes</td>
-      <td style="text-align: left;">Provides version release information about Ultrascan.</td>
+      <td style="text-align: left;">Provides the version release information about Ultrascan.</td>
       <td style="text-align: left;">Open-source repository</td>
     </tr>
     <tr>
       <td style="text-align: left;">Quick Start</td>
-      <td style="text-align: left;">Provides quick start tutorials to help users quickly understand and use Ultrascan.</td>
+      <td style="text-align: left;">Provides a quick start tutorial to help users quickly understand and use Ultrascan.</td>
       <td style="text-align: left;">Open-source repository</td>
     </tr>
     <tr>
@@ -180,6 +187,11 @@ None
     <tr>
       <td style="text-align: left;">Developer Guide</td>
       <td style="text-align: left;">Provides guidance on how to develop Ultrascan.</td>
+      <td style="text-align: left;">Open-source repository</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">API Reference</td>
+      <td style="text-align: left;">Describes newly added public APIs of Ultrascan.</td>
       <td style="text-align: left;">Open-source repository</td>
     </tr>
   </tbody>
