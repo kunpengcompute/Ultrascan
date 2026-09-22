@@ -8,13 +8,17 @@
 - [Grey配置API](#3-grey配置api)：进程级编译参数设置与复位接口。
 - [正则匹配反馈优化技术API](#4-正则匹配反馈优化技术api)：运行期采集、反馈生成及反馈编译接口。
 
-所有接口均可通过公共头文件`hs.h`引入。本文不重复介绍`hs_compile()`、`hs_scan()`等上游通用接口；使用这些接口时，应同时参考公共头文件中的注释和上游API文档。
+所有接口均可通过公共头文件`hs.h`引入。本文不重复介绍`hs_compile()`、`hs_scan()`等
+上游通用接口；使用这些接口时，应同时参考公共头文件中的注释和上游API文档。
 
->![](public_sys-resources/icon-note.gif) **说明：** “正则匹配反馈优化技术”是V5.8.0版本新增的反馈闭环能力，与历史已有的“假阳性阻断技术”是两个独立特性。本文不会以新名称替代历史特性的名称或说明。
+>![说明](public_sys-resources/icon-note.gif) **说明：** “正则匹配反馈优化技术”是V5.8.0版本
+>新增的反馈闭环能力，与历史已有的“假阳性阻断技术”是两个独立特性。本文不会以新名称
+>替代历史特性的名称或说明。
 
 ### 1.1 公共约定
 
-- API返回类型为`hs_error_t`。成功通常返回`HS_SUCCESS`；参数错误返回`HS_INVALID`；编译错误通常返回`HS_COMPILER_ERROR`并通过`hs_compile_error_t`提供详情。
+- API返回类型为`hs_error_t`。成功通常返回`HS_SUCCESS`；参数错误返回`HS_INVALID`；
+  编译错误通常返回`HS_COMPILER_ERROR`并通过`hs_compile_error_t`提供详情。
 - 编译失败后，调用者应使用`hs_free_compile_error()`释放非空的编译错误对象。
 - 文中标记为opaque的对象只能通过对应API创建、传递和释放，调用者不得访问其内部布局。
 - 除非接口明确转移所有权，输入对象的所有权仍归调用者。
@@ -30,7 +34,8 @@
 
 ## 2 通用字节码API
 
-通用字节码将x86和AArch64字节码封装在同一个`fat_hs_database_t`对象中，适用于一次编译后向两类平台分发的场景。`fat_hs_database_t`是opaque类型：
+通用字节码将x86和AArch64字节码封装在同一个`fat_hs_database_t`对象中，适用于一次
+编译后向两类平台分发的场景。`fat_hs_database_t`是opaque类型：
 
 ```c
 typedef struct fat_hs_database fat_hs_database_t;
@@ -253,7 +258,7 @@ hs_error_t HS_CDECL fat_hs_serialize_database(
 
 ### 2.9 `fat_hs_deserialize_database`
 
-分配内存并从序列化字节流重建通用数据库。
+分配内存并从序列化字节流重构通用数据库。
 
 ```c
 hs_error_t HS_CDECL fat_hs_deserialize_database(
@@ -278,7 +283,7 @@ hs_error_t HS_CDECL fat_hs_deserialize_database(
 
 ### 2.10 `fat_hs_deserialize_database_at`
 
-在调用者提供的内存中从序列化字节流重建通用数据库。
+在调用者提供的内存中从序列化字节流重构通用数据库。
 
 ```c
 hs_error_t HS_CDECL fat_hs_deserialize_database_at(
@@ -401,13 +406,15 @@ int main(void) {
     }
 
     puts("fat database serialized successfully");
-    free(bytes); /* 仅适用于默认misc allocator。 */
+    free(bytes); /* 仅适用于默认misc allocator. */
     fat_hs_free_database(db);
     return 0;
 }
 ```
 
-将代码保存为`/opt/Ultrascan/fat_example.c`。以下命令直接使用新生成的静态库，无需安装Ultrascan。应先按照[安装指南](./installation_guide.md)完成默认静态库编译，并确认库文件已经生成：
+将代码保存为`/opt/Ultrascan/fat_example.c`。以下命令直接使用新生成的静态库，
+无需安装Ultrascan。应先按照[安装指南](./installation_guide.md)完成默认静态库编译，
+并确认库文件已经生成：
 
 ```bash
 test -f /opt/Ultrascan/build/lib/libhs.a && \
@@ -439,7 +446,9 @@ fat database serialized successfully
 
 ## 3 Grey配置API
 
-Grey是编译器内部优化参数集合。公开API允许应用在进程内显式设置这些参数，取代旧的`config.txt`隐式读取方式。Ultrascan不再搜索或读取`config.txt`；如需覆盖默认值，必须在编译API之前主动调用本章接口。
+Grey是编译器内部优化参数集合。公开API允许应用在进程内显式设置这些参数，
+取代旧的`config.txt`隐式读取方式。Ultrascan不再搜索或读取`config.txt`；
+如需覆盖默认值，必须在编译API之前主动调用本章接口。
 
 ### 3.1 `hs_set_grey_overrides`
 
@@ -462,7 +471,9 @@ hs_error_t HS_CDECL hs_set_grey_overrides(const char *overrides);
 
 使用约束：
 
-- key必须是`applyGreyOverrides()`白名单中的布尔或数值字段。常用示例包括`allowLily`、`allowNeoFdr`、`limitPatternCount`和`limitPatternLength`；并非`Grey`结构中的所有字段都可公开覆盖。
+- key必须是`applyGreyOverrides()`白名单中的布尔或数值字段。常用示例包括`allowLily`、
+  `allowNeoFdr`、`limitPatternCount`和`limitPatternLength`；并非`Grey`结构中的所有字段
+  都可公开覆盖。
 - value按无符号整数解析。布尔开关建议只使用`0`或`1`，不要传入负数。
 - 解析不会自动去除key中的空白字符；建议始终使用紧凑格式。
 - 配置存储由互斥锁保护，但配置是进程级共享状态。为保证同一批编译结果可复现，应在启动阶段设置，并避免与编译调用并发修改。
@@ -488,7 +499,9 @@ hs_error_t HS_CDECL hs_reset_grey_overrides(void);
 
 ### 3.3 最小用例
 
-下面的用例演示Grey覆盖的完整调用顺序：先设置`allowLily`、`allowNeoFdr`和`limitPatternCount`，再编译规则，最后释放数据库并复位进程级覆盖，避免影响同一进程的后续编译。该用例用于验证配置字符串可被接受并参与编译，不用于观测具体引擎选择结果。
+下面的用例演示Grey覆盖的完整调用顺序：先设置`allowLily`、`allowNeoFdr`和
+`limitPatternCount`，再编译规则，最后释放数据库并复位进程级覆盖，避免影响同一进程
+的后续编译。该用例用于验证配置字符串可被接受并参与编译，不用于观测具体引擎选择结果。
 
 ```c
 #include <stdio.h>
@@ -520,7 +533,8 @@ int main(void) {
 }
 ```
 
-将代码保存为`/opt/Ultrascan/grey_example.c`。以下命令直接使用新生成的静态库，无需安装Ultrascan。先确认默认静态库已经生成：
+将代码保存为`/opt/Ultrascan/grey_example.c`。以下命令直接使用新生成的静态库，
+无需安装Ultrascan。先确认默认静态库已经生成：
 
 ```bash
 test -f /opt/Ultrascan/build/lib/libhs.a && \
@@ -568,7 +582,10 @@ Grey compile succeeded
 
 ## 4 正则匹配反馈优化技术API
 
-正则匹配反馈优化技术建立反馈闭环：先编译baseline数据库，然后进行运行期采样，再生成feedback，最后使用feedback编译新数据库。运行期collector统计多模fragment触发与最终上报之间的关系，feedback筛选高浪费fragment，编译器在保证匹配语义不变的前提下避开相应的低效候选路径。
+正则匹配反馈优化技术建立反馈闭环：先编译baseline数据库，然后进行运行期采样，
+再生成feedback，最后使用feedback编译新数据库。运行期collector统计多模fragment
+触发与最终上报之间的关系，feedback筛选高浪费fragment，编译器在保证匹配语义不变
+的前提下避开相应的低效候选路径。
 
 ### 4.1 构建与可用范围
 
@@ -646,11 +663,17 @@ typedef struct hs_fp_feedback_params {
 | `HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE` | `min_waste_share` | `HS_FP_FEEDBACK_DEFAULT_MIN_WASTE_SHARE` | 5% |
 | `HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS` | `max_bad_fragments` | `HS_FP_FEEDBACK_DEFAULT_MAX_BAD_FRAGMENTS` | 0，表示不限制 |
 
-比率字段使用`HS_FP_FEEDBACK_RATE_SCALE`（值为`1000000000000ULL`）缩放。例如99%表示为`990000000000ULL`。`params == NULL`或零初始化结构使用全部默认值。启用前四个阈值后，字段值为0表示不限制该项；显式启用`MAX_BAD_FRAGMENTS`时，其值必须大于0。
+比率字段使用`HS_FP_FEEDBACK_RATE_SCALE`（值为`1000000000000ULL`）缩放。例如
+99%表示为`990000000000ULL`。`params == NULL`或零初始化结构使用全部默认值。
+启用前四个阈值后，字段值为0表示不限制该项；显式启用`MAX_BAD_FRAGMENTS`时，
+其值必须大于0。
 
 #### 4.2.4 Dump结构与回调
 
-以下定义仅用于`hs_fp_collector_to_feedback_with_dump()`。生成feedback时，库可通过汇总回调输出整体统计，并通过fragment回调逐项输出fragment统计和入选状态，便于记录日志或导出CSV。回调只提供观察结果，不参与feedback筛选，也不转移任何对象的所有权。
+以下定义仅用于`hs_fp_collector_to_feedback_with_dump()`。生成feedback时，库可通过
+汇总回调输出整体统计，并通过fragment回调逐项输出fragment统计和入选状态，便于
+记录日志或导出CSV。回调只提供观察结果，不参与feedback筛选，也不转移任何对象的
+所有权。
 
 ```c
 typedef struct hs_fp_fragment_info {
@@ -703,13 +726,17 @@ typedef struct hs_fp_feedback_dump_callbacks {
 | `true_trigger_count` | 触发后直接产生至少一次最终上报的次数；一次触发产生多个上报仍只计一次。 |
 | `false_positive_count` | 未直接产生最终上报的触发次数。 |
 
-`hs_fp_feedback_dump_summary_t`汇总本次采样窗口内可映射到metadata且实际触发过的known fragment：`fragment_count`为明细数，`bad_fragment_count`为入选feedback的数量，其余三个字段分别汇总trigger、true-trigger和false-positive计数。
+`hs_fp_feedback_dump_summary_t`汇总本次采样窗口内可映射到metadata且实际触发过的
+known fragment：`fragment_count`为明细数，`bad_fragment_count`为入选feedback
+的数量，其余三个字段分别汇总trigger、true-trigger和false-positive计数。
 
-`selected != 0`表示该fragment已进入本次feedback。回调参数及`bytes`、`mask`、`cmp`指针只在回调期间有效；如需持久化，必须在回调中复制。
+`selected != 0`表示该fragment已进入本次feedback。回调参数及`bytes`、`mask`、
+`cmp`指针只在回调期间有效；如需持久化，必须在回调中复制。
 
 ### 4.3 `hs_fp_collector_create`
 
-为指定baseline数据库创建运行期反馈collector。collector借用数据库，数据库必须在collector释放前保持有效；同一collector不支持多线程并发写。
+为指定baseline数据库创建运行期反馈collector。collector借用数据库，数据库必须在
+collector释放前保持有效；同一collector不支持多线程并发写。
 
 ```c
 hs_error_t HS_CDECL hs_fp_collector_create(
@@ -797,7 +824,9 @@ hs_error_t HS_CDECL hs_fp_collector_free(hs_fp_collector_t *collector);
 
 ### 4.7 `hs_fp_collector_to_feedback`
 
-从collector生成用于反馈编译的feedback对象。调用会提交pending计数，但不会复位collector；转换期间不得并发写入同一collector。无fragment入选时，成功返回的feedback仍然有效。
+从collector生成用于反馈编译的feedback对象。调用会提交pending计数，但不会复位
+collector；转换期间不得并发写入同一collector。无fragment入选时，成功返回的
+feedback仍然有效。
 
 ```c
 hs_error_t HS_CDECL hs_fp_collector_to_feedback(
@@ -1009,7 +1038,8 @@ hs_error_t HS_CDECL hs_scan_vector_with_collector(
 
 ### 4.14 `hs_scan_stream_with_collector`
 
-执行streaming模式扫描，同时向collector记录运行期触发信息。匹配语义和回调行为与`hs_scan_stream()`一致；stream close和reset阶段产生的EOD工作不会计入collector。
+执行streaming模式扫描，同时向collector记录运行期触发信息。匹配语义和回调行为与
+`hs_scan_stream()`一致；stream close和reset阶段产生的EOD工作不会计入collector。
 
 ```c
 hs_error_t HS_CDECL hs_scan_stream_with_collector(
@@ -1043,7 +1073,8 @@ hs_error_t HS_CDECL hs_scan_stream_with_collector(
 
 ### 4.15 最小闭环用例
 
-下面的C用例使用块模式完成baseline编译、采集、生成feedback和反馈编译。示例要求链接在AArch64上使用`HS_ENABLE_FP_FEEDBACK=ON`构建的库。
+下面的C用例使用块模式完成baseline编译、采集、生成feedback和反馈编译。示例要求
+链接在AArch64上使用`HS_ENABLE_FP_FEEDBACK=ON`构建的库。
 
 ```c
 #include <stdio.h>
@@ -1122,7 +1153,9 @@ cleanup:
 }
 ```
 
-将代码保存为`/opt/Ultrascan/feedback_example.c`。该用例要求先在AArch64上使用本章构建命令开启`HS_ENABLE_FP_FEEDBACK`。以下命令直接使用新生成的静态库，无需安装Ultrascan。先确认支持反馈能力的静态库已经生成：
+将代码保存为`/opt/Ultrascan/feedback_example.c`。该用例要求先在AArch64上使用
+本章构建命令开启`HS_ENABLE_FP_FEEDBACK`。以下命令直接使用新生成的静态库，无需
+安装Ultrascan。先确认支持反馈能力的静态库已经生成：
 
 ```bash
 test -f /opt/Ultrascan/build-feedback/lib/libhs.a && \
