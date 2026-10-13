@@ -1,15 +1,21 @@
 #ifndef HAO_RUNTIME_H
 #define HAO_RUNTIME_H
 
-#include "ue2common.h"
 #include "hwlm/hwlm.h"
+#include "ue2common.h"
 
 #ifndef HAO_KEY_BITS
 #define HAO_KEY_BITS 22U
 #endif
 
 #define HAO_RUNTIME_MAGIC 0x48414f30U /* "HAO0" */
-#define HAO_RUNTIME_VERSION 30U
+#define HAO_RUNTIME_VERSION 31U
+#define HAO_VARIANTS_MAGIC 0x48414f56U /* "HAOV" */
+#define HAO_VARIANTS_VERSION 1U
+#define HAO_VARIANTS_ENGINE_ID 20U
+#define HAO_PATH_FDR 0U
+#define HAO_PATH_DOT 1U
+#define HAO_PATH_BEXT 2U
 #define HAO_RUNTIME_BLOCK_BYTES 32U
 #define HAO_RUNTIME_L1_OFFSET_BITS 22U
 #define HAO_RUNTIME_L1_OFFSET_MASK ((1U << HAO_RUNTIME_L1_OFFSET_BITS) - 1U)
@@ -78,6 +84,18 @@ struct HAORuntimeRuleMeta {
     hwlm_group_t groups;
 };
 
+/* All offsets are relative to this header. FDR tables remain in the parent. */
+struct HAOVariants {
+    u32 magic;
+    u32 version;
+    u32 size;
+    u32 fallback;
+    u32 dotOffset;
+    u32 dotSize;
+    u32 bextOffset;
+    u32 bextSize;
+};
+
 struct FDR;
 struct FDR_Runtime_Args;
 
@@ -88,6 +106,30 @@ extern "C" {
 hwlm_error_t HaoEngineExec(const struct FDR *fdr,
                            const struct FDR_Runtime_Args *a,
                            hwlm_group_t control);
+
+hwlm_error_t HaoVariantsExec(const struct FDR *fdr,
+                             const struct FDR_Runtime_Args *a,
+                             hwlm_group_t control);
+
+hwlm_error_t FdrEngineExec(const struct FDR *fdr,
+                           const struct FDR_Runtime_Args *a,
+                           hwlm_group_t control, u32 engine);
+
+/* Selection is independent of execution, so unsupported kernels are never
+ * entered. */
+u32 haoSelectPath(const struct HAOVariants *variants, u64a features,
+                  u64a kernels, u32 vl);
+
+#ifdef HS_BUILD_HAVE_SVE
+u32 HaoVectorLength(void);
+hwlm_error_t HaoDotExec(const struct HAORuntimeHeader *hdr,
+                        const struct FDR_Runtime_Args *a, hwlm_group_t control);
+#endif
+#ifdef HS_BUILD_HAVE_SVEBITPERM
+hwlm_error_t HaoBextExec(const struct HAORuntimeHeader *hdr,
+                         const struct FDR_Runtime_Args *a,
+                         hwlm_group_t control);
+#endif
 
 #ifdef __cplusplus
 }

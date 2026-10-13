@@ -36,6 +36,7 @@
 #include "allocator.h"
 #include "crc32.h"
 #include "fat_database.h"
+#include "fdr/hao_runtime_layout.h"
 #include "hs_common.h"
 #include "hs_internal.h"
 #include "hs_version.h"
@@ -274,7 +275,9 @@ hs_error_t HS_CDECL fat_hs_deserialize_database_at(const char *bytes,
 
     fat_db_copy_bytecode(bytes, db);
 
-    if (fat_db_check_crc(db) != HS_SUCCESS) {
+    if (fat_db_check_crc(db) != HS_SUCCESS ||
+        !haoValidateDatabase(fat_hs_get_bytecode(db),
+                             fat_hs_get_bytecode_size(db))) {
         return HS_INVALID;
     }
 
@@ -317,7 +320,9 @@ hs_error_t HS_CDECL fat_hs_deserialize_database(const char *bytes,
 
     fat_db_copy_bytecode(bytes, tempdb);
 
-    if (fat_db_check_crc(tempdb) != HS_SUCCESS) {
+    if (fat_db_check_crc(tempdb) != HS_SUCCESS ||
+        !haoValidateDatabase(fat_hs_get_bytecode(tempdb),
+                             fat_hs_get_bytecode_size(tempdb))) {
         hs_database_free(tempdb);
         return HS_INVALID;
     }

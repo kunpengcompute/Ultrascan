@@ -29,25 +29,26 @@
 #include "fdr.h"
 #include "fdr_confirm.h"
 #include "fdr_confirm_runtime.h"
+#include "fdr_enhanced.h"
 #include "fdr_internal.h"
 #include "fdr_loadval.h"
 #include "flood_runtime.h"
+#include "hao_runtime.h"
 #include "scratch.h"
 #include "teddy.h"
 #include "teddy_internal.h"
 #include "util/arch.h"
 #include "util/simd_utils.h"
 #include "util/uniform_ops.h"
-#include "fdr_enhanced.h"
 
 /** \brief number of bytes processed in each iteration */
-#define ITER_BYTES          16
+#define ITER_BYTES 16
 
 /** \brief total zone buffer size */
-#define ZONE_TOTAL_SIZE     64
+#define ZONE_TOTAL_SIZE 64
 
 /** \brief maximum number of allowed zones */
-#define ZONE_MAX            3
+#define ZONE_MAX 3
 
 /** \brief zone information.
  *
@@ -82,59 +83,55 @@ struct zone {
     const u8 *floodPtr;
 };
 
-static
-const ALIGN_CL_DIRECTIVE u8 zone_or_mask[ITER_BYTES+1][ITER_BYTES] = {
-    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00 },
-    { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00 },
-    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
-};
+static const ALIGN_CL_DIRECTIVE u8 zone_or_mask[ITER_BYTES + 1][ITER_BYTES] = {
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     0x00, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     0xff, 0x00, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     0xff, 0xff, 0x00, 0x00},
+    {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     0xff, 0xff, 0xff, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+     0x00, 0x00, 0x00, 0x00}};
 
 /* compilers don't reliably synthesize the 32-bit ANDN instruction here,
  * so we force its generation.
  */
-static really_inline
-u64a andn(const u32 a, const u8 *b) {
+static really_inline u64a andn(const u32 a, const u8 *b) {
     u64a r;
 #if defined(HAVE_BMI) && !defined(NO_ASM)
-    __asm__ ("andn\t%2,%1,%k0" : "=r"(r) : "r"(a), "m"(*(const u32 *)b));
+    __asm__("andn\t%2,%1,%k0" : "=r"(r) : "r"(a), "m"(*(const u32 *)b));
 #elif defined(HAVE_NEON)
     __asm__ __volatile__("ldr w0, %w2         \n\t"
                          "bic %w0,w0,%w1      \n\t"
                          : "=r"(r)
                          : "r"(a), "m"(*(const u32 *)b)
-                         : "w0"
-    );
+                         : "w0");
 #else
     r = unaligned_load_u32(b) & ~a;
 #endif
@@ -146,9 +143,8 @@ u64a andn(const u32 a, const u8 *b) {
  * generated based on the minimum length of each bucket in order to prevent
  * confirms.
  */
-static really_inline
-m128 getInitState(const struct FDR *fdr, u8 len_history, const u64a *ft,
-                  const struct zone *z) {
+static really_inline m128 getInitState(const struct FDR *fdr, u8 len_history,
+                                       const u64a *ft, const struct zone *z) {
     m128 s;
     if (len_history) {
         /* +1: the zones ensure that we can read the byte at z->end */
@@ -162,10 +158,10 @@ m128 getInitState(const struct FDR *fdr, u8 len_history, const u64a *ft,
     return s;
 }
 
-static really_inline
-void get_conf_stride_1(const u8 *itPtr, UNUSED const u8 *start_ptr,
-                       UNUSED const u8 *end_ptr, u32 domain_mask_flipped,
-                       const u64a *ft, u64a *conf0, u64a *conf8, m128 *s) {
+static really_inline void
+get_conf_stride_1(const u8 *itPtr, UNUSED const u8 *start_ptr,
+                  UNUSED const u8 *end_ptr, u32 domain_mask_flipped,
+                  const u64a *ft, u64a *conf0, u64a *conf8, m128 *s) {
     /* +1: the zones ensure that we can read the byte at z->end */
     assert(itPtr >= start_ptr && itPtr <= end_ptr);
     u64a reach0 = andn(domain_mask_flipped, itPtr);
@@ -251,10 +247,10 @@ void get_conf_stride_1(const u8 *itPtr, UNUSED const u8 *start_ptr,
     *conf8 ^= ~0ULL;
 }
 
-static really_inline
-void get_conf_stride_2(const u8 *itPtr, UNUSED const u8 *start_ptr,
-                       UNUSED const u8 *end_ptr, u32 domain_mask_flipped,
-                       const u64a *ft, u64a *conf0, u64a *conf8, m128 *s) {
+static really_inline void
+get_conf_stride_2(const u8 *itPtr, UNUSED const u8 *start_ptr,
+                  UNUSED const u8 *end_ptr, u32 domain_mask_flipped,
+                  const u64a *ft, u64a *conf0, u64a *conf8, m128 *s) {
     assert(itPtr >= start_ptr && itPtr <= end_ptr);
     u64a reach0 = andn(domain_mask_flipped, itPtr);
     u64a reach2 = andn(domain_mask_flipped, itPtr + 2);
@@ -276,9 +272,9 @@ void get_conf_stride_2(const u8 *itPtr, UNUSED const u8 *start_ptr,
     m128 st12 = load_m128_from_u64a(ft + reach12);
     m128 st14 = load_m128_from_u64a(ft + reach14);
 
-    st2  = lshiftbyte_m128(st2, 2);
-    st4  = lshiftbyte_m128(st4, 4);
-    st6  = lshiftbyte_m128(st6, 6);
+    st2 = lshiftbyte_m128(st2, 2);
+    st4 = lshiftbyte_m128(st4, 4);
+    st6 = lshiftbyte_m128(st6, 6);
 
     *s = or128(*s, st0);
     *s = or128(*s, st2);
@@ -303,10 +299,10 @@ void get_conf_stride_2(const u8 *itPtr, UNUSED const u8 *start_ptr,
     *conf8 ^= ~0ULL;
 }
 
-static really_inline
-void get_conf_stride_4(const u8 *itPtr, UNUSED const u8 *start_ptr,
-                       UNUSED const u8 *end_ptr, u32 domain_mask_flipped,
-                       const u64a *ft, u64a *conf0, u64a *conf8, m128 *s) {
+static really_inline void
+get_conf_stride_4(const u8 *itPtr, UNUSED const u8 *start_ptr,
+                  UNUSED const u8 *end_ptr, u32 domain_mask_flipped,
+                  const u64a *ft, u64a *conf0, u64a *conf8, m128 *s) {
     assert(itPtr >= start_ptr && itPtr <= end_ptr);
     u64a reach0 = andn(domain_mask_flipped, itPtr);
     u64a reach4 = andn(domain_mask_flipped, itPtr + 4);
@@ -334,10 +330,10 @@ void get_conf_stride_4(const u8 *itPtr, UNUSED const u8 *start_ptr,
     *conf8 ^= ~0ULL;
 }
 
-static really_inline
-void do_confirm_fdr(u64a *conf, u8 offset, hwlmcb_rv_t *control,
-                    const u32 *confBase, const struct FDR_Runtime_Args *a,
-                    const u8 *ptr, u32 *last_match_id, struct zone *z) {
+static really_inline void
+do_confirm_fdr(u64a *conf, u8 offset, hwlmcb_rv_t *control, const u32 *confBase,
+               const struct FDR_Runtime_Args *a, const u8 *ptr,
+               u32 *last_match_id, struct zone *z) {
     const u8 bucket = 8;
 
     if (likely(!*conf)) {
@@ -351,7 +347,7 @@ void do_confirm_fdr(u64a *conf, u8 offset, hwlmcb_rv_t *control,
 
     const u8 *confLoc = ptr;
 
-    do  {
+    do {
         u32 bit = findAndClearLSB_64(conf);
         u32 byte = bit / bucket + offset;
         u32 bitRem = bit % bucket;
@@ -360,23 +356,23 @@ void do_confirm_fdr(u64a *conf, u8 offset, hwlmcb_rv_t *control,
         if (unlikely(!cf)) {
             continue;
         }
-        const struct FDRConfirm *fdrc = (const struct FDRConfirm *)
-                                        ((const u8 *)confBase + cf);
+        const struct FDRConfirm *fdrc =
+            (const struct FDRConfirm *)((const u8 *)confBase + cf);
         if (unlikely(!(fdrc->groups & *control))) {
             continue;
         }
         u64a confVal = unaligned_load_u64a(confLoc + byte - sizeof(u64a) + 1);
-        confWithBit(fdrc, a, ptr_main - a->buf + byte, control,
-                    last_match_id, confVal, conf, bit);
+        confWithBit(fdrc, a, ptr_main - a->buf + byte, control, last_match_id,
+                    confVal, conf, bit);
     } while (unlikely(!!*conf));
 }
 
-static really_inline
-void dumpZoneInfo(UNUSED struct zone *z, UNUSED size_t zone_id) {
+static really_inline void dumpZoneInfo(UNUSED struct zone *z,
+                                       UNUSED size_t zone_id) {
 #ifdef DEBUG
     DEBUG_PRINTF("zone: zone=%zu, bufPtr=%p\n", zone_id, z->buf);
-    DEBUG_PRINTF("zone: startPtr=%p, endPtr=%p, shift=%u\n",
-                 z->start, z->end, z->shift);
+    DEBUG_PRINTF("zone: startPtr=%p, endPtr=%p, shift=%u\n", z->start, z->end,
+                 z->shift);
     DEBUG_PRINTF("zone: zone_pointer_adjust=%zd, floodPtr=%p\n",
                  z->zone_pointer_adjust, z->floodPtr);
     DEBUG_PRINTF("zone buf:");
@@ -397,9 +393,8 @@ void dumpZoneInfo(UNUSED struct zone *z, UNUSED size_t zone_id) {
 /**
  * \brief Updates attributes for non-boundary region zone.
  */
-static really_inline
-void createMainZone(const u8 *flood, const u8 *begin, const u8 *end,
-                    struct zone *z) {
+static really_inline void createMainZone(const u8 *flood, const u8 *begin,
+                                         const u8 *end, struct zone *z) {
     z->zone_pointer_adjust = 0; /* zone buffer is the main buffer */
     z->start = begin;
     z->end = end;
@@ -423,9 +418,9 @@ void createMainZone(const u8 *flood, const u8 *begin, const u8 *end,
  *     1 - 24 bytes of data form the buffer (ending at end),
  *     1 byte of final padding
  */
-static really_inline
-void createShortZone(const u8 *buf, const u8 *hend, const u8 *begin,
-                     const u8 *end, struct zone *z) {
+static really_inline void createShortZone(const u8 *buf, const u8 *hend,
+                                          const u8 *begin, const u8 *end,
+                                          struct zone *z) {
     /* the floodPtr for BOUNDARY zones are maximum of end of zone buf to avoid
      * the checks in boundary zone. */
     z->floodPtr = z->buf + ZONE_TOTAL_SIZE;
@@ -445,8 +440,7 @@ void createShortZone(const u8 *buf, const u8 *hend, const u8 *begin,
     *(m128 *)z->buf = loadu128(hend - sizeof(m128));
 
     /* The amount of data we have to copy from main buffer. */
-    size_t copy_len = MIN((size_t)(end - buf),
-                          ITER_BYTES + sizeof(CONF_TYPE));
+    size_t copy_len = MIN((size_t)(end - buf), ITER_BYTES + sizeof(CONF_TYPE));
 
     u8 *zone_data = z->buf + ZONE_SHORT_DATA_OFFSET;
     switch (copy_len) {
@@ -493,7 +487,8 @@ void createShortZone(const u8 *buf, const u8 *hend, const u8 *begin,
     default:
         assert(copy_len <= sizeof(m128) + sizeof(u64a));
 
-        /* perform copy with (potentially overlapping) 8-byte and 16-byte chunks.
+        /* perform copy with (potentially overlapping) 8-byte and 16-byte
+         * chunks.
          */
         *(u64a *)zone_data = unaligned_load_u64a(end - copy_len);
         storeu128(zone_data + copy_len - sizeof(m128),
@@ -535,9 +530,8 @@ void createShortZone(const u8 *buf, const u8 *hend, const u8 *begin,
  * if buf != begin, lookarounds associated with the literal may require
  * the data prior to begin for hash purposes.
  */
-static really_inline
-void createStartZone(const u8 *buf, const u8 *hend, const u8 *begin,
-                     struct zone *z) {
+static really_inline void createStartZone(const u8 *buf, const u8 *hend,
+                                          const u8 *begin, struct zone *z) {
     assert(ITER_BYTES == sizeof(m128));
     assert(sizeof(CONF_TYPE) == 8);
     static const size_t ZONE_START_BEGIN = sizeof(CONF_TYPE);
@@ -557,8 +551,7 @@ void createStartZone(const u8 *buf, const u8 *hend, const u8 *begin,
     unaligned_store_u64a(z->buf, unaligned_load_u64a(hend - sizeof(u64a)));
 
     /* The amount of data we have to copy from main buffer. */
-    size_t copy_len = MIN((size_t)(end - buf),
-                          ITER_BYTES + sizeof(CONF_TYPE));
+    size_t copy_len = MIN((size_t)(end - buf), ITER_BYTES + sizeof(CONF_TYPE));
     assert(copy_len >= 16);
 
     /* copy the post-padding byte; this is required for domain > 8 due to
@@ -600,9 +593,8 @@ void createStartZone(const u8 *buf, const u8 *hend, const u8 *begin,
  * generating hashes. History is not copied, as all locations which require
  * history for generating a hash are the responsiblity of the start zone.
  */
-static really_inline
-void createEndZone(const u8 *buf, const u8 *begin, const u8 *end,
-                   struct zone *z) {
+static really_inline void createEndZone(const u8 *buf, const u8 *begin,
+                                        const u8 *end, struct zone *z) {
     /* the floodPtr for BOUNDARY zones are maximum of end of zone buf to avoid
      * the checks in boundary zone. */
     z->floodPtr = z->buf + ZONE_TOTAL_SIZE;
@@ -620,8 +612,8 @@ void createEndZone(const u8 *buf, const u8 *begin, const u8 *end,
     const u8 *end_first = end - iter_bytes_second;
     /* The amount of data we have to copy from main buffer for the
      * first iteration. */
-    size_t copy_len_first = MIN((size_t)(end_first - buf),
-                                ITER_BYTES + sizeof(CONF_TYPE));
+    size_t copy_len_first =
+        MIN((size_t)(end_first - buf), ITER_BYTES + sizeof(CONF_TYPE));
     assert(copy_len_first >= 16);
 
     size_t total_copy_len = copy_len_first + iter_bytes_second;
@@ -660,9 +652,10 @@ void createEndZone(const u8 *buf, const u8 *begin, const u8 *end,
  * history buf and succeeded by padded bytes possibly from main buf,
  * if available.
  */
-static really_inline
-size_t prepareZones(const u8 *buf, size_t len, const u8 *hend,
-                    size_t start, const u8 *flood, struct zone *zoneArr) {
+static really_inline size_t prepareZones(const u8 *buf, size_t len,
+                                         const u8 *hend, size_t start,
+                                         const u8 *flood,
+                                         struct zone *zoneArr) {
     const u8 *ptr = buf + start;
     size_t remaining = len - start;
 
@@ -703,55 +696,55 @@ size_t prepareZones(const u8 *buf, size_t len, const u8 *hend,
  *- due to gcc4.8.5 do not support builtin_prefetch.
  */
 #if defined(HAVE_NEON)
-#define PREFETCH __asm__ __volatile__("prfm pldl1keep, %0" ::"Q"(*(itPtr + 256)))
-#define P2ALIGN   __asm__ __volatile__(".p2align 6")
+#define PREFETCH                                                               \
+    __asm__ __volatile__("prfm pldl1keep, %0" ::"Q"(*(itPtr + 256)))
+#define P2ALIGN __asm__ __volatile__(".p2align 6")
 #else
 #define PREFETCH __builtin_prefetch(itPtr + ITER_BYTES)
 #define P2ALIGN
 #endif
 
-#define FDR_MAIN_LOOP(zz, s, get_conf_fn)                                   \
-    do {                                                                    \
-        P2ALIGN;                                                            \
-        const u8 *tryFloodDetect = zz->floodPtr;                            \
-        const u8 *start_ptr = zz->start;                                    \
-        const u8 *end_ptr = zz->end - ITER_BYTES;                           \
-                                                                            \
-        for (const u8 *itPtr = start_ptr; itPtr <= end_ptr;                 \
-            itPtr += ITER_BYTES) {                                          \
-            if (unlikely(itPtr > tryFloodDetect)) {                         \
-                tryFloodDetect = floodDetect(fdr, a, &itPtr, tryFloodDetect,\
-                                             &floodBackoff, &control,       \
-                                             ITER_BYTES);                   \
-                if (unlikely(control == HWLM_TERMINATE_MATCHING)) {         \
-                    return HWLM_TERMINATED;                                 \
-                }                                                           \
-            }                                                               \
-            PREFETCH;                                                       \
-            u64a conf0;                                                     \
-            u64a conf8;                                                     \
-            get_conf_fn(itPtr, start_ptr, end_ptr, domain_mask_flipped,     \
-                        ft, &conf0, &conf8, &s);                            \
-            do_confirm_fdr(&conf0, 0, &control, confBase, a, itPtr,         \
-                           &last_match_id, zz);                             \
-            do_confirm_fdr(&conf8, 8, &control, confBase, a, itPtr,         \
-                           &last_match_id, zz);                             \
-            if (unlikely(control == HWLM_TERMINATE_MATCHING)) {             \
-                return HWLM_TERMINATED;                                     \
-            }                                                               \
-        } /* end for loop */                                                \
-    } while (0)                                                             \
+#define FDR_MAIN_LOOP(zz, s, get_conf_fn)                                      \
+    do {                                                                       \
+        P2ALIGN;                                                               \
+        const u8 *tryFloodDetect = zz->floodPtr;                               \
+        const u8 *start_ptr = zz->start;                                       \
+        const u8 *end_ptr = zz->end - ITER_BYTES;                              \
+                                                                               \
+        for (const u8 *itPtr = start_ptr; itPtr <= end_ptr;                    \
+             itPtr += ITER_BYTES) {                                            \
+            if (unlikely(itPtr > tryFloodDetect)) {                            \
+                tryFloodDetect =                                               \
+                    floodDetect(fdr, a, &itPtr, tryFloodDetect, &floodBackoff, \
+                                &control, ITER_BYTES);                         \
+                if (unlikely(control == HWLM_TERMINATE_MATCHING)) {            \
+                    return HWLM_TERMINATED;                                    \
+                }                                                              \
+            }                                                                  \
+            PREFETCH;                                                          \
+            u64a conf0;                                                        \
+            u64a conf8;                                                        \
+            get_conf_fn(itPtr, start_ptr, end_ptr, domain_mask_flipped, ft,    \
+                        &conf0, &conf8, &s);                                   \
+            do_confirm_fdr(&conf0, 0, &control, confBase, a, itPtr,            \
+                           &last_match_id, zz);                                \
+            do_confirm_fdr(&conf8, 8, &control, confBase, a, itPtr,            \
+                           &last_match_id, zz);                                \
+            if (unlikely(control == HWLM_TERMINATE_MATCHING)) {                \
+                return HWLM_TERMINATED;                                        \
+            }                                                                  \
+        } /* end for loop */                                                   \
+    } while (0)
 
-static never_inline
-hwlm_error_t fdr_engine_exec(const struct FDR *fdr,
-                             const struct FDR_Runtime_Args *a,
-                             hwlm_group_t control) {
+static never_inline hwlm_error_t
+fdr_engine_exec(const struct FDR *fdr, const struct FDR_Runtime_Args *a,
+                hwlm_group_t control) {
     assert(ISALIGNED_CL(fdr));
 
     u32 floodBackoff = FLOOD_BACKOFF_START;
     u32 last_match_id = INVALID_MATCH_ID;
     u32 domain_mask_flipped = ~fdr->domainMask;
-    //u32 domain_mask_flipped = fdr->domainMask;
+    // u32 domain_mask_flipped = fdr->domainMask;
     u8 stride = fdr->stride;
     const u64a *ft =
         (const u64a *)((const u8 *)fdr + ROUNDUP_CL(sizeof(struct FDR)));
@@ -761,9 +754,9 @@ hwlm_error_t fdr_engine_exec(const struct FDR *fdr,
     struct zone zones[ZONE_MAX];
     assert(fdr->domain > 8 && fdr->domain < 16);
 
-    size_t numZone = prepareZones(a->buf, a->len,
-                                  a->buf_history + a->len_history,
-                                  a->start_offset, a->firstFloodDetect, zones);
+    size_t numZone =
+        prepareZones(a->buf, a->len, a->buf_history + a->len_history,
+                     a->start_offset, a->firstFloodDetect, zones);
     assert(numZone <= ZONE_MAX);
     m128 state = getInitState(fdr, a->len_history, ft, &zones[0]);
 
@@ -821,9 +814,9 @@ typedef hwlm_error_t (*FDRFUNCTYPE)(const struct FDR *fdr,
                                     hwlm_group_t control);
 #if defined(HAVE_NEON)
 static const FDRFUNCTYPE funcs[] = {
-    KHSEL_FdrEngineExec, /* KHSEL_FdrEngineExec */
+    KHSEL_FdrEngineExec,    /* KHSEL_FdrEngineExec */
     KHSEL_NeoFdrEngineExec, /* KHSEL_NeoFdrEngineExec */
-    HaoEngineExec, /* HAO exec */
+    HaoEngineExec,          /* HAO exec */
     ONLY_AVX2(fdr_exec_fat_teddy_msks1),
     ONLY_AVX2(fdr_exec_fat_teddy_msks1_pck),
     ONLY_AVX2(fdr_exec_fat_teddy_msks2),
@@ -840,12 +833,14 @@ static const FDRFUNCTYPE funcs[] = {
     fdr_exec_teddy_msks3_pck,
     fdr_exec_teddy_msks4,
     fdr_exec_teddy_msks4_pck,
+    NULL, /* 19 is reserved for Lily. */
+    HaoVariantsExec,
 };
 #else
 static const FDRFUNCTYPE funcs[] = {
     fdr_engine_exec, /* fallback to default engine */
     fdr_engine_exec, /* fallback to default engine */
-    NULL, /* old: fast teddy */
+    NULL,            /* old: fast teddy */
     ONLY_AVX2(fdr_exec_fat_teddy_msks1),
     ONLY_AVX2(fdr_exec_fat_teddy_msks1_pck),
     ONLY_AVX2(fdr_exec_fat_teddy_msks2),
@@ -862,28 +857,32 @@ static const FDRFUNCTYPE funcs[] = {
     fdr_exec_teddy_msks3_pck,
     fdr_exec_teddy_msks4,
     fdr_exec_teddy_msks4_pck,
+    NULL, /* 19 is reserved for Lily. */
+    HaoVariantsExec,
 };
 #endif
+/* The wrapper retains a complete table for the existing FDR family. */
+hwlm_error_t FdrEngineExec(const struct FDR *fdr,
+                           const struct FDR_Runtime_Args *a,
+                           hwlm_group_t control, u32 engine) {
+    if (engine > 1U || !fdr || !a) {
+        return HWLM_TERMINATED;
+    }
+    return funcs[engine](fdr, a, control);
+}
 #define FAKE_HISTORY_SIZE 16
 static const u8 fake_history[FAKE_HISTORY_SIZE];
 
 hwlm_error_t fdrExec(const struct FDR *fdr, const u8 *buf, size_t len,
-                     size_t start, HWLMCallback cb,
-                     struct hs_scratch *scratch, hwlm_group_t groups) {
+                     size_t start, HWLMCallback cb, struct hs_scratch *scratch,
+                     hwlm_group_t groups) {
     // We guarantee (for safezone construction) that it is safe to read 16
     // bytes before the end of the history buffer.
     const u8 *hbuf = fake_history + FAKE_HISTORY_SIZE;
     const struct FDR_Runtime_Args a = {
-        buf,
-        len,
-        hbuf,
-        0,
-        start,
-        cb,
-        scratch,
-        nextFloodDetect(buf, len, FLOOD_BACKOFF_START),
-        0
-    };
+        buf,   len, hbuf,    0,
+        start, cb,  scratch, nextFloodDetect(buf, len, FLOOD_BACKOFF_START),
+        0};
     if (unlikely(a.start_offset >= a.len)) {
         return HWLM_SUCCESS;
     } else {
@@ -895,21 +894,13 @@ hwlm_error_t fdrExec(const struct FDR *fdr, const u8 *buf, size_t len,
 hwlm_error_t fdrExecStreaming(const struct FDR *fdr, const u8 *hbuf,
                               size_t hlen, const u8 *buf, size_t len,
                               size_t start, HWLMCallback cb,
-                              struct hs_scratch *scratch,
-                              hwlm_group_t groups) {
+                              struct hs_scratch *scratch, hwlm_group_t groups) {
     struct FDR_Runtime_Args a = {
-        buf,
-        len,
-        hbuf,
-        hlen,
-        start,
-        cb,
-        scratch,
+        buf, len, hbuf, hlen, start, cb, scratch,
         nextFloodDetect(buf, len, FLOOD_BACKOFF_START),
         /* we are guaranteed to always have 16 initialised bytes at the end of
          * the history buffer (they may be garbage). */
-        hbuf ? unaligned_load_u64a(hbuf + hlen - sizeof(u64a)) : (u64a)0
-    };
+        hbuf ? unaligned_load_u64a(hbuf + hlen - sizeof(u64a)) : (u64a)0};
 
     hwlm_error_t ret;
     if (unlikely(a.start_offset >= a.len)) {

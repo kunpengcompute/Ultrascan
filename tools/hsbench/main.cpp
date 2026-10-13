@@ -90,6 +90,7 @@ bool forceEditDistance = false;
 unsigned editDistance = 0;
 bool printCompressSize = false;
 bool useLiteralApi = false;
+string greyOverrides;
 
 // Globals local to this file.
 static bool compressStream = false;
@@ -190,6 +191,8 @@ static void usage(const char *error) {
     printf("  -h              Display help and exit.\n");
     printf("  -G OVERRIDES    Overrides for the grey box.\n");
     printf("  -e PATH         Path to expression directory.\n");
+    printf("                  Honor single-path HAO Grey settings when "
+           "enabled.\n");
     printf("  -U FILE         Load serialized database from FILE (hsdump -U "
            "output).\n");
     printf("  -s FILE         Signature file to use.\n");
@@ -317,6 +320,7 @@ static void processArgs(int argc, char *argv[],
                 usage("Invalid grey overrides");
                 exit(1);
             }
+            greyOverrides = optarg;
             break;
         case 'h':
             usage(nullptr);

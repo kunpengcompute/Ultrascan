@@ -69,9 +69,9 @@ struct HWLMProto {
      */
     std::unique_ptr<TeddyEngineDescription> teddyEng;
 
-     /**
-      * \brief HWLM literals passed from Rose.
-      */
+    /**
+     * \brief HWLM literals passed from Rose.
+     */
     std::vector<hwlmLiteral> lits;
 
     /**
@@ -94,6 +94,10 @@ struct HWLMProto {
      * has already selected the HAO global layout for table generation.
      */
     std::unique_ptr<HAOCompileArtifacts> haoArtifacts;
+
+    /** Optional DOT/BEXT artifacts sharing the FDR fallback and report IDs. */
+    std::unique_ptr<HAOCompileArtifacts> dotArtifacts;
+    std::unique_ptr<HAOCompileArtifacts> bextArtifacts;
 
     HWLMProto(u8 engType_in, std::vector<hwlmLiteral> lits_in);
 
@@ -124,9 +128,9 @@ struct HWLMProto {
 bytecode_ptr<HWLM> hwlmBuild(const HWLMProto &proto, const CompileContext &cc,
                              hwlm_group_t expected_groups = HWLM_ALL_GROUPS);
 
-std::unique_ptr<HWLMProto>
-hwlmBuildProto(std::vector<hwlmLiteral> &lits, bool make_small,
-               const CompileContext &cc);
+std::unique_ptr<HWLMProto> hwlmBuildProto(std::vector<hwlmLiteral> &lits,
+                                          bool make_small,
+                                          const CompileContext &cc);
 
 /**
  * Returns an estimate of the number of repeated characters on the end of a
@@ -138,6 +142,6 @@ size_t hwlmFloodProneSuffixLen(size_t numLiterals, const CompileContext &cc);
 /** \brief Return the size in bytes of an HWLM structure. */
 size_t hwlmSize(const HWLM *h);
 
-} // namespace
+} // namespace ue2
 
 #endif // HWLM_BUILD_H

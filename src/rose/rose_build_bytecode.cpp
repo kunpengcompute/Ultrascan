@@ -3043,7 +3043,7 @@ static u8 getFpFragmentEngine(const LitProto *litProto) {
         return ROSE_FP_ENGINE_TEDDY;
     }
 
-    if (proto.haoArtifacts) {
+    if (proto.haoArtifacts || proto.dotArtifacts || proto.bextArtifacts) {
         return ROSE_FP_ENGINE_HAO;
     }
 

@@ -289,6 +289,10 @@ bool refreshHAOReports(HAOCompileArtifacts *artifacts,
 
 bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts);
 
+bytecode_ptr<u8> buildHAOVariants(const HAOCompileArtifacts *dot,
+                                  const HAOCompileArtifacts *bext,
+                                  u32 fallback);
+
 } // namespace ue2
 
 #endif // HAO_COMPILE_H

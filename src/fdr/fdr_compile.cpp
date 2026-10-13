@@ -38,6 +38,7 @@
 #include "fdr_internal.h"
 #include "grey.h"
 #include "hao_compile.h"
+#include "hao_runtime.h"
 #include "hwlm/hwlm_build.h"
 #include "teddy_compile.h"
 #include "teddy_engine_description.h"
@@ -947,7 +948,8 @@ static bool haoEngineSelectionOk(const vector<hwlmLiteral> &lits,
 
 static unique_ptr<HWLMProto>
 fdrBuildProtoInternal(u8 engType, vector<hwlmLiteral> &lits, bool make_small,
-                      const target_t &target, const Grey &grey, u32 hint) {
+                      const target_t &target, const Grey &grey, u32 hint,
+                      bool haoVariants) {
     DEBUG_PRINTF("cpu has %s\n", target.has_avx2() ? "avx2" : "no-avx2");
 
     if (grey.fdrAllowTeddy) {
@@ -960,12 +962,39 @@ fdrBuildProtoInternal(u8 engType, vector<hwlmLiteral> &lits, bool make_small,
             DEBUG_PRINTF("build with teddy failed, will try with FDR\n");
         }
     }
+    if (haoVariants) {
+        // Choose and build the fallback before attaching any HAO variants.
+        Grey fallbackGrey = grey;
+        fallbackGrey.allowHao = false;
+        fallbackGrey.fdrAllowTeddy = false;
+        auto proto = fdrBuildProtoInternal(engType, lits, make_small, target,
+                                           fallbackGrey, hint, false);
+        if (!proto || proto->teddyEng || !grey.allowHao ||
+            !haoEngineSelectionOk(proto->lits, grey)) {
+            return proto;
+        }
+        const auto order =
+            buildHaoReportOrderRank(proto->lits.size(), proto->bucketToLits);
+        Grey variantGrey = grey;
+        // Host-compatible: the target here is the actual ARM host capability.
+        if (target.has_sve()) {
+            variantGrey.haoHashMode = 2;
+            tryBuildHaoProto(target, proto->lits, variantGrey,
+                             &proto->dotArtifacts, &order);
+        }
+        if (target.has_sve_bitperm()) {
+            variantGrey.haoHashMode = 1;
+            tryBuildHaoProto(target, proto->lits, variantGrey,
+                             &proto->bextArtifacts, &order);
+        }
+        return proto;
+    }
     /* Engine id 2 is now reserved for HAO only. */
     const bool forcedHao = hint == HAO_ENGINE_ID;
     std::unique_ptr<FDREngineDescription> haoDes;
     if (forcedHao) {
         haoDes = getFdrDescription(hint);
-    } else if (hint == HINT_INVALID) {
+    } else if (hint == HINT_INVALID && grey.allowHao) {
         haoDes = chooseHaoEngine(target, lits, make_small);
         if (grey.allowHao && haoDes && haoDes->getID() == HAO_ENGINE_ID &&
             !haoEngineSelectionOk(lits, grey)) {
@@ -1040,9 +1069,9 @@ fdrBuildProtoInternal(u8 engType, vector<hwlmLiteral> &lits, bool make_small,
 
 unique_ptr<HWLMProto> fdrBuildProto(u8 engType, vector<hwlmLiteral> lits,
                                     bool make_small, const target_t &target,
-                                    const Grey &grey) {
+                                    const Grey &grey, bool haoVariants) {
     return fdrBuildProtoInternal(engType, lits, make_small, target, grey,
-                                 HINT_INVALID);
+                                 HINT_INVALID, haoVariants);
 }
 
 static bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
@@ -1052,6 +1081,29 @@ static bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
         return teddyBuildTable(proto, grey);
     }
     bytecode_ptr<u8> matcherBlob = nullptr;
+    const bool variants = proto.dotArtifacts || proto.bextArtifacts;
+    if (variants) {
+        for (auto *artifacts :
+             {proto.dotArtifacts.get(), proto.bextArtifacts.get()}) {
+            if (!artifacts) {
+                continue;
+            }
+            if (!refreshHAOReports(artifacts, proto.lits)) {
+                return nullptr;
+            }
+            const std::string name =
+                std::string(proto.debugName ? proto.debugName : "unknown") +
+                (artifacts->hashMode == HAO_LAYOUT_HASH_DOT ? "/DOT" : "/BEXT");
+            dumpHAOCompileStats(*artifacts, grey, name.c_str());
+            dumpHAOL2MapIfEnabled(proto.lits, *artifacts, grey, name.c_str());
+        }
+        matcherBlob =
+            buildHAOVariants(proto.dotArtifacts.get(),
+                             proto.bextArtifacts.get(), proto.fdrEng->getID());
+        if (!matcherBlob) {
+            return nullptr;
+        }
+    }
     if (proto.fdrEng && proto.fdrEng->getID() == HAO_ENGINE_ID) {
         if (haoShouldPrintCompileStats(proto, grey)) {
             fprintf(stderr,
@@ -1090,7 +1142,11 @@ static bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
 
     FDRCompiler fc(proto.lits, proto.bucketToLits, *(proto.fdrEng),
                    proto.make_small, grey, move(matcherBlob));
-    return fc.build();
+    auto fdr = fc.build();
+    if (fdr && variants) {
+        fdr->engineID = HAO_VARIANTS_ENGINE_ID;
+    }
+    return fdr;
 }
 
 bytecode_ptr<FDR> fdrBuildTable(const HWLMProto &proto, const Grey &grey) {
@@ -1102,8 +1158,9 @@ bytecode_ptr<FDR> fdrBuildTable(const HWLMProto &proto, const Grey &grey) {
 unique_ptr<HWLMProto> fdrBuildProtoHinted(u8 engType, vector<hwlmLiteral> lits,
                                           bool make_small, u32 hint,
                                           const target_t &target,
-                                          const Grey &grey) {
-    return fdrBuildProtoInternal(engType, lits, make_small, target, grey, hint);
+                                          const Grey &grey, bool haoVariants) {
+    return fdrBuildProtoInternal(engType, lits, make_small, target, grey, hint,
+                                 haoVariants);
 }
 
 #endif

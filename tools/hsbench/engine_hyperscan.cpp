@@ -37,23 +37,26 @@
 #include "sqldb.h"
 #include "timer.h"
 
+#include "compiler/error.h"
 #include "database.h"
 #include "fat_database.h"
+#include "grey.h"
 #include "hs_compile.h"
+#include "hs_internal.h"
 #include "hs_runtime.h"
 #include "util/database_util.h"
 #include "util/make_unique.h"
 
+#include <boost/crc.hpp>
 #include <cassert>
 #include <cstring>
 #include <functional>
 #include <iomanip>
 #include <sstream>
+#include <stdio.h>
 #include <string>
 #include <utility>
 #include <vector>
-#include <stdio.h>
-#include <boost/crc.hpp>
 
 using namespace std;
 
@@ -62,18 +65,16 @@ EngineHSContext::EngineHSContext(const hs_database_t *db) {
     assert(scratch);
 }
 
-EngineHSContext::~EngineHSContext() {
-    hs_free_scratch(scratch);
-}
+EngineHSContext::~EngineHSContext() { hs_free_scratch(scratch); }
 
-EngineHSStream::~EngineHSStream() { }
+EngineHSStream::~EngineHSStream() {}
 
 namespace /* anonymous */ {
 
 /** Scan context structure passed to the onMatch callback function. */
 struct ScanHSContext {
     ScanHSContext(unsigned id_in, ResultEntry &result_in,
-                const EngineStream *stream_in)
+                  const EngineStream *stream_in)
         : id(id_in), result(result_in), stream(stream_in) {}
     unsigned id;
     ResultEntry &result;
@@ -86,9 +87,8 @@ struct ScanHSContext {
  * Callback function called for every match that Hyperscan produces, used when
  * "echo matches" is off.
  */
-static
-int HS_CDECL onMatch(unsigned int, unsigned long long,
-                     unsigned long long, unsigned int, void *ctx) {
+static int HS_CDECL onMatch(unsigned int, unsigned long long,
+                            unsigned long long, unsigned int, void *ctx) {
     ScanHSContext *sc = static_cast<ScanHSContext *>(ctx);
     assert(sc);
     sc->result.matches++;
@@ -100,9 +100,9 @@ int HS_CDECL onMatch(unsigned int, unsigned long long,
  * Callback function called for every match that Hyperscan produces when "echo
  * matches" is enabled.
  */
-static
-int HS_CDECL onMatchEcho(unsigned int id, unsigned long long,
-                         unsigned long long to, unsigned int, void *ctx) {
+static int HS_CDECL onMatchEcho(unsigned int id, unsigned long long,
+                                unsigned long long to, unsigned int,
+                                void *ctx) {
     ScanHSContext *sc = static_cast<ScanHSContext *>(ctx);
     assert(sc);
     sc->result.matches++;
@@ -121,9 +121,7 @@ EngineHyperscan::EngineHyperscan(hs_database_t *db_in, CompileHSStats cs)
     assert(db);
 }
 
-EngineHyperscan::~EngineHyperscan() {
-    release_huge(db);
-}
+EngineHyperscan::~EngineHyperscan() { release_huge(db); }
 
 unique_ptr<EngineContext> EngineHyperscan::makeContext() const {
     return ue2::make_unique<EngineHSContext>(db);
@@ -217,8 +215,7 @@ void EngineHyperscan::streamCompressExpand(EngineStream &stream,
                                            vector<char> &temp) const {
     size_t used = 0;
     auto &s = static_cast<EngineHSStream &>(stream);
-    hs_error_t err = hs_compress_stream(s.id, temp.data(), temp.size(),
-                                        &used);
+    hs_error_t err = hs_compress_stream(s.id, temp.data(), temp.size(), &used);
     if (err == HS_INSUFFICIENT_SPACE) {
         temp.resize(used);
         err = hs_compress_stream(s.id, temp.data(), temp.size(), &used);
@@ -233,8 +230,8 @@ void EngineHyperscan::streamCompressExpand(EngineStream &stream,
         printf("stream %u: compressed to %zu\n", s.sn, used);
     }
 
-    err = hs_reset_and_expand_stream(s.id, temp.data(), temp.size(),
-                                     nullptr, nullptr, nullptr);
+    err = hs_reset_and_expand_stream(s.id, temp.data(), temp.size(), nullptr,
+                                     nullptr, nullptr);
 
     if (err != HS_SUCCESS) {
         printf("Fatal error: hs_reset_and expand_stream returned error %d\n",
@@ -293,8 +290,8 @@ void EngineHyperscan::sqlStats(SqlDB &sqldb) const {
 
     static const std::string Q =
         "INSERT INTO Compile ("
-            "sigsName, signatures, dbInfo, exprCount, dbSize, crc, streaming,"
-            "streamSize, scratchSize, compileSecs, peakMemory) "
+        "sigsName, signatures, dbInfo, exprCount, dbSize, crc, streaming,"
+        "streamSize, scratchSize, compileSecs, peakMemory) "
         "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
 
     sqldb.insert_all(Q, compile_stats.sigs_name, compile_stats.signatures,
@@ -305,9 +302,7 @@ void EngineHyperscan::sqlStats(SqlDB &sqldb) const {
                      compile_stats.compileSecs, compile_stats.peakMemorySize);
 }
 
-
-static
-unsigned makeModeFlags(ScanMode scan_mode) {
+static unsigned makeModeFlags(ScanMode scan_mode) {
     switch (scan_mode) {
     case ScanMode::BLOCK:
         return HS_MODE_BLOCK;
@@ -324,41 +319,40 @@ unsigned makeModeFlags(ScanMode scan_mode) {
  * Hash the settings used to compile a database, returning a string that can be
  * used as a filename.
  */
-static
-string dbSettingsHash(const string &filename, u32 mode) {
+static string dbSettingsHash(const string &filename, u32 mode) {
     // 只使用文件名，不含路径
     size_t pos = filename.find_last_of("/\\");
-    string basename = (pos == string::npos) ? filename : filename.substr(pos + 1);
-    
+    string basename =
+        (pos == string::npos) ? filename : filename.substr(pos + 1);
+
     ostringstream info_oss;
     info_oss << basename << ' ' << mode << ' ';
-    
+
     boost::crc_32_type crc;
     crc.process_bytes(info_oss.str().data(), info_oss.str().length());
-    
+
     ostringstream oss;
     oss << hex << setw(8) << setfill('0') << crc.checksum() << dec;
     return oss.str();
 }
 
-static
-string dbFilename(const std::string &name, unsigned mode) {
+static string dbFilename(const std::string &name, unsigned mode) {
     ostringstream oss;
     oss << serializePath << '/' << dbSettingsHash(name, mode) << ".db";
     return oss.str();
 }
 
-SplitDatabases splitDB(const fat_hs_database_t* fat_db) {
+SplitDatabases splitDB(const fat_hs_database_t *fat_db) {
     SplitDatabases result = {nullptr, nullptr};
-    
+
     if (!fat_db) {
         return result;
     }
-    
+
     // 拆分 x86 数据库
     if (fat_db->x86_length > 0) {
         size_t x86_size = sizeof(hs_database) + fat_db->x86_length;
-        result.x86_db = (hs_database_t*)malloc(x86_size);
+        result.x86_db = (hs_database_t *)malloc(x86_size);
         if (result.x86_db) {
             result.x86_db->magic = fat_db->magic;
             result.x86_db->version = fat_db->version;
@@ -367,20 +361,22 @@ SplitDatabases splitDB(const fat_hs_database_t* fat_db) {
             result.x86_db->crc32 = fat_db->x86_crc32;
             result.x86_db->reserved0 = fat_db->reserved0;
             result.x86_db->reserved1 = fat_db->reserved1;
-            
+
             uintptr_t shift = (uintptr_t)result.x86_db->bytes & 0x3f;
-            result.x86_db->bytecode = offsetof(struct hs_database, bytes) - shift;
-            
-            const char* x86_bytecode = (const char*)fat_db + fat_db->x86_bytecode;
-            char* x86_ptr = (char*)result.x86_db + result.x86_db->bytecode;
+            result.x86_db->bytecode =
+                offsetof(struct hs_database, bytes) - shift;
+
+            const char *x86_bytecode =
+                (const char *)fat_db + fat_db->x86_bytecode;
+            char *x86_ptr = (char *)result.x86_db + result.x86_db->bytecode;
             memcpy(x86_ptr, x86_bytecode, fat_db->x86_length);
         }
     }
-    
+
     // 拆分 arm 数据库
     if (fat_db->arm_length > 0) {
         size_t arm_size = sizeof(hs_database) + fat_db->arm_length;
-        result.arm_db = (hs_database_t*)malloc(arm_size);
+        result.arm_db = (hs_database_t *)malloc(arm_size);
         if (result.arm_db) {
             result.arm_db->magic = fat_db->magic;
             result.arm_db->version = fat_db->version;
@@ -389,22 +385,25 @@ SplitDatabases splitDB(const fat_hs_database_t* fat_db) {
             result.arm_db->crc32 = fat_db->arm_crc32;
             result.arm_db->reserved0 = fat_db->reserved0;
             result.arm_db->reserved1 = fat_db->reserved1;
-            
+
             uintptr_t shift = (uintptr_t)result.arm_db->bytes & 0x3f;
-            result.arm_db->bytecode = offsetof(struct hs_database, bytes) - shift;
-            
-            const char* arm_bytecode = (const char*)fat_db + fat_db->arm_bytecode;
-            char* arm_ptr = (char*)result.arm_db + result.arm_db->bytecode;
+            result.arm_db->bytecode =
+                offsetof(struct hs_database, bytes) - shift;
+
+            const char *arm_bytecode =
+                (const char *)fat_db + fat_db->arm_bytecode;
+            char *arm_ptr = (char *)result.arm_db + result.arm_db->bytecode;
             memcpy(arm_ptr, arm_bytecode, fat_db->arm_length);
         }
     }
-    
+
     return result;
 }
 
 std::unique_ptr<EngineHyperscan>
 fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
-                     const std::string &name, const std::string &sigs_name) {
+                         const std::string &name,
+                         const std::string &sigs_name) {
     if (expressions.empty()) {
         assert(0);
         return nullptr;
@@ -473,24 +472,36 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
 
         hs_compile_error_t *compile_err;
         Timer timer;
+        // Pattern length computation should be done before timer start.
+        vector<size_t> lens;
         if (useLiteralApi) {
-            // Pattern length computation should be done before timer start.
-            vector<size_t> lens(count);
+            lens.resize(count);
             for (unsigned int i = 0; i < count; i++) {
                 lens[i] = strlen(patterns[i]);
             }
-            timer.start();
-            err = fat_hs_compile_lit_multi(patterns.data(), flags.data(),
-                                           ids.data(), lens.data(), count,
-                                           full_mode, nullptr, &db, &compile_err);
-            timer.complete();
-        } else {
-            timer.start();
-            err = fat_hs_compile_ext_multi(patterns.data(), flags.data(),
-                                           ids.data(), ext_ptr.data(), count,
-                                           full_mode, nullptr, &db, &compile_err);
-            timer.complete();
         }
+        timer.start();
+        // The private compiler and shared runtime may have separate Grey
+        // storage. Pass the validated command-line settings explicitly to the
+        // compiler; processArgs also sets them in the runtime through the
+        // existing API.
+        ue2::Grey grey(false);
+        if (!greyOverrides.empty() &&
+            !ue2::applyGreyOverrides(&grey, greyOverrides)) {
+            return nullptr;
+        }
+        // Keep the fat container for -w/-i, but benchmark the Grey-selected
+        // single path. Public fat APIs and hsdump still build HAO variants.
+        if (useLiteralApi) {
+            err = ue2::fat_hs_compile_lit_multi_int(
+                patterns.data(), flags.data(), ids.data(), nullptr, lens.data(),
+                count, full_mode, nullptr, &db, &compile_err, grey, false);
+        } else {
+            err = ue2::fat_hs_compile_multi_int(
+                patterns.data(), flags.data(), ids.data(), ext_ptr.data(),
+                count, full_mode, nullptr, &db, &compile_err, grey, false);
+        }
+        timer.complete();
         compileSecs = timer.seconds();
         peakMemorySize = getPeakHeap();
 
@@ -501,35 +512,37 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
             } else {
                 printf("Compile error: %s\n", compile_err->message);
             }
-            hs_free_compile_error(compile_err);
+            // Includes compiler-local constant errors, which the shared library
+            // cannot distinguish from heap allocations.
+            ue2::freeCompileError(compile_err);
             return nullptr;
         }
     }
-    
+
     if (saveDatabases) {
         fat_saveDatabase(db, dbFilename(name, mode).c_str());
-    }   
-    //copy the db into huge pages (where available) to reduce TLB pressure
+    }
+    // copy the db into huge pages (where available) to reduce TLB pressure
     SplitDatabases split = splitDB(db);
 
-     // 根据当前架构选择数据库
+    // 根据当前架构选择数据库
 #if defined(ARCH_X86_64)
-    hs_database_t* target_db = split.x86_db;
+    hs_database_t *target_db = split.x86_db;
     if (split.arm_db) {
         free(split.arm_db);
     }
 #elif defined(ARCH_AARCH64)
-    hs_database_t* target_db = split.arm_db;
+    hs_database_t *target_db = split.arm_db;
     if (split.x86_db) {
         free(split.x86_db);
     }
 #else
-    hs_database_t* target_db = split.x86_db;
+    hs_database_t *target_db = split.x86_db;
     if (split.arm_db) {
         free(split.arm_db);
     }
 #endif
-    
+
     if (!target_db) {
         fat_hs_free_database(db);
         return nullptr;
@@ -549,7 +562,7 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
             return nullptr;
         }
     } else {
-            streamSize = 0;
+        streamSize = 0;
     }
     char *info;
     err = hs_database_info(target_db, &info);
@@ -559,7 +572,7 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
         db_info = string(info);
         free(info);
     }
-    
+
     hs_scratch_t *scratch = nullptr;
     err = hs_alloc_scratch(target_db, &scratch);
     if (err != HS_SUCCESS) {
@@ -571,7 +584,7 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
         return nullptr;
     }
     hs_free_scratch(scratch);
-    
+
     err = hs_database_size(target_db, &compiledSize);
     if (err != HS_SUCCESS) {
         return nullptr;
@@ -599,29 +612,33 @@ fat_buildEngineHyperscan(const ExpressionMap &expressions, ScanMode scan_mode,
 
 std::unique_ptr<EngineHyperscan>
 buildEngineFromSerialized(const std::string &dbPath, ScanMode scan_mode) {
-    
+
     // 尝试加载 fat 数据库
     fat_hs_database_t *fat_db = fat_loadDatabase(dbPath.c_str(), true);
     hs_database_t *db = nullptr;
-    
+
     if (fat_db) {
         // 成功加载 fat 数据库，拆分并选择当前架构
         SplitDatabases split = splitDB(fat_db);
         fat_hs_free_database(fat_db);
-        
+
 #if defined(ARCH_X86_64)
         db = split.x86_db;
-        if (split.arm_db) free(split.arm_db);
+        if (split.arm_db)
+            free(split.arm_db);
 #elif defined(ARCH_AARCH64)
         db = split.arm_db;
-        if (split.x86_db) free(split.x86_db);
+        if (split.x86_db)
+            free(split.x86_db);
 #else
         db = split.x86_db;
-        if (split.arm_db) free(split.arm_db);
+        if (split.arm_db)
+            free(split.arm_db);
 #endif
-        
+
         if (!db) {
-            printf("Error: no compatible database found for current architecture.\n");
+            printf("Error: no compatible database found for current "
+                   "architecture.\n");
             return nullptr;
         }
     } else {
@@ -632,7 +649,7 @@ buildEngineFromSerialized(const std::string &dbPath, ScanMode scan_mode) {
             return nullptr;
         }
     }
-    
+
     // 获取数据库信息
     char *info = nullptr;
     hs_error_t err = hs_database_info(db, &info);
@@ -641,10 +658,10 @@ buildEngineFromSerialized(const std::string &dbPath, ScanMode scan_mode) {
         hs_free_database(db);
         return nullptr;
     }
-    
+
     std::string db_info = info;
     free(info);
-    
+
     // 从 db_info 字符串解析模式
     // 格式: "Version: X.X.X Features: XXX Mode: STREAM/BLOCK/VECTORED"
     std::string db_mode;
@@ -658,37 +675,44 @@ buildEngineFromSerialized(const std::string &dbPath, ScanMode scan_mode) {
             db_mode = db_info.substr(mode_pos, mode_end - mode_pos);
         }
     }
-    
+
     // 检查模式匹配
     std::string expected_mode_str;
     switch (scan_mode) {
-        case ScanMode::BLOCK: expected_mode_str = "BLOCK"; break;
-        case ScanMode::STREAMING: expected_mode_str = "STREAM"; break;
-        case ScanMode::VECTORED: expected_mode_str = "VECTORED"; break;
+    case ScanMode::BLOCK:
+        expected_mode_str = "BLOCK";
+        break;
+    case ScanMode::STREAMING:
+        expected_mode_str = "STREAM";
+        break;
+    case ScanMode::VECTORED:
+        expected_mode_str = "VECTORED";
+        break;
     }
-    
+
     if (db_mode != expected_mode_str) {
         printf("Error: database mode mismatch!\n");
         printf("  Expected: %s\n", expected_mode_str.c_str());
-        printf("  Database: %s\n", db_mode.empty() ? "UNKNOWN" : db_mode.c_str());
+        printf("  Database: %s\n",
+               db_mode.empty() ? "UNKNOWN" : db_mode.c_str());
         hs_free_database(db);
         return nullptr;
     }
-    
+
     // 加载到大页内存
     db = get_huge(db);
     if (!db) {
         return nullptr;
     }
-    
+
     // 获取数据库大小信息
     size_t compiledSize = 0, streamSize = 0, scratchSize = 0;
     hs_database_size(db, &compiledSize);
-    
+
     if (scan_mode == ScanMode::STREAMING) {
         hs_stream_size(db, &streamSize);
     }
-    
+
     // 获取 scratch 大小
     hs_scratch_t *scratch = nullptr;
     err = hs_alloc_scratch(db, &scratch);
@@ -697,24 +721,24 @@ buildEngineFromSerialized(const std::string &dbPath, ScanMode scan_mode) {
         hs_free_database(db);
         return nullptr;
     }
-    
+
     hs_scratch_size(scratch, &scratchSize);
     hs_free_scratch(scratch);
-    
+
     // 构建 CompileHSStats
     CompileHSStats cs;
     cs.sigs_name = dbPath;
     size_t pos = dbPath.find_last_of("/\\");
     cs.signatures = (pos == string::npos) ? dbPath : dbPath.substr(pos + 1);
     cs.db_info = db_info;
-    cs.expressionCount = 0;  // 从序列化数据库无法获取
+    cs.expressionCount = 0; // 从序列化数据库无法获取
     cs.compiledSize = compiledSize;
     cs.crc32 = db->crc32;
     cs.streaming = (scan_mode == ScanMode::STREAMING);
     cs.streamSize = streamSize;
     cs.scratchSize = scratchSize;
-    cs.compileSecs = 0;  // 无编译时间
+    cs.compileSecs = 0; // 无编译时间
     cs.peakMemorySize = 0;
-    
+
     return ue2::make_unique<EngineHyperscan>(db, std::move(cs));
 }

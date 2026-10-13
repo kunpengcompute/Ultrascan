@@ -3473,7 +3473,7 @@ const char *haoFeasibilityReasonName(HAOFeasibilityReason reason) {
 }
 
 bool haoCanUseBextFastPath(const target_t &target) {
-#if defined(__ARM_FEATURE_SVE2_BITPERM)
+#if defined(HS_BUILD_HAVE_SVEBITPERM)
     return target.has_sve_bitperm();
 #else
     (void)target;
@@ -3482,7 +3482,7 @@ bool haoCanUseBextFastPath(const target_t &target) {
 }
 
 bool haoHasSveBitPermPrereq(const target_t &target) {
-#if defined(__ARM_FEATURE_SVE2_BITPERM)
+#if defined(HS_BUILD_HAVE_SVEBITPERM)
     return target.has_sve_bitperm();
 #else
     (void)target;
@@ -3542,7 +3542,7 @@ bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
                        const std::vector<u32> *reportOrder, const Grey &grey) {
     HAOHashPolicy hashPolicy = haoHashPolicy(grey);
     bool defaultMappedToDot = false;
-#if !defined(__ARM_FEATURE_SVE2_BITPERM)
+#if !defined(HS_BUILD_HAVE_SVEBITPERM)
     if (hashPolicy == HAOHashPolicy::BEXT) {
         if (haoHashPolicyIsExplicit(grey)) {
             return false;
@@ -3790,6 +3790,7 @@ static bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
     totalSize += ROUNDUP_N(l2CheckBytes, HAO_RUNTIME_L2_CHECK_ALIGN);
     const u32 l2MetaOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(l2MetaBytes, alignof(u32));
+    totalSize = ROUNDUP_N(totalSize, alignof(HAORuntimeRuleMeta));
     const u32 ruleMetaOffset = verify_u32(totalSize);
     totalSize += ROUNDUP_N(ruleMetaBytes, alignof(u32));
 
@@ -3864,6 +3865,45 @@ static bytecode_ptr<u8> haoBuildBlobImpl(const ArtifactsT &artifacts) {
 
 bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts) {
     return haoBuildBlobImpl(artifacts);
+}
+
+bytecode_ptr<u8> buildHAOVariants(const HAOCompileArtifacts *dot,
+                                  const HAOCompileArtifacts *bext,
+                                  u32 fallback) {
+    if ((!dot && !bext) || fallback > 1U ||
+        (dot &&
+         (!haoArtifactsOk(*dot) || dot->hashMode != HAO_LAYOUT_HASH_DOT)) ||
+        (bext &&
+         (!haoArtifactsOk(*bext) || bext->hashMode != HAO_LAYOUT_HASH_BEXT))) {
+        return nullptr;
+    }
+    auto dotBlob = dot ? buildHAOBlob(*dot) : bytecode_ptr<u8>();
+    auto bextBlob = bext ? buildHAOBlob(*bext) : bytecode_ptr<u8>();
+    if ((dot && !dotBlob) || (bext && !bextBlob)) {
+        return nullptr;
+    }
+    size_t size = ROUNDUP_CL(sizeof(HAOVariants));
+    const u32 dotOffset = dotBlob ? verify_u32(size) : 0;
+    size += ROUNDUP_CL(dotBlob.size());
+    const u32 bextOffset = bextBlob ? verify_u32(size) : 0;
+    size += ROUNDUP_CL(bextBlob.size());
+    auto blob = make_zeroed_bytecode_ptr<u8>(verify_u32(size), 64);
+    auto *hdr = reinterpret_cast<HAOVariants *>(blob.get());
+    hdr->magic = HAO_VARIANTS_MAGIC;
+    hdr->version = HAO_VARIANTS_VERSION;
+    hdr->size = verify_u32(size);
+    hdr->fallback = fallback;
+    hdr->dotOffset = dotOffset;
+    hdr->dotSize = verify_u32(dotBlob.size());
+    hdr->bextOffset = bextOffset;
+    hdr->bextSize = verify_u32(bextBlob.size());
+    if (dotBlob) {
+        memcpy(blob.get() + dotOffset, dotBlob.get(), dotBlob.size());
+    }
+    if (bextBlob) {
+        memcpy(blob.get() + bextOffset, bextBlob.get(), bextBlob.size());
+    }
+    return blob;
 }
 
 } // namespace ue2

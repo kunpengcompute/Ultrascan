@@ -65,7 +65,7 @@
 using namespace std;
 using namespace ue2;
 
-#ifdef HS_ENABLE_FP_FEEDBACK
+#if defined(HS_ENABLE_FP_FEEDBACK) && !defined(HS_INTERNAL_TOOL_BUILD)
 struct hs_compile_context {
     hs_fp_feedback_t *fp_feedback;
     u32 fp_observe_checked_count;
@@ -228,6 +228,19 @@ static u64a currentArmCpuFeatures(void) {
                             HS_CPU_FEATURES_SVEBITPERM);
 }
 
+static target_t fatX86Target(const hs_platform_info_t *platform) {
+    hs_platform_info_t p = {};
+    if (platform) {
+        p = *platform;
+    } else {
+        p.tune = cpuid_tune();
+        p.cpu_features = cpuid_flags();
+    }
+    p.cpu_features &= HS_CPU_FEATURES_AVX2 | HS_CPU_FEATURES_AVX512 |
+                      HS_CPU_FEATURES_AVX512VBMI;
+    return target_t(p);
+}
+
 /** \brief Convert from SOM mode to bytes of precision. */
 static unsigned getSomPrecision(unsigned mode) {
     if (mode & HS_MODE_VECTORED) {
@@ -334,7 +347,7 @@ hs_error_t fat_hs_compile_multi_int(
     const char *const *expressions, const unsigned *flags, const unsigned *ids,
     const hs_expr_ext *const *ext, unsigned elements, unsigned mode,
     const hs_platform_info_t *platform, fat_hs_database_t **db,
-    hs_compile_error_t **comp_error, const Grey &g) {
+    hs_compile_error_t **comp_error, const Grey &g, bool haoVariants) {
     // Check the args: note that it's OK for flags, ids or ext to be null.
     hs_error_t err =
         validate_fat_compile_args(db, comp_error, expressions, elements, g);
@@ -365,8 +378,7 @@ hs_error_t fat_hs_compile_multi_int(
     bool isVectored = mode & HS_MODE_VECTORED;
     unsigned somPrecision = getSomPrecision(mode);
 
-    target_t target_info =
-        platform ? target_t(*platform) : get_current_target();
+    target_t target_info = fatX86Target(platform);
     u32 count_2_4_byte_literals = 0;
     for (unsigned int i = 0; i < elements; i++) {
         try {
@@ -389,6 +401,7 @@ hs_error_t fat_hs_compile_multi_int(
         Grey x86_grey = g;
         x86_grey.allowLily = false;
         x86_grey.allowNeoFdr = false;
+        x86_grey.allowHao = false;
 
         CompileContext x86_cc(isStreaming, isVectored, target_info, x86_grey);
         NG x86_ng(x86_cc, elements, somPrecision);
@@ -459,6 +472,7 @@ hs_error_t fat_hs_compile_multi_int(
 
         CompileContext arm_cc(isStreaming, isVectored, arm_target_info,
                               arm_grey);
+        arm_cc.haoVariants = haoVariants;
         NG arm_ng(arm_cc, elements, somPrecision);
 
         if (count_2_4_byte_literals > 8) {
@@ -544,7 +558,7 @@ hs_error_t fat_hs_compile_lit_multi_int(
     const char *const *expressions, const unsigned *flags, const unsigned *ids,
     const hs_expr_ext *const *ext, const size_t *lens, unsigned elements,
     unsigned mode, const hs_platform_info_t *platform, fat_hs_database_t **db,
-    hs_compile_error_t **comp_error, const Grey &g) {
+    hs_compile_error_t **comp_error, const Grey &g, bool haoVariants) {
     // Check the args: note that it's OK for flags, ids or ext to be null.
     hs_error_t err =
         validate_fat_compile_args(db, comp_error, expressions, elements, g);
@@ -574,14 +588,14 @@ hs_error_t fat_hs_compile_lit_multi_int(
     bool isVectored = mode & HS_MODE_VECTORED;
     unsigned somPrecision = getSomPrecision(mode);
 
-    target_t target_info =
-        platform ? target_t(*platform) : get_current_target();
+    target_t target_info = fatX86Target(platform);
 
     try {
         // =======1. 编译 x86 字节码===============
         Grey x86_grey = g;
         x86_grey.allowLily = false;
         x86_grey.allowNeoFdr = false;
+        x86_grey.allowHao = false;
 
         CompileContext x86_cc(isStreaming, isVectored, target_info, x86_grey);
         NG x86_ng(x86_cc, elements, somPrecision);
@@ -613,6 +627,7 @@ hs_error_t fat_hs_compile_lit_multi_int(
 
         CompileContext arm_cc(isStreaming, isVectored, arm_target_info,
                               arm_grey);
+        arm_cc.haoVariants = haoVariants;
         NG arm_ng(arm_cc, elements, somPrecision);
 
         for (unsigned int i = 0; i < elements; i++) {
@@ -655,6 +670,7 @@ hs_error_t fat_hs_compile_lit_multi_int(
     }
 }
 
+#ifndef HS_INTERNAL_TOOL_BUILD
 hs_error_t hs_compile_multi_int(const char *const *expressions,
                                 const unsigned *flags, const unsigned *ids,
                                 const hs_expr_ext *const *ext,
@@ -1002,8 +1018,10 @@ hs_compile_lit_multi_int(const char *const *expressions, const unsigned *flags,
     }
 }
 
+#endif /* !HS_INTERNAL_TOOL_BUILD */
 } // namespace ue2
 
+#ifndef HS_INTERNAL_TOOL_BUILD
 extern "C" HS_PUBLIC_API hs_error_t HS_CDECL
 hs_compile(const char *expression, unsigned flags, unsigned mode,
            const hs_platform_info_t *platform, hs_database_t **db,
@@ -1601,3 +1619,4 @@ hs_free_compile_error(hs_compile_error_t *error) {
     freeCompileError(error);
     return HS_SUCCESS;
 }
+#endif /* !HS_INTERNAL_TOOL_BUILD */

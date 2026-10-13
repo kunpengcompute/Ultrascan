@@ -48,8 +48,10 @@ hs_free_t hs_misc_free = default_free;
 hs_free_t hs_scratch_free = default_free;
 hs_free_t hs_stream_free = default_free;
 
-static
-hs_alloc_t normalise_alloc(hs_alloc_t a) {
+#ifndef HS_INTERNAL_TOOL_BUILD
+/* A tools-only compiler owns its allocations but uses the library's public API.
+ */
+static hs_alloc_t normalise_alloc(hs_alloc_t a) {
     if (!a) {
         return default_malloc;
     } else {
@@ -57,8 +59,7 @@ hs_alloc_t normalise_alloc(hs_alloc_t a) {
     }
 }
 
-static
-hs_free_t normalise_free(hs_free_t f) {
+static hs_free_t normalise_free(hs_free_t f) {
     if (!f) {
         return default_free;
     } else {
@@ -111,3 +112,4 @@ hs_error_t HS_CDECL hs_set_stream_allocator(hs_alloc_t allocfunc,
 
     return HS_SUCCESS;
 }
+#endif /* !HS_INTERNAL_TOOL_BUILD */

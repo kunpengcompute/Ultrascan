@@ -33,8 +33,8 @@
 #ifndef FDR_COMPILE_H
 #define FDR_COMPILE_H
 
-#include "ue2common.h"
 #include "hwlm/hwlm_build.h"
+#include "ue2common.h"
 #include "util/bytecode_ptr.h"
 
 #include <vector>
@@ -50,19 +50,16 @@ struct target_t;
 bytecode_ptr<FDR> fdrBuildTable(const HWLMProto &proto, const Grey &grey);
 
 #if !defined(RELEASE_BUILD)
-std::unique_ptr<HWLMProto> fdrBuildProtoHinted(
-                                          u8 engType,
-                                          std::vector<hwlmLiteral> lits,
-                                          bool make_small, u32 hint,
-                                          const target_t &target,
-                                          const Grey &grey);
+std::unique_ptr<HWLMProto>
+fdrBuildProtoHinted(u8 engType, std::vector<hwlmLiteral> lits, bool make_small,
+                    u32 hint, const target_t &target, const Grey &grey,
+                    bool haoVariants = false);
 #endif
 
-std::unique_ptr<HWLMProto> fdrBuildProto(
-                                     u8 engType,
-                                     std::vector<hwlmLiteral> lits,
-                                     bool make_small, const target_t &target,
-                                     const Grey &grey);
+std::unique_ptr<HWLMProto>
+fdrBuildProto(u8 engType, std::vector<hwlmLiteral> lits, bool make_small,
+              const target_t &target, const Grey &grey,
+              bool haoVariants = false);
 
 /** \brief Returns size in bytes of the given FDR engine. */
 size_t fdrSize(const struct FDR *fdr);

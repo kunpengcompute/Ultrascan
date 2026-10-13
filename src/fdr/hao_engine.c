@@ -1489,50 +1489,10 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
     return haoRunBatchBlobScalar(hdr, a, control);
 }
 
-static hwlm_error_t haoExecBlobWithPath(const void *blob, u32 blobSize,
-                                        const struct FDR_Runtime_Args *a,
-                                        hwlm_group_t control) {
-    const struct HAORuntimeHeader *hdr = NULL;
-
-    if (!haoValidateLayout(blob, blobSize, &hdr)) {
-        return HWLM_SUCCESS;
-    }
-    if (!a) {
-        return HWLM_SUCCESS;
-    }
-
+hwlm_error_t HAO_EXEC(const struct HAORuntimeHeader *hdr,
+                      const struct FDR_Runtime_Args *a, hwlm_group_t control) {
+    assert(haoRuntimeHeaderHashMode(hdr) == HAO_HASH_MODE);
     return haoRunBatchBlob(hdr, a, &control);
-}
-
-static hwlm_error_t haoExec(const struct FDR *fdr,
-                            const struct FDR_Runtime_Args *a,
-                            hwlm_group_t control) {
-    if (!fdr || !fdrMatcherBlobOffset(fdr) || !fdrMatcherBlobSize(fdr)) {
-        return HWLM_SUCCESS;
-    }
-
-    {
-        const u8 *base = (const u8 *)fdr;
-        const void *blob = base + fdrMatcherBlobOffset(fdr);
-        return haoExecBlobWithPath(blob, fdrMatcherBlobSize(fdr), a, control);
-    }
-}
-
-hwlm_error_t HaoEngineExec(const struct FDR *fdr,
-                           const struct FDR_Runtime_Args *a,
-                           hwlm_group_t control) {
-    return haoExec(fdr, a, control);
-}
-
-#else
-
-hwlm_error_t HaoEngineExec(const struct FDR *fdr,
-                           const struct FDR_Runtime_Args *a,
-                           hwlm_group_t control) {
-    (void)fdr;
-    (void)a;
-    (void)control;
-    return HWLM_SUCCESS;
 }
 
 #endif

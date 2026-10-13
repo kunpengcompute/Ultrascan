@@ -33,8 +33,7 @@
 #ifndef FAT_DATABASE_H_D467FD6F343DDF
 #define FAT_DATABASE_H_D467FD6F343DDF
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 #include "database_common.h"
 #include "hs_compile.h" // for HS_MODE_ flags
@@ -43,8 +42,8 @@ extern "C"
 #include "util/arch.h"
 
 /*
- * a header to enclose the actual fat bytecode - useful for keeping info about the
- * compiled data.
+ * a header to enclose the actual fat bytecode - useful for keeping info about
+ * the compiled data.
  */
 struct fat_hs_database {
     u32 magic;
@@ -52,7 +51,7 @@ struct fat_hs_database {
     u32 x86_length;
     u32 arm_length;
     u64a platform;
-    u64a arm_platform; 
+    u64a arm_platform;
     u32 arm_crc32;
     u32 x86_crc32;
     u32 reserved0;
@@ -63,8 +62,8 @@ struct fat_hs_database {
     char bytes[];
 };
 
-static really_inline
-const void *fat_hs_get_bytecode(const struct fat_hs_database *db) {
+static really_inline const void *
+fat_hs_get_bytecode(const struct fat_hs_database *db) {
 #if defined(ARCH_X86_64)
     return ((const char *)db + db->x86_bytecode);
 #elif defined(ARCH_AARCH64)
@@ -74,12 +73,20 @@ const void *fat_hs_get_bytecode(const struct fat_hs_database *db) {
 #endif
 }
 
+static really_inline u32
+fat_hs_get_bytecode_size(const struct fat_hs_database *db) {
+#if defined(ARCH_AARCH64)
+    return db->arm_length;
+#else
+    return db->x86_length;
+#endif
+}
+
 /**
  * Cheap database sanity checks used in block mode scan calls and streaming
  * mode open calls.
  */
-static really_inline
-hs_error_t fat_validDatabase(const fat_hs_database_t *db) {
+static really_inline hs_error_t fat_validDatabase(const fat_hs_database_t *db) {
     if (!db || db->magic != HS_DB_MAGIC) {
         return HS_INVALID;
     }
