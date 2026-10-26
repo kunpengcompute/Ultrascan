@@ -71,7 +71,7 @@ Ultrascan提供基于openEuler 22.03 LTS SP4（AArch64）的预构建容器镜�
 
 ### 方式二：从Dockerfile构建镜像
 
-通过Dockerfile可快速构建镜像。[Dockerfile](../../Dockerfile)位于代码仓根目录，用户可根据实际需求修改Dockerfile中的路径参数。
+通过Dockerfile可快速构建镜像。[Dockerfile](../../.gitcode/dockerfiles/Dockerfile)位于代码仓“.gitcode/dockerfiles”目录，用户可根据实际需求修改Dockerfile中的路径参数。
 
 1. 拉取Ultrascan源码。
 
@@ -83,7 +83,7 @@ Ultrascan提供基于openEuler 22.03 LTS SP4（AArch64）的预构建容器镜�
 
     ```bash
     cd Ultrascan
-    docker build -t your_image_name:your_image_tag .
+    docker build -f .gitcode/dockerfiles/Dockerfile -t your_image_name:your_image_tag .
     ```
 
 3. 创建并进入容器。
