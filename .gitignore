@@ -83,3 +83,4 @@ build
 build_debug
 pcre
 \.*
+!.gitcode/

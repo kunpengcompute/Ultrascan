@@ -71,7 +71,7 @@ Ultrascan provides a pre-built container image based on openEuler 22.03 LTS SP4 
 
 ### Method 2: Building an Image from the Dockerfile
 
-You can quickly build an image using the Dockerfile. The [Dockerfile](../../Dockerfile) is located in the root directory of the repository. You can modify the path parameters in the Dockerfile as required.
+You can quickly build an image using the Dockerfile. The [Dockerfile](../../.gitcode/dockerfiles/Dockerfile) is located in the `.gitcode/dockerfiles` directory of the repository. You can modify the path parameters in the Dockerfile as required.
 
 1. Clone the Ultrascan source code.
 
@@ -83,7 +83,7 @@ You can quickly build an image using the Dockerfile. The [Dockerfile](../../Dock
 
     ```bash
     cd Ultrascan
-    docker build -t your_image_name:your_image_tag .
+    docker build -f .gitcode/dockerfiles/Dockerfile -t your_image_name:your_image_tag .
     ```
 
 3. Create and enter the container.
