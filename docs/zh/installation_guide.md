@@ -42,6 +42,64 @@ Ultrascan当前适配鲲鹏920系列处理器，操作系统为openEuler 22.03 L
 |SQLite|SQLite 3|可选：Ultrascan tools测试工具hsbench编译依赖SQLite 3。|使用Yum工具安装。|
 |Ultrascan|master|必选：待编译软件。|[获取链接](https://gitcode.com/boostkit/Ultrascan/tree/master)|
 
+## 镜像方式部署
+
+Ultrascan提供基于openEuler 22.03 LTS SP4（AArch64）的预构建容器镜像，镜像内已包含Ultrascan所需的全部编译和测试依赖，用户可以使用镜像快速搭建编译环境，无需手动安装依赖软件。获取镜像有以下两种方式：
+
+- 方式一：从华为云镜像仓库拉取预构建镜像（推荐）。
+- 方式二：从Dockerfile构建镜像。
+
+### 方式一：拉取预构建镜像
+
+1. 拉取镜像。
+
+    ```bash
+    docker pull swr.cn-north-4.myhuaweicloud.com/cloud_boostkit/openeuler22.03_lts_sp4:Ultrascan_26.3.0.01
+    ```
+
+2. 创建并启动容器。其中“/opt/Ultrascan”为宿主机上Ultrascan源码目录，请根据实际路径替换。
+
+    ```bash
+    docker run -itd --name ultrascan_container -v /opt/Ultrascan:/workspace swr.cn-north-4.myhuaweicloud.com/cloud_boostkit/openeuler22.03_lts_sp4:Ultrascan_26.3.0.01
+    ```
+
+3. 进入容器。
+
+    ```bash
+    docker exec -it ultrascan_container bash
+    ```
+
+### 方式二：从Dockerfile构建镜像
+
+通过Dockerfile可快速构建镜像。[Dockerfile](../../Dockerfile)位于代码仓根目录，用户可根据实际需求修改Dockerfile中的路径参数。
+
+1. 拉取Ultrascan源码。
+
+    ```bash
+    git clone https://gitcode.com/boostkit/Ultrascan.git
+    ```
+
+2. 进入源码目录，构建镜像。
+
+    ```bash
+    cd Ultrascan
+    docker build -t your_image_name:your_image_tag .
+    ```
+
+3. 创建并进入容器。
+
+    ```bash
+    docker run -itd --name ultrascan_container -v /opt/Ultrascan:/workspace your_image_name:your_image_tag
+    docker exec -it ultrascan_container bash
+    ```
+
+>![](public_sys-resources/icon-note.gif) **说明：**
+>
+>- 镜像内已预装GCC、CMake、Ragel 6.10、Boost 1.87.0、SQLite 3等编译依赖，并预置PCRE 8.45源码。
+>- 容器工作目录为“/workspace”，容器启动时入口脚本会自动将PCRE源码拷贝到“/workspace/pcre”目录，相当于完成[编译Ultrascan](#编译ultrascan)章节中“添加PCRE依赖库”的步骤。
+>- 容器内CMake版本为3.0及以上，无需执行[编译Ultrascan](#编译ultrascan)章节中注释“pcre/CMakeLists.txt”文件第77行的操作。
+>- 进入容器后，请参考[编译Ultrascan](#编译ultrascan)章节，在“/workspace”目录下完成Ultrascan的编译。
+
 ## 配置编译环境
 
 ### （可选）配置本地源

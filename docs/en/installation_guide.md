@@ -42,6 +42,64 @@ Before installing and compiling software, obtain the software packages by referr
 |SQLite|SQLite 3|Optional. The compilation of the Ultrascan test tool hsbench depends on SQLite 3.|Use Yum to install it.|
 |Ultrascan|master|Mandatory. Software to be compiled.|[Link](https://gitcode.com/boostkit/Ultrascan/tree/master)|
 
+## Deployment Using Container Images
+
+Ultrascan provides a pre-built container image based on openEuler 22.03 LTS SP4 (AArch64). All compilation and test dependencies required by Ultrascan have been installed in the image. You can use the image to quickly set up the compilation environment without manually installing the dependent software. There are two ways to obtain the image:
+
+- Method 1: Pull the pre-built image from the Huawei Cloud image repository (recommended).
+- Method 2: Build an image from the Dockerfile.
+
+### Method 1: Pulling the Pre-built Image
+
+1. Pull the image.
+
+    ```bash
+    docker pull swr.cn-north-4.myhuaweicloud.com/cloud_boostkit/openeuler22.03_lts_sp4:Ultrascan_26.3.0.01
+    ```
+
+2. Create and start a container. `/opt/Ultrascan` indicates the Ultrascan source code directory on the host. Replace it with the actual path.
+
+    ```bash
+    docker run -itd --name ultrascan_container -v /opt/Ultrascan:/workspace swr.cn-north-4.myhuaweicloud.com/cloud_boostkit/openeuler22.03_lts_sp4:Ultrascan_26.3.0.01
+    ```
+
+3. Enter the container.
+
+    ```bash
+    docker exec -it ultrascan_container bash
+    ```
+
+### Method 2: Building an Image from the Dockerfile
+
+You can quickly build an image using the Dockerfile. The [Dockerfile](../../Dockerfile) is located in the root directory of the repository. You can modify the path parameters in the Dockerfile as required.
+
+1. Clone the Ultrascan source code.
+
+    ```bash
+    git clone https://gitcode.com/boostkit/Ultrascan.git
+    ```
+
+2. Go to the source code directory and build the image.
+
+    ```bash
+    cd Ultrascan
+    docker build -t your_image_name:your_image_tag .
+    ```
+
+3. Create and enter the container.
+
+    ```bash
+    docker run -itd --name ultrascan_container -v /opt/Ultrascan:/workspace your_image_name:your_image_tag
+    docker exec -it ultrascan_container bash
+    ```
+
+>![](public_sys-resources/icon-note.gif) **NOTE:**
+>
+>- Compilation dependencies such as GCC, CMake, Ragel 6.10, Boost 1.87.0, and SQLite 3, as well as the PCRE 8.45 source code, have been pre-installed in the image.
+>- The working directory of the container is `/workspace`. When the container starts, the entrypoint script automatically copies the PCRE source code to the `/workspace/pcre` directory. This is equivalent to the "Add the PCRE dependency library" step in [Compiling Ultrascan](#compiling-ultrascan).
+>- The CMake version in the container is 3.0 or later. Therefore, you do not need to comment out line 77 in the `pcre/CMakeLists.txt` file as described in [Compiling Ultrascan](#compiling-ultrascan).
+>- After entering the container, compile Ultrascan in the `/workspace` directory by referring to [Compiling Ultrascan](#compiling-ultrascan).
+
 ## Configuring the Compilation Environment
 
 ### (Optional) Configuring the Local Repository
