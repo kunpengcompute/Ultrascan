@@ -33,9 +33,16 @@
 #include "ue2common.h"
 #include "util/flat_containers.h"
 
+#include <vector>
+
 namespace ue2 {
 
 class RoseBuildImpl;
+class NGHolder;
+
+/** Build the supplementary matcher mask derived from a Rose predecessor. */
+void findRoseLiteralMask(const NGHolder &h, u32 lag, std::vector<u8> &msk,
+                         std::vector<u8> &cmp);
 
 RoseVertex createVertex(RoseBuildImpl *build, const RoseVertex parent,
                         u32 minBound, u32 maxBound, u32 literalId,

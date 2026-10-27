@@ -30,12 +30,12 @@
 #define STRING_UTIL_H
 
 #include "ue2common.h"
-#include <iomanip>
-#include <string>
-#include <sstream>
-#include <vector>
 #include <cstring>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
 
 //
 // Utility functions
@@ -43,9 +43,7 @@
 
 // read a string in and convert it to another type, anything supported
 // by stringstream
-template<typename T>
-inline bool fromString(const std::string &s, T& val)
-{
+template <typename T> inline bool fromString(const std::string &s, T &val) {
     std::istringstream i(s);
     char c;
     if (!(i >> val) || i.get(c)) {
@@ -56,37 +54,57 @@ inline bool fromString(const std::string &s, T& val)
 
 // read in a comma-separated or hyphen-connected set of values: very simple
 // impl, not for external consumption
-template<typename T>
-inline bool strToList(const std::string &s, std::vector<T>& out)
-{
+template <typename T>
+inline bool strToList(const std::string &s, std::vector<T> &out) {
     std::istringstream i(s);
-    char c;
-    do {
-        T val;
+    std::vector<T> parsed;
+    for (;;) {
+        T val, val_end;
         if (!(i >> val)) {
-            break;
+            return false;
         }
+        val_end = val;
 
-        out.push_back(val);
-
-        i.get(c);
-        if (c == '-') {
-            T val_end;
-            i >> val_end;
-            while (val < val_end) {
-                out.push_back(++val);
+        char c = 0;
+        if (i >> c) {
+            if (c == '-') {
+                if (!(i >> val_end) || val_end < val) {
+                    return false;
+                }
+                if (i >> c) {
+                    if (c != ',') {
+                        return false;
+                    }
+                } else {
+                    c = 0;
+                }
+            } else if (c != ',') {
+                return false;
             }
+        }
+
+        for (T cur = val;; cur++) {
+            parsed.push_back(cur);
+            if (cur == val_end) {
+                break;
+            }
+        }
+
+        if (!c) {
             break;
         }
-    } while (c == ',');
+    }
 
-    return !out.empty();
+    if (parsed.empty()) {
+        return false;
+    }
+    out.insert(out.end(), parsed.begin(), parsed.end());
+    return true;
 }
 
 // return a nicely escaped version of a string: this should probably become
 // an IO manipulator or something
-UNUSED static
-const std::string printable(const std::string &in) {
+UNUSED static const std::string printable(const std::string &in) {
     std::ostringstream oss;
     for (size_t i = 0; i < in.size(); ++i) {
         unsigned char c = in[i];
@@ -101,16 +119,14 @@ const std::string printable(const std::string &in) {
         } else if (0x20 <= c && c <= 0x7e && c != '\\') {
             oss << c;
         } else {
-            oss << "\\x"
-                << std::hex << std::setw(2) << std::setfill('0')
-                << (unsigned)(in[i] & 0xff)
-                << std::dec;
+            oss << "\\x" << std::hex << std::setw(2) << std::setfill('0')
+                << (unsigned)(in[i] & 0xff) << std::dec;
         }
     }
     return oss.str();
 }
 
-template<typename it_t>
+template <typename it_t>
 void prettyPrintRange(std::ostream &out, it_t begin, it_t end) {
     bool in_range = false;
     it_t it = begin;
@@ -138,8 +154,7 @@ void prettyPrintRange(std::ostream &out, it_t begin, it_t end) {
 }
 
 // Transfer given string into a hex-escaped pattern.
-static really_inline
-char *makeHex(const unsigned char *pat, unsigned patlen) {
+static really_inline char *makeHex(const unsigned char *pat, unsigned patlen) {
     size_t hexlen = patlen * 4;
     char *hexbuf = (char *)malloc(hexlen + 1);
     unsigned i;

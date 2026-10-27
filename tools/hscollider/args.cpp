@@ -161,7 +161,7 @@ void usage(const char *name, const char *error) {
 }
 
 void processArgs(int argc, char *argv[], CorpusProperties &corpus_gen_prop,
-                 vector<string> *corpora, UNUSED Grey *grey,
+                 vector<string> *corpora, Grey *grey,
                  unique_ptr<hs_platform_info> *plat_out) {
     static const char options[]
         = "-ab:cC:d:D:e:E:G:hHi:k:Lm:M:n:o:O:p:P:qr:R:S:s:t:T:vV:w:x:X:Y:z:Z:8";
@@ -176,6 +176,7 @@ void processArgs(int argc, char *argv[], CorpusProperties &corpus_gen_prop,
     int compressFlag = 0;
     int compressResetFlag = 0;
     int literalFlag = 0;
+    string greyOverrides;
     static const struct option longopts[] = {
         {"copy-scratch", 0, &copyScratch, 1},
         {"copy-stream", 0, &copyStream, 1},
@@ -273,11 +274,22 @@ void processArgs(int argc, char *argv[], CorpusProperties &corpus_gen_prop,
                 edit_distance = dist;
                 break;
             }
-#ifndef RELEASE_BUILD
-            case 'G':
-                applyGreyOverrides(grey, string(optarg));
+            case 'G': {
+                string overrides(optarg);
+                Grey staged = *grey;
+                if (!applyGreyOverrides(&staged, overrides)) {
+                    usage(argv[0], "Invalid grey overrides");
+                    exit(1);
+                }
+                *grey = staged;
+                if (!overrides.empty()) {
+                    greyOverrides += overrides;
+                    if (greyOverrides.back() != ';') {
+                        greyOverrides += ';';
+                    }
+                }
                 break;
-#endif
+            }
             case 'h':
                 usage(argv[0], nullptr);
                 exit(0);
@@ -516,8 +528,12 @@ void processArgs(int argc, char *argv[], CorpusProperties &corpus_gen_prop,
         in_corpora = MAX(0, in_corpora - 1);
     }
 
-    string allowLily = "allowLily:1;";
-    applyGreyOverrides(grey, allowLily);
+    greyOverrides += "allowLily:1;";
+    if (hs_set_grey_overrides(greyOverrides.c_str()) != HS_SUCCESS ||
+        !applyGreyOverrides(grey, "allowLily:1;")) {
+        usage(argv[0], "Invalid grey overrides");
+        exit(1);
+    }
 
     if (g_streamOffset && !g_streamBlocks) {
         usage(argv[0], "stream offset requires streams");

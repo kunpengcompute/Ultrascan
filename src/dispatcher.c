@@ -85,6 +85,11 @@ CREATE_DISPATCH(hs_error_t, hs_scan, const hs_database_t *db, const char *data,
                 unsigned length, unsigned flags, hs_scratch_t *scratch,
                 match_event_handler onEvent, void *userCtx);
 
+CREATE_DISPATCH(hs_error_t, hs_scan_with_collector, const hs_database_t *db,
+                const char *data, unsigned length, unsigned flags,
+                hs_scratch_t *scratch, match_event_handler onEvent,
+                void *userCtx, hs_fp_collector_t *collector);
+
 CREATE_DISPATCH(hs_error_t, hs_stream_size, const hs_database_t *database,
                 size_t *stream_size);
 
@@ -100,6 +105,11 @@ CREATE_DISPATCH(hs_error_t, hs_scan_stream, hs_stream_t *id, const char *data,
                 unsigned int length, unsigned int flags, hs_scratch_t *scratch,
                 match_event_handler onEvent, void *ctxt);
 
+CREATE_DISPATCH(hs_error_t, hs_scan_stream_with_collector, hs_stream_t *id,
+                const char *data, unsigned int length, unsigned int flags,
+                hs_scratch_t *scratch, match_event_handler onEvent, void *ctxt,
+                hs_fp_collector_t *collector);
+
 CREATE_DISPATCH(hs_error_t, hs_close_stream, hs_stream_t *id,
                 hs_scratch_t *scratch, match_event_handler onEvent, void *ctxt);
 
@@ -108,7 +118,15 @@ CREATE_DISPATCH(hs_error_t, hs_scan_vector, const hs_database_t *db,
                 unsigned int count, unsigned int flags, hs_scratch_t *scratch,
                 match_event_handler onevent, void *context);
 
-CREATE_DISPATCH(hs_error_t, hs_database_info, const hs_database_t *db, char **info);
+CREATE_DISPATCH(hs_error_t, hs_scan_vector_with_collector,
+                const hs_database_t *db, const char *const *data,
+                const unsigned int *length, unsigned int count,
+                unsigned int flags, hs_scratch_t *scratch,
+                match_event_handler onevent, void *context,
+                hs_fp_collector_t *collector);
+
+CREATE_DISPATCH(hs_error_t, hs_database_info, const hs_database_t *db,
+                char **info);
 
 CREATE_DISPATCH(hs_error_t, hs_copy_stream, hs_stream_t **to_id,
                 const hs_stream_t *from_id);
@@ -140,7 +158,7 @@ CREATE_DISPATCH(hs_error_t, hs_compress_stream, const hs_stream_t *stream,
                 char *buf, size_t buf_space, size_t *used_space);
 
 CREATE_DISPATCH(hs_error_t, hs_expand_stream, const hs_database_t *db,
-                hs_stream_t **stream, const char *buf,size_t buf_size);
+                hs_stream_t **stream, const char *buf, size_t buf_size);
 
 CREATE_DISPATCH(hs_error_t, hs_reset_and_expand_stream, hs_stream_t *to_stream,
                 const char *buf, size_t buf_size, hs_scratch_t *scratch,
@@ -148,4 +166,5 @@ CREATE_DISPATCH(hs_error_t, hs_reset_and_expand_stream, hs_stream_t *to_stream,
 
 /** INTERNALS **/
 
-CREATE_DISPATCH(u32, Crc32c_ComputeBuf, u32 inCrc32, const void *buf, size_t bufLen);
+CREATE_DISPATCH(u32, Crc32c_ComputeBuf, u32 inCrc32, const void *buf,
+                size_t bufLen);
