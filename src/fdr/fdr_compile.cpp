@@ -32,15 +32,16 @@
 
 #include "fdr_compile.h"
 
-#include "fdr_internal.h"
-#include "fdr_confirm.h"
 #include "fdr_compile_internal.h"
+#include "fdr_confirm.h"
 #include "fdr_engine_description.h"
+#include "fdr_internal.h"
+#include "grey.h"
+#include "hao_compile.h"
+#include "hwlm/hwlm_build.h"
 #include "teddy_compile.h"
 #include "teddy_engine_description.h"
-#include "grey.h"
 #include "ue2common.h"
-#include "hwlm/hwlm_build.h"
 #include "util/compare.h"
 #include "util/container.h"
 #include "util/dump_mask.h"
@@ -63,7 +64,6 @@
 #include <memory>
 #include <numeric>
 #include <set>
-#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -76,14 +76,80 @@ namespace ue2 {
 
 namespace {
 
+static bool haoStatsEnabled(void) {
+    const char *env = getenv("HS_HAO_STATS");
+    return env && *env && *env != '0';
+}
+
+static bool haoShouldPrintCompileStats(const HWLMProto &proto) {
+    if (!haoStatsEnabled()) {
+        return false;
+    }
+    if (!proto.debugName) {
+        return true;
+    }
+    return strncmp(proto.debugName, "x86/", 4) != 0;
+}
+
+static vector<u32> buildHaoReportOrderRank(
+    size_t litCount,
+    const map<BucketIndex, vector<LiteralIndex>> &bucketToLits) {
+    const u32 invalidRank = numeric_limits<u32>::max();
+    vector<u32> rank(litCount, invalidRank);
+    u32 order = 0;
+
+    for (const auto &bucket : bucketToLits) {
+        for (const LiteralIndex litIdx : bucket.second) {
+            if (litIdx >= litCount || rank[litIdx] != invalidRank) {
+                continue;
+            }
+            rank[litIdx] = order++;
+        }
+    }
+
+    for (size_t i = 0; i < rank.size(); i++) {
+        if (rank[i] == invalidRank) {
+            rank[i] = order++;
+        }
+    }
+    return rank;
+}
+
+static bool tryBuildHaoProto(const target_t &target,
+                             const std::vector<hwlmLiteral> &lits,
+                             const Grey &grey,
+                             std::unique_ptr<HAOCompileArtifacts> *out,
+                             const std::vector<u32> *reportOrder = nullptr) {
+    if (out) {
+        out->reset();
+    }
+
+    HAOCompileArtifacts builtArtifacts;
+    HAOFeasibilityResult haoResult;
+    const bool haoFeasible = analyzeHAOFeasibility(
+        target, lits, grey, &haoResult, &builtArtifacts, reportOrder);
+    DEBUG_PRINTF("HAO feasibility: canBuild=%u reason=%s flags=0x%x\n",
+                 haoFeasible ? 1 : 0,
+                 haoFeasibilityReasonName(haoResult.reason), haoResult.flags);
+    if (!haoFeasible) {
+        return false;
+    }
+
+    if (out) {
+        *out = ue2::make_unique<HAOCompileArtifacts>(std::move(builtArtifacts));
+    }
+    return true;
+}
+
 class FDRCompiler : noncopyable {
 private:
     const FDREngineDescription &eng;
     const Grey &grey;
     vector<u8> tab;
     vector<hwlmLiteral> lits;
-    map<BucketIndex, std::vector<LiteralIndex> > bucketToLits;
+    map<BucketIndex, std::vector<LiteralIndex>> bucketToLits;
     bool make_small;
+    bytecode_ptr<u8> matcherBlob;
 
     u8 *tabIndexToMask(u32 indexInTable);
 #ifdef DEBUG
@@ -96,11 +162,11 @@ private:
 public:
     FDRCompiler(vector<hwlmLiteral> lits_in,
                 map<BucketIndex, std::vector<LiteralIndex>> bucketToLits_in,
-                const FDREngineDescription &eng_in,
-                bool make_small_in, const Grey &grey_in)
+                const FDREngineDescription &eng_in, bool make_small_in,
+                const Grey &grey_in, bytecode_ptr<u8> matcherBlob_in = nullptr)
         : eng(eng_in), grey(grey_in), tab(eng_in.getTabSizeBytes()),
           lits(move(lits_in)), bucketToLits(move(bucketToLits_in)),
-          make_small(make_small_in) {}
+          make_small(make_small_in), matcherBlob(move(matcherBlob_in)) {}
 
     bytecode_ptr<FDR> build();
 };
@@ -110,18 +176,11 @@ u8 *FDRCompiler::tabIndexToMask(u32 indexInTable) {
     return &tab[0] + (indexInTable * (eng.getSchemeWidth() / 8));
 }
 
-static
-void setbit(u8 *msk, u32 bit) {
-    msk[bit / 8] |= 1U << (bit % 8);
-}
+static void setbit(u8 *msk, u32 bit) { msk[bit / 8] |= 1U << (bit % 8); }
 
-static
-void clearbit(u8 *msk, u32 bit) {
-    msk[bit / 8] &= ~(1U << (bit % 8));
-}
+static void clearbit(u8 *msk, u32 bit) { msk[bit / 8] &= ~(1U << (bit % 8)); }
 
-static
-void andMask(u8 *dest, const u8 *a, const u8 *b, u32 num_bytes) {
+static void andMask(u8 *dest, const u8 *a, const u8 *b, u32 num_bytes) {
     for (u32 i = 0; i < num_bytes; i++) {
         dest[i] = a[i] & b[i];
     }
@@ -165,13 +224,15 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     size_t tabSize = eng.getTabSizeBytes();
 
     // Note: we place each major structure here on a cacheline boundary.
+    size_t matcherBlobSize = matcherBlob ? matcherBlob.size() : 0;
     size_t size = ROUNDUP_CL(headerSize) + ROUNDUP_CL(tabSize) +
+                  ROUNDUP_CL(matcherBlobSize) +
                   ROUNDUP_CL(confirmTable.size()) + floodTable.size();
 
-    DEBUG_PRINTF("sizes base=%zu tabSize=%zu confirm=%zu floodControl=%zu "
-                 "total=%zu\n",
-                 headerSize, tabSize, confirmTable.size(), floodTable.size(),
-                 size);
+    DEBUG_PRINTF("sizes base=%zu tabSize=%zu matcherBlob=%zu confirm=%zu "
+                 "floodControl=%zu total=%zu\n",
+                 headerSize, tabSize, matcherBlobSize, confirmTable.size(),
+                 floodTable.size(), size);
 
     auto fdr = make_zeroed_bytecode_ptr<FDR>(size, 64);
     assert(fdr); // otherwise would have thrown std::bad_alloc
@@ -187,6 +248,8 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     fdr->domain = eng.bits;
     fdr->domainMask = (1 << eng.bits) - 1;
     fdr->tabSize = tabSize;
+    fdr->matcherBlobOffset = 0;
+    fdr->matcherBlobSize = 0;
     fdr->stride = eng.stride;
     createInitialState(fdr.get());
 
@@ -195,6 +258,15 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     assert(ISALIGNED_CL(ptr));
     copy(tab.begin(), tab.end(), ptr);
     ptr += ROUNDUP_CL(tabSize);
+
+    // Write embedded matcher blob if present.
+    if (matcherBlob && matcherBlob.size()) {
+        assert(ISALIGNED_CL(ptr));
+        fdr->matcherBlobOffset = verify_u32(ptr - fdr_base);
+        fdr->matcherBlobSize = verify_u32(matcherBlob.size());
+        memcpy(ptr, matcherBlob.get(), matcherBlob.size());
+        ptr += ROUNDUP_CL(matcherBlob.size());
+    }
 
     // Write confirm structures.
     assert(ISALIGNED_CL(ptr));
@@ -211,7 +283,7 @@ bytecode_ptr<FDR> FDRCompiler::setupFDR() {
     return fdr;
 }
 
-//#define DEBUG_ASSIGNMENT
+// #define DEBUG_ASSIGNMENT
 
 /**
  * Utility class for computing:
@@ -281,17 +353,16 @@ const array<double, 100> Scorer::count_lut{{
     pow(95, 1.05), pow(96, 1.05), pow(97, 1.05), pow(98, 1.05), pow(99, 1.05),
 }};
 
-const array<double, 9> Scorer::len_lut{{
-    0, pow(1, -3.0), pow(2, -3.0), pow(3, -3.0), pow(4, -3.0),
-       pow(5, -3.0), pow(6, -3.0), pow(7, -3.0), pow(8, -3.0)}};
+const array<double, 9> Scorer::len_lut{
+    {0, pow(1, -3.0), pow(2, -3.0), pow(3, -3.0), pow(4, -3.0), pow(5, -3.0),
+     pow(6, -3.0), pow(7, -3.0), pow(8, -3.0)}};
 
 /**
  * Returns true if the two given literals should be placed in the same chunk as
  * they are identical except for a difference in caselessness.
  */
-static
-bool isEquivLit(const hwlmLiteral &a, const hwlmLiteral &b,
-                const hwlmLiteral *last_nocase_lit) {
+static bool isEquivLit(const hwlmLiteral &a, const hwlmLiteral &b,
+                       const hwlmLiteral *last_nocase_lit) {
     const size_t a_len = a.s.size();
     const size_t b_len = b.s.size();
 
@@ -312,9 +383,8 @@ struct Chunk {
     u32 length;   //!< how long things in the chunk are
 };
 
-static
-vector<Chunk> assignChunks(const vector<hwlmLiteral> &lits,
-                           const map<u32, u32> &lenCounts) {
+static vector<Chunk> assignChunks(const vector<hwlmLiteral> &lits,
+                                  const map<u32, u32> &lenCounts) {
     const u32 CHUNK_MAX = 512;
     const u32 MAX_CONSIDERED_LENGTH = 16;
 
@@ -327,8 +397,10 @@ vector<Chunk> assignChunks(const vector<hwlmLiteral> &lits,
     vector<Chunk> chunks;
     chunks.reserve(CHUNK_MAX);
 
-    const u32 maxPerChunk = lits.size() /
-            (CHUNK_MAX - MIN(MAX_CONSIDERED_LENGTH, lenCounts.size())) + 1;
+    const u32 maxPerChunk =
+        lits.size() /
+            (CHUNK_MAX - MIN(MAX_CONSIDERED_LENGTH, lenCounts.size())) +
+        1;
 
     u32 currentSize = 0;
     u32 chunkStartID = 0;
@@ -338,7 +410,7 @@ vector<Chunk> assignChunks(const vector<hwlmLiteral> &lits,
         const auto &lit = lits[i];
 
         DEBUG_PRINTF("i=%u, lit=%s%s\n", i, escapeString(lit.s).c_str(),
-                      lit.nocase ? " (nocase)" : "");
+                     lit.nocase ? " (nocase)" : "");
 
         // If this literal is identical to the last one (aside from differences
         // in caselessness), keep going even if we will "overfill" a chunk; we
@@ -358,7 +430,7 @@ vector<Chunk> assignChunks(const vector<hwlmLiteral> &lits,
             chunkStartID = i;
             chunks.emplace_back(i, 0, currentSize);
         }
-next_literal:
+    next_literal:
         if (lit.nocase) {
             last_nocase_lit = &lit;
         }
@@ -382,10 +454,9 @@ next_literal:
     return chunks;
 }
 
-static
-map<BucketIndex, vector<LiteralIndex>> assignStringsToBuckets(
-                                    vector<hwlmLiteral> &lits,
-                                    const FDREngineDescription &eng) {
+static map<BucketIndex, vector<LiteralIndex>>
+assignStringsToBuckets(vector<hwlmLiteral> &lits,
+                       const FDREngineDescription &eng) {
     const double MAX_SCORE = numeric_limits<double>::max();
 
     assert(!lits.empty()); // Shouldn't be called with no literals.
@@ -447,7 +518,7 @@ map<BucketIndex, vector<LiteralIndex>> assignStringsToBuckets(
                 if (score > best.first) {
                     break; // now worse locally than our best score, give up
                 }
-                score += t[k][i-1].first;
+                score += t[k][i - 1].first;
                 if (score < best.first) {
                     best = {score, k};
                 }
@@ -455,7 +526,7 @@ map<BucketIndex, vector<LiteralIndex>> assignStringsToBuckets(
             }
             t[j][i] = best;
         }
-        t[numChunks - 1][i] = {0,0}; // fill in empty final row for next iter
+        t[numChunks - 1][i] = {0, 0}; // fill in empty final row for next iter
     }
 
 #ifdef DEBUG_ASSIGNMENT
@@ -524,12 +595,11 @@ void FDRCompiler::dumpMasks(const u8 *defaultMask) {
 }
 #endif
 
-static
-bool getMultiEntriesAtPosition(const FDREngineDescription &eng,
-                               const vector<LiteralIndex> &vl,
-                               const vector<hwlmLiteral> &lits,
-                               SuffixPositionInString pos,
-                               map<u32, unordered_set<u32>> &m2) {
+static bool getMultiEntriesAtPosition(const FDREngineDescription &eng,
+                                      const vector<LiteralIndex> &vl,
+                                      const vector<hwlmLiteral> &lits,
+                                      SuffixPositionInString pos,
+                                      map<u32, unordered_set<u32>> &m2) {
     assert(eng.bits < 32);
 
     u32 distance = 0;
@@ -570,7 +640,7 @@ bool getMultiEntriesAtPosition(const FDREngineDescription &eng,
                     dontCareByte |= 0x20;
                 }
             }
-            u32 loc =  cnt * 8;
+            u32 loc = cnt * 8;
             mask |= maskByte << loc;
             dontCares |= dontCareByte << loc;
         }
@@ -636,8 +706,7 @@ bytecode_ptr<FDR> FDRCompiler::build() {
     return setupFDR();
 }
 
-static
-bool isSuffix(const hwlmLiteral &lit1, const hwlmLiteral &lit2) {
+static bool isSuffix(const hwlmLiteral &lit1, const hwlmLiteral &lit2) {
     const auto &s1 = lit1.s;
     const auto &s2 = lit2.s;
     size_t len1 = s1.length();
@@ -645,7 +714,8 @@ bool isSuffix(const hwlmLiteral &lit1, const hwlmLiteral &lit2) {
     assert(len1 >= len2);
 
     if (lit1.nocase || lit2.nocase) {
-        return equal(s2.begin(), s2.end(), s1.begin() + len1 - len2,
+        return equal(
+            s2.begin(), s2.end(), s1.begin() + len1 - len2,
             [](char a, char b) { return mytoupper(a) == mytoupper(b); });
     } else {
         return equal(s2.begin(), s2.end(), s1.begin() + len1 - len2);
@@ -659,8 +729,7 @@ bool isSuffix(const hwlmLiteral &lit1, const hwlmLiteral &lit2) {
  * squashing. e.g. AAA(no case) in bucket 0, AA(no case) and aa in bucket 1,
  * we can't squash bucket 1 if we have input like "aaa" as aa can also match.
  */
-static
-bool includedCheck(const hwlmLiteral &lit1, const hwlmLiteral &lit2) {
+static bool includedCheck(const hwlmLiteral &lit1, const hwlmLiteral &lit2) {
     /* lit1 is caseless and lit2 is case sensitive */
     if ((lit1.nocase && !lit2.nocase)) {
         return true;
@@ -686,11 +755,10 @@ bool includedCheck(const hwlmLiteral &lit1, const hwlmLiteral &lit2) {
  * e.g. lit0:AAA(no case), lit1:aa, lit2:A(no case). We can have duplicate
  * matches for input "aaa" if lit0 and lit1 both squash lit2.
  */
-static
-bool checkParentLit(
-            const vector<hwlmLiteral> &lits, u32 pos1,
-            const unordered_set<u32> &parent_map,
-            const unordered_map<u32, unordered_set<u32>> &exception_map) {
+static bool
+checkParentLit(const vector<hwlmLiteral> &lits, u32 pos1,
+               const unordered_set<u32> &parent_map,
+               const unordered_map<u32, unordered_set<u32>> &exception_map) {
     assert(pos1 < lits.size());
     const auto &lit1 = lits[pos1];
     for (const auto pos2 : parent_map) {
@@ -715,11 +783,11 @@ bool checkParentLit(
     return true;
 }
 
-static
-void buildSquashMask(vector<hwlmLiteral> &lits, u32 id1, u32 bucket1,
-                     size_t start, const vector<pair<u32, u32>> &group,
-                     unordered_map<u32, unordered_set<u32>> &parent_map,
-                     unordered_map<u32, unordered_set<u32>> &exception_map) {
+static void
+buildSquashMask(vector<hwlmLiteral> &lits, u32 id1, u32 bucket1, size_t start,
+                const vector<pair<u32, u32>> &group,
+                unordered_map<u32, unordered_set<u32>> &parent_map,
+                unordered_map<u32, unordered_set<u32>> &exception_map) {
     auto &lit1 = lits[id1];
     DEBUG_PRINTF("b:%u len:%zu\n", bucket1, lit1.s.length());
 
@@ -748,10 +816,10 @@ void buildSquashMask(vector<hwlmLiteral> &lits, u32 id1, u32 bucket1,
                 exception_map[id1].insert(id2);
                 exception = true;
             } else if (checkParentLit(lits, id1, parent_map[id2],
-                       exception_map)) {
+                                      exception_map)) {
                 if (lit1.included_id == INVALID_LIT_ID) {
-                    DEBUG_PRINTF("find suffix lit1 %u lit2 %u\n",
-                                 lit1.id, lit2.id);
+                    DEBUG_PRINTF("find suffix lit1 %u lit2 %u\n", lit1.id,
+                                 lit2.id);
                     lit1.included_id = lit2.id;
                 } else {
                     /* if we have multiple included literals in one bucket,
@@ -777,8 +845,8 @@ void buildSquashMask(vector<hwlmLiteral> &lits, u32 id1, u32 bucket1,
                     parent_map[child_id].insert(id1);
 
                     lit1.squash |= 1U << bucket2;
-                    DEBUG_PRINTF("build squash mask %2x for %u\n",
-                                 lit1.squash, lit1.id);
+                    DEBUG_PRINTF("build squash mask %2x for %u\n", lit1.squash,
+                                 lit1.id);
                 }
                 return;
             }
@@ -789,9 +857,9 @@ void buildSquashMask(vector<hwlmLiteral> &lits, u32 id1, u32 bucket1,
 
 static constexpr u32 INCLUDED_LIMIT = 1000;
 
-static
-void findIncludedLits(vector<hwlmLiteral> &lits,
-                      const vector<vector<pair<u32, u32>>> &lastCharMap) {
+static void
+findIncludedLits(vector<hwlmLiteral> &lits,
+                 const vector<vector<pair<u32, u32>>> &lastCharMap) {
     /* Map for finding the positions of literal which includes a literal
      * in FDR hwlm literal vector. */
     unordered_map<u32, unordered_set<u32>> parent_map;
@@ -813,10 +881,14 @@ void findIncludedLits(vector<hwlmLiteral> &lits,
     }
 }
 
-static
-void addIncludedInfo(
-               vector<hwlmLiteral> &lits, u32 nBuckets,
-               map<BucketIndex, vector<LiteralIndex>> &bucketToLits) {
+static void
+addIncludedInfo(vector<hwlmLiteral> &lits, u32 nBuckets,
+                map<BucketIndex, vector<LiteralIndex>> &bucketToLits) {
+    for (auto &lit : lits) {
+        lit.included_id = INVALID_LIT_ID;
+        lit.squash = 0;
+    }
+
     vector<vector<pair<u32, u32>>> lastCharMap(256);
 
     for (BucketIndex b = 0; b < nBuckets; b++) {
@@ -834,17 +906,14 @@ void addIncludedInfo(
 
 } // namespace
 
-static
-unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
-                                            vector<hwlmLiteral> &lits,
-                                            bool make_small,
-                                            const target_t &target,
-                                            const Grey &grey, u32 hint) {
+static unique_ptr<HWLMProto>
+fdrBuildProtoInternal(u8 engType, vector<hwlmLiteral> &lits, bool make_small,
+                      const target_t &target, const Grey &grey, u32 hint) {
     DEBUG_PRINTF("cpu has %s\n", target.has_avx2() ? "avx2" : "no-avx2");
 
     if (grey.fdrAllowTeddy) {
-        auto proto = teddyBuildProtoHinted(engType, lits, make_small, hint,
-                                           target);
+        auto proto =
+            teddyBuildProtoHinted(engType, lits, make_small, hint, target);
         if (proto) {
             DEBUG_PRINTF("build with teddy succeeded\n");
             return proto;
@@ -852,10 +921,44 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
             DEBUG_PRINTF("build with teddy failed, will try with FDR\n");
         }
     }
+    /* Engine id 2 is now reserved for HAO only. */
+    const bool forcedHao = hint == HAO_ENGINE_ID;
+    std::unique_ptr<FDREngineDescription> haoDes;
+    if (forcedHao) {
+        haoDes = getFdrDescription(hint);
+    } else if (hint == HINT_INVALID) {
+        haoDes = chooseHaoEngine(target, lits, make_small);
+    }
+
+    if (haoDes && haoDes->getID() == HAO_ENGINE_ID) {
+        if (forcedHao) {
+            haoDes->bits = 9;
+            haoDes->stride = 1;
+        }
+
+        auto haoBucketToLits = assignStringsToBuckets(lits, *haoDes);
+        addIncludedInfo(lits, haoDes->getNumBuckets(), haoBucketToLits);
+        const auto haoReportOrder =
+            buildHaoReportOrderRank(lits.size(), haoBucketToLits);
+
+        std::unique_ptr<HAOCompileArtifacts> haoArtifacts;
+        if (tryBuildHaoProto(target, lits, grey, &haoArtifacts,
+                             &haoReportOrder)) {
+            auto proto = ue2::make_unique<HWLMProto>(
+                engType, move(haoDes), lits, haoBucketToLits, make_small);
+            proto->haoArtifacts = std::move(haoArtifacts);
+            return proto;
+        }
+    }
+
+    if (forcedHao) {
+        return nullptr;
+    }
 
     if (grey.allowNeoFdr) {
-        auto des = (hint == HINT_INVALID) ? chooseNeoFdrEngine(target, lits, make_small)
-                                        : getFdrDescription(hint);
+        auto des = (hint == HINT_INVALID)
+                       ? chooseNeoFdrEngine(target, lits, make_small)
+                       : getFdrDescription(hint);
         if (!des) {
             return nullptr;
         }
@@ -868,10 +971,9 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
 
         auto bucketToLits = assignStringsToBuckets(lits, *des);
         addIncludedInfo(lits, des->getNumBuckets(), bucketToLits);
-        auto proto =
-            ue2::make_unique<HWLMProto>(engType, move(des), lits, bucketToLits,
-                                        make_small);
-        return proto;        
+        auto proto = ue2::make_unique<HWLMProto>(engType, move(des), lits,
+                                                 bucketToLits, make_small);
+        return proto;
     }
 
     auto des = (hint == HINT_INVALID) ? chooseEngine(target, lits, make_small)
@@ -888,9 +990,8 @@ unique_ptr<HWLMProto> fdrBuildProtoInternal(u8 engType,
 
     auto bucketToLits = assignStringsToBuckets(lits, *des);
     addIncludedInfo(lits, des->getNumBuckets(), bucketToLits);
-    auto proto =
-        ue2::make_unique<HWLMProto>(engType, move(des), lits, bucketToLits,
-                                    make_small);
+    auto proto = ue2::make_unique<HWLMProto>(engType, move(des), lits,
+                                             bucketToLits, make_small);
     return proto;
 }
 
@@ -901,16 +1002,52 @@ unique_ptr<HWLMProto> fdrBuildProto(u8 engType, vector<hwlmLiteral> lits,
                                  HINT_INVALID);
 }
 
-static
-bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
-                                        const Grey &grey) {
+static bytecode_ptr<FDR> fdrBuildTableInternal(const HWLMProto &proto,
+                                               const Grey &grey) {
 
     if (proto.teddyEng) {
         return teddyBuildTable(proto, grey);
     }
+    bytecode_ptr<u8> matcherBlob = nullptr;
+    if (proto.fdrEng && proto.fdrEng->getID() == HAO_ENGINE_ID) {
+        const bool printStats = haoShouldPrintCompileStats(proto);
+        if (printStats) {
+            printf("[HAO][Compile] matcher=%s proto=%p lits=%zu bits=%u "
+                   "stride=%u\n",
+                   proto.debugName ? proto.debugName : "unknown",
+                   (const void *)&proto, proto.lits.size(), proto.fdrEng->bits,
+                   proto.fdrEng->stride);
+            fflush(stdout);
+        }
+
+        HAOCompileArtifacts *haoArtifacts = proto.haoArtifacts.get();
+        if (!haoArtifacts) {
+            assert(0 && "HAO table build missing cached artifacts");
+            return nullptr;
+        }
+        if (!refreshHAOReports(haoArtifacts, proto.lits)) {
+            assert(0 && "HAO report metadata mismatch");
+            return nullptr;
+        }
+        dumpHAOL2MapIfEnabled(proto.lits, *haoArtifacts);
+
+        if (printStats) {
+            dumpHAOCompileStats(*haoArtifacts);
+        }
+
+        if (!haoArtifactsOk(*haoArtifacts)) {
+            assert(0 &&
+                   "HAO feasibility mismatch: invalid coverage in table build");
+            return nullptr;
+        }
+        matcherBlob = buildHAOBlob(*haoArtifacts);
+        if (!matcherBlob) {
+            return nullptr;
+        }
+    }
 
     FDRCompiler fc(proto.lits, proto.bucketToLits, *(proto.fdrEng),
-                   proto.make_small, grey);
+                   proto.make_small, grey, move(matcherBlob));
     return fc.build();
 }
 
@@ -920,13 +1057,11 @@ bytecode_ptr<FDR> fdrBuildTable(const HWLMProto &proto, const Grey &grey) {
 
 #if !defined(RELEASE_BUILD)
 
-unique_ptr<HWLMProto> fdrBuildProtoHinted(u8 engType,
-                                          vector<hwlmLiteral> lits,
+unique_ptr<HWLMProto> fdrBuildProtoHinted(u8 engType, vector<hwlmLiteral> lits,
                                           bool make_small, u32 hint,
                                           const target_t &target,
                                           const Grey &grey) {
-    return fdrBuildProtoInternal(engType, lits, make_small, target, grey,
-                                 hint);
+    return fdrBuildProtoInternal(engType, lits, make_small, target, grey, hint);
 }
 
 #endif

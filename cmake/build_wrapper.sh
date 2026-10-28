@@ -1,4 +1,5 @@
-#!/bin/sh -e
+#!/bin/sh
+set -e
 # This is used for renaming symbols for the fat runtime, don't call directly
 # TODO: make this a lot less fragile!
 cleanup () {

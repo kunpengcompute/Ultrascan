@@ -52,11 +52,8 @@
 #include "expressions.h"
 #include "string_util.h"
 #include "util/expression_path.h"
-#include "util/make_unique.h"
 
-#include "grey.h"
 #include "hs_compile.h"
-#include "hs_internal.h"
 #include "ue2common.h"
 
 #ifdef HS_HYBRID
@@ -78,7 +75,6 @@
 #include <boost/algorithm/string/trim.hpp>
 
 using namespace std;
-using namespace ue2;
 
 namespace /* anonymous */ {
 
@@ -115,9 +111,6 @@ ExprExtMap g_validSubs;
 
 // Iterator pointing to next logical expression to process.
 ExprExtMap::const_iterator comb_read_it;
-
-// Global greybox structure, used in non-release builds.
-unique_ptr<Grey> g_grey;
 
 // Global expression map.
 ExpressionMap g_exprMap;
@@ -320,20 +313,6 @@ void checkExpression(UNUSED void *threadarg) {
             hs_compile_error_t *compile_err;
             hs_database_t *db = nullptr;
 
-#if !defined(RELEASE_BUILD)
-            // This variant is available in non-release builds and allows us to
-            // modify greybox settings.
-            if (use_literal_api) {
-                size_t len = strlen(regexp);
-                err = hs_compile_lit_multi_int(&regexp, &flags, nullptr, &extp,
-                                               &len, 1, mode, nullptr, &db,
-                                               &compile_err, *g_grey);
-            } else {
-                err = hs_compile_multi_int(&regexp, &flags, nullptr, &extp, 1,
-                                           mode, nullptr, &db, &compile_err,
-                                           *g_grey);
-            }
-#else
             if (use_literal_api) {
                 size_t len = strlen(regexp);
                 err = hs_compile_lit_multi(&regexp, &flags, nullptr, &len, 1,
@@ -342,7 +321,6 @@ void checkExpression(UNUSED void *threadarg) {
                 err = hs_compile_ext_multi(&regexp, &flags, nullptr, &extp, 1,
                                            mode, nullptr, &db, &compile_err);
             }
-#endif
 
             if (err == HS_SUCCESS) {
                 assert(db);
@@ -444,17 +422,9 @@ void checkLogicalExpression(UNUSED void *threadarg) {
         hs_compile_error_t *compile_err;
         hs_database_t *db = nullptr;
 
-#if !defined(RELEASE_BUILD)
-        // This variant is available in non-release builds and allows us to
-        // modify greybox settings.
-        err = hs_compile_multi_int(regexv.data(), flagsv.data(), idv.data(),
-                                   extv.data(), regexv.size(), mode,
-                                   nullptr, &db, &compile_err, *g_grey);
-#else
         err = hs_compile_ext_multi(regexv.data(), flagsv.data(), idv.data(),
                                    extv.data(), regexv.size(), mode,
                                    nullptr, &db, &compile_err);
-#endif
 
         if (err == HS_SUCCESS) {
             assert(db);
@@ -476,9 +446,7 @@ void usage() {
          << "  -s FILE         Signature file to use." << endl
          << "  -z NUM          Signature ID to use." << endl
          << "  -E DISTANCE     Force edit distance to DISTANCE for all patterns." << endl
-#ifndef RELEASE_BUILD
          << "  -G OVERRIDES    Overrides for the grey." << endl
-#endif
          << "  -V              Operate in vectored mode." << endl
          << "  -N              Operate in block mode (default: streaming)." << endl
 #ifdef HS_HYBRID
@@ -495,7 +463,7 @@ void usage() {
 }
 
 static
-void processArgs(int argc, char *argv[], UNUSED unique_ptr<Grey> &grey) {
+void processArgs(int argc, char *argv[]) {
     const char options[] = "e:E:s:z:hHLNV8G:T:BC";
     bool signatureSet = false;
     int literalFlag = 0;
@@ -539,11 +507,13 @@ void processArgs(int argc, char *argv[], UNUSED unique_ptr<Grey> &grey) {
             globalFlags |= HS_FLAG_UTF8;
             break;
 
-#ifndef RELEASE_BUILD
         case 'G':
-            applyGreyOverrides(grey.get(), string(optarg));
+            if (hs_set_grey_overrides(optarg) != HS_SUCCESS) {
+                cout << "Invalid grey overrides." << endl;
+                usage();
+                exit(1);
+            }
             break;
-#endif
         case 'L':
             globalFlags |= HS_FLAG_SOM_LEFTMOST;
             break;
@@ -663,10 +633,7 @@ void loadSignatureBuildSigs(const string &inFile,
 int HS_CDECL main(int argc, char **argv) {
     num_of_threads = max(1u, std::thread::hardware_concurrency());
 
-#if !defined(RELEASE_BUILD)
-    g_grey = make_unique<Grey>();
-#endif
-    processArgs(argc, argv, g_grey);
+    processArgs(argc, argv);
 
     if (num_of_threads == 0) {
         cout << "Error: Must have at least one thread." << endl;

@@ -101,7 +101,8 @@ struct LitProto {
 };
 
 bytecode_ptr<HWLM>
-buildHWLMMatcher(const RoseBuildImpl &build, LitProto *proto);
+buildHWLMMatcher(const RoseBuildImpl &build, LitProto *proto,
+                 const char *matcherName);
 
 std::unique_ptr<LitProto>
 buildFloatingMatcherProto(const RoseBuildImpl &build,

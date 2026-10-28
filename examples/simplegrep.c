@@ -44,11 +44,14 @@
  *
  * Usage:
  *
- *     ./simplegrep <pattern> <input file>
+ *     ./simplegrep [-G OVERRIDES] <pattern> <input file>
  *
  * Example:
  *
  *     ./simplegrep int simplegrep.c
+ *
+ * Note: -G OVERRIDES can be used to set Hyperscan grey box overrides,
+ * e.g. -G "allowLily:1;allowHao:0;"
  *
  */
 
@@ -145,13 +148,30 @@ static char *readInputData(const char *inputFN, unsigned int *length) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <pattern> <input file>\n", argv[0]);
+    int opt;
+    while ((opt = getopt(argc, argv, "G:")) != -1) {
+        switch (opt) {
+        case 'G':
+            if (hs_set_grey_overrides(optarg) != HS_SUCCESS) {
+                fprintf(stderr, "ERROR: Invalid grey overrides.\n");
+                return -1;
+            }
+            break;
+        default:
+            fprintf(stderr, "Usage: %s [-G OVERRIDES] <pattern> <input file>\n",
+                    argv[0]);
+            return -1;
+        }
+    }
+
+    if (argc - optind != 2) {
+        fprintf(stderr, "Usage: %s [-G OVERRIDES] <pattern> <input file>\n",
+                argv[0]);
         return -1;
     }
 
-    char *pattern = argv[1];
-    char *inputFN = argv[2];
+    char *pattern = argv[optind];
+    char *inputFN = argv[optind + 1];
 
     if (access(inputFN, F_OK) != 0) {
         fprintf(stderr, "ERROR: file doesn't exist.\n");

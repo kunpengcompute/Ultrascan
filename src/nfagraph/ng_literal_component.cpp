@@ -33,13 +33,17 @@
 
 #include "ng_literal_component.h"
 
+#include "compiler/compiler.h"
+#include "fp_collector.h"
 #include "grey.h"
 #include "ng.h"
+#include "ng_literal_quality.h"
 #include "ng_prune.h"
 #include "ng_util.h"
-#include "ue2common.h"
-#include "compiler/compiler.h"
 #include "rose/rose_build.h"
+#include "rose/rose_build_fp_feedback.h"
+#include "ue2common.h"
+#include "util/compile_context.h"
 #include "util/container.h"
 #include "util/graph.h"
 #include "util/graph_range.h"
@@ -51,9 +55,8 @@ using namespace std;
 
 namespace ue2 {
 
-static
-bool isLiteralChar(const NGHolder &g, NFAVertex v, bool &nocase,
-                   bool &casefixed) {
+static bool isLiteralChar(const NGHolder &g, NFAVertex v, bool &nocase,
+                          bool &casefixed) {
     const CharReach &cr = g[v].char_reach;
     const size_t num = cr.count();
     if (num > 2) {
@@ -88,8 +91,7 @@ bool isLiteralChar(const NGHolder &g, NFAVertex v, bool &nocase,
     return false;
 }
 
-static
-void addToString(string &s, const NGHolder &g, NFAVertex v) {
+static void addToString(string &s, const NGHolder &g, NFAVertex v) {
     const CharReach &cr = g[v].char_reach;
     assert(cr.count() == 1 || cr.isCaselessChar());
 
@@ -97,9 +99,8 @@ void addToString(string &s, const NGHolder &g, NFAVertex v) {
     s.push_back(c);
 }
 
-static
-bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v, const bool anchored,
-                     set<NFAVertex> &dead) {
+static bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v,
+                            const bool anchored, set<NFAVertex> &dead) {
     DEBUG_PRINTF("examine vertex %zu\n", g[v].index);
     bool nocase = false, casefixed = false;
 
@@ -179,13 +180,22 @@ bool splitOffLiteral(NG &ng, NGHolder &g, NFAVertex v, const bool anchored,
         DEBUG_PRINTF("skipping literal of length 1\n");
         return false;
     }
-    if (ng.cc.grey.allowNeoFdr && literal.length() >= 8) {
-        const std::string &str = literal;
-        if (memcmp(str.c_str() + str.length() - 8, "\0\0\0\0\0\0\0\0", 8) == 0) {
-            return false;
-        }
+    if (ng.cc.grey.allowNeoFdr &&
+        isLowQualityNeoFdrLiteral(ue2_literal(literal, nocase))) {
+        DEBUG_PRINTF("rejecting zero-dense NeoFDR literal\n");
+        return false;
     }
-    ng.rose->add(anchored, eod, ue2_literal(literal, nocase), g[u].reports);
+
+    ue2_literal rose_literal(literal, nocase);
+    const unsigned int fp_table =
+        fpFeedbackTableForDirectRoseLiteral(ng.cc, anchored, eod, rose_literal);
+    if (fpFeedbackBlocksRoseLiteral(ng.cc, fp_table, rose_literal,
+                                    HS_FP_COMPILE_CHECKPOINT_LITERAL_SPLIT)) {
+        DEBUG_PRINTF("skipping literal split due to fp feedback\n");
+        return false;
+    }
+
+    ng.rose->add(anchored, eod, rose_literal, g[u].reports);
 
     // Remove the terminal vertex. Later, we rely on pruneUseless to remove the
     // other vertices in this chain, since they'll no longer lead to an accept.

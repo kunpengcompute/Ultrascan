@@ -339,6 +339,11 @@ m128 pshufb_m128(m128 a, m128 b) {
 }
 
 static really_inline
+m128 Pshufb_m128_opt(m128 a, m128 b) {
+    return pshufb_m128(a, b);
+}
+
+static really_inline
 m256 pshufb_m256(m256 a, m256 b) {
 #if defined(HAVE_AVX2)
     return _mm256_shuffle_epi8(a, b);

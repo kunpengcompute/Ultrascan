@@ -2,7 +2,9 @@
 
 `unit/fuzz` 是一个基于 Google Test 的 fuzz 测试程序。它会调用
 `tools/fuzz` 下的 Python 生成器产生正则表达式，再用随机数据驱动
-Hyperscan 的编译、扫描、stream、scratch、fat compile 等接口。
+Hyperscan 的编译、扫描、stream、scratch、fat compile 等接口。当前还覆盖
+生成器 record 解析、QUIET-only 断言问题的确定性回归，以及假阳性反馈 collector、
+带 collector 扫描、feedback 生成和反馈重编译等公开 API。
 
 注意：这个 fuzz 不是 libFuzzer 入口形式，不需要 `LLVMFuzzerTestOneInput`。
 
@@ -25,85 +27,133 @@ ARM 机器上需要：
 
 - C/C++ 编译器
 - CMake
-- Python，最好保证 `python` 命令可用；如果系统只有 `python3`，需要把
-  `unit/fuzz/generator/python_generator.cpp` 中的 `python` 改为 `python3`
-- lcov/genhtml，用于覆盖率报告
+- Python。默认命令为 `python`；其他命令或路径可通过 `HS_FUZZ_PYTHON` 指定
 
-## 3. 普通编译和运行
+- lcov/genhtml（可选），用于覆盖率报告
 
-先在项目根目录构建 Hyperscan 本体：
+## 3. 构建和运行
+
+下面是推荐的长时间 fuzz 构建。假阳性反馈路径需要在 AArch64 构建项目本体时开启
+`HS_ENABLE_FP_FEEDBACK`：
 
 ```bash
-export HS_ROOT=/path/to/hyperscan
-cd "$HS_ROOT"
-rm -rf build
-mkdir build
-cd build
-
-cmake ..
+cd /path/to/Ultrascan
+mkdir -p build_cov
+cd build_cov
+cmake .. -DHS_ENABLE_FP_FEEDBACK=ON 
 make -j$(nproc)
 ```
 
-再构建 fuzz：
+再构建 fuzz。标准目录布局会自动使用项目根目录下的 `build_cov`：
 
 ```bash
-cd "$HS_ROOT/unit/fuzz"
-rm -rf build
-mkdir build
+cd ../unit/fuzz
+mkdir -p build
 cd build
-
-cmake ..
+cmake .. 
 make -j$(nproc)
 ```
 
-运行 fuzz：
+运行：
 
 ```bash
 ./hyperscan_fuzz_test
 ```
 
-默认只输出每组生成器的汇总信息，不再打印每个 pattern、每次 scan、
-每个 compile error 的详细日志。
+正常构建和运行不需要设置任何环境变量。若本体没有开启反馈功能，程序会探测到
+`HS_ARCH_ERROR`，继续执行普通 fuzz，并自动跳过反馈路径。
 
-如果需要排查具体失败路径，可以打开详细日志：
+与 fuzz 直接相关的编译选项如下。项目本体和 fuzz 是两个独立 CMake 工程，所以
+`CMAKE_BUILD_TYPE` 应分别配置；fuzz 的编译类型不会改变已经链接的 `libhs`。
 
-```bash
-HS_FUZZ_VERBOSE=1 ./hyperscan_fuzz_test
-```
+| 配置位置 | 选项 | 默认值 | 作用和用法 |
+| --- | --- | --- | --- |
+| 项目本体 | `CMAKE_BUILD_TYPE` | `RelWithDebInfo` | `RelWithDebInfo` 适合长时间 fuzz；`Debug` 适合定位断言和崩溃；`Release` 用于无调试符号的性能运行；`MinSizeRel` 优化体积，不建议用于 fuzz。 |
+| 项目本体 | `HS_ENABLE_FP_FEEDBACK` | `OFF` | AArch64 上设为 `ON` 才会执行假阳性反馈 fuzz；x86 不支持设为 `ON`。 |
+| 项目本体 | `HS_ARM_MARCH` | `AUTO` | AArch64 指令集目标；本机 fuzz 通常使用 `AUTO`，跨机器运行使用 `PORTABLE`，也可指定 `native` 或具体架构值（如 `armv8.2-a+crc+sve`）。 |
+| 项目本体 | `OPTIMISE` | `ON` | 控制项目自身的 `-O2/-O3`。仅设置 `CMAKE_BUILD_TYPE=Debug` 不会关闭它；需要低优化调试时同时设置 `-DOPTIMISE=OFF`。 |
+| 项目本体 | `DEBUG_OUTPUT` | `OFF` | 开启内部调试输出并自动关闭 `OPTIMISE`，日志非常多，只用于定向排障。 |
+| 项目本体 | `ENABLE_COVERAGE` | `OFF` | 为本体添加 gcov 覆盖率参数；应与 `-DOPTIMISE=OFF` 一起使用。 |
+| 项目本体 | `BUILD_SHARED_LIBS` | `OFF` | `ON` 时构建共享 `libhs`；默认静态库即可运行 fuzz。 |
+| 项目本体 | `BUILD_STATIC_AND_SHARED` | `OFF` | `ON` 时同时构建静态库和共享库，普通 fuzz 不需要。 |
+| fuzz | `CMAKE_BUILD_TYPE` | 未设置 | 建议与本体一致；`Debug` 便于调试 fuzz 驱动，`RelWithDebInfo` 适合长时间运行。 |
+| fuzz | `HS_BUILD_DIR` | `../../build` | 指定要测试的 Hyperscan 构建目录。只有本体不在标准 `build` 目录时才需要设置。 |
 
-汇总里的 `unique errors` 默认最多展示 30 类错误。需要查看更多时：
+`unit/fuzz/CMakeLists.txt` 当前始终为 fuzz 可执行文件加入 gcov 参数；顶层
+`ENABLE_COVERAGE` 只决定 Hyperscan 本体是否生成覆盖率数据，与 `Debug` 是否开启
+没有直接关系。
 
-```bash
-HS_FUZZ_MAX_UNIQUE_ERRORS=100 ./hyperscan_fuzz_test
-```
-
-只运行主测试：
-
-```bash
-./hyperscan_fuzz_test --gtest_filter='FuzzTests/HyperscanFuzzTest.AllInterfaces/*'
-```
-
-并行运行主测试中的单 pattern API fuzz：
-
-```bash
-HS_FUZZ_THREADS=8 ./hyperscan_fuzz_test --gtest_filter='FuzzTests/HyperscanFuzzTest.AllInterfaces/*'
-```
-
-设置 `HS_FUZZ_THREADS` 后，Python 生成器会流式输出 pattern，主线程通过
-有界队列交给 worker 线程消费，不再一次性把所有 pattern 放进内存。队列默认
-最多缓存 4096 条，可通过 `HS_FUZZ_QUEUE_SIZE` 调整。
-
-多模式接口仍由主线程单独执行一次。并行模式下，多模式接口默认只使用前
-1024 条 pattern，避免把千万级 pattern 一次性传给 multi compile。如需调整：
+需要关闭优化定位崩溃时，分别这样配置：
 
 ```bash
-HS_FUZZ_THREADS=8 HS_FUZZ_QUEUE_SIZE=8192 HS_FUZZ_MULTI_LIMIT=4096 ./hyperscan_fuzz_test --gtest_filter='FuzzTests/HyperscanFuzzTest.AllInterfaces/*'
+# 项目本体
+cmake .. -DHS_ENABLE_FP_FEEDBACK=ON \
+  -DCMAKE_BUILD_TYPE=Debug -DOPTIMISE=OFF
+
+# unit/fuzz/build
+cmake .. -DCMAKE_BUILD_TYPE=Debug
 ```
 
-设置 `HS_FUZZ_MULTI_LIMIT=0` 可以跳过多模式接口。
+当前 fuzz 支持的运行环境变量如下，全部都是可选项：
 
-调试时建议先把 `unit/fuzz/fuzz_test.cpp` 里的 `count` 调小，例如 `100`。
-`count` 表示每个生成器产生多少条正则表达式，不是匹配次数，也不是性能循环次数。
+| 环境变量 | 默认值 | 作用 |
+| --- | --- | --- |
+| `HS_FUZZ_COUNT` | `10000000` | 每个 Python 生成器产生的 pattern 数；共有 3 个生成器。必须是正整数，`0` 或非法值会回退到默认值。 |
+| `HS_FUZZ_THREADS` | `1` | 工作线程总数；大于 `1` 时启用 lane 模式，不同 API 组分道并行执行（见下文）。 |
+| `HS_FUZZ_API_SAMPLE` | `10` | lane 模式下非 feedback lane 的采样分母：每 N 个用例取 1 个；`1` 表示全量，`0` 回退到默认值。 |
+| `HS_FUZZ_FEEDBACK_THREADS` | `HS_FUZZ_THREADS` 的一半（至少 1） | feedback lane 专属线程数；实际会夹在 `[1, HS_FUZZ_THREADS]` 区间。 |
+| `HS_FUZZ_QUEUE_SIZE` | `4096` | 并行模式下每条 lane 的待执行队列容量；单线程时无效，`0` 回退到默认值。 |
+| `HS_FUZZ_MULTI_LIMIT` | `1024` | 送入 multi 编译接口的 pattern 上限；`0` 禁用 multi 接口 fuzz。 |
+| `HS_FUZZ_FP_LIMIT` | `256` | 每个生成器执行完整 collector/feedback/recompile 流程的用例上限；`0` 禁用逐用例反馈流程。 |
+| `HS_FUZZ_PYTHON` | `python` | Python 命令或可执行文件路径，例如 `python3` 或 `/usr/bin/python3`。 |
+| `HS_FUZZ_VERBOSE` | `0` | 设为非 `0` 值时输出逐 API 详细日志；默认只输出进度、错误和汇总。 |
+| `HS_FUZZ_MAX_UNIQUE_ERRORS` | `30` | 汇总中每个 API 最多展示的不同错误信息数；只限制输出，不限制执行。 |
+| `HS_FUZZ_TRACE_CASE` | `0` | 设为非 `0` 值时，在标准输出打印每个用例的 begin/end、ID、flags 和 pattern。 |
+| `HS_FUZZ_TRACE_DIR` | 未设置 | 将各 worker 当前执行的用例和阶段写入 `<目录>/worker_N.current`（含 `lane=` 行）；目录需预先创建，崩溃后可用残留文件定位。 |
+
+### 并行 lane 模式（不同 API 组并行）
+
+`HS_FUZZ_THREADS` 大于 1 时，单 pattern 用例不再整链路串行，而是按 API 拆成
+最多 4 条 lane 并行执行：
+
+| lane | 覆盖接口 | 采样 | 线程 |
+| --- | --- | --- | --- |
+| feedback | 假阳性反馈全链路（collector / feedback / 反馈重编译 / 带 collector 扫描对比） | 全量（受 `HS_FUZZ_FP_LIMIT` 限制总量） | `HS_FUZZ_FEEDBACK_THREADS`，默认 `HS_FUZZ_THREADS` 的一半 |
+| compile | `hs_compile`、`fat_hs_compile`、`hs_compile_lit`、`fat_hs_compile_lit`、`hs_expression_info`、`hs_expression_ext_info` | 每 `HS_FUZZ_API_SAMPLE` 个取 1 | 剩余线程按 5:3:2 分配 |
+| scan | `hs_scan`、`hs_scan_stream`、`hs_scan_vector` | 同上 | 同上 |
+| stream | stream 操作 6 个接口、`hs_clone_scratch`、`hs_scratch_size` | 同上 | 同上 |
+
+- 生产者按采样率把用例路由到各 lane 的独立队列（容量均为
+  `HS_FUZZ_QUEUE_SIZE`）；队列满时生产者阻塞形成背压，不会死锁。
+- 每 lane 每线程持有独立 `Runner`（独立 database/scratch/统计），lane 内各
+  阶段仍串行。
+- 线程不足时权重小的 lane 可能分到 0 线程而被跳过（例如 `HS_FUZZ_THREADS=2`
+  时只有 feedback 和 compile），启动时会打印每条 lane 的实际配置。
+- x86 或本体未开启 `HS_ENABLE_FP_FEEDBACK` 时自动去掉 feedback lane，其线程
+  配额按 5:3:2 分给其余 lane。
+- multi 编译接口仍在所有单用例结束后由主线程串行执行。
+- 单线程（`HS_FUZZ_THREADS=1`）保持原先的整链路串行行为。
+- 汇总输出按 `worker N (lane 名) ` 分组，可直接看出各 API 组的调用量。
+
+### 常用运行示例
+
+```bash
+# 快速验证：每个生成器执行 100 个 pattern
+HS_FUZZ_COUNT=100 ./hyperscan_fuzz_test
+
+# 并行执行（lane 模式），并限制高开销的 multi 接口
+HS_FUZZ_THREADS=8 HS_FUZZ_MULTI_LIMIT=512 HS_FUZZ_FP_LIMIT=128 \
+  ./hyperscan_fuzz_test
+
+# 反馈优化接口重点跑：8 线程中 4 个给 feedback lane，反馈用例全量采样，
+# 其他 API 降采样到 1/10
+HS_FUZZ_THREADS=8 HS_FUZZ_FP_LIMIT=10000000 HS_FUZZ_API_SAMPLE=10 \
+  ./hyperscan_fuzz_test
+
+# 为崩溃定位保留每个 worker 的当前用例和执行阶段
+mkdir -p /tmp/hs-fuzz-trace
+HS_FUZZ_TRACE_DIR=/tmp/hs-fuzz-trace ./hyperscan_fuzz_test
+```
 
 ## 4. 覆盖率编译
 
@@ -131,11 +181,12 @@ endif()
 ```bash
 export HS_ROOT=/path/to/hyperscan
 cd "$HS_ROOT"
-rm -rf build
-mkdir build
-cd build
+rm -rf build_cov
+mkdir build_cov
+cd build_cov
 
-cmake .. -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+cmake .. -DHS_ENABLE_FP_FEEDBACK=ON -DENABLE_COVERAGE=ON \
+  -DCMAKE_BUILD_TYPE=Debug -DOPTIMISE=OFF
 make -j$(nproc)
 ```
 
@@ -156,8 +207,8 @@ make -j$(nproc)
 
 ```bash
 cd "$HS_ROOT"
-find build -name '*.gcda' | head
-find build -name '*.gcda' | grep fat_database
+find build_cov -name '*.gcda' | head
+find build_cov -name '*.gcda' | grep fat_database
 ```
 
 ## 5. 生成全量覆盖率报告
@@ -169,7 +220,7 @@ cd "$HS_ROOT"
 rm -f coverage.info coverage.info.cleaned
 
 lcov --capture \
-  --directory build \
+  --directory build_cov \
   --directory unit/fuzz/build \
   --ignore-errors inconsistent,inconsistent \
   --output-file coverage.info
@@ -208,14 +259,15 @@ $HS_ROOT/coverage_report/index.html
 检查：
 
 ```bash
-find build -name '*.gcno' | head
-find build -name '*.gcda' | head
+find build_cov -name '*.gcno' | head
+find build_cov -name '*.gcda' | head
 ```
 
 如果没有 `.gcno`，重新使用：
 
 ```bash
-cmake .. -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+cmake .. -DHS_ENABLE_FP_FEEDBACK=ON -DENABLE_COVERAGE=ON \
+  -DCMAKE_BUILD_TYPE=Debug -DOPTIMISE=OFF
 ```
 
 如果有 `.gcno` 但没有 `.gcda`，先运行 fuzz：
@@ -232,7 +284,7 @@ cd "$HS_ROOT/unit/fuzz/build"
 
 ```bash
 lcov --capture \
-  --directory build \
+  --directory build_cov \
   --directory unit/fuzz/build \
   --ignore-errors inconsistent,inconsistent \
   --output-file coverage.info
@@ -249,8 +301,8 @@ grep -n 'SF:.*fat_database.c' coverage.info coverage.info.cleaned 2>/dev/null
 再确认编译和运行数据：
 
 ```bash
-find build -name '*.gcno' | grep fat_database
-find build -name '*.gcda' | grep fat_database
+find build_cov -name '*.gcno' | grep fat_database
+find build_cov -name '*.gcda' | grep fat_database
 ```
 
 如果 `.gcno` 没有，说明顶层 `CMakeLists.txt` 没给 C 文件加 coverage 参数，
@@ -272,20 +324,15 @@ lcov: ERROR: (inconsistent) mismatched end line ...
 
 ### 6.5 fuzz 链接了错误的 libhs
 
-确认 fuzz 链接的是当前项目的库：
+标准目录布局会自动使用项目根目录下的 `build_cov`，CMake 配置阶段会打印实际选中的
+Hyperscan 库路径。只有根库位于其他目录时才需要显式指定，例如：
 
 ```bash
-cd "$HS_ROOT/unit/fuzz/build"
-ldd ./hyperscan_fuzz_test | grep hs
+cmake .. -DHS_BUILD_DIR=/path/to/nonstandard-hyperscan-build
 ```
 
-应该指向：
-
-```text
-$HS_ROOT/build/lib/libhs.so
-```
-
-如果指向 `/usr/lib` 或 `/usr/local/lib`，覆盖率不会进当前项目的 `build`。
+如果配置输出仍指向旧库，删除独立 fuzz 构建目录或清理其中的 CMake cache
+后再重新配置。
 
 ## 7. 当前覆盖接口概览
 
@@ -307,6 +354,27 @@ $HS_ROOT/build/lib/libhs.so
 - `hs_scan`
 - `hs_scan_stream`
 - `hs_scan_vector`
+- `hs_scan_with_collector`
+- `hs_scan_stream_with_collector`
+- `hs_scan_vector_with_collector`
+
+假阳性反馈接口：
+
+- `hs_fp_collector_create`
+- `hs_fp_collector_reset`
+- `hs_fp_collector_merge`
+- `hs_fp_collector_free`
+- `hs_fp_collector_to_feedback`
+- `hs_fp_collector_to_feedback_with_dump`
+- `hs_fp_feedback_free`
+- `hs_compile_multi_with_feedback`
+- `hs_compile_ext_multi_with_feedback`
+
+定向回归：
+
+- Python 生成器 `id:/pattern/flags` record 解析，包含 pattern 正文中的 `/`
+- QUIET 非组合表达式在 block、stream、vectored 模式下编译和扫描成功，且不产生 callback
+- 普通扫描、带 collector 扫描和反馈重编译扫描的完整 callback 多重集保持一致
 
 stream 操作：
 

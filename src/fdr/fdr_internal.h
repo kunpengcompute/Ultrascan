@@ -82,7 +82,19 @@ struct FDR {
     m128 start; /* initial start state to use at offset 0. The state has been
                  * set up based on the min length of buckets to reduce the need
                  * for pointless confirms. */
+    u32 matcherBlobOffset; /* optional matcher blob offset from FDR base */
+    u32 matcherBlobSize;   /* optional matcher blob size in bytes */
 };
+
+static inline
+u32 fdrMatcherBlobOffset(const struct FDR *fdr) {
+    return fdr ? fdr->matcherBlobOffset : 0;
+}
+
+static inline
+u32 fdrMatcherBlobSize(const struct FDR *fdr) {
+    return fdr ? fdr->matcherBlobSize : 0;
+}
 
 /** \brief FDR runtime arguments.
  *

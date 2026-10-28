@@ -47,6 +47,7 @@ struct HWLM;
 namespace ue2 {
 
 class FDREngineDescription;
+struct HAOCompileArtifacts;
 class TeddyEngineDescription;
 struct CompileContext;
 struct Grey;
@@ -79,9 +80,20 @@ struct HWLMProto {
     std::map<u32, std::vector<u32>> bucketToLits;
 
     /**
+     * \brief Optional compile-time label used only for diagnostics.
+     */
+    const char *debugName = nullptr;
+
+    /**
      * \brief Flag to optimise matcher for small size from Rose.
      */
     bool make_small = false;
+
+    /**
+     * \brief Optional cached HAO compile artifacts, used when proto build
+     * has already selected the HAO global layout for table generation.
+     */
+    std::unique_ptr<HAOCompileArtifacts> haoArtifacts;
 
     HWLMProto(u8 engType_in, std::vector<hwlmLiteral> lits_in);
 

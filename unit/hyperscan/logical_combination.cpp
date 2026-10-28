@@ -31,10 +31,10 @@
 #include <iostream>
 #include <vector>
 
-#include "gtest/gtest.h"
-#include "hs.h"
 #include "config.h"
+#include "hs.h"
 #include "test_util.h"
+#include "gtest/gtest.h"
 
 using namespace std;
 
@@ -43,8 +43,9 @@ TEST(LogicalCombination, SingleComb1) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "abcdefxxfoobarrrghabcxdefxteakettleeeeexxxxijklmxxdef";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "(101 & 102 & 103) | (104 & !105)"};
+    const char *expr[] = {"abc",        "def",
+                          "foobar.*gh", "teakettle{4,10}",
+                          "ijkl[mMn]",  "(101 & 102 & 103) | (104 & !105)"};
     unsigned flags[] = {0, 0, 0, 0, 0, HS_FLAG_COMBINATION};
     unsigned ids[] = {101, 102, 103, 104, 105, 1001};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 6, HS_MODE_NOSTREAM,
@@ -90,10 +91,12 @@ TEST(LogicalCombination, SingleCombQuietSub1) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "abcdefxxfoobarrrghabcxdefxteakettleeeeexxxxijklmxxdef";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "(101 & 102 & 103) | (104 & !105)"};
-    unsigned flags[] = {HS_FLAG_QUIET, HS_FLAG_QUIET, HS_FLAG_QUIET,
-                        HS_FLAG_QUIET, 0, HS_FLAG_COMBINATION};
+    const char *expr[] = {"abc",        "def",
+                          "foobar.*gh", "teakettle{4,10}",
+                          "ijkl[mMn]",  "(101 & 102 & 103) | (104 & !105)"};
+    unsigned flags[] = {
+        HS_FLAG_QUIET,      HS_FLAG_QUIET, HS_FLAG_QUIET, HS_FLAG_QUIET, 0,
+        HS_FLAG_COMBINATION};
     unsigned ids[] = {101, 102, 103, 104, 105, 1001};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 6, HS_MODE_NOSTREAM,
                                       nullptr, &db, &compile_err);
@@ -130,12 +133,19 @@ TEST(LogicalCombination, MultiCombQuietSub1) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "abcdefxxfoobarrrghabcxdefxteakettleeeeexxxxijklmxxdef";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "(101 & 102 & 103) | (104 & !105)",
-                          "!101 & 102", "!(!101 | 102)", "101 & !102"};
-    unsigned flags[] = {HS_FLAG_QUIET, HS_FLAG_QUIET, HS_FLAG_QUIET,
-                        HS_FLAG_QUIET, 0, HS_FLAG_COMBINATION,
-                        HS_FLAG_COMBINATION, HS_FLAG_COMBINATION,
+    const char *expr[] = {"abc",        "def",
+                          "foobar.*gh", "teakettle{4,10}",
+                          "ijkl[mMn]",  "(101 & 102 & 103) | (104 & !105)",
+                          "!101 & 102", "!(!101 | 102)",
+                          "101 & !102"};
+    unsigned flags[] = {HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        0,
+                        HS_FLAG_COMBINATION,
+                        HS_FLAG_COMBINATION,
+                        HS_FLAG_COMBINATION,
                         HS_FLAG_COMBINATION};
     unsigned ids[] = {101, 102, 103, 104, 105, 1001, 1002, 1003, 1004};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 9, HS_MODE_NOSTREAM,
@@ -175,11 +185,16 @@ TEST(LogicalCombination, MultiHighlanderCombQuietSub1) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "abcdefxxfoobarrrghabcxdefxteakettleeeeexxxxijklmxxdef";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "(101 & 102 & 103) | (104 & !105)",
-                          "!101 & 102", "!(!101 | 102)", "101 & !102"};
-    unsigned flags[] = {HS_FLAG_QUIET, HS_FLAG_QUIET, HS_FLAG_QUIET,
-                        HS_FLAG_QUIET, 0,
+    const char *expr[] = {"abc",        "def",
+                          "foobar.*gh", "teakettle{4,10}",
+                          "ijkl[mMn]",  "(101 & 102 & 103) | (104 & !105)",
+                          "!101 & 102", "!(!101 | 102)",
+                          "101 & !102"};
+    unsigned flags[] = {HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        0,
                         HS_FLAG_COMBINATION | HS_FLAG_SINGLEMATCH,
                         HS_FLAG_COMBINATION,
                         HS_FLAG_COMBINATION | HS_FLAG_SINGLEMATCH,
@@ -216,12 +231,19 @@ TEST(LogicalCombination, MultiQuietCombQuietSub1) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "abcdefxxfoobarrrghabcxdefxteakettleeeeexxxxijklmxxdef";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "(101 & 102 & 103) | (104 & !105)",
-                          "!101 & 102", "!(!101 | 102)", "101 & !102"};
-    unsigned flags[] = {HS_FLAG_QUIET, HS_FLAG_QUIET, HS_FLAG_QUIET,
-                        HS_FLAG_QUIET, 0, HS_FLAG_COMBINATION | HS_FLAG_QUIET,
-                        HS_FLAG_COMBINATION, HS_FLAG_COMBINATION,
+    const char *expr[] = {"abc",        "def",
+                          "foobar.*gh", "teakettle{4,10}",
+                          "ijkl[mMn]",  "(101 & 102 & 103) | (104 & !105)",
+                          "!101 & 102", "!(!101 | 102)",
+                          "101 & !102"};
+    unsigned flags[] = {HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        0,
+                        HS_FLAG_COMBINATION | HS_FLAG_QUIET,
+                        HS_FLAG_COMBINATION,
+                        HS_FLAG_COMBINATION,
                         HS_FLAG_COMBINATION | HS_FLAG_QUIET};
     unsigned ids[] = {101, 102, 103, 104, 105, 1001, 1002, 1003, 1004};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 9, HS_MODE_NOSTREAM,
@@ -253,8 +275,9 @@ TEST(LogicalCombination, SingleComb2) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "abbdefxxfoobarrrghabcxdefxteakettleeeeexxxxijklmxxdef";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "(201 | 202 & 203) & (!204 | 205)"};
+    const char *expr[] = {"abc",        "def",
+                          "foobar.*gh", "teakettle{4,10}",
+                          "ijkl[mMn]",  "(201 | 202 & 203) & (!204 | 205)"};
     unsigned flags[] = {0, 0, 0, 0, 0, HS_FLAG_COMBINATION};
     unsigned ids[] = {201, 202, 203, 204, 205, 1002};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 6, HS_MODE_NOSTREAM,
@@ -297,10 +320,11 @@ TEST(LogicalCombination, SingleCombQuietSub2) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "abbdefxxfoobarrrghabcxdefxteakettleeeeexxxxijklmxxdef";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "(201 | 202 & 203) & (!204 | 205)"};
-    unsigned flags[] = {0, HS_FLAG_QUIET, HS_FLAG_QUIET, 0, HS_FLAG_QUIET,
-                        HS_FLAG_COMBINATION};
+    const char *expr[] = {"abc",        "def",
+                          "foobar.*gh", "teakettle{4,10}",
+                          "ijkl[mMn]",  "(201 | 202 & 203) & (!204 | 205)"};
+    unsigned flags[] = {0, HS_FLAG_QUIET, HS_FLAG_QUIET,
+                        0, HS_FLAG_QUIET, HS_FLAG_COMBINATION};
     unsigned ids[] = {201, 202, 203, 204, 205, 1002};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 6, HS_MODE_NOSTREAM,
                                       nullptr, &db, &compile_err);
@@ -337,8 +361,9 @@ TEST(LogicalCombination, SingleComb3) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "abcijklndefxxfoobarrrghabcxdefxteakettleeeeexxxxijklnxxdef";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "((301 | 302) & 303) & (304 | 305)"};
+    const char *expr[] = {"abc",        "def",
+                          "foobar.*gh", "teakettle{4,10}",
+                          "ijkl[mMn]",  "((301 | 302) & 303) & (304 | 305)"};
     unsigned flags[] = {0, 0, 0, 0, 0, HS_FLAG_COMBINATION};
     unsigned ids[] = {301, 302, 303, 304, 305, 1003};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 6, HS_MODE_NOSTREAM,
@@ -385,10 +410,11 @@ TEST(LogicalCombination, SingleCombQuietSub3) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "abcijklndefxxfoobarrrghabcxdefxteakettleeeeexxxxijklnxxdef";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "((301 | 302) & 303) & (304 | 305)"};
-    unsigned flags[] = {HS_FLAG_QUIET, HS_FLAG_QUIET, 0, HS_FLAG_QUIET,
-                        HS_FLAG_QUIET, HS_FLAG_COMBINATION};
+    const char *expr[] = {"abc",        "def",
+                          "foobar.*gh", "teakettle{4,10}",
+                          "ijkl[mMn]",  "((301 | 302) & 303) & (304 | 305)"};
+    unsigned flags[] = {HS_FLAG_QUIET, HS_FLAG_QUIET, 0,
+                        HS_FLAG_QUIET, HS_FLAG_QUIET, HS_FLAG_COMBINATION};
     unsigned ids[] = {301, 302, 303, 304, 305, 1003};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 6, HS_MODE_NOSTREAM,
                                       nullptr, &db, &compile_err);
@@ -425,12 +451,22 @@ TEST(LogicalCombination, MultiCombDupSub4) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "abbdefxxfoobarrrghabcxdefxteakettleeeeexxxxijklmxxdef";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "(201 & 202 & 203) | (204 & !205)",
+    const char *expr[] = {"abc",
+                          "def",
+                          "foobar.*gh",
+                          "teakettle{4,10}",
+                          "ijkl[mMn]",
+                          "(201 & 202 & 203) | (204 & !205)",
                           "(201 | 202 & 203) & (!204 | 205)",
                           "((201 | 202) & 203) & (204 | 205)"};
-    unsigned flags[] = {0, 0, 0, 0, 0, HS_FLAG_COMBINATION,
-                        HS_FLAG_COMBINATION, HS_FLAG_COMBINATION};
+    unsigned flags[] = {0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        HS_FLAG_COMBINATION,
+                        HS_FLAG_COMBINATION,
+                        HS_FLAG_COMBINATION};
     unsigned ids[] = {201, 202, 203, 204, 205, 1001, 1002, 1003};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 8, HS_MODE_NOSTREAM,
                                       nullptr, &db, &compile_err);
@@ -482,12 +518,17 @@ TEST(LogicalCombination, MultiCombQuietDupSub4) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "abbdefxxfoobarrrghabcxdefxteakettleeeeexxxxijklmxxdef";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "(201 & 202 & 203) | (204 & !205)",
+    const char *expr[] = {"abc",
+                          "def",
+                          "foobar.*gh",
+                          "teakettle{4,10}",
+                          "ijkl[mMn]",
+                          "(201 & 202 & 203) | (204 & !205)",
                           "(201 | 202 & 203) & (!204 | 205)",
                           "((201 | 202) & 203) & (204 | 205)"};
-    unsigned flags[] = {HS_FLAG_QUIET, HS_FLAG_QUIET, HS_FLAG_QUIET, 0,
-                        HS_FLAG_QUIET, HS_FLAG_COMBINATION,
+    unsigned flags[] = {HS_FLAG_QUIET,       HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,       0,
+                        HS_FLAG_QUIET,       HS_FLAG_COMBINATION,
                         HS_FLAG_COMBINATION, HS_FLAG_COMBINATION};
     unsigned ids[] = {201, 202, 203, 204, 205, 1001, 1002, 1003};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 8, HS_MODE_NOSTREAM,
@@ -539,18 +580,44 @@ TEST(LogicalCombination, MultiCombUniSub5) {
                   "-----------------------------------------------"
                   "cabijklRfeexxgoobarrrjpcabxfeexshockwaveeeeexxxxijklsxxfee"
                   "------------------------------------------";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "cba", "fed", "google.*cn",
-                          "haystacks{4,8}", "ijkl[oOp]", "cab", "fee",
-                          "goobar.*jp", "shockwave{4,6}", "ijkl[rRs]",
+    const char *expr[] = {"abc",
+                          "def",
+                          "foobar.*gh",
+                          "teakettle{4,10}",
+                          "ijkl[mMn]",
+                          "cba",
+                          "fed",
+                          "google.*cn",
+                          "haystacks{4,8}",
+                          "ijkl[oOp]",
+                          "cab",
+                          "fee",
+                          "goobar.*jp",
+                          "shockwave{4,6}",
+                          "ijkl[rRs]",
                           "(101 & 102 & 103) | (104 & !105)",
                           "(201 | 202 & 203) & (!204 | 205)",
                           "((301 | 302) & 303) & (304 | 305)"};
-    unsigned flags[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                        HS_FLAG_COMBINATION, HS_FLAG_COMBINATION,
+    unsigned flags[] = {0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        HS_FLAG_COMBINATION,
+                        HS_FLAG_COMBINATION,
                         HS_FLAG_COMBINATION};
-    unsigned ids[] = {101, 102, 103, 104, 105, 201, 202, 203, 204, 205, 301,
-                      302, 303, 304, 305, 1001, 1002, 1003};
+    unsigned ids[] = {101, 102, 103, 104, 105, 201, 202,  203,  204,
+                      205, 301, 302, 303, 304, 305, 1001, 1002, 1003};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 18, HS_MODE_NOSTREAM,
                                       nullptr, &db, &compile_err);
 
@@ -629,20 +696,44 @@ TEST(LogicalCombination, MultiCombQuietUniSub5) {
                   "-----------------------------------------------"
                   "cabijklRfeexxgoobarrrjpcabxfeexshockwaveeeeexxxxijklsxxfee"
                   "------------------------------------------";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "cba", "fed", "google.*cn",
-                          "haystacks{4,8}", "ijkl[oOp]", "cab", "fee",
-                          "goobar.*jp", "shockwave{4,6}", "ijkl[rRs]",
+    const char *expr[] = {"abc",
+                          "def",
+                          "foobar.*gh",
+                          "teakettle{4,10}",
+                          "ijkl[mMn]",
+                          "cba",
+                          "fed",
+                          "google.*cn",
+                          "haystacks{4,8}",
+                          "ijkl[oOp]",
+                          "cab",
+                          "fee",
+                          "goobar.*jp",
+                          "shockwave{4,6}",
+                          "ijkl[rRs]",
                           "(101 & 102 & 103) | (104 & !105)",
                           "(201 | 202 & 203) & (!204 | 205)",
                           "((301 | 302) & 303) & (304 | 305)"};
-    unsigned flags[] = {0, HS_FLAG_QUIET, HS_FLAG_QUIET, HS_FLAG_QUIET, 0,
-                        HS_FLAG_QUIET, 0, HS_FLAG_QUIET, 0, HS_FLAG_QUIET,
-                        HS_FLAG_QUIET, HS_FLAG_QUIET, 0, HS_FLAG_QUIET, 0,
-                        HS_FLAG_COMBINATION, HS_FLAG_COMBINATION,
+    unsigned flags[] = {0,
+                        HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        0,
+                        HS_FLAG_QUIET,
+                        0,
+                        HS_FLAG_QUIET,
+                        0,
+                        HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        HS_FLAG_QUIET,
+                        0,
+                        HS_FLAG_QUIET,
+                        0,
+                        HS_FLAG_COMBINATION,
+                        HS_FLAG_COMBINATION,
                         HS_FLAG_COMBINATION};
-    unsigned ids[] = {101, 102, 103, 104, 105, 201, 202, 203, 204, 205, 301,
-                      302, 303, 304, 305, 1001, 1002, 1003};
+    unsigned ids[] = {101, 102, 103, 104, 105, 201, 202,  203,  204,
+                      205, 301, 302, 303, 304, 305, 1001, 1002, 1003};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 18, HS_MODE_NOSTREAM,
                                       nullptr, &db, &compile_err);
 
@@ -700,8 +791,9 @@ TEST(LogicalCombination, SingleCombPurelyNegative6) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "(!201 | 202 & 203) & (!204 | 205)"};
+    const char *expr[] = {"abc",        "def",
+                          "foobar.*gh", "teakettle{4,10}",
+                          "ijkl[mMn]",  "(!201 | 202 & 203) & (!204 | 205)"};
     unsigned flags[] = {0, 0, 0, 0, 0, HS_FLAG_COMBINATION};
     unsigned ids[] = {201, 202, 203, 204, 205, 1002};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 6, HS_MODE_NOSTREAM,
@@ -732,8 +824,9 @@ TEST(LogicalCombination, SingleCombQuietPurelyNegative6) {
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
     string data = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "(!201 | 202 & 203) & (!204 | 205)"};
+    const char *expr[] = {"abc",        "def",
+                          "foobar.*gh", "teakettle{4,10}",
+                          "ijkl[mMn]",  "(!201 | 202 & 203) & (!204 | 205)"};
     unsigned flags[] = {0, 0, 0, 0, 0, HS_FLAG_COMBINATION | HS_FLAG_QUIET};
     unsigned ids[] = {201, 202, 203, 204, 205, 1002};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 6, HS_MODE_NOSTREAM,
@@ -768,18 +861,44 @@ TEST(LogicalCombination, MultiCombPurelyNegativeUniSub6) {
                   "-----------------------------------------------"
                   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                   "------------------------------------------";
-    const char *expr[] = {"abc", "def", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "cba", "fed", "google.*cn",
-                          "haystacks{4,8}", "ijkl[oOp]", "cab", "fee",
-                          "goobar.*jp", "shockwave{4,6}", "ijkl[rRs]",
+    const char *expr[] = {"abc",
+                          "def",
+                          "foobar.*gh",
+                          "teakettle{4,10}",
+                          "ijkl[mMn]",
+                          "cba",
+                          "fed",
+                          "google.*cn",
+                          "haystacks{4,8}",
+                          "ijkl[oOp]",
+                          "cab",
+                          "fee",
+                          "goobar.*jp",
+                          "shockwave{4,6}",
+                          "ijkl[rRs]",
                           "(101 & 102 & 103) | (!104 & !105)",
                           "(!201 | 202 & 203) & (!204 | 205)",
                           "((301 | 302) & 303) & (304 | 305)"};
-    unsigned flags[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                        HS_FLAG_COMBINATION, HS_FLAG_COMBINATION,
+    unsigned flags[] = {0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        HS_FLAG_COMBINATION,
+                        HS_FLAG_COMBINATION,
                         HS_FLAG_COMBINATION};
-    unsigned ids[] = {101, 102, 103, 104, 105, 201, 202, 203, 204, 205, 301,
-                      302, 303, 304, 305, 1001, 1002, 1003};
+    unsigned ids[] = {101, 102, 103, 104, 105, 201, 202,  203,  204,
+                      205, 301, 302, 303, 304, 305, 1001, 1002, 1003};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 18, HS_MODE_NOSTREAM,
                                       nullptr, &db, &compile_err);
 
@@ -815,19 +934,44 @@ TEST(LogicalCombination, MultiCombPurelyNegativeUniSubEOD6) {
                   "-----------------------------------------------"
                   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                   "-------------------------------------defed";
-    const char *expr[] = {"abc", "defed", "foobar.*gh", "teakettle{4,10}",
-                          "ijkl[mMn]", "cba", "fed", "google.*cn",
-                          "haystacks{4,8}", "ijkl[oOp]", "cab", "fee",
-                          "goobar.*jp", "shockwave{4,6}", "ijkl[rRs]",
+    const char *expr[] = {"abc",
+                          "defed",
+                          "foobar.*gh",
+                          "teakettle{4,10}",
+                          "ijkl[mMn]",
+                          "cba",
+                          "fed",
+                          "google.*cn",
+                          "haystacks{4,8}",
+                          "ijkl[oOp]",
+                          "cab",
+                          "fee",
+                          "goobar.*jp",
+                          "shockwave{4,6}",
+                          "ijkl[rRs]",
                           "(101 & 102 & 103) | (!104 & !105)",
                           "(!201 | 202 & 203) & (!204 | 205)",
                           "((301 | 302) & 303) & (304 | 305)"};
-    unsigned flags[] = {0, 0, 0, 0, 0, 0, HS_FLAG_MULTILINE,
-                        0, 0, 0, 0, 0, 0, 0, 0,
-                        HS_FLAG_COMBINATION, HS_FLAG_COMBINATION,
+    unsigned flags[] = {0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        HS_FLAG_MULTILINE,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        HS_FLAG_COMBINATION,
+                        HS_FLAG_COMBINATION,
                         HS_FLAG_COMBINATION};
-    unsigned ids[] = {101, 102, 103, 104, 105, 201, 202, 203, 204, 205, 301,
-                      302, 303, 304, 305, 1001, 1002, 1003};
+    unsigned ids[] = {101, 102, 103, 104, 105, 201, 202,  203,  204,
+                      205, 301, 302, 303, 304, 305, 1001, 1002, 1003};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 18, HS_MODE_NOSTREAM,
                                       nullptr, &db, &compile_err);
 
@@ -862,19 +1006,29 @@ TEST(LogicalCombination, MultiCombStream1) {
     hs_database_t *db = nullptr;
     hs_compile_error_t *compile_err = nullptr;
     CallBackContext c;
-    string data[] = {"xxxxxxxabcxxxxxxxdefxxxghixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                     "xxxxxxxxxxxxxxxxghixxxxxxxxxxxabcxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                     "xxxxxxxxxxxxxxxxdefxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                     "xxxxxxxxxxxxxxxxxyzxxxxxxxxxxxxxxxxxxxxxghixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                     "xxxxxghixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxzxy",
+    string data[] = {"xxxxxxxabcxxxxxxxdefxxxghixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                     "xxxxxxxxxxxxxxxxxxx",
+                     "xxxxxxxxxxxxxxxxghixxxxxxxxxxxabcxxxxxxxxxxxxxxxxxxxxxxxx"
+                     "xxxxxxxxxxxxxxxxxxx",
+                     "xxxxxxxxxxxxxxxxdefxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                     "xxxxxxxxxxxxxxxxxxx",
+                     "xxxxxxxxxxxxxxxxxyzxxxxxxxxxxxxxxxxxxxxxghixxxxxxxxxxxxxx"
+                     "xxxxxxxxxxxxxxxxxxx",
+                     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                     "xxxxxxxxxxxxxxxxxxx",
+                     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                     "xxxxxxxxxxxxxxxxxxx",
+                     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                     "xxxxxxxxxxxxxxxxxxx",
+                     "xxxxxghixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                     "xxxxxxxxxxxxxxxxxxx",
+                     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                     "xxxxxxxxxxxxxxxxxxx",
+                     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                     "xxxxxxxxxxxxxxxxzxy",
                      "z"};
-    const char *expr[] = {"abc", "def", "xyz", "zxyz",
-                          "101 & 102", "201 & !202"};
+    const char *expr[] = {"abc",  "def",       "xyz",
+                          "zxyz", "101 & 102", "201 & !202"};
     unsigned flags[] = {0, 0, 0, 0, HS_FLAG_COMBINATION, HS_FLAG_COMBINATION};
     unsigned ids[] = {101, 102, 201, 202, 1001, 1002};
     hs_error_t err = hs_compile_multi(expr, flags, ids, 6, HS_MODE_STREAM,
@@ -915,6 +1069,144 @@ TEST(LogicalCombination, MultiCombStream1) {
     ASSERT_EQ(MatchRecord(247, 1002), c.matches[8]);
     ASSERT_EQ(MatchRecord(761, 201), c.matches[9]);
     ASSERT_EQ(MatchRecord(761, 202), c.matches[10]);
+
+    hs_free_database(db);
+    err = hs_free_scratch(scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+}
+
+// A QUIET expression that is NOT referenced by any logical combination
+// produces no user-visible reports and no internal state changes.  The
+// compiler should silently skip it so that it does not generate an empty
+// Rose program.  This test covers block, stream, and vectored modes.
+TEST(LogicalCombination, QuietOnlyLiteralNoCombinationBlock) {
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    // "Q" is a single-byte literal with HS_FLAG_QUIET, no combination
+    // expression references report 2001.
+    const char *expr[] = {"Q"};
+    unsigned flags[] = {HS_FLAG_QUIET};
+    unsigned ids[] = {2001};
+    hs_error_t err = hs_compile_multi(expr, flags, ids, 1, HS_MODE_BLOCK,
+                                      nullptr, &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(scratch != nullptr);
+
+    CallBackContext c;
+    c.halt = 0;
+    // Scan data that definitely contains 'Q', expect zero callbacks.
+    err = hs_scan(db, "QQQQQQQQQQ", 10, 0, scratch, record_cb, (void *)&c);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_EQ(0U, c.matches.size());
+
+    hs_free_database(db);
+    err = hs_free_scratch(scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+}
+
+TEST(LogicalCombination, QuietOnlyLiteralNoCombinationStream) {
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    const char *expr[] = {"Q"};
+    unsigned flags[] = {HS_FLAG_QUIET};
+    unsigned ids[] = {2001};
+    hs_error_t err = hs_compile_multi(expr, flags, ids, 1, HS_MODE_STREAM,
+                                      nullptr, &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(scratch != nullptr);
+
+    hs_stream_t *stream = nullptr;
+    err = hs_open_stream(db, 0, &stream);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(stream != nullptr);
+
+    CallBackContext c;
+    c.halt = 0;
+    err = hs_scan_stream(stream, "QQQQQQQQQQ", 10, 0, scratch, record_cb,
+                         (void *)&c);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_EQ(0U, c.matches.size());
+
+    err = hs_close_stream(stream, scratch, dummy_cb, nullptr);
+    ASSERT_EQ(HS_SUCCESS, err);
+
+    hs_free_database(db);
+    err = hs_free_scratch(scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+}
+
+TEST(LogicalCombination, QuietOnlyLiteralNoCombinationVectored) {
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    const char *expr[] = {"Q"};
+    unsigned flags[] = {HS_FLAG_QUIET};
+    unsigned ids[] = {2001};
+    hs_error_t err = hs_compile_multi(expr, flags, ids, 1, HS_MODE_VECTORED,
+                                      nullptr, &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(scratch != nullptr);
+
+    CallBackContext c;
+    c.halt = 0;
+
+    const char *data = "QQQQQQQQQQ";
+    unsigned int data_len = 10;
+    err = hs_scan_vector(db, &data, &data_len, 1, 0, scratch, record_cb,
+                         (void *)&c);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_EQ(0U, c.matches.size());
+
+    hs_free_database(db);
+    err = hs_free_scratch(scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+}
+
+// Regression: a QUIET expression that IS referenced by a logical combination
+// must still be compiled and produce correct match results.  The
+// sub-expressions themselves are QUIET (no user-visible report), but the
+// combination fires when both sub-expressions match.
+TEST(LogicalCombination, QuietSubExprWithCombinationStillWorks) {
+    hs_database_t *db = nullptr;
+    hs_compile_error_t *compile_err = nullptr;
+    CallBackContext c;
+    // Both "abc" and "def" appear, so combination 101 & 102 fires once.
+    string data = "abcxdefx";
+    const char *expr[] = {"abc", "def", "101 & 102"};
+    unsigned flags[] = {HS_FLAG_QUIET, HS_FLAG_QUIET, HS_FLAG_COMBINATION};
+    unsigned ids[] = {101, 102, 1001};
+    hs_error_t err = hs_compile_multi(expr, flags, ids, 3, HS_MODE_BLOCK,
+                                      nullptr, &db, &compile_err);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(db != nullptr);
+
+    hs_scratch_t *scratch = nullptr;
+    err = hs_alloc_scratch(db, &scratch);
+    ASSERT_EQ(HS_SUCCESS, err);
+    ASSERT_TRUE(scratch != nullptr);
+
+    c.halt = 0;
+    err = hs_scan(db, data.c_str(), data.size(), 0, scratch, record_cb,
+                  (void *)&c);
+    ASSERT_EQ(HS_SUCCESS, err);
+    // QUIET sub-expressions "abc" and "def" produce no reports.
+    // The combination (101 & 102) fires once, reporting 1001.
+    ASSERT_EQ(1U, c.matches.size());
+    ASSERT_EQ(1001U, c.matches[0].id);
 
     hs_free_database(db);
     err = hs_free_scratch(scratch);

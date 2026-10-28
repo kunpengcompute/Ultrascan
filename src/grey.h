@@ -54,6 +54,8 @@ struct Grey {
     bool allowSheng;
     bool allowMcSheng;
     bool allowNeoFdr;
+    /* Enable the HAO literal-matcher family. */
+    bool allowHao;
     bool allowPuff;
     bool allowLiteral;
     bool allowViolet;
@@ -213,7 +215,16 @@ struct Grey {
 };
 
 #include <string>
-void applyGreyOverrides(Grey *g, const std::string &overrides);
+bool applyGreyOverrides(Grey *g, const std::string &overrides);
+
+/** \brief Set global Grey overrides to be applied on every Grey construction. */
+void setGreyOverrides(const std::string &overrides);
+
+/** \brief Reset global Grey overrides to empty (all defaults). */
+void resetGreyOverrides();
+
+/** \brief Get the current global Grey overrides string. */
+std::string getGreyOverrides();
 
 } // namespace ue2
 
