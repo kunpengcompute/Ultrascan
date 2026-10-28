@@ -145,6 +145,63 @@ static void findMaskLiteral(const vector<CharReach> &mask, bool streaming,
     *offset = verify_u32(best_begin);
 }
 
+static bool isRule19LikeSafeMask(const vector<CharReach> &mask,
+                                const ue2_literal &lit, u32 lit_offset,
+                                bool anchored, bool eod) {
+    static const size_t SAFE_MASK_MAX_LEN = 16;
+    static const size_t MIN_EXTRA_FIXED_BYTES = 3;
+    static const size_t MAX_CONFIRM_SPAN = 8;
+
+    if (anchored || eod || mask.size() > SAFE_MASK_MAX_LEN ||
+        lit.length() != 2 || lit_offset > mask.size() ||
+        mask.size() - lit_offset != lit.length()) {
+        return false;
+    }
+
+    const string &s = lit.get_string();
+    if (s[0] != '\0' || s[1] != '\0') {
+        return false;
+    }
+
+    size_t extra_fixed = 0;
+    size_t first_fixed = mask.size();
+    size_t last_fixed = 0;
+    bool has_nonzero_fixed = false;
+    for (size_t i = 0; i < lit_offset; i++) {
+        const CharReach &cr = mask[i];
+        if (cr.all()) {
+            continue;
+        }
+        if (cr.count() != 1) {
+            return false;
+        }
+
+        extra_fixed++;
+        first_fixed = min(first_fixed, i);
+        last_fixed = i;
+        has_nonzero_fixed |= cr.find_first() != 0;
+    }
+
+    // The trailing literal supplies the other two fixed bytes; the remaining
+    // constraints must fit in one eight-byte confirmation window.
+    return extra_fixed >= MIN_EXTRA_FIXED_BYTES && has_nonzero_fixed &&
+           last_fixed - first_fixed + 1 <= MAX_CONFIRM_SPAN;
+}
+
+static bool shouldBlockNeoFdrMaskLiteral(const vector<CharReach> &mask,
+                                        const ue2_literal &lit,
+                                        u32 lit_offset, bool anchored,
+                                        bool eod) {
+    if (!isLowQualityNeoFdrLiteral(lit)) {
+        return false;
+    }
+    if (isRule19LikeSafeMask(mask, lit, lit_offset, anchored, eod)) {
+        DEBUG_PRINTF("allowing low-quality mask literal due to cheap confirm\n");
+        return false;
+    }
+    return true;
+}
+
 static bool initFmlCandidates(const CharReach &cr, vector<ue2_literal> &cand) {
     for (size_t i = cr.find_first(); i != cr.npos; i = cr.find_next(i)) {
         char c = (char)i;
@@ -372,8 +429,11 @@ static bool validateTransientMask(const vector<CharReach> &mask, bool anchored,
         return false;
     }
 
-    if (grey.allowNeoFdr &&
-        any_of(begin(lits), end(lits), isLowQualityNeoFdrLiteral)) {
+    if (grey.allowNeoFdr && any_of(begin(lits), end(lits),
+                                 [&](const ue2_literal &lit) {
+                                     return shouldBlockNeoFdrMaskLiteral(
+                                         mask, lit, lit_minBound, anchored, eod);
+                                 })) {
         DEBUG_PRINTF("rejecting low-quality NeoFDR transient mask literal\n");
         return false;
     }
@@ -564,7 +624,10 @@ static void addTransientMask(RoseBuildImpl &build,
     }
 
     assert(!build.cc.grey.allowNeoFdr ||
-           none_of(begin(lits), end(lits), isLowQualityNeoFdrLiteral));
+           none_of(begin(lits), end(lits), [&](const ue2_literal &lit) {
+               return shouldBlockNeoFdrMaskLiteral(mask, lit, lit_minBound,
+                                                  anchored, eod);
+           }));
 
     u32 delay = mask.size() - lit_length - lit_minBound;
     assert(delay <= MAX_DELAY);
@@ -765,7 +828,8 @@ static bool checkAllowMask(const vector<CharReach> &mask, ue2_literal *lit,
     u32 lit_offset;
     findMaskLiteral(mask, cc.streaming, lit, &lit_offset, cc.grey);
 
-    if (cc.grey.allowNeoFdr && isLowQualityNeoFdrLiteral(*lit)) {
+    if (cc.grey.allowNeoFdr &&
+        shouldBlockNeoFdrMaskLiteral(mask, *lit, lit_offset, anchored, false)) {
         DEBUG_PRINTF("rejecting low-quality NeoFDR mask literal\n");
         return false;
     }
