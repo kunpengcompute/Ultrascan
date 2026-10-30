@@ -116,6 +116,4 @@ hs_error_t KHSEL_LilyForTeddyRunExec(const struct RoseEngine *rose,
 
 | 文档版本 | 发布日期 | 修改说明 |
 | --- | --- | --- |
-| 03 | 2026-09-30 | 第三次正式发布（V5.8.0）：新增mcsheng算法性能优化和正则匹配反馈优化技术。 |
-| 02 | 2026-06-30 | 第二次正式发布：新增通用字节码功能。 |
-| 01 | 2026-03-30 | 第一次正式发布：优化Ultrascan 2~4字节短规则匹配算法，新增`KHSEL_BuildLilyForTeddy`、`KHSEL_LilyForTeddyRunExec`。 |
+| 01 | 2026-12-30 | 第一次正式发布（V5.9.0）：新增假阳性阻断过滤逻辑判断优化。 |
