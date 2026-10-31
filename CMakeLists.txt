@@ -1648,8 +1648,8 @@ set(hs_dump_SRCS
 # Build the optional kernels independently of the common ARM ISA and host CPU.
 if (HS_TARGET_AARCH64)
     if (HS_BUILD_HAVE_SVE)
-        list(APPEND hs_exec_SRCS src/fdr/hao_dot.c)
-        set_source_files_properties(src/fdr/hao_dot.c PROPERTIES
+        list(APPEND hs_exec_SRCS src/fdr/hao_dot.c src/fdr/hao_dot_entry.c)
+        set_source_files_properties(src/fdr/hao_dot.c src/fdr/hao_dot_entry.c PROPERTIES
             COMPILE_FLAGS "${HS_SVE_C_FLAGS} -msve-vector-bits=scalable -fno-lto")
     endif()
     if (HS_BUILD_HAVE_SVEBITPERM)

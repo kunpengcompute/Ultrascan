@@ -421,12 +421,8 @@ static really_inline svuint32_t haoPackU64KeysToU32(svuint64_t key0,
 #if defined(HAO_HAVE_SVE2)
     return svqxtnt_u64(svqxtnb_u64(key0), key1);
 #else
-    const svuint32_t k0 = svreinterpret_u32_u64(key0);
-    const svuint32_t k1 = svreinterpret_u32_u64(key1);
-    const svuint32_t lo0 = svuzp1_u32(k0, k0);
-    const svuint32_t lo1 = svuzp1_u32(k1, k1);
-
-    return svzip1_u32(lo0, lo1);
+    /* Keys use at most 22 bits; interleave the low u32 of each u64. */
+    return svtrn1_u32(svreinterpret_u32_u64(key0), svreinterpret_u32_u64(key1));
 #endif
 }
 
