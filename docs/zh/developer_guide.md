@@ -1,5 +1,7 @@
 # 开发指南
 
+本文档介绍Ultrascan内部实现与KHSEL内部接口，说明KHSEL已优化函数的功能、参数与返回值，适用于需要理解或维护Ultrascan内部实现的开发者。
+
 ## 文档定位
 
 本文面向需要理解或维护Ultrascan内部实现的开发者，主要说明KHSEL内部接口。
@@ -47,7 +49,7 @@ std::vector<u8> KHSEL_BuildLily(
 
 ### `KHSEL_LilyRunExec`
 
-函数功能：基于编译输出的mask，对运行期输入数据进行匹配。
+函数功能：基于编译输出的lilyTeddy字节码，对运行期输入数据进行匹配。
 
 ```c
 hs_error_t KHSEL_LilyRunExec(const struct RoseEngine *rose,
