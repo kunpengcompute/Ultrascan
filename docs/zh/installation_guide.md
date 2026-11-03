@@ -1,5 +1,7 @@
 # 安装指南
 
+本文档介绍Ultrascan安装指南，提供基于鲲鹏920新型号处理器和openEuler操作系统的镜像部署、环境配置与源码编译完整指导，适用于使用鲲鹏计算平台的用户。
+
 ## 简介
 
 本文基于鲲鹏920新型号处理器和openEuler操作系统，提供Ultrascan的安装和编译指导。
@@ -50,11 +52,11 @@ openEuler 24.03 LTS SP3。若您在使用过程中遇到问题，请先检查使
 |Git|系统软件源提供的版本|必选：获取Ultrascan源码。|使用Yum工具安装。|
 |GCC|10.3及以上|必选。|-|
 |CMake|2.8.11及以上|必选。|-|
-|Ragel|6.9及以上|必选：编译依赖Ragel。|[获取链接](http://www.colm.net/files/ragel/ragel-6.10.tar.gz)|
-|Boost|1.57及以上|必选：编译依赖Boost头文件。|[获取链接](https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz)|
-|PCRE|8.41及以上|可选：Ultrascan tools正确性验证工具hscollider编译依赖PCRE的8.41及以上版本。|[获取链接](https://sourceforge.net/projects/pcre/files/pcre/8.43/pcre-8.43.tar.gz)|
+|Ragel|6.9及以上|必选：编译依赖Ragel。|[Ragel 6.10源码包](http://www.colm.net/files/ragel/ragel-6.10.tar.gz)|
+|Boost|1.57及以上|必选：编译依赖Boost头文件。|[Boost 1.87.0源码包](https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz)|
+|PCRE|8.41及以上|可选：Ultrascan tools正确性验证工具hscollider编译依赖PCRE的8.41及以上版本。|[PCRE 8.43源码包](https://sourceforge.net/projects/pcre/files/pcre/8.43/pcre-8.43.tar.gz)|
 |SQLite|SQLite 3|可选：Ultrascan tools测试工具hsbench和hspgo编译依赖SQLite 3。|使用Yum工具安装。|
-|Ultrascan|master|必选：待编译软件。|[获取链接](https://gitcode.com/boostkit/Ultrascan/tree/master)|
+|Ultrascan|master|必选：待编译软件。|[Ultrascan源码master分支](https://gitcode.com/boostkit/Ultrascan/tree/master)|
 
 ## 镜像方式部署
 
@@ -132,7 +134,7 @@ Ultrascan提供基于openEuler 22.03 LTS SP4（AArch64）的预构建容器镜�
     ```
 
     >![说明](public_sys-resources/icon-note.gif) **说明：**
-    >执行克隆前，请确保`/opt`所在文件系统具有数GB可用空间，并且目标路径
+    >执行克隆前，请确保`/opt`所在文件系统具有2GB可用空间，并且目标路径
     >`/opt/Ultrascan`不存在或为空。如果该路径中已经存在完整的Ultrascan
     >Git仓库，请不要重复克隆，可直接跳过本步骤。
 
@@ -164,7 +166,7 @@ mkdir -p /opt/Ultrascan/build \
 df -h /opt/Ultrascan
 ```
 
-完整源码、第三方依赖及多个构建配置会占用数GB空间。若空间不足，请先为`/opt/Ultrascan`配置容量足够的文件系统，再继续后续步骤。
+完整源码、第三方依赖及多个构建配置会占用2GB空间。若空间不足，请先为`/opt/Ultrascan`配置容量足够的文件系统，再继续后续步骤。
 
 ### （可选）配置本地源
 
@@ -379,7 +381,7 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
 
     - 如果执行成功，则回显内容如下所示。
 
-        ```bash
+        ```output
         -lsqlite3
         ```
 
@@ -504,7 +506,7 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
 
         生成的静态库：
 
-        ![生成的静态库](figures/2.png)
+        ![Ultrascan编译后生成的静态库文件回显，可见库文件名与大小信息](figures/2.png)
 
     - 编译动态库。
 
@@ -535,7 +537,7 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
         - `hspgo`依赖SQLite 3。已安装SQLite且反馈能力开启时，会生成
           `/opt/Ultrascan/build-feedback/bin/hspgo`；缺少SQLite时库仍可构建，
           但不会生成该工具。
-        - 应用通过API集成时，请参考[正则匹配反馈优化技术API](./api_reference.md#4-正则匹配反馈优化技术api)。
+        - 应用通过API集成时，请参考[正则匹配反馈优化技术API](./api_reference.md#正则匹配反馈优化技术api)。
 
     - （可选）AArch64编译目标选择。
 
@@ -572,3 +574,10 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
         - 交叉编译时，工具链文件应将`CMAKE_SYSTEM_PROCESSOR`设置为`aarch64`；否则该选项不会生效。
         - 配置阶段会输出`AARCH64 single-ISA build mode/flags`及
           `crc/sve/sve2/sve2-bitperm`特性探测结果，可据此核对实际生效的编译标志。
+          
+## 修订记录
+
+| 文档版本 | 发布日期 | 修改说明 |
+| --- | --- | --- |
+| 01 | 2026-09-30 | 第一次正式发布。 |
+          
