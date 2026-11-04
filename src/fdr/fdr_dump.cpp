@@ -34,6 +34,8 @@
 #include "fdr_dump.h"
 #include "fdr_engine_description.h"
 #include "fdr_internal.h"
+#include "hao_runtime.h"
+#include "hao_runtime_layout.h"
 #include "teddy_engine_description.h"
 #include "teddy_internal.h"
 #include "ue2common.h"
@@ -49,10 +51,12 @@ using namespace std;
 
 namespace ue2 {
 
-static
-bool fdrIsTeddy(const FDR *fdr) {
+static bool fdrIsTeddy(const FDR *fdr) {
     assert(fdr);
     u32 engine = fdr->engineID;
+    if (engine == HAO_VARIANTS_ENGINE_ID) {
+        return false;
+    }
 
     /* teddys don't have an fdr engine description (which is why the dump code
      * is so broken). */
@@ -60,20 +64,18 @@ bool fdrIsTeddy(const FDR *fdr) {
     return !getFdrDescription(engine);
 }
 
-static
-void dumpLitIndex(const FDRConfirm *fdrc, FILE *f) {
+static void dumpLitIndex(const FDRConfirm *fdrc, FILE *f) {
     const u32 *lit_index = getConfirmLitIndex(fdrc);
     u32 num_lits = 1U << fdrc->nBits;
     u32 lits_used = count_if(lit_index, lit_index + num_lits,
                              [](u32 idx) { return idx != 0; });
 
     fprintf(f, "      load    %u/%u (%0.2f%%)\n", lits_used, num_lits,
-            (double)lits_used / (double)(num_lits)*100);
+            (double)lits_used / (double)(num_lits) * 100);
 }
 
-static
-void dumpConfirms(const void *fdr_base, u32 conf_offset, u32 num_confirms,
-                  FILE *f) {
+static void dumpConfirms(const void *fdr_base, u32 conf_offset,
+                         u32 num_confirms, FILE *f) {
     const u32 *conf = (const u32 *)((const char *)fdr_base + conf_offset);
     for (u32 i = 0; i < num_confirms; i++) {
         const auto *fdrc = (const FDRConfirm *)((const char *)conf + conf[i]);
@@ -86,12 +88,11 @@ void dumpConfirms(const void *fdr_base, u32 conf_offset, u32 num_confirms,
     }
 }
 
-static
-void dumpTeddyReinforced(const u8 *rmsk, const u32 num_tables, FILE *f) {
+static void dumpTeddyReinforced(const u8 *rmsk, const u32 num_tables, FILE *f) {
     // dump reinforcement masks
     for (u32 b = 0; b < num_tables; b++) {
-        fprintf(f, "    reinforcement table for bucket %u..%u:\n",
-                   b * 8, b * 8 + 7);
+        fprintf(f, "    reinforcement table for bucket %u..%u:\n", b * 8,
+                b * 8 + 7);
         for (u32 i = 0; i <= N_CHARS; i++) {
             fprintf(f, "      0x%02x: ", i);
             for (u32 j = 0; j < 8; j++) {
@@ -107,8 +108,7 @@ void dumpTeddyReinforced(const u8 *rmsk, const u32 num_tables, FILE *f) {
     }
 }
 
-static
-void dumpTeddyDupMasks(const u8 *dmsk, u32 numMasks, FILE *f) {
+static void dumpTeddyDupMasks(const u8 *dmsk, u32 numMasks, FILE *f) {
     // dump nibble masks
     u32 maskWidth = 2;
     fprintf(f, "    dup nibble masks:\n");
@@ -126,8 +126,8 @@ void dumpTeddyDupMasks(const u8 *dmsk, u32 numMasks, FILE *f) {
     fprintf(f, "\n");
 }
 
-static
-void dumpTeddyMasks(const u8 *baseMsk, u32 numMasks, u32 maskWidth, FILE *f) {
+static void dumpTeddyMasks(const u8 *baseMsk, u32 numMasks, u32 maskWidth,
+                           FILE *f) {
     // dump nibble masks
     fprintf(f, "    nibble masks:\n");
     for (u32 i = 0; i < numMasks * 2; i++) {
@@ -144,8 +144,7 @@ void dumpTeddyMasks(const u8 *baseMsk, u32 numMasks, u32 maskWidth, FILE *f) {
     fprintf(f, "\n");
 }
 
-static
-void dumpTeddy(const Teddy *teddy, FILE *f) {
+static void dumpTeddy(const Teddy *teddy, FILE *f) {
     fprintf(f, "TEDDY:         %u\n", teddy->engineID);
     auto des = getTeddyDescription(teddy->engineID);
     if (!des) {
@@ -179,10 +178,20 @@ void dumpTeddy(const Teddy *teddy, FILE *f) {
     dumpConfirms(teddy, teddy->confOffset, des->getNumBuckets(), f);
 }
 
-static
-void dumpFDR(const FDR *fdr, FILE *f) {
+static void dumpFDR(const FDR *fdr, FILE *f) {
     fprintf(f, "FDR:           %u\n", fdr->engineID);
     auto des = getFdrDescription(fdr->engineID);
+    if (fdr->engineID == HAO_VARIANTS_ENGINE_ID) {
+        const HAOVariants *variants = nullptr;
+        if (!haoValidateVariants((const u8 *)fdr + fdr->matcherBlobOffset,
+                                 fdr->matcherBlobSize, &variants)) {
+            fprintf(f, "   <invalid variants>\n");
+            return;
+        }
+        fprintf(f, "    paths      FDR%s%s\n", variants->dotSize ? " DOT" : "",
+                variants->bextSize ? " BEXT" : "");
+        des = getFdrDescription(variants->fallback);
+    }
     if (!des) {
         fprintf(f, "   <unknown engine>\n");
         return;

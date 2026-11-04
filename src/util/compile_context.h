@@ -63,6 +63,10 @@ struct CompileContext {
     const bool streaming; /* streaming or vectored mode */
     const bool vectored;
 
+    /** Retain FDR with host-compatible HAO variants, independent of container.
+     */
+    bool haoVariants = false;
+
     /** \brief Target platform info. */
     const target_t target_info;
 

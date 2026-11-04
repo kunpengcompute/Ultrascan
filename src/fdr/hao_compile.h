@@ -1,6 +1,7 @@
 #ifndef HAO_COMPILE_H
 #define HAO_COMPILE_H
 
+#include "grey.h"
 #include "hwlm/hwlm_literal.h"
 #include "ue2common.h"
 #include "util/bytecode_ptr.h"
@@ -72,7 +73,6 @@ enum : u32 {
     HAO_RULE_PLAN_FLAG_MASK_MERGE_FAILED = 1U << 6,
 };
 
-struct Grey;
 struct target_t;
 
 struct HAOBitSelector {
@@ -266,12 +266,21 @@ bool canBuildHAO(const target_t &target, const std::vector<hwlmLiteral> &lits,
 bool buildHAOArtifacts(const std::vector<hwlmLiteral> &lits,
                        HAOCompileArtifacts *artifacts,
                        HAODumpMode dumpMode = HAODumpMode::Full,
-                       const std::vector<u32> *reportOrder = nullptr);
+                       const std::vector<u32> *reportOrder = nullptr,
+                       const Grey &grey = Grey());
 
-void dumpHAOCompileStats(const HAOCompileArtifacts &artifacts);
+/* Dump routing: with DUMP_SUPPORT and Grey::DUMP_HAO set and dumpPath
+ * non-empty, writes hao_compile_stats_<matcher>.txt into the dump directory
+ * (matcher is sanitised; nullptr/empty becomes "unknown"); additionally
+ * prints to stderr when grey.haoDebug bit 1 is set. */
+void dumpHAOCompileStats(const HAOCompileArtifacts &artifacts, const Grey &grey,
+                         const char *matcher = nullptr);
 
+/* With DUMP_SUPPORT and Grey::DUMP_HAO set and dumpPath non-empty, writes
+ * hao_l2map_<matcher>.txt into the dump directory; otherwise a no-op. */
 void dumpHAOL2MapIfEnabled(const std::vector<hwlmLiteral> &lits,
-                           const HAOCompileArtifacts &artifacts);
+                           const HAOCompileArtifacts &artifacts,
+                           const Grey &grey, const char *matcher = nullptr);
 
 bool haoArtifactsOk(const HAOCompileArtifacts &artifacts);
 
@@ -279,6 +288,10 @@ bool refreshHAOReports(HAOCompileArtifacts *artifacts,
                        const std::vector<hwlmLiteral> &lits);
 
 bytecode_ptr<u8> buildHAOBlob(const HAOCompileArtifacts &artifacts);
+
+bytecode_ptr<u8> buildHAOVariants(const HAOCompileArtifacts *dot,
+                                  const HAOCompileArtifacts *bext,
+                                  u32 fallback);
 
 } // namespace ue2
 

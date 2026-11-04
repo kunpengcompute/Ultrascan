@@ -95,6 +95,7 @@ set(unit_internal_SOURCES
     internal/depth.cpp
     internal/fdr.cpp
     internal/hao.cpp
+    internal/hao_variants.cpp
     internal/hao_runtime_test_impl.cpp
     internal/fdr_flood.cpp
     internal/fdr_loadval.cpp
@@ -166,9 +167,20 @@ add_executable(unit-internal ${unit_internal_SOURCES})
 endif()
 set_target_properties(unit-internal PROPERTIES COMPILE_FLAGS "${HS_CXX_FLAGS}")
 target_link_libraries(unit-internal hs corpusomatic expressionutil)
+if (HS_TARGET_AARCH64 AND CMAKE_SYSTEM_NAME MATCHES "Linux")
+    # Used only by cross-capability regressions and corpus replay.
+    add_library(hao-caps MODULE internal/hao_caps.c)
+    target_link_libraries(hao-caps dl)
+endif()
 if (HS_UNIT_HAS_HSBENCH_CORPUS_DB)
 target_compile_definitions(unit-internal PRIVATE HS_UNIT_HAS_HSBENCH_CORPUS_DB=1)
 target_link_libraries(unit-internal ${SQLITE3_LDFLAGS})
+if (HS_TARGET_AARCH64)
+    # Corpus verification is opt-in: cmake --build <dir> --target hao-replay.
+    add_executable(hao-replay EXCLUDE_FROM_ALL internal/hao_replay.cpp
+        ${PROJECT_SOURCE_DIR}/tools/hsbench/data_corpus.cpp)
+    target_link_libraries(hao-replay hs ${SQLITE3_LDFLAGS})
+endif()
 endif()
 endif(NOT (RELEASE_BUILD OR FAT_RUNTIME))
 

@@ -42,44 +42,48 @@ struct HAORuntimeStats {
 extern struct HAORuntimeStats g_haoStats;
 extern int g_haoStatsActive;
 
+/* Refresh runtime-stats activation from the grey overrides (haoDebug bit
+ * with value 4) and register the exit dump hook. Reads grey once. */
 void haoRefreshStatsMode(void);
-void haoStatsObserveL2Entry(
-    const struct HAORuntimeL2Check *l2CheckTable,
-    const struct HAORuntimeL2Meta *l2MetaTable,
-    const struct HAORuntimeRuleMeta *ruleMeta, u32 offset, u32 matchMask);
-void haoStatsObserveL2Bucket(
-    const struct HAORuntimeL2Check *l2CheckTable,
-    const struct HAORuntimeL2Meta *l2MetaTable,
-    const struct HAORuntimeRuleMeta *ruleMeta, u32 offset, u32 count,
-    u32 visitedCount, int anyReport);
+
+/* Implemented in grey.cpp: reports haoDebug bit (value 4) of the
+ * process-level grey overrides set via hs_set_grey_overrides(). */
+int haoGreyRuntimeStatsEnabled(void);
+void haoStatsObserveL2Entry(const struct HAORuntimeL2Check *l2CheckTable,
+                            const struct HAORuntimeL2Meta *l2MetaTable,
+                            const struct HAORuntimeRuleMeta *ruleMeta,
+                            u32 offset, u32 matchMask);
+void haoStatsObserveL2Bucket(const struct HAORuntimeL2Check *l2CheckTable,
+                             const struct HAORuntimeL2Meta *l2MetaTable,
+                             const struct HAORuntimeRuleMeta *ruleMeta,
+                             u32 offset, u32 count, u32 visitedCount,
+                             int anyReport);
 void haoStatsObserveRangeShape(u32 entryCount, u32 ruleCount);
 
-#define HAO_STATS_IF_ENABLED(stmt) \
-    do {                           \
-        if (g_haoStatsActive) {    \
-            stmt;                  \
-        }                          \
+#define HAO_STATS_IF_ENABLED(stmt)                                             \
+    do {                                                                       \
+        if (g_haoStatsActive) {                                                \
+            stmt;                                                              \
+        }                                                                      \
     } while (0)
 
-#define HAO_STATS_ADD(field, delta) \
+#define HAO_STATS_ADD(field, delta)                                            \
     HAO_STATS_IF_ENABLED(g_haoStats.field += (u64a)(delta))
 #else
-static really_inline
-void haoRefreshStatsMode(void) {
-}
+static really_inline void haoRefreshStatsMode(void) {}
 
-static really_inline
-void haoStatsObserveRangeShape(u32 entryCount, u32 ruleCount) {
+static really_inline void haoStatsObserveRangeShape(u32 entryCount,
+                                                    u32 ruleCount) {
     (void)entryCount;
     (void)ruleCount;
 }
 
-#define HAO_STATS_IF_ENABLED(stmt) \
-    do {                           \
+#define HAO_STATS_IF_ENABLED(stmt)                                             \
+    do {                                                                       \
     } while (0)
 
-#define HAO_STATS_ADD(field, delta) \
-    do {                            \
+#define HAO_STATS_ADD(field, delta)                                            \
+    do {                                                                       \
     } while (0)
 #endif
 

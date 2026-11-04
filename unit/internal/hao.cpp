@@ -26,7 +26,7 @@
 
 #include "gtest/gtest.h"
 
-#if defined(__linux__) && defined(__aarch64__) && defined(__ARM_FEATURE_SVE)
+#if defined(__linux__) && defined(__aarch64__) && defined(HS_BUILD_HAVE_SVE)
 #include <sys/prctl.h>
 #endif
 
@@ -60,7 +60,7 @@ static constexpr u32 ENGINE_ID_NEO = 1;
 static constexpr u32 ENGINE_ID_HAO = ue2::HAO_ENGINE_ID;
 static constexpr size_t HAO_COLLISION_SAMPLE_COUNT = 1U << 20;
 
-#if defined(__linux__) && defined(__aarch64__) && defined(__ARM_FEATURE_SVE)
+#if defined(__linux__) && defined(__aarch64__) && defined(HS_BUILD_HAVE_SVE)
 #ifndef PR_SVE_SET_VL
 #define PR_SVE_SET_VL 50
 #endif
@@ -102,7 +102,7 @@ private:
 };
 #endif
 
-#if defined(__ARM_FEATURE_SVE2_BITPERM)
+#if defined(HS_BUILD_HAVE_SVEBITPERM)
 static constexpr bool haoCurrentBinaryHasBitPerm(void) { return true; }
 #else
 static constexpr bool haoCurrentBinaryHasBitPerm(void) { return false; }
@@ -2123,18 +2123,12 @@ TEST(HAOCompile, AnalyzeHaoFeasibilityRejectsEmptyAndSveOnlyShortRules) {
 
 TEST(HAOCompile, AnalyzeHaoFeasibilityRejectsNoSelectors) {
 #if defined(__aarch64__)
-    const char *hashMode = getenv("HS_HAO_HASH_MODE");
-    if (hashMode && *hashMode &&
-        (!strcmp(hashMode, "dot") || !strcmp(hashMode, "DOT") ||
-         !strcmp(hashMode, "1"))) {
-        SUCCEED() << "NO_SELECTORS is a BEXT-only feasibility path";
-        return;
-    }
     if (!haoCurrentBinaryHasBitPerm()) {
         SUCCEED() << "NO_SELECTORS path requires BEXT-capable build";
         return;
     }
     auto grey = makeHaoGrey(true);
+    grey.haoHashMode = 1; /* force BEXT: NO_SELECTORS is a BEXT-only path */
     HAOFeasibilityResult result;
     HAOCompileArtifacts artifacts;
     hs_platform_info bitpermInfo = {};
@@ -2163,7 +2157,7 @@ TEST(HAOCompile, CanBuildHaoRejectsTooFewLiterals) {
         hwlmLiteral("b", false, false, 6231, HWLM_ALL_GROUPS, {}, {}),
         hwlmLiteral("c", false, false, 6232, HWLM_ALL_GROUPS, {}, {})};
 
-    EXPECT_EQ(haoCurrentBinaryHasBitPerm(),
+    EXPECT_EQ(haoCanUseBextFastPath(get_current_target()),
               canBuildHAO(get_current_target(), lits, grey));
 }
 
@@ -2525,7 +2519,7 @@ TEST(HAORuntime, ExecHandlesNullArgsAndMissingBlob) {
 }
 
 TEST(HAORuntime, HaoDirectMatchesFdrExecWithSve256Vl) {
-#if defined(__linux__) && defined(__aarch64__) && defined(__ARM_FEATURE_SVE)
+#if defined(__linux__) && defined(__aarch64__) && defined(HS_BUILD_HAVE_SVE)
     ScopedSveVlForTest sveVl;
     if (!sveVl.set(32U)) {
         SUCCEED() << "SVE VL=32 is not available on this host";
@@ -2564,7 +2558,7 @@ TEST(HAORuntime, HaoDirectMatchesFdrExecWithSve256Vl) {
 }
 
 TEST(HAORuntime, HaoDirectMatchesFdrExecWithSve512Vl) {
-#if defined(__linux__) && defined(__aarch64__) && defined(__ARM_FEATURE_SVE)
+#if defined(__linux__) && defined(__aarch64__) && defined(HS_BUILD_HAVE_SVE)
     ScopedSveVlForTest sveVl;
     if (!sveVl.set(64U)) {
         SUCCEED() << "SVE VL=64 is not available on this host";

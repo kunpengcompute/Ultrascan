@@ -300,60 +300,14 @@ else()
     if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
         set(EXTRA_C_FLAGS "${EXTRA_C_FLAGS} -fsigned-char")
         set(EXTRA_CXX_FLAGS "${EXTRA_CXX_FLAGS} -fsigned-char")
-        set(HS_ARM_MARCH "AUTO" CACHE STRING
-            "AArch64 target: AUTO, PORTABLE, native, or an explicit -march value")
-        set_property(CACHE HS_ARM_MARCH PROPERTY STRINGS
-            AUTO PORTABLE native armv8-a+crc armv8.2-a+crc+sve
-            armv9-a+sve2 armv8.6-a+crc+sve2+sve2-bitperm)
-
-        # Older builds generated armv8-a/armv8-a+crc as the implicit default
-        # and stored it in CMakeCache.txt.  Treat those cached defaults as AUTO
-        # so reconfiguring an existing build directory still follows the current
-        # build host.  Use -DHS_ARM_MARCH=PORTABLE for an intentional baseline
-        # armv8-a+crc build.
-        if (HS_ARM_MARCH STREQUAL "" OR HS_ARM_MARCH STREQUAL "armv8-a" OR
-            HS_ARM_MARCH STREQUAL "armv8-a+crc")
-            set(HS_ARM_MARCH "AUTO" CACHE STRING
-                "AArch64 target: AUTO, PORTABLE, native, or an explicit -march value"
-                FORCE)
-        endif()
-
-        string(TOUPPER "${HS_ARM_MARCH}" _HS_ARM_MARCH_MODE)
-        set(_HS_ARM_ARCH_FLAGS "")
-        set(_HS_ARM_BUILD_MODE "")
-        if (_HS_ARM_MARCH_MODE STREQUAL "AUTO")
-            if (NOT CMAKE_CROSSCOMPILING)
-                set(_HS_ARM_NATIVE_FLAGS "-march=native -mtune=native")
-                unset(HS_ARM_NATIVE_C_FLAGS_OK CACHE)
-                unset(HS_ARM_NATIVE_CXX_FLAGS_OK CACHE)
-                CHECK_C_COMPILER_FLAG("${_HS_ARM_NATIVE_FLAGS}"
-                    HS_ARM_NATIVE_C_FLAGS_OK)
-                CHECK_CXX_COMPILER_FLAG("${_HS_ARM_NATIVE_FLAGS}"
-                    HS_ARM_NATIVE_CXX_FLAGS_OK)
-                if (HS_ARM_NATIVE_C_FLAGS_OK AND HS_ARM_NATIVE_CXX_FLAGS_OK)
-                    set(_HS_ARM_ARCH_FLAGS "${_HS_ARM_NATIVE_FLAGS}")
-                    set(_HS_ARM_BUILD_MODE "native auto")
-                else()
-                    set(_HS_ARM_ARCH_FLAGS "-march=armv8-a+crc")
-                    set(_HS_ARM_BUILD_MODE
-                        "portable fallback, native flags unsupported")
-                endif()
-            else()
-                set(_HS_ARM_ARCH_FLAGS "-march=armv8-a+crc")
-                set(_HS_ARM_BUILD_MODE "portable cross-build fallback")
-            endif()
-        elseif (_HS_ARM_MARCH_MODE STREQUAL "PORTABLE")
-            # crc32.c uses the AArch64 CRC32 instructions whenever NEON is
-            # enabled, so CRC is part of the minimum ISA required by the
-            # current runtime implementation.
-            set(_HS_ARM_ARCH_FLAGS "-march=armv8-a+crc")
-            set(_HS_ARM_BUILD_MODE "portable")
-        elseif (_HS_ARM_MARCH_MODE STREQUAL "NATIVE")
-            set(_HS_ARM_ARCH_FLAGS "-march=native -mtune=native")
-            set(_HS_ARM_BUILD_MODE "explicit native")
-        else()
-            set(_HS_ARM_ARCH_FLAGS "-march=${HS_ARM_MARCH}")
-            set(_HS_ARM_BUILD_MODE "explicit")
+        # Keep the existing cache option readable, but common code always uses
+        # the deployment baseline. DOT/BEXT get their extensions per source.
+        set(HS_ARM_MARCH "PORTABLE" CACHE STRING "AArch64 common-code baseline")
+        set_property(CACHE HS_ARM_MARCH PROPERTY STRINGS PORTABLE)
+        set(_HS_ARM_ARCH_FLAGS "-march=armv8-a+crc")
+        set(_HS_ARM_BUILD_MODE "portable common code, separate kernels")
+        if (NOT HS_ARM_MARCH STREQUAL "PORTABLE")
+            message(STATUS "HS_ARM_MARCH=${HS_ARM_MARCH}: common code uses PORTABLE; optional kernels are built separately")
         endif()
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_HS_ARM_ARCH_FLAGS}")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_HS_ARM_ARCH_FLAGS}")
@@ -577,12 +531,14 @@ int main(void) {
         "${CMAKE_C_FLAGS} ${EXTRA_C_FLAGS} ${ARCH_C_FLAGS}")
 
     set(_HS_SVE_FLAG_CANDIDATES
-        "-march=armv8.2-a+sve"
-        "-march=armv9-a+sve")
+        "-march=armv8-a+crc+sve -msve-vector-bits=scalable"
+        "-march=armv8.2-a+crc+sve -msve-vector-bits=scalable")
     set(_HS_SVE2_FLAG_CANDIDATES
+        "-march=armv8-a+crc+sve2 -msve-vector-bits=scalable"
         "-march=armv9-a+sve2"
         "-march=armv8.6-a+sve2")
     set(_HS_SVEBITPERM_FLAG_CANDIDATES
+        "-march=armv8-a+crc+sve2+sve2-bitperm -msve-vector-bits=scalable"
         "-march=armv8.6-a+crc+sve2+sve2-bitperm"
         "-march=armv9-a+sve2-bitperm"
         "-march=armv8.6-a+sve2-bitperm")
@@ -592,8 +548,14 @@ int main(void) {
 #if !defined(__ARM_FEATURE_SVE)
 #error no sve
 #endif
+#if defined(__ARM_FEATURE_SVE2)
+#error DOT must not require SVE2
+#endif
 int main(void) {
-    return 0;
+    svuint64_t zero = svdup_n_u64(0);
+    svuint16_t words = svdup_n_u16(1);
+    svuint64_t result = svdot_u64(zero, words, words);
+    return (int)svlastb_u64(svptrue_b64(), result);
 }")
 
     set(_HS_SVE2_TEST_SOURCE
@@ -640,6 +602,7 @@ int main(void) {
             set(CMAKE_REQUIRED_FLAGS
                 "${_HS_ARM_REQUIRED_BASE_FLAGS} ${_HS_SVE_FLAG}")
             set(_HS_SVE_TEST_VAR "HS_TOOLCHAIN_SVE_TEST_${_HS_SVE_IDX}")
+            unset(${_HS_SVE_TEST_VAR} CACHE)
             CHECK_C_SOURCE_COMPILES("${_HS_SVE_TEST_SOURCE}" ${_HS_SVE_TEST_VAR})
             if (${_HS_SVE_TEST_VAR})
                 set(HS_BUILD_HAVE_SVE TRUE)
@@ -661,10 +624,6 @@ int main(void) {
             if (${_HS_SVE2_TEST_VAR})
                 set(HS_BUILD_HAVE_SVE2 TRUE)
                 set(HS_SVE2_C_FLAGS "${_HS_SVE2_FLAG}")
-                if (NOT HS_BUILD_HAVE_SVE)
-                    set(HS_BUILD_HAVE_SVE TRUE)
-                    set(HS_SVE_C_FLAGS "${_HS_SVE2_FLAG}")
-                endif()
                 break()
             endif()
         endforeach()
@@ -689,16 +648,18 @@ int main(void) {
                     set(HS_BUILD_HAVE_SVE2 TRUE)
                     set(HS_SVE2_C_FLAGS "${_HS_SVEBITPERM_FLAG}")
                 endif()
-                if (NOT HS_BUILD_HAVE_SVE)
-                    set(HS_BUILD_HAVE_SVE TRUE)
-                    set(HS_SVE_C_FLAGS "${_HS_SVEBITPERM_FLAG}")
-                endif()
                 break()
             endif()
         endforeach()
     endif()
 
-    if (HS_ARM_TARGET_HAVE_SVE2 AND HS_BUILD_HAVE_SVE2)
+    if (NOT HS_BUILD_HAVE_SVE)
+        # The common VL helper is provided by DOT; never substitute its flags
+        # with SVE2 flags, which would make DOT unsafe on SVE-only hosts.
+        set(HS_BUILD_HAVE_SVEBITPERM FALSE)
+    endif()
+
+    if (HS_BUILD_HAVE_SVE2)
         set(CMAKE_REQUIRED_FLAGS
             "${_HS_ARM_REQUIRED_BASE_FLAGS} ${HS_SVE2_C_FLAGS}")
         unset(HS_TOOLCHAIN_SVE2_HISTCNT_TEST CACHE)
@@ -1042,6 +1003,8 @@ set (hs_exec_common_SRCS
     src/util/multibit.c
     src/fat_database.c
     src/fat_database.h
+    src/fdr/hao_runtime_layout.c
+    src/fdr/hao_runtime_layout.h
     src/fp_collector.h
     )
 
@@ -1082,9 +1045,7 @@ set (hs_exec_SRCS
     src/fdr/fdr_confirm_runtime.h
     src/fdr/flood_runtime.h
     src/fdr/fdr_loadval.h
-    src/fdr/hao_engine.c
-    src/fdr/hao_runtime_layout.c
-    src/fdr/hao_runtime_layout.h
+    src/fdr/hao_dispatch.c
     src/fdr/hao_runtime_stats.c
     src/fdr/hao_runtime_stats.h
     src/fdr/hao_runtime.h
@@ -1684,24 +1645,17 @@ set(hs_dump_SRCS
     src/util/dump_util.h
 )
 
-# HAO's BEXT fast path requires SVE2 BitPerm.  Do not force BitPerm, or even
-# plain SVE, into HAO sources when the selected AArch64 target does not support
-# it; those files should inherit the same target flags chosen for the current
-# build machine.  AUTO builds on BitPerm hosts will naturally compile HAO with
-# BitPerm through -march=native, while non-BitPerm hosts keep their native or
-# portable target flags.
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
-    if (HS_ARM_TARGET_HAVE_SVEBITPERM)
-        message(STATUS
-            "HAO runtime inherits global AArch64 SVE2 BitPerm target flags")
-    elseif (HS_ARM_TARGET_HAVE_SVE)
-        message(STATUS
-            "HAO runtime inherits global AArch64 SVE target flags; "
-            "SVE2 BitPerm is not enabled for this target")
-    else()
-        message(STATUS
-            "HAO runtime inherits selected AArch64 target flags; SVE is not "
-            "enabled for this target")
+# Build the optional kernels independently of the common ARM ISA and host CPU.
+if (HS_TARGET_AARCH64)
+    if (HS_BUILD_HAVE_SVE)
+        list(APPEND hs_exec_SRCS src/fdr/hao_dot.c src/fdr/hao_dot_entry.c)
+        set_source_files_properties(src/fdr/hao_dot.c src/fdr/hao_dot_entry.c PROPERTIES
+            COMPILE_FLAGS "${HS_SVE_C_FLAGS} -msve-vector-bits=scalable -fno-lto")
+    endif()
+    if (HS_BUILD_HAVE_SVEBITPERM)
+        list(APPEND hs_exec_SRCS src/fdr/hao_bext.c)
+        set_source_files_properties(src/fdr/hao_bext.c PROPERTIES
+            COMPILE_FLAGS "${HS_SVEBITPERM_C_FLAGS} -msve-vector-bits=scalable -fno-lto")
     endif()
 endif()
 
@@ -1963,6 +1917,38 @@ if (NOT BUILD_STATIC_LIBS)
     # use shared lib without having to change all the targets
     add_library(hs ALIAS hs_shared)
 endif ()
+
+# hsbench uses the internal fat compiler's single-path intent. In shared-only
+# builds its compiler is private to the tool; all scan APIs still come from hs.
+# Reuse compiler objects except hs.cpp, whose public wrappers must stay in hs.
+if (TARGET hsbench AND NOT BUILD_STATIC_LIBS)
+    set(hsbench_compile_SRCS
+        src/hs.cpp
+        src/alloc.c
+        src/crc32.c
+        src/util/cpuid_flags.c
+        src/util/multibit.c
+        src/fdr/hao_runtime_layout.c)
+    if (HS_ENABLE_FP_FEEDBACK)
+        # Only its read-only query is needed by the private fat compiler.
+        list(APPEND hsbench_compile_SRCS src/fp_collector.c)
+    endif()
+    if (CMAKE_VERSION VERSION_LESS "3.15")
+        list(APPEND hsbench_compile_SRCS ${hs_compile_SRCS})
+        list(REMOVE_DUPLICATES hsbench_compile_SRCS)
+    else()
+        list(APPEND hsbench_compile_SRCS
+            "$<FILTER:$<TARGET_OBJECTS:hs_compile_shared>,EXCLUDE,hs[.]cpp[.](o|obj)$>")
+    endif()
+    add_library(hsbench_compile STATIC ${hsbench_compile_SRCS})
+    target_compile_definitions(hsbench_compile PRIVATE HS_INTERNAL_TOOL_BUILD=1)
+    add_dependencies(hsbench_compile ragel_Parser)
+    if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+        # Also isolate reused Debug objects, which do not use hidden visibility.
+        set_property(TARGET hsbench APPEND_STRING PROPERTY LINK_FLAGS
+            " -Wl,--exclude-libs,libhsbench_compile.a")
+    endif()
+endif()
 
 option(BUILD_EXAMPLES "Build Hyperscan example code (default TRUE)" TRUE)
 if(NOT WIN32 AND BUILD_EXAMPLES)

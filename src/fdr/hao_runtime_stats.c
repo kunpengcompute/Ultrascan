@@ -12,9 +12,9 @@
 #if HAO_ENABLE_RUNTIME_STATS
 
 struct HAORuntimeStats g_haoStats;
-static int g_haoStatsForceEnabled;
-static int g_haoStatsEnvEnabled = -1;
 static int g_haoStatsAtexitRegistered;
+static int g_haoStatsModeChecked;
+
 int g_haoStatsActive;
 
 #ifndef HAO_L2_FP_TOPN
@@ -81,15 +81,16 @@ static u32 g_haoL2BucketStatsCount;
 static void haoDumpRuntimeStats(void);
 
 void haoRefreshStatsMode(void) {
-    if (g_haoStatsEnvEnabled < 0) {
-        const char *env = getenv("HS_HAO_STATS");
-        g_haoStatsEnvEnabled = env && *env && *env != '0';
-        if (g_haoStatsEnvEnabled && !g_haoStatsAtexitRegistered) {
+    /* Grey overrides are process-level and set before compile time, so a
+     * one-time read is sufficient (mirrors the previous env behaviour). */
+    if (!g_haoStatsModeChecked) {
+        g_haoStatsModeChecked = 1;
+        g_haoStatsActive = haoGreyRuntimeStatsEnabled();
+        if (g_haoStatsActive && !g_haoStatsAtexitRegistered) {
             atexit(haoDumpRuntimeStats);
             g_haoStatsAtexitRegistered = 1;
         }
     }
-    g_haoStatsActive = g_haoStatsForceEnabled || g_haoStatsEnvEnabled;
 }
 
 static double haoStatsPct(u64a num, u64a den) {

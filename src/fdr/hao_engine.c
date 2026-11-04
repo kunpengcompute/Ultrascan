@@ -421,12 +421,8 @@ static really_inline svuint32_t haoPackU64KeysToU32(svuint64_t key0,
 #if defined(HAO_HAVE_SVE2)
     return svqxtnt_u64(svqxtnb_u64(key0), key1);
 #else
-    const svuint32_t k0 = svreinterpret_u32_u64(key0);
-    const svuint32_t k1 = svreinterpret_u32_u64(key1);
-    const svuint32_t lo0 = svuzp1_u32(k0, k0);
-    const svuint32_t lo1 = svuzp1_u32(k1, k1);
-
-    return svzip1_u32(lo0, lo1);
+    /* Keys use at most 22 bits; interleave the low u32 of each u64. */
+    return svtrn1_u32(svreinterpret_u32_u64(key0), svreinterpret_u32_u64(key1));
 #endif
 }
 
@@ -1489,50 +1485,10 @@ static int haoRunBatchBlob(const struct HAORuntimeHeader *hdr,
     return haoRunBatchBlobScalar(hdr, a, control);
 }
 
-static hwlm_error_t haoExecBlobWithPath(const void *blob, u32 blobSize,
-                                        const struct FDR_Runtime_Args *a,
-                                        hwlm_group_t control) {
-    const struct HAORuntimeHeader *hdr = NULL;
-
-    if (!haoValidateLayout(blob, blobSize, &hdr)) {
-        return HWLM_SUCCESS;
-    }
-    if (!a) {
-        return HWLM_SUCCESS;
-    }
-
+hwlm_error_t HAO_EXEC(const struct HAORuntimeHeader *hdr,
+                      const struct FDR_Runtime_Args *a, hwlm_group_t control) {
+    assert(haoRuntimeHeaderHashMode(hdr) == HAO_HASH_MODE);
     return haoRunBatchBlob(hdr, a, &control);
-}
-
-static hwlm_error_t haoExec(const struct FDR *fdr,
-                            const struct FDR_Runtime_Args *a,
-                            hwlm_group_t control) {
-    if (!fdr || !fdrMatcherBlobOffset(fdr) || !fdrMatcherBlobSize(fdr)) {
-        return HWLM_SUCCESS;
-    }
-
-    {
-        const u8 *base = (const u8 *)fdr;
-        const void *blob = base + fdrMatcherBlobOffset(fdr);
-        return haoExecBlobWithPath(blob, fdrMatcherBlobSize(fdr), a, control);
-    }
-}
-
-hwlm_error_t HaoEngineExec(const struct FDR *fdr,
-                           const struct FDR_Runtime_Args *a,
-                           hwlm_group_t control) {
-    return haoExec(fdr, a, control);
-}
-
-#else
-
-hwlm_error_t HaoEngineExec(const struct FDR *fdr,
-                           const struct FDR_Runtime_Args *a,
-                           hwlm_group_t control) {
-    (void)fdr;
-    (void)a;
-    (void)control;
-    return HWLM_SUCCESS;
 }
 
 #endif

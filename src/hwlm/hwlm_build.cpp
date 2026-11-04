@@ -32,19 +32,19 @@
 
 #include "hwlm_build.h"
 
-#include "grey.h"
-#include "hwlm.h"
-#include "hwlm_internal.h"
-#include "hwlm_literal.h"
-#include "noodle_engine.h"
-#include "noodle_build.h"
-#include "scratch.h"
-#include "ue2common.h"
 #include "fdr/fdr_compile.h"
 #include "fdr/fdr_compile_internal.h"
 #include "fdr/fdr_engine_description.h"
 #include "fdr/hao_compile.h"
 #include "fdr/teddy_engine_description.h"
+#include "grey.h"
+#include "hwlm.h"
+#include "hwlm_internal.h"
+#include "hwlm_literal.h"
+#include "noodle_build.h"
+#include "noodle_engine.h"
+#include "scratch.h"
+#include "ue2common.h"
 #include "util/compile_context.h"
 #include "util/compile_error.h"
 #include "util/make_unique.h"
@@ -61,27 +61,21 @@ namespace ue2 {
 HWLMProto::HWLMProto(u8 engType_in, vector<hwlmLiteral> lits_in)
     : engType(engType_in), lits(move(lits_in)) {}
 
-HWLMProto::HWLMProto(u8 engType_in,
-                     unique_ptr<FDREngineDescription> eng_in,
+HWLMProto::HWLMProto(u8 engType_in, unique_ptr<FDREngineDescription> eng_in,
                      vector<hwlmLiteral> lits_in,
-                     map<u32, vector<u32>> bucketToLits_in,
-                     bool make_small_in)
+                     map<u32, vector<u32>> bucketToLits_in, bool make_small_in)
     : engType(engType_in), fdrEng(move(eng_in)), lits(move(lits_in)),
       bucketToLits(move(bucketToLits_in)), make_small(make_small_in) {}
 
-HWLMProto::HWLMProto(u8 engType_in,
-                     unique_ptr<TeddyEngineDescription> eng_in,
+HWLMProto::HWLMProto(u8 engType_in, unique_ptr<TeddyEngineDescription> eng_in,
                      vector<hwlmLiteral> lits_in,
-                     map<u32, vector<u32>> bucketToLits_in,
-                     bool make_small_in)
-    : engType(engType_in), teddyEng(move(eng_in)),
-      lits(move(lits_in)),
+                     map<u32, vector<u32>> bucketToLits_in, bool make_small_in)
+    : engType(engType_in), teddyEng(move(eng_in)), lits(move(lits_in)),
       bucketToLits(move(bucketToLits_in)), make_small(make_small_in) {}
 
 HWLMProto::~HWLMProto() {}
 
-static
-void dumpLits(UNUSED const vector<hwlmLiteral> &lits) {
+static void dumpLits(UNUSED const vector<hwlmLiteral> &lits) {
 #ifdef DEBUG
     DEBUG_PRINTF("building lit table for:\n");
     for (const auto &lit : lits) {
@@ -93,8 +87,7 @@ void dumpLits(UNUSED const vector<hwlmLiteral> &lits) {
 
 #ifndef NDEBUG
 // Called by an assertion.
-static
-bool everyoneHasGroups(const vector<hwlmLiteral> &lits) {
+static bool everyoneHasGroups(const vector<hwlmLiteral> &lits) {
     for (const auto &lit : lits) {
         if (!lit.groups) {
             return false;
@@ -104,9 +97,8 @@ bool everyoneHasGroups(const vector<hwlmLiteral> &lits) {
 }
 #endif
 
-static
-bool isNoodleable(const vector<hwlmLiteral> &lits,
-                  const CompileContext &cc) {
+static bool isNoodleable(const vector<hwlmLiteral> &lits,
+                         const CompileContext &cc) {
     if (!cc.grey.allowNoodle) {
         return false;
     }
@@ -162,9 +154,8 @@ bytecode_ptr<HWLM> hwlmBuild(const HWLMProto &proto, const CompileContext &cc,
     return h;
 }
 
-unique_ptr<HWLMProto>
-hwlmBuildProto(vector<hwlmLiteral> &lits, bool make_small,
-               const CompileContext &cc) {
+unique_ptr<HWLMProto> hwlmBuildProto(vector<hwlmLiteral> &lits, bool make_small,
+                                     const CompileContext &cc) {
     assert(!lits.empty());
     dumpLits(lits);
 
@@ -205,8 +196,8 @@ hwlmBuildProto(vector<hwlmLiteral> &lits, bool make_small,
         proto = ue2::make_unique<HWLMProto>(HWLM_ENGINE_NOOD, lits);
     } else {
         DEBUG_PRINTF("building a new deal\n");
-        proto = fdrBuildProto(HWLM_ENGINE_FDR, lits, make_small,
-                              cc.target_info, cc.grey);
+        proto = fdrBuildProto(HWLM_ENGINE_FDR, lits, make_small, cc.target_info,
+                              cc.grey, cc.haoVariants);
         if (!proto) {
             return nullptr;
         }

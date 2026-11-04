@@ -36,6 +36,7 @@
 #include "allocator.h"
 #include "crc32.h"
 #include "database.h"
+#include "fdr/hao_runtime_layout.h"
 #include "hs_common.h"
 #include "hs_internal.h"
 #include "hs_version.h"
@@ -227,7 +228,8 @@ hs_error_t HS_CDECL hs_deserialize_database_at(const char *bytes,
     // Copy the bytecode into the correctly-aligned location, set offsets
     db_copy_bytecode(bytes, db);
 
-    if (db_check_crc(db) != HS_SUCCESS) {
+    if (db_check_crc(db) != HS_SUCCESS ||
+        !haoValidateDatabase(hs_get_bytecode(db), db->length)) {
         return HS_INVALID;
     }
 
@@ -275,7 +277,8 @@ hs_error_t HS_CDECL hs_deserialize_database(const char *bytes,
     // Copy the bytecode into the correctly-aligned location, set offsets
     db_copy_bytecode(bytes, tempdb);
 
-    if (db_check_crc(tempdb) != HS_SUCCESS) {
+    if (db_check_crc(tempdb) != HS_SUCCESS ||
+        !haoValidateDatabase(hs_get_bytecode(tempdb), tempdb->length)) {
         hs_database_free(tempdb);
         return HS_INVALID;
     }
@@ -343,6 +346,10 @@ hs_error_t dbIsValid(const hs_database_t *db) {
     if (rv != HS_SUCCESS) {
         DEBUG_PRINTF("bad crc\n");
         return rv;
+    }
+
+    if (!haoValidateDatabase(hs_get_bytecode(db), db->length)) {
+        return HS_INVALID;
     }
 
     return HS_SUCCESS;

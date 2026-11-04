@@ -29,8 +29,8 @@
 #ifndef GREY_H
 #define GREY_H
 
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "ue2common.h"
 
@@ -56,6 +56,16 @@ struct Grey {
     bool allowNeoFdr;
     /* Enable the HAO literal-matcher family. */
     bool allowHao;
+    u32 haoKeyBits;      /* 0=auto, 12..22=force HAO key bits */
+    u32 haoHashMode;     /* 0=auto, 1=bext, 2=dot */
+    u32 haoSelectorMode; /* 0=auto, 1=default, 2=dynamic, 3=hash_opt,
+                          * 4=high_align */
+    u32 haoDebug;        /* bitmask: 1=engine-selection trace,
+                          * 2=compile-stats summary to stderr,
+                          * 4=runtime stats atexit dump
+                          * (HAO_ENABLE_RUNTIME_STATS builds) */
+    u32 haoDebugAuto;    /* 0=off; N>0: dump all auto candidate stats and
+                          * extend scan floor to N (DUMP_SUPPORT builds) */
     bool allowPuff;
     bool allowLiteral;
     bool allowViolet;
@@ -72,13 +82,13 @@ struct Grey {
     bool fdrAllowTeddy;
     bool fdrAllowFlood;
 
-    u32  violetAvoidSuffixes; /* 0=never, 1=sometimes, 2=always */
+    u32 violetAvoidSuffixes; /* 0=never, 1=sometimes, 2=always */
     bool violetAvoidWeakInfixes;
     bool violetDoubleCut;
     bool violetExtractStrongLiterals;
     bool violetLiteralChains;
-    u32  violetDoubleCutLiteralLen;
-    u32  violetEarlyCleanLiteralLen;
+    u32 violetDoubleCutLiteralLen;
+    u32 violetEarlyCleanLiteralLen;
 
     bool puffImproveHead;
     bool castleExclusive; // enable castle mutual exclusion analysis
@@ -157,24 +167,25 @@ struct Grey {
     // SmallWrite engine
     bool allowSmallWrite;
     bool allowSmallWriteSheng;
-    u32 smallWriteLargestBuffer;  // largest buffer that can be small write
-    u32 smallWriteLargestBufferBad;// largest buffer that can be small write
-    u32 limitSmallWriteOutfixSize; //!< max total size of outfix DFAs
-    u32 smallWriteMaxPatterns; // only try small writes if fewer patterns
-    u32 smallWriteMaxLiterals; // only try small writes if fewer literals
-    u32 smallWriteMergeBatchSize; // number of DFAs to merge in a batch
+    u32 smallWriteLargestBuffer;    // largest buffer that can be small write
+    u32 smallWriteLargestBufferBad; // largest buffer that can be small write
+    u32 limitSmallWriteOutfixSize;  //!< max total size of outfix DFAs
+    u32 smallWriteMaxPatterns;      // only try small writes if fewer patterns
+    u32 smallWriteMaxLiterals;      // only try small writes if fewer literals
+    u32 smallWriteMergeBatchSize;   // number of DFAs to merge in a batch
 
     // Tamarama engine
     bool allowTamarama;
     u32 tamaChunkSize; //!< max chunk size for exclusivity analysis in Tamarama
 
     enum DumpFlags {
-        DUMP_NONE       = 0,
-        DUMP_BASICS     = 1 << 0, // Dump basic textual data
-        DUMP_PARSE      = 1 << 1, // Dump component tree to .txt
-        DUMP_INT_GRAPH  = 1 << 2, // Dump non-implementation graphs
-        DUMP_IMPL       = 1 << 3, // Dump implementation graphs
-        DUMP_LILY       = 1 << 4  // Dump Lily matcher data
+        DUMP_NONE = 0,
+        DUMP_BASICS = 1 << 0,    // Dump basic textual data
+        DUMP_PARSE = 1 << 1,     // Dump component tree to .txt
+        DUMP_INT_GRAPH = 1 << 2, // Dump non-implementation graphs
+        DUMP_IMPL = 1 << 3,      // Dump implementation graphs
+        DUMP_LILY = 1 << 4,      // Dump Lily matcher data
+        DUMP_HAO = 1 << 5        // Dump HAO matcher data
     };
 
     u32 dumpFlags;
@@ -217,7 +228,8 @@ struct Grey {
 #include <string>
 bool applyGreyOverrides(Grey *g, const std::string &overrides);
 
-/** \brief Set global Grey overrides to be applied on every Grey construction. */
+/** \brief Set global Grey overrides to be applied on every Grey construction.
+ */
 void setGreyOverrides(const std::string &overrides);
 
 /** \brief Reset global Grey overrides to empty (all defaults). */

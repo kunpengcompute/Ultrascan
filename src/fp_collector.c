@@ -142,6 +142,9 @@ static char bytes_equal_short_neon(const u8 *lhs, const u8 *rhs, size_t len) {
     return 1;
 }
 
+#ifndef HS_INTERNAL_TOOL_BUILD
+/* The tools-only compiler needs the read-only fragment query below, without
+ * embedding collector APIs or runtime histogram implementations. */
 static u64a sat_add_u64a(u64a a, u64a b) {
     const u64a max = ~(u64a)0;
     if (max - a < b) {
@@ -1158,6 +1161,8 @@ char hs_fp_feedback_fragment_is_bad(const hs_fp_feedback_t *feedback, u32 table,
         feedback, table, bytes, length, nocase, mask, cmp, mask_length, NULL);
 }
 
+#endif /* !HS_INTERNAL_TOOL_BUILD */
+
 char hs_fp_feedback_fragment_match_index(const hs_fp_feedback_t *feedback,
                                          u32 table, const char *bytes,
                                          size_t length, char nocase,
@@ -1208,6 +1213,7 @@ char hs_fp_feedback_fragment_match_index(const hs_fp_feedback_t *feedback,
     return 0;
 }
 
+#ifndef HS_INTERNAL_TOOL_BUILD
 hs_error_t hs_fp_collector_check_db(const hs_fp_collector_t *collector,
                                     const hs_database_t *db) {
     if (!collector) {
@@ -1303,3 +1309,4 @@ void hs_fp_collector_record_final_report(struct hs_scratch *scratch) {
             sat_add_u64a(counter->true_trigger_count, 1);
     }
 }
+#endif /* !HS_INTERNAL_TOOL_BUILD */

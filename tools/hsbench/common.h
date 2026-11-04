@@ -42,6 +42,7 @@ extern bool forceEditDistance;
 extern unsigned editDistance;
 extern bool printCompressSize;
 extern bool useLiteralApi;
+extern std::string greyOverrides;
 extern bool loadSerializedDb;
 extern std::string serializedDbPath;
 

@@ -15,4 +15,9 @@ hs_fp_collector_flush
 hs_fp_collector_begin_trigger
 hs_fp_collector_end_trigger
 hs_fp_collector_record_final_report
+cpuid_flags
+haoValidateLayout
+haoValidateVariants
+haoValidateTables
+haoValidateDatabase
 ^_

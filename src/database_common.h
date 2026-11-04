@@ -34,8 +34,7 @@
 #define DATABASE_COMMMON_H_D467FD6F343DDA
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 #include "hs_compile.h" // for HS_MODE_ flags
@@ -43,58 +42,49 @@ extern "C"
 #include "ue2common.h"
 #include "util/arch.h"
 
-#define HS_DB_VERSION HS_VERSION_32BIT
-#define HS_DB_MAGIC   (0xdbdbdbdbU)
+/* The low byte is the database ABI revision, independent of release numbering.
+ */
+#define HS_DB_VERSION (HS_VERSION_32BIT | 1U)
+#define HS_DB_MAGIC (0xdbdbdbdbU)
 
 // Values in here cannot (easily) change - add new ones!
 
 // CPU type is the low 6 bits (we can't need more than 64, surely!)
 
-#define HS_PLATFORM_INTEL           1
-#define HS_PLATFORM_CPU_MASK        0x3F
+#define HS_PLATFORM_INTEL 1
+#define HS_PLATFORM_CPU_MASK 0x3F
 
-#define HS_PLATFORM_NOAVX2          (4<<13)
-#define HS_PLATFORM_NOAVX512        (8<<13)
-#define HS_PLATFORM_NOAVX512VBMI    (0x10<<13)
+#define HS_PLATFORM_NOAVX2 (4 << 13)
+#define HS_PLATFORM_NOAVX512 (8 << 13)
+#define HS_PLATFORM_NOAVX512VBMI (0x10 << 13)
 
 /** \brief Platform features bitmask. */
 typedef u64a platform_t;
 
-static UNUSED
-const platform_t hs_current_platform = {
+static UNUSED const platform_t hs_current_platform = {
 #if !defined(HAVE_AVX2)
     HS_PLATFORM_NOAVX2 |
 #endif
 #if !defined(HAVE_AVX512)
-    HS_PLATFORM_NOAVX512 |
+        HS_PLATFORM_NOAVX512 |
 #endif
 #if !defined(HAVE_AVX512VBMI)
-    HS_PLATFORM_NOAVX512VBMI |
+        HS_PLATFORM_NOAVX512VBMI |
 #endif
-    0,
+        0,
 };
 
-static UNUSED
-const platform_t hs_current_platform_no_avx2 = {
-    HS_PLATFORM_NOAVX2 |
-    HS_PLATFORM_NOAVX512 |
-    HS_PLATFORM_NOAVX512VBMI |
-    0,
+static UNUSED const platform_t hs_current_platform_no_avx2 = {
+    HS_PLATFORM_NOAVX2 | HS_PLATFORM_NOAVX512 | HS_PLATFORM_NOAVX512VBMI | 0,
 };
 
-static UNUSED
-const platform_t hs_current_platform_no_avx512 = {
-    HS_PLATFORM_NOAVX512 |
-    HS_PLATFORM_NOAVX512VBMI |
-    0,
+static UNUSED const platform_t hs_current_platform_no_avx512 = {
+    HS_PLATFORM_NOAVX512 | HS_PLATFORM_NOAVX512VBMI | 0,
 };
 
-static UNUSED
-const platform_t hs_current_platform_no_avx512vbmi = {
-    HS_PLATFORM_NOAVX512VBMI |
-    0,
+static UNUSED const platform_t hs_current_platform_no_avx512vbmi = {
+    HS_PLATFORM_NOAVX512VBMI | 0,
 };
-
 
 #ifdef __cplusplus
 } /* extern "C" */

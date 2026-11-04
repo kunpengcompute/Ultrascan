@@ -90,6 +90,7 @@ bool forceEditDistance = false;
 unsigned editDistance = 0;
 bool printCompressSize = false;
 bool useLiteralApi = false;
+string greyOverrides;
 
 // Globals local to this file.
 static bool compressStream = false;
@@ -97,6 +98,7 @@ static bool compressStream = false;
 namespace /* anonymous */ {
 
 bool display_per_scan = false;
+bool sharedCorpus = false;
 ScanMode scan_mode = ScanMode::STREAMING;
 bool useHybrid = false;
 bool usePcre = false;
@@ -116,9 +118,11 @@ typedef void (*thread_func_t)(void *context);
 class ThreadContext : boost::noncopyable {
 public:
     ThreadContext(unsigned num_in, const Engine &db_in, thread_barrier &tb_in,
-                  thread_func_t function_in, vector<DataBlock> corpus_data_in)
+                  thread_func_t function_in, vector<DataBlock> corpus_data_in,
+                  const vector<DataBlock> *shared_corpus = nullptr)
         : num(num_in), results(repeats), engine(db_in),
-          enginectx(db_in.makeContext()), corpus_data(move(corpus_data_in)),
+          enginectx(db_in.makeContext()), corpus_storage(move(corpus_data_in)),
+          corpus_data(shared_corpus ? *shared_corpus : corpus_storage),
           tb(tb_in), function(function_in) {}
 
     // Start the thread.
@@ -175,7 +179,9 @@ public:
     vector<ResultEntry> results;
     const Engine &engine;
     unique_ptr<EngineContext> enginectx;
-    vector<DataBlock> corpus_data;
+    // Empty in shared mode; otherwise owns this thread's input copy.
+    vector<DataBlock> corpus_storage;
+    const vector<DataBlock> &corpus_data;
 
 protected:
     thread_barrier &tb; // shared barrier for time sync
@@ -190,6 +196,8 @@ static void usage(const char *error) {
     printf("  -h              Display help and exit.\n");
     printf("  -G OVERRIDES    Overrides for the grey box.\n");
     printf("  -e PATH         Path to expression directory.\n");
+    printf("                  Honor single-path HAO Grey settings when "
+           "enabled.\n");
     printf("  -U FILE         Load serialized database from FILE (hsdump -U "
            "output).\n");
     printf("  -s FILE         Signature file to use.\n");
@@ -218,6 +226,8 @@ static void usage(const char *error) {
            " DISTANCE.\n");
     printf("\n");
     printf("  --per-scan      Display per-scan Mbit/sec results.\n");
+    printf("  --shared-corpus Share read-only corpus data between threads\n");
+    printf("                  (default: a separate copy per thread).\n");
     printf("  --echo-matches  Display all matches that occur during scan.\n");
     printf("  --sql-out FILE  Output sqlite db.\n");
     printf("  --literal-on    Use Hyperscan pure literal matching.\n");
@@ -247,6 +257,7 @@ static void processArgs(int argc, char *argv[],
         ;
     int in_sigfile = 0;
     int do_per_scan = 0;
+    int do_shared_corpus = 0;
     int do_compress = 0;
     int do_compress_size = 0;
     int do_echo_matches = 0;
@@ -257,6 +268,7 @@ static void processArgs(int argc, char *argv[],
 
     static struct option longopts[] = {
         {"per-scan", no_argument, &do_per_scan, 1},
+        {"shared-corpus", no_argument, &do_shared_corpus, 1},
         {"echo-matches", no_argument, &do_echo_matches, 1},
         {"compress-stream", no_argument, &do_compress, 1},
         {"sql-out", required_argument, &do_sql_output, 1},
@@ -317,6 +329,7 @@ static void processArgs(int argc, char *argv[],
                 usage("Invalid grey overrides");
                 exit(1);
             }
+            greyOverrides = optarg;
             break;
         case 'h':
             usage(nullptr);
@@ -412,6 +425,9 @@ static void processArgs(int argc, char *argv[],
     }
     if (do_per_scan) {
         display_per_scan = true;
+    }
+    if (do_shared_corpus) {
+        sharedCorpus = true;
     }
     if (do_compress) {
         compressStream = true;
@@ -951,9 +967,10 @@ static void sqlResults(const vector<unique_ptr<ThreadContext>> &threads,
 /**
  * Construct a thread context for this scanning mode.
  *
- * Note: does not take blocks by reference. This is to give every thread their
- * own copy of the data. It would be unrealistic for every thread to be scanning
- * the same copy of the data.
+ * By default each thread owns a copy of the input. With --shared-corpus, all
+ * threads refer to the caller's read-only blocks instead. runBenchmark joins
+ * all threads before returning, so the caller's blocks outlive these
+ * references.
  */
 static unique_ptr<ThreadContext>
 makeThreadContext(const Engine &db, const vector<DataBlock> &blocks,
@@ -976,6 +993,10 @@ makeThreadContext(const Engine &db, const vector<DataBlock> &blocks,
     }
     assert(fn);
 
+    if (sharedCorpus) {
+        return ue2::make_unique<ThreadContext>(id, db, sync_barrier, fn,
+                                               vector<DataBlock>{}, &blocks);
+    }
     return ue2::make_unique<ThreadContext>(id, db, sync_barrier, fn, blocks);
 }
 

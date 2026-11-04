@@ -28,9 +28,9 @@
 
 #include "cpuid_flags.h"
 #include "cpuid_inline.h"
-#include "ue2common.h"
 #include "hs_compile.h" // for HS_MODE_ flags
 #include "hs_internal.h"
+#include "ue2common.h"
 #include "util/arch.h"
 
 #if defined(__aarch64__) && defined(__linux__)
@@ -46,50 +46,6 @@
 
 #if !defined(_WIN32) && !defined(CPUID_H_)
 #include <cpuid.h>
-#endif
-
-#if defined(__aarch64__) && defined(__linux__)
-static
-int cpuFeatureLineHas(const char *line, const char *feature) {
-    size_t len = strlen(feature);
-    const char *pos = line;
-
-    while ((pos = strstr(pos, feature)) != NULL) {
-        char after = pos[len];
-        int before = pos == line || pos[-1] == ':' || pos[-1] == ' ' ||
-                     pos[-1] == '\t';
-        if (before &&
-            (after == '\0' || after == '\n' || after == ' ' ||
-             after == '\t')) {
-            return 1;
-        }
-        pos += len;
-    }
-
-    return 0;
-}
-
-static
-int cpuInfoHasFeature(const char *feature) {
-    FILE *f = fopen("/proc/cpuinfo", "r");
-    char line[4096];
-    int found = 0;
-
-    if (!f) {
-        return 0;
-    }
-
-    while (fgets(line, sizeof(line), f)) {
-        if (strncmp(line, "Features", 8) == 0 &&
-            cpuFeatureLineHas(line, feature)) {
-            found = 1;
-            break;
-        }
-    }
-
-    fclose(f);
-    return found;
-}
 #endif
 
 u64a cpuid_flags(void) {
@@ -153,17 +109,6 @@ u64a cpuid_flags(void) {
     }
 #endif
 
-    if (cpuInfoHasFeature("sve")) {
-        cap |= HS_CPU_FEATURES_SVE;
-    }
-    if (cpuInfoHasFeature("sve2")) {
-        cap |= HS_CPU_FEATURES_SVE2 | HS_CPU_FEATURES_SVE;
-    }
-    if (cpuInfoHasFeature("svebitperm")) {
-        cap |= HS_CPU_FEATURES_SVEBITPERM | HS_CPU_FEATURES_SVE2 |
-               HS_CPU_FEATURES_SVE;
-    }
-
 #if !defined(FAT_RUNTIME) && !defined(HS_BUILD_HAVE_SVE)
     cap &= ~(HS_CPU_FEATURES_SVE | HS_CPU_FEATURES_SVE2 |
              HS_CPU_FEATURES_SVEBITPERM);
@@ -191,51 +136,52 @@ struct family_id {
  * and "Intel Architecture and Processor Identification With CPUID Model and
  * Family Numbers" */
 static const struct family_id known_microarch[] = {
-    { 0x6, 0x37, HS_TUNE_FAMILY_SLM }, /* baytrail */
-    { 0x6, 0x4A, HS_TUNE_FAMILY_SLM }, /* silvermont */
-    { 0x6, 0x4C, HS_TUNE_FAMILY_SLM }, /* silvermont */
-    { 0x6, 0x4D, HS_TUNE_FAMILY_SLM }, /* avoton, rangley */
-    { 0x6, 0x5A, HS_TUNE_FAMILY_SLM }, /* silvermont */
-    { 0x6, 0x5D, HS_TUNE_FAMILY_SLM }, /* silvermont */
+    {0x6, 0x37, HS_TUNE_FAMILY_SLM}, /* baytrail */
+    {0x6, 0x4A, HS_TUNE_FAMILY_SLM}, /* silvermont */
+    {0x6, 0x4C, HS_TUNE_FAMILY_SLM}, /* silvermont */
+    {0x6, 0x4D, HS_TUNE_FAMILY_SLM}, /* avoton, rangley */
+    {0x6, 0x5A, HS_TUNE_FAMILY_SLM}, /* silvermont */
+    {0x6, 0x5D, HS_TUNE_FAMILY_SLM}, /* silvermont */
 
-    { 0x6, 0x5C, HS_TUNE_FAMILY_GLM }, /* goldmont */
-    { 0x6, 0x5F, HS_TUNE_FAMILY_GLM }, /* denverton */
+    {0x6, 0x5C, HS_TUNE_FAMILY_GLM}, /* goldmont */
+    {0x6, 0x5F, HS_TUNE_FAMILY_GLM}, /* denverton */
 
-    { 0x6, 0x3C, HS_TUNE_FAMILY_HSW }, /* haswell */
-    { 0x6, 0x45, HS_TUNE_FAMILY_HSW }, /* haswell */
-    { 0x6, 0x46, HS_TUNE_FAMILY_HSW }, /* haswell */
-    { 0x6, 0x3F, HS_TUNE_FAMILY_HSW }, /* haswell Xeon */
+    {0x6, 0x3C, HS_TUNE_FAMILY_HSW}, /* haswell */
+    {0x6, 0x45, HS_TUNE_FAMILY_HSW}, /* haswell */
+    {0x6, 0x46, HS_TUNE_FAMILY_HSW}, /* haswell */
+    {0x6, 0x3F, HS_TUNE_FAMILY_HSW}, /* haswell Xeon */
 
-    { 0x6, 0x3E, HS_TUNE_FAMILY_IVB }, /* ivybridge Xeon */
-    { 0x6, 0x3A, HS_TUNE_FAMILY_IVB }, /* ivybridge */
+    {0x6, 0x3E, HS_TUNE_FAMILY_IVB}, /* ivybridge Xeon */
+    {0x6, 0x3A, HS_TUNE_FAMILY_IVB}, /* ivybridge */
 
-    { 0x6, 0x2A, HS_TUNE_FAMILY_SNB }, /* sandybridge */
-    { 0x6, 0x2D, HS_TUNE_FAMILY_SNB }, /* sandybridge Xeon */
+    {0x6, 0x2A, HS_TUNE_FAMILY_SNB}, /* sandybridge */
+    {0x6, 0x2D, HS_TUNE_FAMILY_SNB}, /* sandybridge Xeon */
 
-    { 0x6, 0x3D, HS_TUNE_FAMILY_BDW }, /* broadwell Core-M */
-    { 0x6, 0x47, HS_TUNE_FAMILY_BDW }, /* broadwell */
-    { 0x6, 0x4F, HS_TUNE_FAMILY_BDW }, /* broadwell xeon */
-    { 0x6, 0x56, HS_TUNE_FAMILY_BDW }, /* broadwell xeon-d */
+    {0x6, 0x3D, HS_TUNE_FAMILY_BDW}, /* broadwell Core-M */
+    {0x6, 0x47, HS_TUNE_FAMILY_BDW}, /* broadwell */
+    {0x6, 0x4F, HS_TUNE_FAMILY_BDW}, /* broadwell xeon */
+    {0x6, 0x56, HS_TUNE_FAMILY_BDW}, /* broadwell xeon-d */
 
-    { 0x6, 0x4E, HS_TUNE_FAMILY_SKL }, /* Skylake Mobile */
-    { 0x6, 0x5E, HS_TUNE_FAMILY_SKL }, /* Skylake Core/E3 Xeon */
-    { 0x6, 0x55, HS_TUNE_FAMILY_SKX }, /* Skylake Xeon */
+    {0x6, 0x4E, HS_TUNE_FAMILY_SKL}, /* Skylake Mobile */
+    {0x6, 0x5E, HS_TUNE_FAMILY_SKL}, /* Skylake Core/E3 Xeon */
+    {0x6, 0x55, HS_TUNE_FAMILY_SKX}, /* Skylake Xeon */
 
-    { 0x6, 0x8E, HS_TUNE_FAMILY_SKL }, /* Kabylake Mobile */
-    { 0x6, 0x9E, HS_TUNE_FAMILY_SKL }, /* Kabylake desktop */
+    {0x6, 0x8E, HS_TUNE_FAMILY_SKL}, /* Kabylake Mobile */
+    {0x6, 0x9E, HS_TUNE_FAMILY_SKL}, /* Kabylake desktop */
 
-    { 0x6, 0x7D, HS_TUNE_FAMILY_ICL }, /* Icelake */
-    { 0x6, 0x7E, HS_TUNE_FAMILY_ICL }, /* Icelake */
-    { 0x6, 0x6A, HS_TUNE_FAMILY_ICX }, /* Icelake Xeon-D */
-    { 0x6, 0x6C, HS_TUNE_FAMILY_ICX }, /* Icelake Xeon */
+    {0x6, 0x7D, HS_TUNE_FAMILY_ICL}, /* Icelake */
+    {0x6, 0x7E, HS_TUNE_FAMILY_ICL}, /* Icelake */
+    {0x6, 0x6A, HS_TUNE_FAMILY_ICX}, /* Icelake Xeon-D */
+    {0x6, 0x6C, HS_TUNE_FAMILY_ICX}, /* Icelake Xeon */
 
 };
 #endif
 
 #ifdef DUMP_SUPPORT
-static UNUSED
-const char *dumpTune(u32 tune) {
-#define T_CASE(x) case x: return #x;
+static UNUSED const char *dumpTune(u32 tune) {
+#define T_CASE(x)                                                              \
+    case x:                                                                    \
+        return #x;
     switch (tune) {
         T_CASE(HS_TUNE_FAMILY_SLM);
         T_CASE(HS_TUNE_FAMILY_GLM);
@@ -279,7 +225,7 @@ u32 cpuid_tune(void) {
         }
 
         u32 tune = known_microarch[i].tune;
-        DEBUG_PRINTF("found tune flag %s\n", dumpTune(tune) );
+        DEBUG_PRINTF("found tune flag %s\n", dumpTune(tune));
         return tune;
     }
 #endif
