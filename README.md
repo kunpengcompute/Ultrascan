@@ -1,16 +1,18 @@
 # Ultrascan介绍
 
+本文档介绍Ultrascan这款高性能开源正则表达式匹配库的特性、目录结构与环境部署方式，其通过短规则旁路、假阳性阻断等匹配算法并结合SIMD指令实现正则表达式高性能匹配，同时提供通用字节码和正则匹配反馈优化技术，适用于在DPI/IPS/IDS/FW等场景部署正则匹配的用户。
+
 简体中文 | [English](./README_en.md)
 
 ## 最新消息
 
-[2026-09-30]: 发布Ultrascan 5.8.0，新增mcsheng算法性能优化和正则匹配反馈优化技术；优化Grey配置方式，支持通过公开API设置与复位进程级Grey配置。
+[2026-09-30]： 发布Ultrascan 5.8.0，新增mcsheng算法性能优化和正则匹配反馈优化技术；优化Grey配置方式，支持通过公开API设置与复位进程级Grey配置。
 
-[2026-06-30]: 原Hyperscan正式更名为Ultrascan，同时发布Ultrascan 5.7.0。新增通用字节码功能，支持规则集字节码跨平台部署。
+[2026-06-30]： 原Hyperscan正式更名为Ultrascan，同时发布Ultrascan 5.7.0。新增通用字节码功能，支持规则集字节码跨平台部署。
 
-[2026-03-30]: 发布Hyperscan 2.6.0。新增基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短规则匹配算法。
+[2026-03-30]： 发布Hyperscan 2.6.0。新增基于鲲鹏920新型号处理器优化Hyperscan 2~4字节短规则匹配算法。
 
-[2025-12-30]: 发布Hyperscan KHSEL 2.5.3。优化Hyperscan多模匹配算法。优化Rose解释器后端长字符串校验。增加短规则旁路算法开关。
+[2025-12-30]： 发布Hyperscan KHSEL 2.5.3。优化Hyperscan多模匹配算法。优化Rose解释器后端长字符串校验。增加短规则旁路算法开关。
 
 ## 项目介绍
 
@@ -139,7 +141,7 @@ AArch64目标可通过`HS_ARM_MARCH`选择指令集基线（CMake目标处理器
 
 ## 贡献声明
 
-欢迎大家为社区做贡献，如果使用过程中有任何问题/建议，或者需要反馈特性需求和bug报告，可以提交[Issues](https://gitcode.com/boostkit/Ultrascan/issues)联系我们，具体贡献方法可参考[这里](https://gitcode.com/boostkit/community/blob/master/docs/contributor/contributing.md)。同时也欢迎大家在[讨论专区](https://gitcode.com/boostkit/community/discussions)展开讨论交流。感谢您的支持。
+欢迎大家为社区做贡献，如果使用过程中有任何问题/建议，或者需要反馈特性需求和bug报告，可以提交[Issues](https://gitcode.com/boostkit/Ultrascan/issues)联系我们，具体贡献方法可参考[社区贡献指南](https://gitcode.com/boostkit/community/blob/master/docs/contributor/contributing.md)/contributor/contributing.md)。同时也欢迎大家在[讨论专区](https://gitcode.com/boostkit/community/discussions)展开讨论交流。感谢您的支持。
 
 ## 免责声明
 

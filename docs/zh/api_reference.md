@@ -1,12 +1,12 @@
 # API参考
 
-## 1 文档范围
+## 文档范围
 
 本文汇总Ultrascan在标准Hyperscan C API基础上新增的公开接口，按主题分为以下三章：
 
-- [通用字节码API](#2-通用字节码api)：`fat_hs_*`系列接口。
-- [Grey配置API](#3-grey配置api)：进程级编译参数设置与复位接口。
-- [正则匹配反馈优化技术API](#4-正则匹配反馈优化技术api)：运行期采集、反馈生成及反馈编译接口。
+- 通用字节码API：`fat_hs_*`系列接口。
+- Grey配置API：进程级编译参数设置与复位接口。
+- 正则匹配反馈优化技术API：运行期采集、反馈生成及反馈编译接口。
 
 所有接口均可通过公共头文件`hs.h`引入。本文不重复介绍`hs_compile()`、`hs_scan()`等
 上游通用接口；使用这些接口时，应同时参考公共头文件中的注释和上游API文档。
@@ -15,7 +15,7 @@
 >新增的反馈闭环能力，与历史已有的“假阳性阻断技术”是两个独立特性。本文不会以新名称
 >替代历史特性的名称或说明。
 
-### 1.1 公共约定
+### 公共约定
 
 - API返回类型为`hs_error_t`。成功通常返回`HS_SUCCESS`；参数错误返回`HS_INVALID`；
   编译错误通常返回`HS_COMPILER_ERROR`并通过`hs_compile_error_t`提供详情。
@@ -23,7 +23,7 @@
 - 文中标记为opaque的对象只能通过对应API创建、传递和释放，调用者不得访问其内部布局。
 - 除非接口明确转移所有权，输入对象的所有权仍归调用者。
 
-### 1.2 示例路径
+### 示例路径
 
 本文命令沿用[安装指南](./installation_guide.md)中的固定目录布局：
 
@@ -32,7 +32,7 @@
 - Debug构建目录：`/opt/Ultrascan/build-debug`
 - 反馈优化构建目录：`/opt/Ultrascan/build-feedback`
 
-## 2 通用字节码API
+## 通用字节码API
 
 通用字节码将x86和AArch64字节码封装在同一个`fat_hs_database_t`对象中，适用于一次
 编译后向两类平台分发的场景。`fat_hs_database_t`是opaque类型：
@@ -41,7 +41,7 @@
 typedef struct fat_hs_database fat_hs_database_t;
 ```
 
-### 2.1 API清单
+### API清单
 
 | 分类 | API | 说明 |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ typedef struct fat_hs_database fat_hs_database_t;
 | 查询 | `fat_hs_serialized_database_size` | 查询序列化数据反序列化后所需空间。 |
 | 查询 | `fat_hs_database_info` | 查询数据库版本和模式信息。 |
 
-### 2.2 `fat_hs_compile`
+### `fat_hs_compile`
 
 编译一个正则表达式，生成同时包含x86和AArch64字节码的通用数据库。
 
@@ -86,7 +86,7 @@ hs_error_t HS_CDECL fat_hs_compile(
 | `HS_COMPILER_ERROR` | `db`、`error`或表达式参数不合法，模式或平台参数不合法，或表达式解析、编译失败。 |
 | `HS_ARCH_ERROR` | 库以`FAT_RUNTIME`构建且运行平台不支持SSSE3。 |
 
-### 2.3 `fat_hs_compile_multi`
+### `fat_hs_compile_multi`
 
 编译多个正则表达式，生成通用数据库。
 
@@ -117,7 +117,7 @@ hs_error_t HS_CDECL fat_hs_compile_multi(
 | `HS_COMPILER_ERROR` | `db`、`error`、表达式数组或`elements`参数不合法，模式或平台参数不合法，或任一表达式解析、编译失败。 |
 | `HS_ARCH_ERROR` | 库以`FAT_RUNTIME`构建且运行平台不支持SSSE3。 |
 
-### 2.4 `fat_hs_compile_ext_multi`
+### `fat_hs_compile_ext_multi`
 
 使用扩展参数编译多个正则表达式，生成通用数据库。
 
@@ -150,7 +150,7 @@ hs_error_t HS_CDECL fat_hs_compile_ext_multi(
 | `HS_COMPILER_ERROR` | `db`、`error`、表达式数组、扩展参数、`elements`、模式或平台参数不合法，或任一表达式解析、编译失败。 |
 | `HS_ARCH_ERROR` | 库以`FAT_RUNTIME`构建且运行平台不支持SSSE3。 |
 
-### 2.5 `fat_hs_compile_lit`
+### `fat_hs_compile_lit`
 
 编译一个纯字面量表达式，生成通用数据库。该接口不按正则语法解释字节内容。
 
@@ -179,7 +179,7 @@ hs_error_t HS_CDECL fat_hs_compile_lit(
 | `HS_COMPILER_ERROR` | `db`、`error`、字面量、长度、模式或平台参数不合法，或编译失败。 |
 | `HS_ARCH_ERROR` | 库以`FAT_RUNTIME`构建且运行平台不支持SSSE3。 |
 
-### 2.6 `fat_hs_compile_lit_multi`
+### `fat_hs_compile_lit_multi`
 
 编译多个纯字面量表达式，生成通用数据库。
 
@@ -211,7 +211,7 @@ hs_error_t HS_CDECL fat_hs_compile_lit_multi(
 | `HS_COMPILER_ERROR` | `db`、`error`、字面量数组、长度数组、`elements`、模式或平台参数不合法，或任一字面量编译失败。 |
 | `HS_ARCH_ERROR` | 库以`FAT_RUNTIME`构建且运行平台不支持SSSE3。 |
 
-### 2.7 `fat_hs_free_database`
+### `fat_hs_free_database`
 
 释放由通用字节码编译或分配式反序列化接口返回的数据库。
 
@@ -230,7 +230,7 @@ hs_error_t HS_CDECL fat_hs_free_database(fat_hs_database_t *db);
 | `HS_SUCCESS` | 数据库已释放，或`db`为`NULL`。 |
 | `HS_INVALID` | `db`非空但不是有效的通用数据库对象。 |
 
-### 2.8 `fat_hs_serialize_database`
+### `fat_hs_serialize_database`
 
 将内存中的通用数据库序列化为连续字节流。
 
@@ -256,7 +256,7 @@ hs_error_t HS_CDECL fat_hs_serialize_database(
 | `HS_NOMEM` | misc allocator未能分配输出缓冲区。 |
 | `HS_BAD_ALLOC` | misc allocator返回的缓冲区未满足对齐要求。 |
 
-### 2.9 `fat_hs_deserialize_database`
+### `fat_hs_deserialize_database`
 
 分配内存并从序列化字节流重构通用数据库。
 
@@ -281,7 +281,7 @@ hs_error_t HS_CDECL fat_hs_deserialize_database(
 | `HS_NOMEM` | database allocator未能分配数据库内存。 |
 | `HS_BAD_ALLOC` | database allocator返回的内存未满足对齐要求。 |
 
-### 2.10 `fat_hs_deserialize_database_at`
+### `fat_hs_deserialize_database_at`
 
 在调用者提供的内存中从序列化字节流重构通用数据库。
 
@@ -305,7 +305,7 @@ hs_error_t HS_CDECL fat_hs_deserialize_database_at(
 | `HS_BAD_ALIGN` | `db`未按8字节对齐。 |
 | `HS_DB_VERSION_ERROR` | 字节流中的数据库版本与当前库不匹配。 |
 
-### 2.11 `fat_hs_database_size`
+### `fat_hs_database_size`
 
 查询内存中通用数据库占用的空间大小。
 
@@ -327,7 +327,7 @@ hs_error_t HS_CDECL fat_hs_database_size(
 | `HS_INVALID` | `db`或`size`为空，或数据库魔数无效。 |
 | `HS_DB_VERSION_ERROR` | 数据库版本与当前库不匹配。 |
 
-### 2.12 `fat_hs_serialized_database_size`
+### `fat_hs_serialized_database_size`
 
 查询序列化通用数据库反序列化所需的内存空间。
 
@@ -350,7 +350,7 @@ hs_error_t HS_CDECL fat_hs_serialized_database_size(
 | `HS_INVALID` | 字节流为空、长度或格式无效，或`size`为空。 |
 | `HS_DB_VERSION_ERROR` | 字节流中的数据库版本与当前库不匹配。 |
 
-### 2.13 `fat_hs_database_info`
+### `fat_hs_database_info`
 
 查询通用数据库的版本和模式信息。
 
@@ -373,7 +373,7 @@ hs_error_t HS_CDECL fat_hs_database_info(
 | `HS_NOMEM` | misc allocator未能分配信息字符串。 |
 | `HS_BAD_ALLOC` | misc allocator返回的内存未满足对齐要求。 |
 
-### 2.14 最小用例
+### 最小用例
 
 下面的示例编译一个通用数据库并将其序列化。实际跨平台部署时，可以直接使用`hsdump -U`生成文件，并由支持通用字节码的工具加载。
 
@@ -444,13 +444,13 @@ cc -std=c99 \
 fat database serialized successfully
 ```
 
-## 3 Grey配置API
+## Grey配置API
 
 Grey是编译器内部优化参数集合。公开API允许应用在进程内显式设置这些参数，
 取代旧的`config.txt`隐式读取方式。Ultrascan不再搜索或读取`config.txt`；
 如需覆盖默认值，必须在编译API之前主动调用本章接口。
 
-### 3.1 `hs_set_grey_overrides`
+### `hs_set_grey_overrides`
 
 设置进程级Grey覆盖字符串。设置成功后，后续构造Grey配置的编译调用都会读取这份配置，直到再次设置或复位。
 
@@ -479,7 +479,7 @@ hs_error_t HS_CDECL hs_set_grey_overrides(const char *overrides);
 - 配置存储由互斥锁保护，但配置是进程级共享状态。为保证同一批编译结果可复现，应在启动阶段设置，并避免与编译调用并发修改。
 - 每次成功调用都会整体替换上一份覆盖字符串，不会自动与上一次设置合并。
 
-### 3.2 `hs_reset_grey_overrides`
+### `hs_reset_grey_overrides`
 
 清除进程级Grey覆盖，使后续编译恢复使用代码中的硬编码默认值。
 
@@ -497,7 +497,7 @@ hs_error_t HS_CDECL hs_reset_grey_overrides(void);
 | --- | --- |
 | `HS_SUCCESS` | 覆盖已清除；重复调用也安全。 |
 
-### 3.3 最小用例
+### 最小用例
 
 下面的用例演示Grey覆盖的完整调用顺序：先设置`allowLily`、`allowNeoFdr`和
 `limitPatternCount`，再编译规则，最后释放数据库并复位进程级覆盖，避免影响同一进程
@@ -566,7 +566,7 @@ cc -std=c99 \
 Grey compile succeeded
 ```
 
-### 3.4 示例程序与工具参数
+### 示例程序与工具参数
 
 仓库中的示例程序和主要编译工具已接入同一公开API：
 
@@ -580,14 +580,14 @@ Grey compile succeeded
 
 命令行参数仅负责在进程内调用`hs_set_grey_overrides()`；它不会创建或修改`config.txt`。
 
-## 4 正则匹配反馈优化技术API
+## 正则匹配反馈优化技术API
 
 正则匹配反馈优化技术建立反馈闭环：先编译baseline数据库，然后进行运行期采样，
 再生成feedback，最后使用feedback编译新数据库。运行期collector统计多模fragment
 触发与最终上报之间的关系，feedback筛选高浪费fragment，编译器在保证匹配语义不变
 的前提下避开相应的低效候选路径。
 
-### 4.1 构建与可用范围
+### 构建与可用范围
 
 完整能力当前仅支持AArch64，并且默认关闭。构建时显式开启：
 
@@ -602,9 +602,9 @@ make -j
 - 关闭能力时公共符号仍然存在，以保持链接兼容。各接口在此状态下的精确返回值在对应API小节中说明。
 - 普通编译和扫描应继续调用不带`_with_feedback`或`_with_collector`后缀的原接口。
 
-### 4.2 对象、常量与参数
+### 对象、常量与参数
 
-#### 4.2.1 Opaque对象
+#### Opaque对象
 
 ```c
 typedef struct hs_fp_collector hs_fp_collector_t;
@@ -614,7 +614,7 @@ typedef struct hs_fp_feedback hs_fp_feedback_t;
 - `hs_fp_collector_t`绑定一个具体baseline数据库并累积运行期计数。它借用数据库，不延长数据库生命周期。
 - `hs_fp_feedback_t`保存独立的坏fragment身份副本，可在collector及baseline数据库释放后继续用于反馈编译。
 
-#### 4.2.2 Fragment分类常量
+#### Fragment分类常量
 
 | 常量 | 值 | 说明 |
 | --- | ---: | --- |
@@ -640,7 +640,7 @@ typedef struct hs_fp_feedback hs_fp_feedback_t;
 | `HS_FP_FRAGMENT_FLAG_NORUNS` | `0x02` | fragment带NORUNS属性。 |
 | `HS_FP_FRAGMENT_FLAG_MASKED` | `0x04` | fragment带mask/cmp约束。 |
 
-#### 4.2.3 筛选参数
+#### 筛选参数
 
 ```c
 typedef struct hs_fp_feedback_params {
@@ -668,7 +668,7 @@ typedef struct hs_fp_feedback_params {
 启用前四个阈值后，字段值为0表示不限制该项；显式启用`MAX_BAD_FRAGMENTS`时，
 其值必须大于0。
 
-#### 4.2.4 Dump结构与回调
+#### Dump结构与回调
 
 以下定义仅用于`hs_fp_collector_to_feedback_with_dump()`。生成feedback时，库可通过
 汇总回调输出整体统计，并通过fragment回调逐项输出fragment统计和入选状态，便于
@@ -733,7 +733,7 @@ known fragment：`fragment_count`为明细数，`bad_fragment_count`为入选fee
 `selected != 0`表示该fragment已进入本次feedback。回调参数及`bytes`、`mask`、
 `cmp`指针只在回调期间有效；如需持久化，必须在回调中复制。
 
-### 4.3 `hs_fp_collector_create`
+### `hs_fp_collector_create`
 
 为指定baseline数据库创建运行期反馈collector。collector借用数据库，数据库必须在
 collector释放前保持有效；同一collector不支持多线程并发写。
@@ -758,7 +758,7 @@ hs_error_t HS_CDECL hs_fp_collector_create(
 | `HS_NOMEM` | 功能已启用时，分配collector或计数器失败。 |
 | `HS_ARCH_ERROR` | 功能未启用且`collector`有效时，将`*collector`置为`NULL`并返回该值。 |
 
-### 4.4 `hs_fp_collector_reset`
+### `hs_fp_collector_reset`
 
 清空collector的累计计数，但保留其与baseline数据库的绑定。
 
@@ -778,7 +778,7 @@ hs_error_t HS_CDECL hs_fp_collector_reset(hs_fp_collector_t *collector);
 | `HS_INVALID` | 功能已启用且`collector == NULL`。 |
 | `HS_ARCH_ERROR` | 功能未启用时，不校验`collector`，直接返回该值。 |
 
-### 4.5 `hs_fp_collector_merge`
+### `hs_fp_collector_merge`
 
 将同一数据库创建的多个collector合并为新collector。输入collector不会被释放或复位。
 
@@ -804,7 +804,7 @@ hs_error_t HS_CDECL hs_fp_collector_merge(
 | `HS_NOMEM` | 功能已启用时，分配新collector或计数器失败。 |
 | `HS_ARCH_ERROR` | 功能未启用且`collector`有效时，将`*collector`置为`NULL`并返回该值。 |
 
-### 4.6 `hs_fp_collector_free`
+### `hs_fp_collector_free`
 
 释放collector。`NULL`安全。
 
@@ -822,7 +822,7 @@ hs_error_t HS_CDECL hs_fp_collector_free(hs_fp_collector_t *collector);
 | --- | --- |
 | `HS_SUCCESS` | 无论特性是否启用、`collector`是否为`NULL`，均返回成功。 |
 
-### 4.7 `hs_fp_collector_to_feedback`
+### `hs_fp_collector_to_feedback`
 
 从collector生成用于反馈编译的feedback对象。调用会提交pending计数，但不会复位
 collector；转换期间不得并发写入同一collector。无fragment入选时，成功返回的
@@ -849,7 +849,7 @@ hs_error_t HS_CDECL hs_fp_collector_to_feedback(
 | `HS_NOMEM` | 功能已启用时，分配统计报告或feedback失败。 |
 | `HS_ARCH_ERROR` | 功能未启用且`feedback`有效时，将`*feedback`置为`NULL`并返回该值。 |
 
-### 4.8 `hs_fp_collector_to_feedback_with_dump`
+### `hs_fp_collector_to_feedback_with_dump`
 
 从collector生成feedback，并可同步输出汇总和fragment dump信息。回调只提供观察结果，不参与筛选，也不转移对象所有权。
 
@@ -877,7 +877,7 @@ hs_error_t HS_CDECL hs_fp_collector_to_feedback_with_dump(
 | `HS_NOMEM` | 功能已启用时，分配统计报告或feedback失败。 |
 | `HS_ARCH_ERROR` | 功能未启用且`feedback`有效时，将`*feedback`置为`NULL`并返回该值。 |
 
-### 4.9 `hs_fp_feedback_free`
+### `hs_fp_feedback_free`
 
 释放feedback对象。`NULL`安全。
 
@@ -895,7 +895,7 @@ hs_error_t HS_CDECL hs_fp_feedback_free(hs_fp_feedback_t *feedback);
 | --- | --- |
 | `HS_SUCCESS` | 无论特性是否启用、`feedback`是否为`NULL`，均返回成功。 |
 
-### 4.10 `hs_compile_multi_with_feedback`
+### `hs_compile_multi_with_feedback`
 
 使用feedback编译多个正则表达式。当前没有single、literal或fat数据库的反馈编译变体。
 
@@ -928,7 +928,7 @@ hs_error_t HS_CDECL hs_compile_multi_with_feedback(
 | `HS_NOMEM` | 功能已启用时，创建或复制反馈编译上下文失败。 |
 | `HS_ARCH_ERROR` | 功能未启用时，即使`feedback == NULL`也返回该值；`db`置为`NULL`，`error`非空时返回错误详情。 |
 
-### 4.11 `hs_compile_ext_multi_with_feedback`
+### `hs_compile_ext_multi_with_feedback`
 
 使用feedback和扩展参数编译多个正则表达式。
 
@@ -963,7 +963,7 @@ hs_error_t HS_CDECL hs_compile_ext_multi_with_feedback(
 | `HS_NOMEM` | 功能已启用时，创建或复制反馈编译上下文失败。 |
 | `HS_ARCH_ERROR` | 功能未启用时，即使`feedback == NULL`也返回该值；`db`置为`NULL`，`error`非空时返回错误详情。 |
 
-### 4.12 `hs_scan_with_collector`
+### `hs_scan_with_collector`
 
 执行块模式扫描，同时向collector记录运行期触发信息。匹配语义和回调行为与`hs_scan()`一致。
 
@@ -999,7 +999,7 @@ hs_error_t HS_CDECL hs_scan_with_collector(
 | `HS_UNKNOWN_ERROR` | 功能已启用时，扫描期间发生内部匹配错误。 |
 | `HS_ARCH_ERROR` | 功能未启用时，直接返回该值，不执行扫描。 |
 
-### 4.13 `hs_scan_vector_with_collector`
+### `hs_scan_vector_with_collector`
 
 执行vectored模式扫描，同时向collector记录运行期触发信息。匹配语义和回调行为与`hs_scan_vector()`一致。
 
@@ -1036,7 +1036,7 @@ hs_error_t HS_CDECL hs_scan_vector_with_collector(
 | `HS_UNKNOWN_ERROR` | 功能已启用时，扫描期间发生内部匹配错误。 |
 | `HS_ARCH_ERROR` | 功能未启用时，直接返回该值，不执行扫描。 |
 
-### 4.14 `hs_scan_stream_with_collector`
+### `hs_scan_stream_with_collector`
 
 执行streaming模式扫描，同时向collector记录运行期触发信息。匹配语义和回调行为与
 `hs_scan_stream()`一致；stream close和reset阶段产生的EOD工作不会计入collector。
@@ -1071,7 +1071,7 @@ hs_error_t HS_CDECL hs_scan_stream_with_collector(
 | `HS_UNKNOWN_ERROR` | 功能已启用时，扫描期间发生内部匹配错误；已记录的部分计数不会回滚。 |
 | `HS_ARCH_ERROR` | 功能未启用且`id`有效时，直接返回该值，不执行扫描。 |
 
-### 4.15 最小闭环用例
+### 最小闭环用例
 
 下面的C用例使用块模式完成baseline编译、采集、生成feedback和反馈编译。示例要求
 链接在AArch64上使用`HS_ENABLE_FP_FEEDBACK=ON`构建的库。
@@ -1188,3 +1188,10 @@ feedback-compiled database created
 ```
 
 完整工具化流程请参考[快速入门](./quick_start.md)中的`hspgo`章节。
+         
+## 修订记录
+
+| 文档版本 | 发布日期 | 修改说明 |
+| --- | --- | --- |
+| 01 | 2026-09-30 | 第一次正式发布。 |
+ 
