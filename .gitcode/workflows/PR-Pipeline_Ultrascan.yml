@@ -22,8 +22,8 @@ concurrency: # 并发控制
     events: [mr_id]        # 抢占粒度=按MR隔离：同一MR的新推送取消该MR的旧运行，不同MR互不影响
 
 permissions:
-  repository: read
-  id-token: write
+  repository: read      # 顶层只声明只读权限
+  pr: read              # 供作业读取 PR 元数据（只读）
 
 env:
   pr_id: ${{ atomgit.event.pull_request.number }}
@@ -75,7 +75,6 @@ stages: #阶段，不超过16个阶段，不超过256个job
               base: ${{ env.branch }}
               repo: ${{ atomgit.repository }}
               number: ${{ env.pr_id }}
-              token: ${{ secrets.GIT_TOKEN }}
               list-files: json
               predicate-quantifier: every
               filters: |
@@ -103,20 +102,25 @@ stages: #阶段，不超过16个阶段，不超过256个job
       sca-pr:
         name: sca-pr
         runs-on: ["ubuntu-latest", "x64", "slim"]
+        permissions:
+          id-token: write     # 仅本作业需要 OIDC 令牌
         steps:
           - name: sca
             uses: openlibing/sca-action/sca-pr-action@v1.0.0
             with:
               project-name: "boostkit"
-      malicious-scan:
-        name: malicious-scan
+      antipoison-scan:
+        name: antipoison-scan
         runs-on: ["ubuntu-latest", "x64", "slim"]
+        permissions:
+          id-token: write     # 仅本作业需要 OIDC 令牌
         steps:
           - name: malicious code scan
             uses: openlibing/malicious-code-scan-action/malicious-code-pr-scan-action@v1.0.0
             with:
               project-name: "boostkit"
       pre-commit:
+        name: pre-commit
         runs-on: ["ubuntu-latest", "x64", "slim"]
         steps:
           - name: Checkout
@@ -132,13 +136,22 @@ stages: #阶段，不超过16个阶段，不超过256个job
           - name: Setup Go
             uses: setup-go
             with:
-              go-version: '1.21'
+              go-version: '1.26.1'    # 版本号必须带引号（否则 YAML 解析成 1.2）；须满足 gitleaks 最低 Go 要求
+          - name: install gitleaks
+            run: |
+              export GO111MODULE=on
+              export GOPROXY=https://mirrors.huaweicloud.com/repository/goproxy/
+              export GONOSUMDB=*
+              cd ${ATOMGIT_WORKSPACE}
+              wget --no-host-directories -c --no-check-certificate https://pytorch-package.obs.cn-north-4.myhuaweicloud.com/pta-codecheck/gitleaks
+              chmod +x gitleaks
+              cd -
           - name: Run pre-commit
             uses: openlibing/pre-commit-action@v1.0.0
       build:
         name: build
         if: ${{ jobs.Detect_file_changes.outputs.need_build == 'yes' }}
-        needs: [ Detect_file_changes, sca-pr, malicious-scan, pre-commit]
+        needs: [ Detect_file_changes, sca-pr, antipoison-scan, pre-commit]
         uses: .gitcode/workflows/build_job.yml
         with:
           runs_on_flavor: "flavor=large"
