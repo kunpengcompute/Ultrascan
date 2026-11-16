@@ -1,5 +1,7 @@
 # 快速入门
 
+本文档介绍Ultrascan的快速入门流程，包括安装前提条件、hsdump通用字节码生成、hsbench通用字节码性能测试与hspgo正则匹配反馈优化技术工具的使用方法，适用于需要在鲲鹏计算平台和x86计算平台上部署规则集字节码的用户。
+
 ## 前提条件
 
 请参考[安装指南](./installation_guide.md)完成Ultrascan的安装和编译。
@@ -13,7 +15,7 @@ hsdump是Ultrascan提供的调试工具，用于转储模式编译过程中的�
 
 1. 准备规则文件。在`/opt/Ultrascan/build-debug/patterns.txt`中写入正则表达式，格式如下：
 
-    ```text
+    ```output
     1:/hatstand.*teakettle/s
     2:/(hatstand|teakettle)/iH
     ```
@@ -133,7 +135,7 @@ cd /opt/Ultrascan/build-feedback
 | --- | --- |
 | `-e PATH` | 规则文件或目录。 |
 | `-c FILE` | hsbench SQLite语料库。 |
-| `-N`/`-V` | 分别选择block/vectored模式；不指定时使用streaming模式。 |
+| `-N`/`-V` | 分别选择块模式（block）/向量模式（vectored）；不指定时使用流模式（streaming）。 |
 | `-b N` | baseline普通扫描轮数，默认20（与hsbench `-n` 默认值一致）。 |
 | `-n N` | 切换到反馈编译数据库后的测量轮数，默认20（与hsbench `-n` 默认值一致）。 |
 | `-m N` | 最小trigger数，默认1000。 |
@@ -229,4 +231,10 @@ cd /opt/Ultrascan/build-feedback
 fingerprint；公开`hs_fp_feedback_t`本身不携带此指纹，因此业务直接集成API时
 必须自行保证配置一致。
 
-需要把闭环集成到应用时，请参考[正则匹配反馈优化技术API](./api_reference.md#4-正则匹配反馈优化技术api)。
+需要把闭环集成到应用时，请参考[正则匹配反馈优化技术API](./api_reference.md#正则匹配反馈优化技术api)。
+
+## 修订记录
+
+| 文档版本 | 发布日期 | 修改说明 |
+| --- | --- | --- |
+| 01 | 2026-09-30 | 第一次正式发布。 |
