@@ -1,10 +1,68 @@
-project: BoostKit/Ultrascan
+# Use the upstream project identity referenced by the repository READMEs.
+project: boostkit/Ultrascan
 version: "1.0"
 
+# Temporarily exclude all code from copyright-header scanning, including
+# Ultrascan-specific changes. These rules describe scan scope, not license changes.
+# No source allow-list: the root exclusion also covers root-level code and any
+# directories without a more specific rule. All rules below exclude scanning.
 directories:
+  # Temporary repository-wide exclusion; revise this rule before enabling scans.
   - path: "./"
     type: upstream
 
+  # Core engine code and Ultrascan adaptations are temporarily excluded together.
+  - path: "./src/"
+    type: upstream
+
+  - path: "./src/kunpeng-enhanced"
+    type: source
+
+  # Chimera's PCRE-compatible API implementation and related headers.
+  - path: "./chimera/"
+    type: upstream
+
+  # Header files; the patched Boost dependency has a more specific rule below.
+  - path: "./include/"
+    type: upstream
+  - path: "./include/boost-patched/"
+    type: third_party
+
+  # Compiled tools and shared utilities are also temporarily excluded.
+  - path: "./tools/"
+    type: upstream
+  - path: "./util/"
+    type: upstream
+
+  # Unit tests, including the bundled GoogleTest framework.
+  - path: "./unit/"
+    type: test
+  - path: "./unit/gtest/"
+    type: third_party
+
+  # Example programs and their build files.
+  - path: "./examples/"
+    type: examples
+
+  # Developer references and project documentation.
+  - path: "./doc/"
+    type: docs
+  - path: "./docs/"
+    type: docs
+
+  # CMake configuration, CI workflows, container builds and helper scripts.
+  - path: "./cmake/"
+    type: build
+  - path: "./.gitcode/"
+    type: build
+  - path: "./.gitcode/scripts/"
+    type: scripts
+
 files:
+  # Use the existing repository license; retain its BSD license text and notices.
   - path: "./LICENSE"
     type: license
+  - path: "./ThirdPartyNotice.md"
+    type: notice
+  - path: "./.gitcode/opensource-repo-layout.yaml"
+    type: compliance-config
