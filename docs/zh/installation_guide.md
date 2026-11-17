@@ -27,6 +27,7 @@ Ultrascan鲲鹏计算平台软件版本主要增加了以下功能：
     过多，触发大量的解释器调用和低效的长规则校验，而最终无一真实匹配。大量
     无谓的解释器调用成为热点，多模匹配失去了应有的预过滤能力。
 - 增加通用字节码功能，用户可以通过hsdump工具将规则集编译为通用字节码，该字节码支持在x86和鲲鹏计算平台运行。
+- 增加Hao多模匹配算法，支持基于SVE的DOT路径和基于SVE2 BitPerm的BEXT路径，并可在通用字节码中保留FDR回退。
 - 增加正则匹配反馈优化技术，在AArch64平台根据真实扫描语料采集反馈，并使用反馈重新编译规则数据库。
 
 更多关于Ultrascan的信息，请参考[鲲鹏Gitcode代码仓](https://gitcode.com/boostkit/Ultrascan)。
@@ -539,21 +540,12 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
           但不会生成该工具。
         - 应用通过API集成时，请参考[正则匹配反馈优化技术API](./api_reference.md#正则匹配反馈优化技术api)。
 
-    - （可选）AArch64编译目标选择。
+    - AArch64公共代码与Hao内核构建。
 
-        当CMake目标处理器为`aarch64`或`AARCH64`时，可使用`HS_ARM_MARCH`控制
-        AArch64编译目标的指令集基线，支持以下取值：
-
-        - `AUTO`（默认）：原生构建时使用`-march=native -mtune=native`；
-          交叉编译，或C/C++编译器不支持该组合标志时，自动回退为`PORTABLE`。
-          适合构建机和部署机具备相同指令集基线的场景。
-        - `PORTABLE`：固定使用`-march=armv8-a+crc`。产物要求目标机支持
-          Armv8-A和CRC32扩展，适合在满足该最低基线的不同机型间分发，
-          也是性能对比测试的推荐基线。
-        - `native`：显式使用`-march=native -mtune=native`，与AUTO成功路径等价，但不带探测回退。
-        - 显式架构值（如`armv8.2-a+crc+sve`、`armv9-a+sve2`、
-          `armv8.6-a+crc+sve2+sve2-bitperm`）：目标机型统一且已知指令集基线时
-          使用。传入的是架构值本身，无需添加`-march=`前缀。
+        当CMake目标处理器为`aarch64`或`AARCH64`时，公共代码固定使用
+        `-march=armv8-a+crc`，要求部署机支持Armv8-A和CRC32扩展。
+        `HS_ARM_MARCH`默认值为`PORTABLE`；旧缓存中的`AUTO`、`native`或显式
+        架构值仍可被读取，但不再改变公共代码基线，CMake会输出提示。
 
         使用示例：
 
@@ -564,16 +556,26 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
         make -j
         ```
 
-        使用时注意：
+        Hao的可选内核根据编译器能力单独探测并编译，不要求构建主机本身具备
+        相应CPU扩展，也无需将整个工程的`-march`提升为SVE/SVE2基线：
 
-        - `AUTO`或`native`构建的产物只能部署到支持编译器所选全部指令集扩展的
-          机器上；部署到较低指令集基线的机器可能触发非法指令错误。跨机型分发请
-          使用`PORTABLE`，或按最低目标机型选择显式值。
-        - `PORTABLE`不将SVE/SVE2作为编译目标基线。需要SVE或SVE2指令集能力时，
-          应显式选择包含相应扩展的架构值，并确保所有部署机均支持该值。
-        - 交叉编译时，工具链文件应将`CMAKE_SYSTEM_PROCESSOR`设置为`aarch64`；否则该选项不会生效。
-        - 配置阶段会输出`AARCH64 single-ISA build mode/flags`及
-          `crc/sve/sve2/sve2-bitperm`特性探测结果，可据此核对实际生效的编译标志。
+        | 内核 | 工具链要求 | 运行条件 |
+        | --- | --- | --- |
+        | DOT | 能编译SVE intrinsic | CPU/操作系统支持SVE，当前向量长度至少256位。 |
+        | BEXT | 能编译SVE2 BitPerm intrinsic，且SVE内核可构建 | CPU/操作系统支持SVE、SVE2和SVE2 BitPerm，当前向量长度至少256位。 |
+
+        - `HS_BUILD_HAVE_SVE`、`HS_BUILD_HAVE_SVEBITPERM`是工具链探测结果，
+          不代表运行机一定具备对应能力。运行时会检查CPU/操作系统能力和向量长度。
+        - 未构建可选内核或运行条件不足时，使用可用的其他路径；通用字节码的
+          Hao多变体布局保留FDR回退。其变体生成还受编译数据库时主机能力限制，
+          详见[用户指南](./user_guide.md#通用字节码中的hao)。
+        - Hao默认关闭，使用时在编译数据库前设置Grey参数`allowHao:1`。
+          该算法不依赖`HS_ENABLE_FP_FEEDBACK`选项。
+        - 交叉编译时，工具链文件应将`CMAKE_SYSTEM_PROCESSOR`设置为`aarch64`。
+        - 配置阶段的`AARCH64 single-ISA build mode/flags`显示公共代码基线；
+          `ARM toolchain can/cannot compile SVE code paths`和
+          `ARM toolchain can/cannot compile SVE2 BitPerm code paths`显示可选内核
+          构建能力。公共代码的`sve=FALSE`不表示可选Hao内核无法构建。
 
 ## 修订记录
 

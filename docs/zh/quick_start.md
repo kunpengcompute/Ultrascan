@@ -56,28 +56,28 @@ hsbench是Ultrascan提供的Benchmark性能测试工具，可用于观察指定�
 
 2. 运行hsbench。
 
-    不使用通用字节码：
+    从规则集编译后测试：
 
     ```bash
     cd /opt/Ultrascan/build
     ./bin/hsbench \
         -e ../hsbench-samples/pcre/snort_literals \
-        -c ../hsbench-samples/corpora/gutenberg.db -N -n 1
+        -c ../hsbench-samples/corpora/alexa200.db -N -n 1
     ```
 
-    使用通用字节码：
+    加载已有通用字节码测试：
 
     ```bash
     ./bin/hsbench \
         -U /opt/Ultrascan/build-debug/dump_output/dump/db.raw \
-        -c ../hsbench-samples/corpora/gutenberg.db \
+        -c ../hsbench-samples/corpora/alexa200.db \
         -N -n 1
     ```
 
     参数说明：
 
     - `-e PATH`：指定规则文件路径。
-    - `-U, --dump_db`：使用通用字节码格式数据库。
+    - `-U FILE`：加载`hsdump -U`生成的序列化数据库文件；与`hsdump`中不带文件参数的`-U`含义不同。
     - `-c, --corpus`：指定测试数据库路径。
     - `-N, --block`：使用块模式编译（默认为流模式）。
     - `-n, --num_iterations`：指定测试迭代次数（默认为20）。
@@ -97,6 +97,72 @@ hsbench是Ultrascan提供的Benchmark性能测试工具，可用于观察指定�
     - Mean throughput \(overall\)：平均吞吐量（Mbit/s）。
     - Max throughput \(per core\)：所有Core核中的最大吞吐量（Mbit/s）。
     - 由于db是通过序列化结果直接加载，所以无需编译，因此Compile time和Peak heap usage为0。
+
+## Hao算法验证与调优
+
+在AArch64平台完成构建，并准备好上文的hsbench规则集和SQLite语料库。Hao默认关闭；
+下面以块模式对比同一规则集和语料。
+
+1. 对比关闭Hao与自动选择Hao的结果。
+
+    ```bash
+    cd /opt/Ultrascan/build
+    ./bin/hsbench \
+        -e ../hsbench-samples/pcre/teakettle_2500 \
+        -c ../hsbench-samples/corpora/gutenberg.db -N -n 20 \
+        -G "allowHao:0;"
+    ./bin/hsbench \
+        -e ../hsbench-samples/pcre/teakettle_2500 \
+        -c ../hsbench-samples/corpora/gutenberg.db -N -n 20 \
+        -G "allowHao:1;haoDebug:3;"
+    ```
+
+    先核对`Matches per iteration`，再比较吞吐、编译时间和数据库大小。
+    `haoDebug:1`输出`[HAO][EngSel]`及`SCALE_ACCEPT`、`MID_LEN_ACCEPT`、
+    `REJECT_LEN`或`REJECT_SMALL`决策，以及`[HAO][Admission]`的5%碰撞桶准入结果；
+    `haoDebug:2`输出已生成Hao的编译统计。
+    规模筛选通过后仍需通过完整可行性检查，不能仅凭`allowHao:1`或接受决策
+    判断已经采用Hao。具体筛选条件见[用户指南](./user_guide.md#启用与适用范围)。
+
+2. 按需比较DOT与BEXT单一路径。
+
+    ```bash
+    ./bin/hsbench \
+        -e ../hsbench-samples/pcre/snort_literals \
+        -c ../hsbench-samples/corpora/gutenberg.db -N -n 20 \
+        -G "allowHao:1;haoHashMode:2;haoDebug:3;"
+    ./bin/hsbench \
+        -e ../hsbench-samples/pcre/snort_literals \
+        -c ../hsbench-samples/corpora/gutenberg.db -N -n 20 \
+        -G "allowHao:1;haoHashMode:1;haoDebug:3;"
+    ```
+
+    DOT要求SVE，BEXT额外要求SVE2 BitPerm，且两者均要求当前SVE向量长度
+    至少256位。`haoHashMode`指定Hao内部哈希路径，不绕过引擎筛选；
+    不满足条件时可能继续使用其他匹配引擎。BEXT键宽与selector调优参数见
+    [Grey参数](./user_guide.md#grey参数)。
+
+3. 生成并验证实际部署用的通用字节码。
+
+    使用Debug构建中的`hsdump`，在具备所需SVE能力的AArch64主机执行：
+
+    ```bash
+    cd /opt/Ultrascan/build-debug
+    ./bin/hsdump \
+        -e ../hsbench-samples/pcre/teakettle_2500 \
+        -o ./dump_hao -U -X -N -G "allowHao:1;haoDebug:3;"
+    ./bin/hsbench -U ./dump_hao/dump/db.raw \
+        -c ../hsbench-samples/corpora/gutenberg.db -N -n 20
+    ```
+
+    生成的AArch64部分保留FDR回退，并附加主机支持且成功构建的DOT/BEXT
+    变体。`hsdump`还会为生成的Hao matcher输出`hao_compile_stats_*.txt`
+    和`hao_l2map_*.txt`，位于本例的`dump_hao/dump/`目录。未采用Hao的
+    matcher不会生成这些文件。
+
+    `hsbench -e`只比较Grey选择的单一路径，`hsbench -U FILE`则运行文件中
+    已有的部署布局。多变体布局在运行时优先选择BEXT，其次DOT，条件不足时
+    回退到FDR。加载文件时再传入`haoHashMode`不会改写已有布局。
 
 ## hspgo正则匹配反馈优化技术工具
 
@@ -133,21 +199,21 @@ cd /opt/Ultrascan/build-feedback
 
 | 参数 | 说明 |
 | --- | --- |
-| `-e PATH` | 规则文件或目录。 |
-| `-c FILE` | hsbench SQLite语料库。 |
-| `-N`/`-V` | 分别选择块模式（block）/向量模式（vectored）；不指定时使用流模式（streaming）。 |
-| `-b N` | baseline普通扫描轮数，默认20（与hsbench `-n` 默认值一致）。 |
-| `-n N` | 切换到反馈编译数据库后的测量轮数，默认20（与hsbench `-n` 默认值一致）。 |
-| `-m N` | 最小trigger数，默认1000。 |
-| `-p N` | 最小false-positive trigger数，默认1000。 |
-| `-q RATIO` | 最小false-positive比例，范围0~1，默认0.99。 |
-| `-s RATIO` | 最小全局浪费占比，范围0~1，默认0.05。 |
-| `-k N` | 最多保留的坏fragment数；默认不限制。 |
-| `-v` | 输出汇总、诊断及排名靠前的fragment。 |
-| `-o DIR` | 输出report和feedback CSV。 |
-| `-O DIR` | 输出可复用的feedback二进制文件。 |
-| `-I DIR` | 导入已生成的feedback二进制文件，跳过采集阶段。 |
-| `-G OVERRIDES` | 设置本轮baseline和反馈编译共用的Grey参数；`allowNeoFdr` 传非零值会被强制置0并输出warning。 |
+| -e PATH | 规则文件或目录。 |
+| -c FILE | hsbench SQLite语料库。 |
+| -N/-V | 分别选择块模式（block）/向量模式（vectored）；不指定时使用流模式（streaming）。 |
+| -b N | baseline普通扫描轮数，默认20（与hsbench -n 默认值一致）。 |
+| -n N | 切换到反馈编译数据库后的测量轮数，默认20（与hsbench -n 默认值一致）。 |
+| -m N | 最小trigger数，默认1000。 |
+| -p N | 最小false-positive trigger数，默认1000。 |
+| -q RATIO | 最小false-positive比例，范围0~1，默认0.99。 |
+| -s RATIO | 最小全局浪费占比，范围0~1，默认0.05。 |
+| -k N | 最多保留的坏fragment数；默认不限制。 |
+| -v | 输出汇总、诊断及排名靠前的fragment。 |
+| -o DIR | 输出report和feedback CSV。 |
+| -O DIR | 输出可复用的feedback二进制文件。 |
+| -I DIR | 导入已生成的feedback二进制文件，跳过采集阶段。 |
+| -G OVERRIDES | 设置本轮baseline和反馈编译共用的Grey参数；allowNeoFdr 传非零值会被强制置0并输出warning。 |
 
 工具只统计反馈数据库切换完成后的优化吞吐；baseline轮数不会混入优化测量结果。如下示例执行。
 

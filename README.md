@@ -6,7 +6,7 @@
 
 ## 最新消息
 
-[2026-12-30]: 发布Ultrascan 5.9.0，新增假阳性阻断过滤逻辑判断优化。
+[2026-12-30]: 发布Ultrascan 5.9.0，新增假阳性阻断过滤逻辑判断优化和Hao多模匹配算法，支持DOT/BEXT路径及通用字节码运行期分派。
 
 [2026-09-30]： 发布Ultrascan 5.8.0，新增mcsheng算法性能优化和正则匹配反馈优化技术；优化Grey配置方式，支持通过公开API设置与复位进程级Grey配置。
 
@@ -26,6 +26,7 @@ Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 |--|--|
 | 短规则旁路技术 | 短规则旁路技术特性包括单字节短规则算法和2~4字节短规则算法，通过将导致性能瓶颈的短规则从常规规则中分离，用旁路规则算法消除冗余操作，从而大幅提升整体匹配性能。 |
 | 假阳性阻断技术 | 假阳性阻断技术特性能够减少解释器大量无用的调用，进而大幅提高Ultrascan匹配性能。  |
+| Hao多模匹配算法 | 面向AArch64平台，通过哈希位图过滤和SVE并行校验加速literal匹配；提供DOT、BEXT两种路径，支持通用字节码保留FDR回退。该特性默认关闭，通过Grey参数allowHao:1启用，详见[用户指南](./docs/zh/user_guide.md#hao多模匹配算法)。 |
 | 通用字节码技术 | 通用字节码技术特性能够将Ultrascan的正则表达式编译为跨平台支持格式，该格式支持一套规则集字节码能够在x86和鲲鹏计算平台上运行，无需重新编译。 |
 | 正则匹配反馈优化技术 | 根据真实扫描语料采集低效fragment反馈，并使用feedback重新编译规则数据库，形成面向业务负载的优化闭环。 |
 
@@ -59,7 +60,7 @@ Ultrascan是一款高性能的开源正则表达式匹配库，在支持PCRE的�
 │   └── boost-patched/                                        # Boost库补丁版本
 ├── src                                                        # 核心源代码目录
 │   ├── compiler/                                             # 编译器模块，负责将正则表达式编译为内部表示
-│   ├── fdr/                                                  # FDR引擎
+│   ├── fdr/                                                  # FDR、Hao引擎
 │   ├── hwlm/                                                 # HWLM引擎
 │   ├── kunpeng-enhanced/                                     # 鲲鹏平台增强实现，包含Lily引擎
 │   ├── nfa/                                                  # NFA引擎
@@ -120,7 +121,7 @@ lily单字节、2-4字节短规则匹配引擎各自仅能处理至多8条单字
 
 正则匹配反馈优化技术当前仅支持AArch64，默认关闭，需在构建时显式设置`-DHS_ENABLE_FP_FEEDBACK=ON`。
 
-AArch64目标可通过`HS_ARM_MARCH`选择指令集基线（CMake目标处理器需为`aarch64`或`AARCH64`）：默认`AUTO`在原生构建时使用`-march=native -mtune=native`，交叉编译或编译器不支持该组合标志时回退为`PORTABLE`；`PORTABLE`固定使用`-march=armv8-a+crc`，仅可部署到支持Armv8-A和CRC32扩展的机器，适合在满足该基线的机型间分发及性能对比；也可传入显式架构值（如`armv8.2-a+crc+sve`、`armv9-a+sve2`）。`AUTO`、`native`和显式高阶架构值构建的产物只能部署到支持其全部指令集扩展的机器；详细说明请参见《[安装指南](./docs/zh/installation_guide.md)》。
+AArch64公共代码固定采用`-march=armv8-a+crc`基线，`HS_ARM_MARCH`默认值为`PORTABLE`；DOT/BEXT内核根据工具链探测结果单独构建。Hao运行时要求SVE向量长度至少为256位：DOT需要SVE，BEXT还需要SVE2和SVE2 BitPerm。通用字节码仅携带编译主机支持且成功构建的Hao变体，运行时按BEXT、DOT、FDR回退顺序选择；x86部分不启用Hao。详细说明请参见《[安装指南](./docs/zh/installation_guide.md)》和《[用户指南](./docs/zh/user_guide.md#hao多模匹配算法)》。
 
 ## 环境部署
 
@@ -128,7 +129,7 @@ AArch64目标可通过`HS_ARM_MARCH`选择指令集基线（CMake目标处理器
 
 ## 快速入门
 
-介绍通用字节码工具、性能Benchmark工具和正则匹配反馈优化技术工具的快速入门，具体请参见《[快速入门](./docs/zh/quick_start.md)》。
+介绍通用字节码工具、性能Benchmark工具、Hao算法验证和正则匹配反馈优化技术工具的快速入门，具体请参见《[快速入门](./docs/zh/quick_start.md)》。
 
 ## 学习文档
 

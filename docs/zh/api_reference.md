@@ -41,22 +41,28 @@
 typedef struct fat_hs_database fat_hs_database_t;
 ```
 
+编译前设置`hs_set_grey_overrides("allowHao:1;")`可允许AArch64部分使用Hao。
+通过引擎筛选后，公开`fat_hs_*`编译接口保留FDR回退，并附加编译主机支持且
+成功构建的DOT/BEXT变体；x86部分不启用Hao。多变体编译不受`haoHashMode`
+单一路径选择限制，运行时按实际能力分派，详见
+[通用字节码中的Hao](./user_guide.md#通用字节码中的hao)。无需新增Hao专用公开API。
+
 ### API清单
 
 | 分类 | API | 说明 |
 | --- | --- | --- |
-| 编译 | `fat_hs_compile` | 编译单个正则表达式。 |
-| 编译 | `fat_hs_compile_multi` | 编译多个正则表达式。 |
-| 编译 | `fat_hs_compile_ext_multi` | 使用扩展参数编译多个正则表达式。 |
-| 编译 | `fat_hs_compile_lit` | 编译单个纯字面量。 |
-| 编译 | `fat_hs_compile_lit_multi` | 编译多个纯字面量。 |
-| 生命周期 | `fat_hs_free_database` | 释放通用字节码数据库。 |
-| 序列化 | `fat_hs_serialize_database` | 将通用数据库序列化为字节流。 |
-| 反序列化 | `fat_hs_deserialize_database` | 分配并反序列化通用数据库。 |
-| 反序列化 | `fat_hs_deserialize_database_at` | 在调用者提供的内存中反序列化。 |
-| 查询 | `fat_hs_database_size` | 查询内存中通用数据库的大小。 |
-| 查询 | `fat_hs_serialized_database_size` | 查询序列化数据反序列化后所需空间。 |
-| 查询 | `fat_hs_database_info` | 查询数据库版本和模式信息。 |
+| 编译 | fat_hs_compile | 编译单个正则表达式。 |
+| 编译 | fat_hs_compile_multi | 编译多个正则表达式。 |
+| 编译 | fat_hs_compile_ext_multi | 使用扩展参数编译多个正则表达式。 |
+| 编译 | fat_hs_compile_lit | 编译单个纯字面量。 |
+| 编译 | fat_hs_compile_lit_multi | 编译多个纯字面量。 |
+| 生命周期 | fat_hs_free_database | 释放通用字节码数据库。 |
+| 序列化 | fat_hs_serialize_database | 将通用数据库序列化为字节流。 |
+| 反序列化 | fat_hs_deserialize_database | 分配并反序列化通用数据库。 |
+| 反序列化 | fat_hs_deserialize_database_at | 在调用者提供的内存中反序列化。 |
+| 查询 | fat_hs_database_size | 查询内存中通用数据库的大小。 |
+| 查询 | fat_hs_serialized_database_size | 查询序列化数据反序列化后所需空间。 |
+| 查询 | fat_hs_database_info | 查询数据库版本和模式信息。 |
 
 ### `fat_hs_compile`
 
@@ -71,20 +77,20 @@ hs_error_t HS_CDECL fat_hs_compile(
 
 | 参数 | 说明 |
 | --- | --- |
-| `expression` | 以NUL结尾的正则表达式，不能为空。表达式中不包含分隔符和内嵌标志。 |
-| `flags` | 作用于该表达式的`HS_FLAG_*`标志。多个标志可按位或。 |
-| `mode` | 数据库模式。必须选择`HS_MODE_BLOCK`、`HS_MODE_STREAM`或`HS_MODE_VECTORED`之一，并可组合适用的模式标志。 |
-| `platform` | 可选目标平台信息；为`NULL`时按当前主机平台生成数据库。 |
-| `db` | 非空输出参数。成功时返回通用数据库；失败时置为`NULL`。调用者使用`fat_hs_free_database()`释放成功返回的对象。 |
-| `error` | 非空输出参数。编译失败时返回错误详情；调用者使用`hs_free_compile_error()`释放非空对象。 |
+| expression | 以NUL结尾的正则表达式，不能为空。表达式中不包含分隔符和内嵌标志。 |
+| flags | 作用于该表达式的HS_FLAG_*标志。多个标志可按位或。 |
+| mode | 数据库模式。必须选择HS_MODE_BLOCK、HS_MODE_STREAM或HS_MODE_VECTORED之一，并可组合适用的模式标志。 |
+| platform | 可选目标平台信息；为NULL时按当前主机平台生成数据库。 |
+| db | 非空输出参数。成功时返回通用数据库；失败时置为NULL。调用者使用fat_hs_free_database()释放成功返回的对象。 |
+| error | 非空输出参数。编译失败时返回错误详情；调用者使用hs_free_compile_error()释放非空对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 编译成功。 |
-| `HS_COMPILER_ERROR` | `db`、`error`或表达式参数不合法，模式或平台参数不合法，或表达式解析、编译失败。 |
-| `HS_ARCH_ERROR` | 库以`FAT_RUNTIME`构建且运行平台不支持SSSE3。 |
+| HS_SUCCESS | 编译成功。 |
+| HS_COMPILER_ERROR | db、error或表达式参数不合法，模式或平台参数不合法，或表达式解析、编译失败。 |
+| HS_ARCH_ERROR | 库以FAT_RUNTIME构建且运行平台不支持SSSE3。 |
 
 ### `fat_hs_compile_multi`
 
@@ -100,22 +106,22 @@ hs_error_t HS_CDECL fat_hs_compile_multi(
 
 | 参数 | 说明 |
 | --- | --- |
-| `expressions` | 以NUL结尾的正则表达式数组，不能为空。数组包含`elements`个元素。 |
-| `flags` | 每个表达式对应的`HS_FLAG_*`标志数组；可为`NULL`，表示全部标志为0。 |
-| `ids` | 每个表达式对应的ID数组；可为`NULL`，表示使用默认ID。 |
-| `elements` | 表达式数量，必须大于0。 |
-| `mode` | 数据库模式。必须选择`HS_MODE_BLOCK`、`HS_MODE_STREAM`或`HS_MODE_VECTORED`之一，并可组合适用的模式标志。 |
-| `platform` | 可选目标平台信息；为`NULL`时按当前主机平台生成数据库。 |
-| `db` | 非空输出参数。成功时返回通用数据库；失败时置为`NULL`。调用者使用`fat_hs_free_database()`释放成功返回的对象。 |
-| `error` | 非空输出参数。编译失败时返回错误详情；调用者使用`hs_free_compile_error()`释放非空对象。 |
+| expressions | 以NUL结尾的正则表达式数组，不能为空。数组包含elements个元素。 |
+| flags | 每个表达式对应的HS_FLAG_*标志数组；可为NULL，表示全部标志为0。 |
+| ids | 每个表达式对应的ID数组；可为NULL，表示使用默认ID。 |
+| elements | 表达式数量，必须大于0。 |
+| mode | 数据库模式。必须选择HS_MODE_BLOCK、HS_MODE_STREAM或HS_MODE_VECTORED之一，并可组合适用的模式标志。 |
+| platform | 可选目标平台信息；为NULL时按当前主机平台生成数据库。 |
+| db | 非空输出参数。成功时返回通用数据库；失败时置为NULL。调用者使用fat_hs_free_database()释放成功返回的对象。 |
+| error | 非空输出参数。编译失败时返回错误详情；调用者使用hs_free_compile_error()释放非空对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 编译成功。 |
-| `HS_COMPILER_ERROR` | `db`、`error`、表达式数组或`elements`参数不合法，模式或平台参数不合法，或任一表达式解析、编译失败。 |
-| `HS_ARCH_ERROR` | 库以`FAT_RUNTIME`构建且运行平台不支持SSSE3。 |
+| HS_SUCCESS | 编译成功。 |
+| HS_COMPILER_ERROR | db、error、表达式数组或elements参数不合法，模式或平台参数不合法，或任一表达式解析、编译失败。 |
+| HS_ARCH_ERROR | 库以FAT_RUNTIME构建且运行平台不支持SSSE3。 |
 
 ### `fat_hs_compile_ext_multi`
 
@@ -132,23 +138,23 @@ hs_error_t HS_CDECL fat_hs_compile_ext_multi(
 
 | 参数 | 说明 |
 | --- | --- |
-| `expressions` | 以NUL结尾的正则表达式数组，不能为空。数组包含`elements`个元素。 |
-| `flags` | 每个表达式对应的`HS_FLAG_*`标志数组；可为`NULL`，表示全部标志为0。 |
-| `ids` | 每个表达式对应的ID数组；可为`NULL`，表示使用默认ID。 |
-| `ext` | 每个表达式对应的`hs_expr_ext_t`指针数组；可为`NULL`，单个数组元素也可为`NULL`。调用期间由调用者保持有效。 |
-| `elements` | 表达式数量，必须大于0。 |
-| `mode` | 数据库模式。必须选择`HS_MODE_BLOCK`、`HS_MODE_STREAM`或`HS_MODE_VECTORED`之一，并可组合适用的模式标志。 |
-| `platform` | 可选目标平台信息；为`NULL`时按当前主机平台生成数据库。 |
-| `db` | 非空输出参数。成功时返回通用数据库；失败时置为`NULL`。调用者使用`fat_hs_free_database()`释放成功返回的对象。 |
-| `error` | 非空输出参数。编译失败时返回错误详情；调用者使用`hs_free_compile_error()`释放非空对象。 |
+| expressions | 以NUL结尾的正则表达式数组，不能为空。数组包含elements个元素。 |
+| flags | 每个表达式对应的HS_FLAG_*标志数组；可为NULL，表示全部标志为0。 |
+| ids | 每个表达式对应的ID数组；可为NULL，表示使用默认ID。 |
+| ext | 每个表达式对应的hs_expr_ext_t指针数组；可为NULL，单个数组元素也可为NULL。调用期间由调用者保持有效。 |
+| elements | 表达式数量，必须大于0。 |
+| mode | 数据库模式。必须选择HS_MODE_BLOCK、HS_MODE_STREAM或HS_MODE_VECTORED之一，并可组合适用的模式标志。 |
+| platform | 可选目标平台信息；为NULL时按当前主机平台生成数据库。 |
+| db | 非空输出参数。成功时返回通用数据库；失败时置为NULL。调用者使用fat_hs_free_database()释放成功返回的对象。 |
+| error | 非空输出参数。编译失败时返回错误详情；调用者使用hs_free_compile_error()释放非空对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 编译成功。 |
-| `HS_COMPILER_ERROR` | `db`、`error`、表达式数组、扩展参数、`elements`、模式或平台参数不合法，或任一表达式解析、编译失败。 |
-| `HS_ARCH_ERROR` | 库以`FAT_RUNTIME`构建且运行平台不支持SSSE3。 |
+| HS_SUCCESS | 编译成功。 |
+| HS_COMPILER_ERROR | db、error、表达式数组、扩展参数、elements、模式或平台参数不合法，或任一表达式解析、编译失败。 |
+| HS_ARCH_ERROR | 库以FAT_RUNTIME构建且运行平台不支持SSSE3。 |
 
 ### `fat_hs_compile_lit`
 
@@ -163,21 +169,21 @@ hs_error_t HS_CDECL fat_hs_compile_lit(
 
 | 参数 | 说明 |
 | --- | --- |
-| `expression` | 纯字面量字节序列，不能为空；数据可包含`\0`。 |
-| `flags` | 作用于该字面量的`HS_FLAG_*`标志。 |
-| `len` | `expression`的字节长度，接口只读取此前`len`个字节。 |
-| `mode` | 数据库模式。必须选择`HS_MODE_BLOCK`、`HS_MODE_STREAM`或`HS_MODE_VECTORED`之一，并可组合适用的模式标志。 |
-| `platform` | 可选目标平台信息；为`NULL`时按当前主机平台生成数据库。 |
-| `db` | 非空输出参数。成功时返回通用数据库；失败时置为`NULL`。调用者使用`fat_hs_free_database()`释放成功返回的对象。 |
-| `error` | 非空输出参数。编译失败时返回错误详情；调用者使用`hs_free_compile_error()`释放非空对象。 |
+| expression | 纯字面量字节序列，不能为空；数据可包含\0。 |
+| flags | 作用于该字面量的HS_FLAG_*标志。 |
+| len | expression的字节长度，接口只读取此前len个字节。 |
+| mode | 数据库模式。必须选择HS_MODE_BLOCK、HS_MODE_STREAM或HS_MODE_VECTORED之一，并可组合适用的模式标志。 |
+| platform | 可选目标平台信息；为NULL时按当前主机平台生成数据库。 |
+| db | 非空输出参数。成功时返回通用数据库；失败时置为NULL。调用者使用fat_hs_free_database()释放成功返回的对象。 |
+| error | 非空输出参数。编译失败时返回错误详情；调用者使用hs_free_compile_error()释放非空对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 编译成功。 |
-| `HS_COMPILER_ERROR` | `db`、`error`、字面量、长度、模式或平台参数不合法，或编译失败。 |
-| `HS_ARCH_ERROR` | 库以`FAT_RUNTIME`构建且运行平台不支持SSSE3。 |
+| HS_SUCCESS | 编译成功。 |
+| HS_COMPILER_ERROR | db、error、字面量、长度、模式或平台参数不合法，或编译失败。 |
+| HS_ARCH_ERROR | 库以FAT_RUNTIME构建且运行平台不支持SSSE3。 |
 
 ### `fat_hs_compile_lit_multi`
 
@@ -193,23 +199,23 @@ hs_error_t HS_CDECL fat_hs_compile_lit_multi(
 
 | 参数 | 说明 |
 | --- | --- |
-| `expressions` | 纯字面量字节序列数组，不能为空。数组包含`elements`个元素，各元素可包含`\0`。 |
-| `flags` | 每个字面量对应的`HS_FLAG_*`标志数组；可为`NULL`，表示全部标志为0。 |
-| `ids` | 每个字面量对应的ID数组；可为`NULL`，表示使用默认ID。 |
-| `lens` | 每个字面量的字节长度数组，不能为空。数组与`expressions`一一对应，`lens[i]`指定从`expressions[i]`读取的字节数；字面量可包含`\0`，接口只读取前`lens[i]`个字节。 |
-| `elements` | 字面量数量，必须大于0。 |
-| `mode` | 数据库模式。必须选择`HS_MODE_BLOCK`、`HS_MODE_STREAM`或`HS_MODE_VECTORED`之一，并可组合适用的模式标志。 |
-| `platform` | 可选目标平台信息；为`NULL`时按当前主机平台生成数据库。 |
-| `db` | 非空输出参数。成功时返回通用数据库；失败时置为`NULL`。调用者使用`fat_hs_free_database()`释放成功返回的对象。 |
-| `error` | 非空输出参数。编译失败时返回错误详情；调用者使用`hs_free_compile_error()`释放非空对象。 |
+| expressions | 纯字面量字节序列数组，不能为空。数组包含elements个元素，各元素可包含\0。 |
+| flags | 每个字面量对应的HS_FLAG_*标志数组；可为NULL，表示全部标志为0。 |
+| ids | 每个字面量对应的ID数组；可为NULL，表示使用默认ID。 |
+| lens | 每个字面量的字节长度数组，不能为空。数组与expressions一一对应，lens[i]指定从expressions[i]读取的字节数；字面量可包含\0，接口只读取前lens[i]个字节。 |
+| elements | 字面量数量，必须大于0。 |
+| mode | 数据库模式。必须选择HS_MODE_BLOCK、HS_MODE_STREAM或HS_MODE_VECTORED之一，并可组合适用的模式标志。 |
+| platform | 可选目标平台信息；为NULL时按当前主机平台生成数据库。 |
+| db | 非空输出参数。成功时返回通用数据库；失败时置为NULL。调用者使用fat_hs_free_database()释放成功返回的对象。 |
+| error | 非空输出参数。编译失败时返回错误详情；调用者使用hs_free_compile_error()释放非空对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 编译成功。 |
-| `HS_COMPILER_ERROR` | `db`、`error`、字面量数组、长度数组、`elements`、模式或平台参数不合法，或任一字面量编译失败。 |
-| `HS_ARCH_ERROR` | 库以`FAT_RUNTIME`构建且运行平台不支持SSSE3。 |
+| HS_SUCCESS | 编译成功。 |
+| HS_COMPILER_ERROR | db、error、字面量数组、长度数组、elements、模式或平台参数不合法，或任一字面量编译失败。 |
+| HS_ARCH_ERROR | 库以FAT_RUNTIME构建且运行平台不支持SSSE3。 |
 
 ### `fat_hs_free_database`
 
@@ -221,14 +227,14 @@ hs_error_t HS_CDECL fat_hs_free_database(fat_hs_database_t *db);
 
 | 参数 | 说明 |
 | --- | --- |
-| `db` | 待释放的通用数据库；可为`NULL`。 |
+| db | 待释放的通用数据库；可为NULL。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 数据库已释放，或`db`为`NULL`。 |
-| `HS_INVALID` | `db`非空但不是有效的通用数据库对象。 |
+| HS_SUCCESS | 数据库已释放，或db为NULL。 |
+| HS_INVALID | db非空但不是有效的通用数据库对象。 |
 
 ### `fat_hs_serialize_database`
 
@@ -241,20 +247,20 @@ hs_error_t HS_CDECL fat_hs_serialize_database(
 
 | 参数 | 说明 |
 | --- | --- |
-| `db` | 待序列化的通用数据库，必须有效且按要求对齐。 |
-| `bytes` | 非空输出参数。成功时返回由misc allocator分配的序列化缓冲区；默认分配器下可使用`free()`释放，配置自定义misc allocator时应使用相应释放函数。 |
-| `length` | 非空输出参数。成功时返回`bytes`指向缓冲区的长度。 |
+| db | 待序列化的通用数据库，必须有效且按要求对齐。 |
+| bytes | 非空输出参数。成功时返回由misc allocator分配的序列化缓冲区；默认分配器下可使用free()释放，配置自定义misc allocator时应使用相应释放函数。 |
+| length | 非空输出参数。成功时返回bytes指向缓冲区的长度。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 序列化成功。 |
-| `HS_INVALID` | `db`、`bytes`或`length`为空，或数据库魔数无效。 |
-| `HS_BAD_ALIGN` | `db`未按要求对齐。 |
-| `HS_DB_VERSION_ERROR` | 数据库版本与当前库不匹配。 |
-| `HS_NOMEM` | misc allocator未能分配输出缓冲区。 |
-| `HS_BAD_ALLOC` | misc allocator返回的缓冲区未满足对齐要求。 |
+| HS_SUCCESS | 序列化成功。 |
+| HS_INVALID | db、bytes或length为空，或数据库魔数无效。 |
+| HS_BAD_ALIGN | db未按要求对齐。 |
+| HS_DB_VERSION_ERROR | 数据库版本与当前库不匹配。 |
+| HS_NOMEM | misc allocator未能分配输出缓冲区。 |
+| HS_BAD_ALLOC | misc allocator返回的缓冲区未满足对齐要求。 |
 
 ### `fat_hs_deserialize_database`
 
@@ -267,19 +273,19 @@ hs_error_t HS_CDECL fat_hs_deserialize_database(
 
 | 参数 | 说明 |
 | --- | --- |
-| `bytes` | 通用数据库的序列化字节流，不能为空。 |
-| `length` | `bytes`指向字节流的长度。 |
-| `db` | 非空输出参数。成功时返回新数据库；失败时置为`NULL`。调用者使用`fat_hs_free_database()`释放成功返回的对象。 |
+| bytes | 通用数据库的序列化字节流，不能为空。 |
+| length | bytes指向字节流的长度。 |
+| db | 非空输出参数。成功时返回新数据库；失败时置为NULL。调用者使用fat_hs_free_database()释放成功返回的对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 反序列化成功。 |
-| `HS_INVALID` | `bytes`或`db`为空，字节流格式、长度、数据库魔数或校验和无效。 |
-| `HS_DB_VERSION_ERROR` | 字节流中的数据库版本与当前库不匹配。 |
-| `HS_NOMEM` | database allocator未能分配数据库内存。 |
-| `HS_BAD_ALLOC` | database allocator返回的内存未满足对齐要求。 |
+| HS_SUCCESS | 反序列化成功。 |
+| HS_INVALID | bytes或db为空，字节流格式、长度、数据库魔数或校验和无效。 |
+| HS_DB_VERSION_ERROR | 字节流中的数据库版本与当前库不匹配。 |
+| HS_NOMEM | database allocator未能分配数据库内存。 |
+| HS_BAD_ALLOC | database allocator返回的内存未满足对齐要求。 |
 
 ### `fat_hs_deserialize_database_at`
 
@@ -292,18 +298,18 @@ hs_error_t HS_CDECL fat_hs_deserialize_database_at(
 
 | 参数 | 说明 |
 | --- | --- |
-| `bytes` | 通用数据库的序列化字节流，不能为空。 |
-| `length` | `bytes`指向字节流的长度。 |
-| `db` | 调用者预分配的输出内存，不能为空且至少按8字节对齐。所需空间先通过`fat_hs_serialized_database_size()`查询；内存所有权始终归调用者，不得调用`fat_hs_free_database()`释放。 |
+| bytes | 通用数据库的序列化字节流，不能为空。 |
+| length | bytes指向字节流的长度。 |
+| db | 调用者预分配的输出内存，不能为空且至少按8字节对齐。所需空间先通过fat_hs_serialized_database_size()查询；内存所有权始终归调用者，不得调用fat_hs_free_database()释放。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 反序列化成功。 |
-| `HS_INVALID` | `bytes`或`db`为空，字节流格式、长度、数据库魔数或校验和无效。 |
-| `HS_BAD_ALIGN` | `db`未按8字节对齐。 |
-| `HS_DB_VERSION_ERROR` | 字节流中的数据库版本与当前库不匹配。 |
+| HS_SUCCESS | 反序列化成功。 |
+| HS_INVALID | bytes或db为空，字节流格式、长度、数据库魔数或校验和无效。 |
+| HS_BAD_ALIGN | db未按8字节对齐。 |
+| HS_DB_VERSION_ERROR | 字节流中的数据库版本与当前库不匹配。 |
 
 ### `fat_hs_database_size`
 
@@ -316,16 +322,16 @@ hs_error_t HS_CDECL fat_hs_database_size(
 
 | 参数 | 说明 |
 | --- | --- |
-| `db` | 待查询的通用数据库。 |
-| `size` | 非空输出参数。成功时返回数据库所占字节数。 |
+| db | 待查询的通用数据库。 |
+| size | 非空输出参数。成功时返回数据库所占字节数。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 查询成功。 |
-| `HS_INVALID` | `db`或`size`为空，或数据库魔数无效。 |
-| `HS_DB_VERSION_ERROR` | 数据库版本与当前库不匹配。 |
+| HS_SUCCESS | 查询成功。 |
+| HS_INVALID | db或size为空，或数据库魔数无效。 |
+| HS_DB_VERSION_ERROR | 数据库版本与当前库不匹配。 |
 
 ### `fat_hs_serialized_database_size`
 
@@ -338,17 +344,17 @@ hs_error_t HS_CDECL fat_hs_serialized_database_size(
 
 | 参数 | 说明 |
 | --- | --- |
-| `bytes` | 通用数据库的序列化字节流。 |
-| `length` | `bytes`指向字节流的长度。 |
-| `size` | 非空输出参数。成功时返回`fat_hs_deserialize_database_at()`所需的内存大小。 |
+| bytes | 通用数据库的序列化字节流。 |
+| length | bytes指向字节流的长度。 |
+| size | 非空输出参数。成功时返回fat_hs_deserialize_database_at()所需的内存大小。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 查询成功。 |
-| `HS_INVALID` | 字节流为空、长度或格式无效，或`size`为空。 |
-| `HS_DB_VERSION_ERROR` | 字节流中的数据库版本与当前库不匹配。 |
+| HS_SUCCESS | 查询成功。 |
+| HS_INVALID | 字节流为空、长度或格式无效，或size为空。 |
+| HS_DB_VERSION_ERROR | 字节流中的数据库版本与当前库不匹配。 |
 
 ### `fat_hs_database_info`
 
@@ -361,17 +367,17 @@ hs_error_t HS_CDECL fat_hs_database_info(
 
 | 参数 | 说明 |
 | --- | --- |
-| `db` | 待查询的通用数据库，必须有效且按要求对齐。 |
-| `info` | 非空输出参数。成功时返回由misc allocator分配的NUL结尾信息字符串；默认分配器下可使用`free()`释放，配置自定义misc allocator时应使用相应释放函数。失败时置为`NULL`。 |
+| db | 待查询的通用数据库，必须有效且按要求对齐。 |
+| info | 非空输出参数。成功时返回由misc allocator分配的NUL结尾信息字符串；默认分配器下可使用free()释放，配置自定义misc allocator时应使用相应释放函数。失败时置为NULL。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 查询成功。 |
-| `HS_INVALID` | `db`或`info`为空，`db`未按要求对齐，或数据库魔数无效。 |
-| `HS_NOMEM` | misc allocator未能分配信息字符串。 |
-| `HS_BAD_ALLOC` | misc allocator返回的内存未满足对齐要求。 |
+| HS_SUCCESS | 查询成功。 |
+| HS_INVALID | db或info为空，db未按要求对齐，或数据库魔数无效。 |
+| HS_NOMEM | misc allocator未能分配信息字符串。 |
+| HS_BAD_ALLOC | misc allocator返回的内存未满足对齐要求。 |
 
 ### 最小用例
 
@@ -460,24 +466,30 @@ hs_error_t HS_CDECL hs_set_grey_overrides(const char *overrides);
 
 | 参数 | 说明 |
 | --- | --- |
-| `overrides` | 格式为`key:value;key:value;...`。传入`NULL`或空字符串等价于复位。 |
+| overrides | 格式为key:value;key:value;...。传入NULL或空字符串等价于复位。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 字符串有效，已保存新配置；`NULL`或空字符串也返回成功。 |
-| `HS_INVALID` | 存在未知key、缺少冒号、非数字或越界数值等格式错误；原有全局配置保持不变。调试用途的`help`输入也会被拒绝。 |
+| HS_SUCCESS | 字符串有效，已保存新配置；NULL或空字符串也返回成功。 |
+| HS_INVALID | 存在未知key、缺少冒号、非数字或越界数值等格式错误；原有全局配置保持不变。调试用途的help输入也会被拒绝。 |
 
 使用约束：
 
 - key必须是`applyGreyOverrides()`白名单中的布尔或数值字段。常用示例包括`allowLily`、
-  `allowNeoFdr`、`limitPatternCount`和`limitPatternLength`；并非`Grey`结构中的所有字段
+  `allowNeoFdr`、`allowHao`、`haoHashMode`、`haoKeyBits`、`haoSelectorMode`、
+  `haoDebug`、`haoDebugAuto`、`limitPatternCount`和`limitPatternLength`；并非`Grey`结构中的所有字段
   都可公开覆盖。
 - value按无符号整数解析。布尔开关建议只使用`0`或`1`，不要传入负数。
 - 解析不会自动去除key中的空白字符；建议始终使用紧凑格式。
 - 配置存储由互斥锁保护，但配置是进程级共享状态。为保证同一批编译结果可复现，应在启动阶段设置，并避免与编译调用并发修改。
 - 每次成功调用都会整体替换上一份覆盖字符串，不会自动与上一次设置合并。
+- Hao参数的默认值、适用路径及硬件限制见[用户指南](./user_guide.md#grey参数)。
+  这些参数允许编译器选择Hao，不保证每个内部matcher都采用Hao。
+- 编入`HAO_ENABLE_RUNTIME_STATS=1`的构建还会在首次Hao扫描时读取`haoDebug`
+  的值为`4`的bit，以决定是否启用进程级运行统计。因此该诊断配置应保留至首次
+  扫描，具体见[开发指南](./developer_guide.md#诊断与验证)。
 
 ### `hs_reset_grey_overrides`
 
@@ -495,7 +507,7 @@ hs_error_t HS_CDECL hs_reset_grey_overrides(void);
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 覆盖已清除；重复调用也安全。 |
+| HS_SUCCESS | 覆盖已清除；重复调用也安全。 |
 
 ### 最小用例
 
@@ -572,11 +584,11 @@ Grey compile succeeded
 
 | 程序 | 参数 |
 | --- | --- |
-| `examples/simplegrep` | `-G OVERRIDES` |
-| `examples/pcapscan` | `-G OVERRIDES` |
-| `examples/patbench` | `-g OVERRIDES` |
-| `hsdump` | `-G OVERRIDES` |
-| `hsbench`、`hscheck`、`hscollider`、`hspgo` | `-G OVERRIDES` |
+| examples/simplegrep | -G OVERRIDES |
+| examples/pcapscan | -G OVERRIDES |
+| examples/patbench | -g OVERRIDES |
+| hsdump | -G OVERRIDES |
+| hsbench、hscheck、hscollider、hspgo | -G OVERRIDES |
 
 命令行参数仅负责在进程内调用`hs_set_grey_overrides()`；它不会创建或修改`config.txt`。
 
@@ -618,27 +630,27 @@ typedef struct hs_fp_feedback hs_fp_feedback_t;
 
 | 常量 | 值 | 说明 |
 | --- | ---: | --- |
-| `HS_FP_TABLE_UNKNOWN` | 0 | 未知表。 |
-| `HS_FP_TABLE_FLOATING` | 1 | floating表。 |
-| `HS_FP_TABLE_EOD_ANCHORED` | 2 | EOD anchored表。 |
-| `HS_FP_TABLE_SMALL_BLOCK` | 3 | small-block表。 |
-| `HS_FP_TABLE_DELAY_REBUILD` | 4 | 保留值，不采集也不用于反馈编译。 |
-| `HS_FP_TABLE_ANCHORED` | 5 | 保留值，不采集也不用于反馈编译。 |
+| HS_FP_TABLE_UNKNOWN | 0 | 未知表。 |
+| HS_FP_TABLE_FLOATING | 1 | floating表。 |
+| HS_FP_TABLE_EOD_ANCHORED | 2 | EOD anchored表。 |
+| HS_FP_TABLE_SMALL_BLOCK | 3 | small-block表。 |
+| HS_FP_TABLE_DELAY_REBUILD | 4 | 保留值，不采集也不用于反馈编译。 |
+| HS_FP_TABLE_ANCHORED | 5 | 保留值，不采集也不用于反馈编译。 |
 
 | 常量 | 值 | 说明 |
 | --- | ---: | --- |
-| `HS_FP_ENGINE_UNKNOWN` | 0 | 未知引擎类型。 |
-| `HS_FP_ENGINE_NOODLE` | 1 | Noodle类型标识。 |
-| `HS_FP_ENGINE_FDR` | 2 | FDR类型标识。 |
-| `HS_FP_ENGINE_NEO_FDR` | 3 | NeoFDR类型标识。 |
-| `HS_FP_ENGINE_HAO` | 4 | 为保持公开ABI完整性保留的引擎类型标识。 |
-| `HS_FP_ENGINE_TEDDY` | 5 | Teddy类型标识。 |
+| HS_FP_ENGINE_UNKNOWN | 0 | 未知引擎类型。 |
+| HS_FP_ENGINE_NOODLE | 1 | Noodle类型标识。 |
+| HS_FP_ENGINE_FDR | 2 | FDR类型标识。 |
+| HS_FP_ENGINE_NEO_FDR | 3 | NeoFDR类型标识。 |
+| HS_FP_ENGINE_HAO | 4 | Hao类型标识，涵盖单一路径及携带Hao变体的matcher。 |
+| HS_FP_ENGINE_TEDDY | 5 | Teddy类型标识。 |
 
 | 常量 | 值 | 说明 |
 | --- | ---: | --- |
-| `HS_FP_FRAGMENT_FLAG_NOCASE` | `0x01` | fragment不区分大小写。 |
-| `HS_FP_FRAGMENT_FLAG_NORUNS` | `0x02` | fragment带NORUNS属性。 |
-| `HS_FP_FRAGMENT_FLAG_MASKED` | `0x04` | fragment带mask/cmp约束。 |
+| HS_FP_FRAGMENT_FLAG_NOCASE | 0x01 | fragment不区分大小写。 |
+| HS_FP_FRAGMENT_FLAG_NORUNS | 0x02 | fragment带NORUNS属性。 |
+| HS_FP_FRAGMENT_FLAG_MASKED | 0x04 | fragment带mask/cmp约束。 |
 
 #### 筛选参数
 
@@ -657,11 +669,11 @@ typedef struct hs_fp_feedback_params {
 
 | Flag | 生效字段 | 默认值宏 | 默认值 |
 | --- | --- | --- | ---: |
-| `HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT` | `min_trigger_count` | `HS_FP_FEEDBACK_DEFAULT_MIN_TRIGGER_COUNT` | 1000 |
-| `HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT` | `min_false_positive_count` | `HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_COUNT` | 1000 |
-| `HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE` | `min_false_positive_rate` | `HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_RATE` | 99% |
-| `HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE` | `min_waste_share` | `HS_FP_FEEDBACK_DEFAULT_MIN_WASTE_SHARE` | 5% |
-| `HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS` | `max_bad_fragments` | `HS_FP_FEEDBACK_DEFAULT_MAX_BAD_FRAGMENTS` | 0，表示不限制 |
+| HS_FP_FEEDBACK_PARAM_MIN_TRIGGER_COUNT | min_trigger_count | HS_FP_FEEDBACK_DEFAULT_MIN_TRIGGER_COUNT | 1000 |
+| HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_COUNT | min_false_positive_count | HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_COUNT | 1000 |
+| HS_FP_FEEDBACK_PARAM_MIN_FALSE_POSITIVE_RATE | min_false_positive_rate | HS_FP_FEEDBACK_DEFAULT_MIN_FALSE_POSITIVE_RATE | 99% |
+| HS_FP_FEEDBACK_PARAM_MIN_WASTE_SHARE | min_waste_share | HS_FP_FEEDBACK_DEFAULT_MIN_WASTE_SHARE | 5% |
+| HS_FP_FEEDBACK_PARAM_MAX_BAD_FRAGMENTS | max_bad_fragments | HS_FP_FEEDBACK_DEFAULT_MAX_BAD_FRAGMENTS | 0，表示不限制 |
 
 比率字段使用`HS_FP_FEEDBACK_RATE_SCALE`（值为`1000000000000ULL`）缩放。例如
 99%表示为`990000000000ULL`。`params == NULL`或零初始化结构使用全部默认值。
@@ -716,15 +728,15 @@ typedef struct hs_fp_feedback_dump_callbacks {
 
 | 字段 | 说明 |
 | --- | --- |
-| `key` | 用于dump、日志和跨编译观察的稳定fragment key。 |
-| `table` | `HS_FP_TABLE_*`值，也是反馈编译精确身份的一部分。 |
-| `engine` | `HS_FP_ENGINE_*`值，仅用于分类和观察。 |
-| `flags` | `HS_FP_FRAGMENT_FLAG_*`位图。 |
-| `bytes`/`length` | fragment二进制内容及长度，不保证以NUL结尾。 |
-| `mask`/`cmp`/`mask_length` | 可选mask/cmp约束；无约束时长度为0，指针可为`NULL`。 |
-| `trigger_count` | 前端fragment触发次数。 |
-| `true_trigger_count` | 触发后直接产生至少一次最终上报的次数；一次触发产生多个上报仍只计一次。 |
-| `false_positive_count` | 未直接产生最终上报的触发次数。 |
+| key | 用于dump、日志和跨编译观察的稳定fragment key。 |
+| table | HS_FP_TABLE_*值，也是反馈编译精确身份的一部分。 |
+| engine | HS_FP_ENGINE_*值，仅用于分类和观察。 |
+| flags | HS_FP_FRAGMENT_FLAG_*位图。 |
+| bytes/length | fragment二进制内容及长度，不保证以NUL结尾。 |
+| mask/cmp/mask_length | 可选mask/cmp约束；无约束时长度为0，指针可为NULL。 |
+| trigger_count | 前端fragment触发次数。 |
+| true_trigger_count | 触发后直接产生至少一次最终上报的次数；一次触发产生多个上报仍只计一次。 |
+| false_positive_count | 未直接产生最终上报的触发次数。 |
 
 `hs_fp_feedback_dump_summary_t`汇总本次采样窗口内可映射到metadata且实际触发过的
 known fragment：`fragment_count`为明细数，`bad_fragment_count`为入选feedback
@@ -745,18 +757,18 @@ hs_error_t HS_CDECL hs_fp_collector_create(
 
 | 参数 | 说明 |
 | --- | --- |
-| `db` | 已编译的baseline数据库。 |
-| `collector` | 非空输出参数。启用特性时成功返回新collector；失败或特性未启用时置为`NULL`。调用者使用`hs_fp_collector_free()`释放成功返回的对象。 |
+| db | 已编译的baseline数据库。 |
+| collector | 非空输出参数。启用特性时成功返回新collector；失败或特性未启用时置为NULL。调用者使用hs_fp_collector_free()释放成功返回的对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 功能已启用时创建成功。 |
-| `HS_INVALID` | 功能已启用时，`collector == NULL`、数据库为空、数据库魔数错误或字节码未按要求对齐；功能未启用时，仅在`collector == NULL`时返回该值。 |
-| `HS_DB_VERSION_ERROR` | 功能已启用时，数据库版本与当前库不匹配。 |
-| `HS_NOMEM` | 功能已启用时，分配collector或计数器失败。 |
-| `HS_ARCH_ERROR` | 功能未启用且`collector`有效时，将`*collector`置为`NULL`并返回该值。 |
+| HS_SUCCESS | 功能已启用时创建成功。 |
+| HS_INVALID | 功能已启用时，collector == NULL、数据库为空、数据库魔数错误或字节码未按要求对齐；功能未启用时，仅在collector == NULL时返回该值。 |
+| HS_DB_VERSION_ERROR | 功能已启用时，数据库版本与当前库不匹配。 |
+| HS_NOMEM | 功能已启用时，分配collector或计数器失败。 |
+| HS_ARCH_ERROR | 功能未启用且collector有效时，将*collector置为NULL并返回该值。 |
 
 ### `hs_fp_collector_reset`
 
@@ -768,15 +780,15 @@ hs_error_t HS_CDECL hs_fp_collector_reset(hs_fp_collector_t *collector);
 
 | 参数 | 说明 |
 | --- | --- |
-| `collector` | 待复位的collector。启用特性时不能为空。 |
+| collector | 待复位的collector。启用特性时不能为空。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 功能已启用时复位成功。 |
-| `HS_INVALID` | 功能已启用且`collector == NULL`。 |
-| `HS_ARCH_ERROR` | 功能未启用时，不校验`collector`，直接返回该值。 |
+| HS_SUCCESS | 功能已启用时复位成功。 |
+| HS_INVALID | 功能已启用且collector == NULL。 |
+| HS_ARCH_ERROR | 功能未启用时，不校验collector，直接返回该值。 |
 
 ### `hs_fp_collector_merge`
 
@@ -790,19 +802,19 @@ hs_error_t HS_CDECL hs_fp_collector_merge(
 
 | 参数 | 说明 |
 | --- | --- |
-| `collectors` | 待合并的collector数组，不能为空。所有元素必须非空，且必须由完全相同的数据库对象创建。 |
-| `count` | `collectors`中的对象数量，必须大于0。 |
-| `collector` | 非空输出参数。启用特性时成功返回新的合并collector；失败或特性未启用时置为`NULL`。调用者使用`hs_fp_collector_free()`释放成功返回的对象。 |
+| collectors | 待合并的collector数组，不能为空。所有元素必须非空，且必须由完全相同的数据库对象创建。 |
+| count | collectors中的对象数量，必须大于0。 |
+| collector | 非空输出参数。启用特性时成功返回新的合并collector；失败或特性未启用时置为NULL。调用者使用hs_fp_collector_free()释放成功返回的对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 功能已启用时合并成功。 |
-| `HS_INVALID` | 功能已启用时，`collectors == NULL`、`count == 0`、`collector == NULL`、任一输入collector为空，或输入来自不同数据库对象；功能未启用时，仅在`collector == NULL`时返回该值。 |
-| `HS_DB_VERSION_ERROR` | 功能已启用时，新collector创建时关联数据库版本与当前库不匹配。 |
-| `HS_NOMEM` | 功能已启用时，分配新collector或计数器失败。 |
-| `HS_ARCH_ERROR` | 功能未启用且`collector`有效时，将`*collector`置为`NULL`并返回该值。 |
+| HS_SUCCESS | 功能已启用时合并成功。 |
+| HS_INVALID | 功能已启用时，collectors == NULL、count == 0、collector == NULL、任一输入collector为空，或输入来自不同数据库对象；功能未启用时，仅在collector == NULL时返回该值。 |
+| HS_DB_VERSION_ERROR | 功能已启用时，新collector创建时关联数据库版本与当前库不匹配。 |
+| HS_NOMEM | 功能已启用时，分配新collector或计数器失败。 |
+| HS_ARCH_ERROR | 功能未启用且collector有效时，将*collector置为NULL并返回该值。 |
 
 ### `hs_fp_collector_free`
 
@@ -814,13 +826,13 @@ hs_error_t HS_CDECL hs_fp_collector_free(hs_fp_collector_t *collector);
 
 | 参数 | 说明 |
 | --- | --- |
-| `collector` | 待释放的collector；可为`NULL`。 |
+| collector | 待释放的collector；可为NULL。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 无论特性是否启用、`collector`是否为`NULL`，均返回成功。 |
+| HS_SUCCESS | 无论特性是否启用、collector是否为NULL，均返回成功。 |
 
 ### `hs_fp_collector_to_feedback`
 
@@ -836,18 +848,18 @@ hs_error_t HS_CDECL hs_fp_collector_to_feedback(
 
 | 参数 | 说明 |
 | --- | --- |
-| `collector` | 有效的反馈collector。 |
-| `params` | 可选筛选参数。传入`NULL`或零初始化结构时使用默认阈值。 |
-| `feedback` | 非空输出参数。启用特性时成功返回feedback；失败或特性未启用时置为`NULL`。调用者使用`hs_fp_feedback_free()`释放成功返回的对象。 |
+| collector | 有效的反馈collector。 |
+| params | 可选筛选参数。传入NULL或零初始化结构时使用默认阈值。 |
+| feedback | 非空输出参数。启用特性时成功返回feedback；失败或特性未启用时置为NULL。调用者使用hs_fp_feedback_free()释放成功返回的对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 功能已启用时，feedback生成成功。 |
-| `HS_INVALID` | 功能已启用时，`collector == NULL`、`feedback == NULL`、筛选参数的`flags`包含未知位、已启用的`max_bad_fragments`为0，或已启用的比例阈值大于`HS_FP_FEEDBACK_RATE_SCALE`；功能未启用时，仅在`feedback == NULL`时返回该值。 |
-| `HS_NOMEM` | 功能已启用时，分配统计报告或feedback失败。 |
-| `HS_ARCH_ERROR` | 功能未启用且`feedback`有效时，将`*feedback`置为`NULL`并返回该值。 |
+| HS_SUCCESS | 功能已启用时，feedback生成成功。 |
+| HS_INVALID | 功能已启用时，collector == NULL、feedback == NULL、筛选参数的flags包含未知位、已启用的max_bad_fragments为0，或已启用的比例阈值大于HS_FP_FEEDBACK_RATE_SCALE；功能未启用时，仅在feedback == NULL时返回该值。 |
+| HS_NOMEM | 功能已启用时，分配统计报告或feedback失败。 |
+| HS_ARCH_ERROR | 功能未启用且feedback有效时，将*feedback置为NULL并返回该值。 |
 
 ### `hs_fp_collector_to_feedback_with_dump`
 
@@ -862,20 +874,20 @@ hs_error_t HS_CDECL hs_fp_collector_to_feedback_with_dump(
 
 | 参数 | 说明 |
 | --- | --- |
-| `collector` | 有效的反馈collector。 |
-| `params` | 可选筛选参数。传入`NULL`或零初始化结构时使用默认阈值。 |
-| `callbacks` | 可选dump回调集合；为`NULL`时不输出dump。`on_summary`和`on_fragment`可分别为`NULL`。 |
-| `context` | 原样传递给dump回调的用户上下文；`callbacks == NULL`时不使用。 |
-| `feedback` | 非空输出参数。启用特性时成功返回feedback；失败或特性未启用时置为`NULL`。调用者使用`hs_fp_feedback_free()`释放成功返回的对象。 |
+| collector | 有效的反馈collector。 |
+| params | 可选筛选参数。传入NULL或零初始化结构时使用默认阈值。 |
+| callbacks | 可选dump回调集合；为NULL时不输出dump。on_summary和on_fragment可分别为NULL。 |
+| context | 原样传递给dump回调的用户上下文；callbacks == NULL时不使用。 |
+| feedback | 非空输出参数。启用特性时成功返回feedback；失败或特性未启用时置为NULL。调用者使用hs_fp_feedback_free()释放成功返回的对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 功能已启用时，feedback生成成功。 |
-| `HS_INVALID` | 功能已启用时，`collector == NULL`、`feedback == NULL`、筛选参数的`flags`包含未知位、已启用的`max_bad_fragments`为0，或已启用的比例阈值大于`HS_FP_FEEDBACK_RATE_SCALE`；功能未启用时，仅在`feedback == NULL`时返回该值。 |
-| `HS_NOMEM` | 功能已启用时，分配统计报告或feedback失败。 |
-| `HS_ARCH_ERROR` | 功能未启用且`feedback`有效时，将`*feedback`置为`NULL`并返回该值。 |
+| HS_SUCCESS | 功能已启用时，feedback生成成功。 |
+| HS_INVALID | 功能已启用时，collector == NULL、feedback == NULL、筛选参数的flags包含未知位、已启用的max_bad_fragments为0，或已启用的比例阈值大于HS_FP_FEEDBACK_RATE_SCALE；功能未启用时，仅在feedback == NULL时返回该值。 |
+| HS_NOMEM | 功能已启用时，分配统计报告或feedback失败。 |
+| HS_ARCH_ERROR | 功能未启用且feedback有效时，将*feedback置为NULL并返回该值。 |
 
 ### `hs_fp_feedback_free`
 
@@ -887,13 +899,13 @@ hs_error_t HS_CDECL hs_fp_feedback_free(hs_fp_feedback_t *feedback);
 
 | 参数 | 说明 |
 | --- | --- |
-| `feedback` | 待释放的feedback；可为`NULL`。 |
+| feedback | 待释放的feedback；可为NULL。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 无论特性是否启用、`feedback`是否为`NULL`，均返回成功。 |
+| HS_SUCCESS | 无论特性是否启用、feedback是否为NULL，均返回成功。 |
 
 ### `hs_compile_multi_with_feedback`
 
@@ -909,24 +921,24 @@ hs_error_t HS_CDECL hs_compile_multi_with_feedback(
 
 | 参数 | 说明 |
 | --- | --- |
-| `expressions` | 以NUL结尾的正则表达式数组。 |
-| `flags` | 每个表达式对应的`HS_FLAG_*`标志数组；可为`NULL`，表示全部标志为0。 |
-| `ids` | 每个表达式对应的ID数组；可为`NULL`，表示使用默认ID。 |
-| `elements` | 表达式数量，必须大于0。 |
-| `mode` | 数据库模式。必须选择`HS_MODE_BLOCK`、`HS_MODE_STREAM`或`HS_MODE_VECTORED`之一，并可组合适用的模式标志。 |
-| `platform` | 可选目标平台信息；为`NULL`时按当前主机平台生成数据库。 |
-| `feedback` | 可选反馈对象。启用特性时为`NULL`等价于对应的普通multi编译；库只在调用期间读取，不接管所有权。 |
-| `db` | 输出参数。成功时返回新数据库；失败或特性未启用时置为`NULL`。调用者使用`hs_free_database()`释放成功返回的对象。 |
-| `error` | 输出参数。编译失败时返回错误详情；调用者使用`hs_free_compile_error()`释放非空对象。 |
+| expressions | 以NUL结尾的正则表达式数组。 |
+| flags | 每个表达式对应的HS_FLAG_*标志数组；可为NULL，表示全部标志为0。 |
+| ids | 每个表达式对应的ID数组；可为NULL，表示使用默认ID。 |
+| elements | 表达式数量，必须大于0。 |
+| mode | 数据库模式。必须选择HS_MODE_BLOCK、HS_MODE_STREAM或HS_MODE_VECTORED之一，并可组合适用的模式标志。 |
+| platform | 可选目标平台信息；为NULL时按当前主机平台生成数据库。 |
+| feedback | 可选反馈对象。启用特性时为NULL等价于对应的普通multi编译；库只在调用期间读取，不接管所有权。 |
+| db | 输出参数。成功时返回新数据库；失败或特性未启用时置为NULL。调用者使用hs_free_database()释放成功返回的对象。 |
+| error | 输出参数。编译失败时返回错误详情；调用者使用hs_free_compile_error()释放非空对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 功能已启用时编译成功。 |
-| `HS_COMPILER_ERROR` | 功能已启用时，编译参数、模式或平台参数不合法，或表达式解析、编译失败；详情通过`error`返回。 |
-| `HS_NOMEM` | 功能已启用时，创建或复制反馈编译上下文失败。 |
-| `HS_ARCH_ERROR` | 功能未启用时，即使`feedback == NULL`也返回该值；`db`置为`NULL`，`error`非空时返回错误详情。 |
+| HS_SUCCESS | 功能已启用时编译成功。 |
+| HS_COMPILER_ERROR | 功能已启用时，编译参数、模式或平台参数不合法，或表达式解析、编译失败；详情通过error返回。 |
+| HS_NOMEM | 功能已启用时，创建或复制反馈编译上下文失败。 |
+| HS_ARCH_ERROR | 功能未启用时，即使feedback == NULL也返回该值；db置为NULL，error非空时返回错误详情。 |
 
 ### `hs_compile_ext_multi_with_feedback`
 
@@ -943,25 +955,25 @@ hs_error_t HS_CDECL hs_compile_ext_multi_with_feedback(
 
 | 参数 | 说明 |
 | --- | --- |
-| `expressions` | 以NUL结尾的正则表达式数组。 |
-| `flags` | 每个表达式对应的`HS_FLAG_*`标志数组；可为`NULL`，表示全部标志为0。 |
-| `ids` | 每个表达式对应的ID数组；可为`NULL`，表示使用默认ID。 |
-| `ext` | 每个表达式对应的`hs_expr_ext_t`指针数组；可为`NULL`，单个数组元素也可为`NULL`。调用期间由调用者保持有效。 |
-| `elements` | 表达式数量，必须大于0。 |
-| `mode` | 数据库模式。必须选择`HS_MODE_BLOCK`、`HS_MODE_STREAM`或`HS_MODE_VECTORED`之一，并可组合适用的模式标志。 |
-| `platform` | 可选目标平台信息；为`NULL`时按当前主机平台生成数据库。 |
-| `feedback` | 可选反馈对象。启用特性时为`NULL`等价于对应的普通扩展multi编译；库只在调用期间读取，不接管所有权。 |
-| `db` | 输出参数。成功时返回新数据库；失败或特性未启用时置为`NULL`。调用者使用`hs_free_database()`释放成功返回的对象。 |
-| `error` | 输出参数。编译失败时返回错误详情；调用者使用`hs_free_compile_error()`释放非空对象。 |
+| expressions | 以NUL结尾的正则表达式数组。 |
+| flags | 每个表达式对应的HS_FLAG_*标志数组；可为NULL，表示全部标志为0。 |
+| ids | 每个表达式对应的ID数组；可为NULL，表示使用默认ID。 |
+| ext | 每个表达式对应的hs_expr_ext_t指针数组；可为NULL，单个数组元素也可为NULL。调用期间由调用者保持有效。 |
+| elements | 表达式数量，必须大于0。 |
+| mode | 数据库模式。必须选择HS_MODE_BLOCK、HS_MODE_STREAM或HS_MODE_VECTORED之一，并可组合适用的模式标志。 |
+| platform | 可选目标平台信息；为NULL时按当前主机平台生成数据库。 |
+| feedback | 可选反馈对象。启用特性时为NULL等价于对应的普通扩展multi编译；库只在调用期间读取，不接管所有权。 |
+| db | 输出参数。成功时返回新数据库；失败或特性未启用时置为NULL。调用者使用hs_free_database()释放成功返回的对象。 |
+| error | 输出参数。编译失败时返回错误详情；调用者使用hs_free_compile_error()释放非空对象。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 功能已启用时编译成功。 |
-| `HS_COMPILER_ERROR` | 功能已启用时，编译参数、扩展参数、模式或平台参数不合法，或表达式解析、编译失败；详情通过`error`返回。 |
-| `HS_NOMEM` | 功能已启用时，创建或复制反馈编译上下文失败。 |
-| `HS_ARCH_ERROR` | 功能未启用时，即使`feedback == NULL`也返回该值；`db`置为`NULL`，`error`非空时返回错误详情。 |
+| HS_SUCCESS | 功能已启用时编译成功。 |
+| HS_COMPILER_ERROR | 功能已启用时，编译参数、扩展参数、模式或平台参数不合法，或表达式解析、编译失败；详情通过error返回。 |
+| HS_NOMEM | 功能已启用时，创建或复制反馈编译上下文失败。 |
+| HS_ARCH_ERROR | 功能未启用时，即使feedback == NULL也返回该值；db置为NULL，error非空时返回错误详情。 |
 
 ### `hs_scan_with_collector`
 
@@ -977,27 +989,27 @@ hs_error_t HS_CDECL hs_scan_with_collector(
 
 | 参数 | 说明 |
 | --- | --- |
-| `db` | 块模式数据库，且必须与`collector`绑定同一个数据库对象。 |
-| `data` | 待扫描数据，不能为空。 |
-| `length` | `data`的字节长度。 |
-| `flags` | 扫描标志，当前保留供将来使用。 |
-| `scratch` | 与`db`兼容的每线程scratch空间。 |
-| `onEvent` | 可选匹配回调；为`NULL`时不输出匹配。 |
-| `context` | 原样传递给`onEvent`的用户上下文。 |
-| `collector` | 与`db`绑定的有效collector。 |
+| db | 块模式数据库，且必须与collector绑定同一个数据库对象。 |
+| data | 待扫描数据，不能为空。 |
+| length | data的字节长度。 |
+| flags | 扫描标志，当前保留供将来使用。 |
+| scratch | 与db兼容的每线程scratch空间。 |
+| onEvent | 可选匹配回调；为NULL时不输出匹配。 |
+| context | 原样传递给onEvent的用户上下文。 |
+| collector | 与db绑定的有效collector。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 功能已启用时扫描成功；本次pending计数已提交。 |
-| `HS_SCAN_TERMINATED` | 功能已启用时，匹配回调请求停止；本次pending计数已提交。 |
-| `HS_INVALID` | 功能已启用时，`collector`、数据库、数据或scratch无效，或数据库与collector不匹配。 |
-| `HS_DB_VERSION_ERROR` | 功能已启用时，数据库版本与当前库不匹配。 |
-| `HS_DB_MODE_ERROR` | 功能已启用时，数据库不是块模式。 |
-| `HS_SCRATCH_IN_USE` | 功能已启用时，`scratch`正在被其他调用使用。 |
-| `HS_UNKNOWN_ERROR` | 功能已启用时，扫描期间发生内部匹配错误。 |
-| `HS_ARCH_ERROR` | 功能未启用时，直接返回该值，不执行扫描。 |
+| HS_SUCCESS | 功能已启用时扫描成功；本次pending计数已提交。 |
+| HS_SCAN_TERMINATED | 功能已启用时，匹配回调请求停止；本次pending计数已提交。 |
+| HS_INVALID | 功能已启用时，collector、数据库、数据或scratch无效，或数据库与collector不匹配。 |
+| HS_DB_VERSION_ERROR | 功能已启用时，数据库版本与当前库不匹配。 |
+| HS_DB_MODE_ERROR | 功能已启用时，数据库不是块模式。 |
+| HS_SCRATCH_IN_USE | 功能已启用时，scratch正在被其他调用使用。 |
+| HS_UNKNOWN_ERROR | 功能已启用时，扫描期间发生内部匹配错误。 |
+| HS_ARCH_ERROR | 功能未启用时，直接返回该值，不执行扫描。 |
 
 ### `hs_scan_vector_with_collector`
 
@@ -1013,28 +1025,28 @@ hs_error_t HS_CDECL hs_scan_vector_with_collector(
 
 | 参数 | 说明 |
 | --- | --- |
-| `db` | vectored模式数据库，且必须与`collector`绑定同一个数据库对象。 |
-| `data` | 待扫描数据块指针数组，不能为空。 |
-| `length` | 各数据块长度数组，不能为空。 |
-| `count` | 数据块数量。 |
-| `flags` | 扫描标志，当前保留供将来使用。 |
-| `scratch` | 与`db`兼容的每线程scratch空间。 |
-| `onEvent` | 可选匹配回调；为`NULL`时不输出匹配。 |
-| `context` | 原样传递给`onEvent`的用户上下文。 |
-| `collector` | 与`db`绑定的有效collector。 |
+| db | vectored模式数据库，且必须与collector绑定同一个数据库对象。 |
+| data | 待扫描数据块指针数组，不能为空。 |
+| length | 各数据块长度数组，不能为空。 |
+| count | 数据块数量。 |
+| flags | 扫描标志，当前保留供将来使用。 |
+| scratch | 与db兼容的每线程scratch空间。 |
+| onEvent | 可选匹配回调；为NULL时不输出匹配。 |
+| context | 原样传递给onEvent的用户上下文。 |
+| collector | 与db绑定的有效collector。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 功能已启用时扫描成功；本次pending计数已提交。 |
-| `HS_SCAN_TERMINATED` | 功能已启用时，匹配回调请求停止；本次pending计数已提交。 |
-| `HS_INVALID` | 功能已启用时，`collector`、数据库、数据数组、长度数组或scratch无效，或数据库与collector不匹配。 |
-| `HS_DB_VERSION_ERROR` | 功能已启用时，数据库版本与当前库不匹配。 |
-| `HS_DB_MODE_ERROR` | 功能已启用时，数据库不是vectored模式。 |
-| `HS_SCRATCH_IN_USE` | 功能已启用时，`scratch`正在被其他调用使用。 |
-| `HS_UNKNOWN_ERROR` | 功能已启用时，扫描期间发生内部匹配错误。 |
-| `HS_ARCH_ERROR` | 功能未启用时，直接返回该值，不执行扫描。 |
+| HS_SUCCESS | 功能已启用时扫描成功；本次pending计数已提交。 |
+| HS_SCAN_TERMINATED | 功能已启用时，匹配回调请求停止；本次pending计数已提交。 |
+| HS_INVALID | 功能已启用时，collector、数据库、数据数组、长度数组或scratch无效，或数据库与collector不匹配。 |
+| HS_DB_VERSION_ERROR | 功能已启用时，数据库版本与当前库不匹配。 |
+| HS_DB_MODE_ERROR | 功能已启用时，数据库不是vectored模式。 |
+| HS_SCRATCH_IN_USE | 功能已启用时，scratch正在被其他调用使用。 |
+| HS_UNKNOWN_ERROR | 功能已启用时，扫描期间发生内部匹配错误。 |
+| HS_ARCH_ERROR | 功能未启用时，直接返回该值，不执行扫描。 |
 
 ### `hs_scan_stream_with_collector`
 
@@ -1051,25 +1063,25 @@ hs_error_t HS_CDECL hs_scan_stream_with_collector(
 
 | 参数 | 说明 |
 | --- | --- |
-| `id` | 已打开的stream对象；其数据库/Rose实例必须与`collector`绑定的对象相同。 |
-| `data` | 待扫描数据，不能为空。 |
-| `length` | `data`的字节长度。 |
-| `flags` | 扫描标志，当前保留供将来使用。 |
-| `scratch` | 与stream兼容的每线程scratch空间。 |
-| `onEvent` | 可选匹配回调；为`NULL`时不输出匹配。 |
-| `context` | 原样传递给`onEvent`的用户上下文。 |
-| `collector` | 与stream绑定同一Rose实例的有效collector。 |
+| id | 已打开的stream对象；其数据库/Rose实例必须与collector绑定的对象相同。 |
+| data | 待扫描数据，不能为空。 |
+| length | data的字节长度。 |
+| flags | 扫描标志，当前保留供将来使用。 |
+| scratch | 与stream兼容的每线程scratch空间。 |
+| onEvent | 可选匹配回调；为NULL时不输出匹配。 |
+| context | 原样传递给onEvent的用户上下文。 |
+| collector | 与stream绑定同一Rose实例的有效collector。 |
 
 返回值：
 
 | 返回值 | 说明 |
 | --- | --- |
-| `HS_SUCCESS` | 功能已启用时扫描成功；本次pending计数已提交。 |
-| `HS_SCAN_TERMINATED` | 功能已启用时，匹配回调请求停止；本次pending计数已提交。 |
-| `HS_INVALID` | 功能已启用时，`id`、`collector`、数据或scratch无效，或stream与collector不匹配；功能未启用时，`id == NULL`也返回该值。 |
-| `HS_SCRATCH_IN_USE` | 功能已启用时，`scratch`正在被其他调用使用。 |
-| `HS_UNKNOWN_ERROR` | 功能已启用时，扫描期间发生内部匹配错误；已记录的部分计数不会回滚。 |
-| `HS_ARCH_ERROR` | 功能未启用且`id`有效时，直接返回该值，不执行扫描。 |
+| HS_SUCCESS | 功能已启用时扫描成功；本次pending计数已提交。 |
+| HS_SCAN_TERMINATED | 功能已启用时，匹配回调请求停止；本次pending计数已提交。 |
+| HS_INVALID | 功能已启用时，id、collector、数据或scratch无效，或stream与collector不匹配；功能未启用时，id == NULL也返回该值。 |
+| HS_SCRATCH_IN_USE | 功能已启用时，scratch正在被其他调用使用。 |
+| HS_UNKNOWN_ERROR | 功能已启用时，扫描期间发生内部匹配错误；已记录的部分计数不会回滚。 |
+| HS_ARCH_ERROR | 功能未启用且id有效时，直接返回该值，不执行扫描。 |
 
 ### 最小闭环用例
 
