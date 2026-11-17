@@ -1,0 +1,10 @@
+project: BoostKit/Ultrascan
+version: "1.0"
+
+directories:
+  - path: "./"
+    type: upstream
+
+files:
+  - path: "./LICENSE"
+    type: license
