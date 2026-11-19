@@ -1,7 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Technologies Co., Ltd.
- * Optimized fdr
- * Copyright (c) 2015-2017, Intel Corporation
+ * Copyright (c) 2020 Huawei Technologies Co., Ltd.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
