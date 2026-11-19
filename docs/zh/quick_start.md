@@ -4,12 +4,11 @@
 
 ## 前提条件
 
-请参考[安装指南](./installation_guide.md)完成Ultrascan的安装和编译。
+请参考《[安装指南](./installation_guide.md)》完成Ultrascan的安装和编译。
 
 ## hsdump通用字节码生成工具
 
-对于需要编译一套规则集字节码，将该字节码同时部署到鲲鹏计算平台和x86计算平台
-上的场景，使用hsdump进行字节码的编译并生成编译后文件（下文称通用字节码）。
+对于需要编译一套规则集字节码，将该字节码同时部署到鲲鹏计算平台和x86计算平台上的场景，使用hsdump进行字节码的编译并生成编译后文件（下文称通用字节码）。
 hsdump是Ultrascan提供的调试工具，用于转储模式编译过程中的内部信息。
 通过hsdump可以编译出支持跨平台部署的字节码。
 
@@ -95,7 +94,7 @@ hsbench是Ultrascan提供的Benchmark性能测试工具，可用于观察指定�
     - Time spent scanning：使用目标规则集扫描目标数据库，扫描所用的时间。
     - Matches per iteration：每次迭代，按规则集匹配命中的数量。
     - Mean throughput \(overall\)：平均吞吐量（Mbit/s）。
-    - Max throughput \(per core\)：所有Core核中的最大吞吐量（Mbit/s）。
+    - Max throughput \(per core\)：各扫描线程中最快一次扫描对应的吞吐量（Mbit/s）。
     - 由于db是通过序列化结果直接加载，所以无需编译，因此Compile time和Peak heap usage为0。
 
 ## Hao算法验证与调优
@@ -121,8 +120,7 @@ hsbench是Ultrascan提供的Benchmark性能测试工具，可用于观察指定�
     `haoDebug:1`输出`[HAO][EngSel]`及`SCALE_ACCEPT`、`MID_LEN_ACCEPT`、
     `REJECT_LEN`或`REJECT_SMALL`决策，以及`[HAO][Admission]`的5%碰撞桶准入结果；
     `haoDebug:2`输出已生成Hao的编译统计。
-    规模筛选通过后仍需通过完整可行性检查，不能仅凭`allowHao:1`或接受决策
-    判断已经采用Hao。具体筛选条件见[用户指南](./user_guide.md#启用与适用范围)。
+    规模筛选通过后仍需通过完整可行性检查，不能仅凭`allowHao:1`或接受决策判断已经采用Hao。具体筛选条件见《[用户指南](./user_guide.md#启用与适用范围)》。
 
 2. 按需比较DOT与BEXT单一路径。
 
@@ -137,8 +135,7 @@ hsbench是Ultrascan提供的Benchmark性能测试工具，可用于观察指定�
         -G "allowHao:1;haoHashMode:1;haoDebug:3;"
     ```
 
-    DOT要求SVE，BEXT额外要求SVE2 BitPerm，且两者均要求当前SVE向量长度
-    至少256位。`haoHashMode`指定Hao内部哈希路径，不绕过引擎筛选；
+    DOT要求SVE，BEXT额外要求SVE2 BitPerm，且两者均要求当前SVE向量长度至少256位。`haoHashMode`指定Hao内部哈希路径，不绕过引擎筛选；
     不满足条件时可能继续使用其他匹配引擎。BEXT键宽与selector调优参数见
     [Grey参数](./user_guide.md#grey参数)。
 
@@ -160,9 +157,7 @@ hsbench是Ultrascan提供的Benchmark性能测试工具，可用于观察指定�
     和`hao_l2map_*.txt`，位于本例的`dump_hao/dump/`目录。未采用Hao的
     matcher不会生成这些文件。
 
-    `hsbench -e`只比较Grey选择的单一路径，`hsbench -U FILE`则运行文件中
-    已有的部署布局。多变体布局在运行时优先选择BEXT，其次DOT，条件不足时
-    回退到FDR。加载文件时再传入`haoHashMode`不会改写已有布局。
+    `hsbench -e`只比较Grey选择的单一路径，`hsbench -U FILE`则运行文件中已有的部署布局。多变体布局在运行时优先选择BEXT，其次DOT，条件不足时回退到FDR。加载文件时再传入`haoHashMode`不会改写已有布局。
 
 ## hspgo正则匹配反馈优化技术工具
 
@@ -174,13 +169,12 @@ hsbench是Ultrascan提供的Benchmark性能测试工具，可用于观察指定�
 - 构建环境已安装SQLite 3，否则不会生成`hspgo`。
 - 准备hsbench格式的规则文件或目录，以及SQLite语料库。
 
-具体构建命令见[安装指南](./installation_guide.md)中的“编译Ultrascan”步骤。
+具体构建命令见《[安装指南](./installation_guide.md)》中的“编译Ultrascan”步骤。
 
 ### 采集并反馈编译
 
 以下命令使用块模式并显式指定 `-b 1 -n 5`（两者默认值均为20，与hsbench `-n`
-默认值一致），先运行1轮普通baseline对照，随后执行工具内置的反馈采集，并在
-切换到反馈编译数据库后测量5轮。示例把筛选阈值降低到1，便于在小语料上观察流程；
+默认值一致），先运行1轮普通baseline对照，随后执行工具内置的反馈采集，并在切换到反馈编译数据库后测量5轮。示例把筛选阈值降低到1，便于在小语料上观察流程；
 生产环境应先使用默认阈值，再根据dump结果调优。
 
 ```bash
@@ -215,7 +209,7 @@ cd /opt/Ultrascan/build-feedback
 | -I DIR | 导入已生成的feedback二进制文件，跳过采集阶段。 |
 | -G OVERRIDES | 设置本轮baseline和反馈编译共用的Grey参数；allowNeoFdr 传非零值会被强制置0并输出warning。 |
 
-工具只统计反馈数据库切换完成后的优化吞吐；baseline轮数不会混入优化测量结果。如下示例执行。
+工具只统计反馈数据库切换完成后的优化吞吐；baseline轮数不会混入优化测量结果。执行示例如下。
 
 ```text
 [root@localhost build-feedback]# ./bin/hspgo \
@@ -294,8 +288,7 @@ cd /opt/Ultrascan/build-feedback
 ```
 
 导入时，扫描模式、规则集和Grey覆盖字符串必须与导出时一致。`hspgo`会校验工具层
-fingerprint；公开`hs_fp_feedback_t`本身不携带此指纹，因此业务直接集成API时
-必须自行保证配置一致。
+fingerprint；公开`hs_fp_feedback_t`本身不携带此指纹，因此业务直接集成API时必须自行保证配置一致。
 
 需要把闭环集成到应用时，请参考[正则匹配反馈优化技术API](./api_reference.md#正则匹配反馈优化技术api)。
 
@@ -303,4 +296,4 @@ fingerprint；公开`hs_fp_feedback_t`本身不携带此指纹，因此业务直
 
 | 文档版本 | 发布日期 | 修改说明 |
 | --- | --- | --- |
-| 01 | 2026-09-30 | 第一次正式发布。 |
+| 01 | 2026-12-30 | 第一次正式发布 |

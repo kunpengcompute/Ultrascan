@@ -8,12 +8,9 @@
 - Grey配置API：进程级编译参数设置与复位接口。
 - 正则匹配反馈优化技术API：运行期采集、反馈生成及反馈编译接口。
 
-所有接口均可通过公共头文件`hs.h`引入。本文不重复介绍`hs_compile()`、`hs_scan()`等
-上游通用接口；使用这些接口时，应同时参考公共头文件中的注释和上游API文档。
+所有接口均可通过公共头文件`hs.h`引入。本文不重复介绍`hs_compile()`、`hs_scan()`等上游通用接口；使用这些接口时，应同时参考公共头文件中的注释和上游API文档。
 
->![说明](public_sys-resources/icon-note.gif) **说明：** “正则匹配反馈优化技术”是V5.8.0版本
->新增的反馈闭环能力，与历史已有的“假阳性阻断技术”是两个独立特性。本文不会以新名称
->替代历史特性的名称或说明。
+>![说明](public_sys-resources/icon-note.gif) **说明：** “正则匹配反馈优化技术”是V5.8.0版本新增的反馈闭环能力，与历史已有的“假阳性阻断技术”是两个独立特性。本文不会以新名称替代历史特性的名称或说明。
 
 ### 公共约定
 
@@ -25,7 +22,7 @@
 
 ### 示例路径
 
-本文命令沿用[安装指南](./installation_guide.md)中的固定目录布局：
+本文命令沿用《[安装指南](./installation_guide.md)》中的固定目录布局：
 
 - Ultrascan源码：`/opt/Ultrascan`
 - 默认静态库构建目录：`/opt/Ultrascan/build`
@@ -34,16 +31,14 @@
 
 ## 通用字节码API
 
-通用字节码将x86和AArch64字节码封装在同一个`fat_hs_database_t`对象中，适用于一次
-编译后向两类平台分发的场景。`fat_hs_database_t`是opaque类型：
+通用字节码将x86和AArch64字节码封装在同一个`fat_hs_database_t`对象中，适用于一次编译后向两类平台分发的场景。`fat_hs_database_t`是opaque类型：
 
 ```c
 typedef struct fat_hs_database fat_hs_database_t;
 ```
 
 编译前设置`hs_set_grey_overrides("allowHao:1;")`可允许AArch64部分使用Hao。
-通过引擎筛选后，公开`fat_hs_*`编译接口保留FDR回退，并附加编译主机支持且
-成功构建的DOT/BEXT变体；x86部分不启用Hao。多变体编译不受`haoHashMode`
+通过引擎筛选后，公开`fat_hs_*`编译接口保留FDR回退，并附加编译主机支持且成功构建的DOT/BEXT变体；x86部分不启用Hao。多变体编译不受`haoHashMode`
 单一路径选择限制，运行时按实际能力分派，详见
 [通用字节码中的Hao](./user_guide.md#通用字节码中的hao)。无需新增Hao专用公开API。
 
@@ -379,7 +374,7 @@ hs_error_t HS_CDECL fat_hs_database_info(
 | HS_NOMEM | misc allocator未能分配信息字符串。 |
 | HS_BAD_ALLOC | misc allocator返回的内存未满足对齐要求。 |
 
-### 最小用例
+### 通用字节码最小用例
 
 下面的示例编译一个通用数据库并将其序列化。实际跨平台部署时，可以直接使用`hsdump -U`生成文件，并由支持通用字节码的工具加载。
 
@@ -419,7 +414,7 @@ int main(void) {
 ```
 
 将代码保存为`/opt/Ultrascan/fat_example.c`。以下命令直接使用新生成的静态库，
-无需安装Ultrascan。应先按照[安装指南](./installation_guide.md)完成默认静态库编译，
+无需安装Ultrascan。应先按照《[安装指南](./installation_guide.md)》完成默认静态库编译，
 并确认库文件已经生成：
 
 ```bash
@@ -479,17 +474,15 @@ hs_error_t HS_CDECL hs_set_grey_overrides(const char *overrides);
 
 - key必须是`applyGreyOverrides()`白名单中的布尔或数值字段。常用示例包括`allowLily`、
   `allowNeoFdr`、`allowHao`、`haoHashMode`、`haoKeyBits`、`haoSelectorMode`、
-  `haoDebug`、`haoDebugAuto`、`limitPatternCount`和`limitPatternLength`；并非`Grey`结构中的所有字段
-  都可公开覆盖。
+  `haoDebug`、`haoDebugAuto`、`limitPatternCount`和`limitPatternLength`；并非`Grey`结构中的所有字段都可公开覆盖。
 - value按无符号整数解析。布尔开关建议只使用`0`或`1`，不要传入负数。
 - 解析不会自动去除key中的空白字符；建议始终使用紧凑格式。
 - 配置存储由互斥锁保护，但配置是进程级共享状态。为保证同一批编译结果可复现，应在启动阶段设置，并避免与编译调用并发修改。
 - 每次成功调用都会整体替换上一份覆盖字符串，不会自动与上一次设置合并。
-- Hao参数的默认值、适用路径及硬件限制见[用户指南](./user_guide.md#grey参数)。
+- Hao参数的默认值、适用路径及硬件限制见《[用户指南](./user_guide.md#grey参数)》。
   这些参数允许编译器选择Hao，不保证每个内部matcher都采用Hao。
 - 编入`HAO_ENABLE_RUNTIME_STATS=1`的构建还会在首次Hao扫描时读取`haoDebug`
-  的值为`4`的bit，以决定是否启用进程级运行统计。因此该诊断配置应保留至首次
-  扫描，具体见[开发指南](./developer_guide.md#诊断与验证)。
+  的值为`4`的bit，以决定是否启用进程级运行统计。因此该诊断配置应保留至首次扫描，具体见《[开发指南](./developer_guide.md#诊断与验证)》。
 
 ### `hs_reset_grey_overrides`
 
@@ -509,11 +502,10 @@ hs_error_t HS_CDECL hs_reset_grey_overrides(void);
 | --- | --- |
 | HS_SUCCESS | 覆盖已清除；重复调用也安全。 |
 
-### 最小用例
+### Grey配置最小用例
 
 下面的用例演示Grey覆盖的完整调用顺序：先设置`allowLily`、`allowNeoFdr`和
-`limitPatternCount`，再编译规则，最后释放数据库并复位进程级覆盖，避免影响同一进程
-的后续编译。该用例用于验证配置字符串可被接受并参与编译，不用于观测具体引擎选择结果。
+`limitPatternCount`，再编译规则，最后释放数据库并复位进程级覆盖，避免影响同一进程的后续编译。该用例用于验证配置字符串可被接受并参与编译，不用于观测具体引擎选择结果。
 
 ```c
 #include <stdio.h>
@@ -596,8 +588,7 @@ Grey compile succeeded
 
 正则匹配反馈优化技术建立反馈闭环：先编译baseline数据库，然后进行运行期采样，
 再生成feedback，最后使用feedback编译新数据库。运行期collector统计多模fragment
-触发与最终上报之间的关系，feedback筛选高浪费fragment，编译器在保证匹配语义不变
-的前提下避开相应的低效候选路径。
+触发与最终上报之间的关系，feedback筛选高浪费fragment，编译器在保证匹配语义不变的前提下避开相应的低效候选路径。
 
 ### 构建与可用范围
 
@@ -682,10 +673,7 @@ typedef struct hs_fp_feedback_params {
 
 #### Dump结构与回调
 
-以下定义仅用于`hs_fp_collector_to_feedback_with_dump()`。生成feedback时，库可通过
-汇总回调输出整体统计，并通过fragment回调逐项输出fragment统计和入选状态，便于
-记录日志或导出CSV。回调只提供观察结果，不参与feedback筛选，也不转移任何对象的
-所有权。
+以下定义仅用于`hs_fp_collector_to_feedback_with_dump()`。生成feedback时，库可通过汇总回调输出整体统计，并通过fragment回调逐项输出fragment统计和入选状态，便于记录日志或导出CSV。回调只提供观察结果，不参与feedback筛选，也不转移任何对象的所有权。
 
 ```c
 typedef struct hs_fp_fragment_info {
@@ -1085,12 +1073,10 @@ hs_error_t HS_CDECL hs_scan_stream_with_collector(
 
 ### 最小闭环用例
 
-下面的C用例使用块模式完成baseline编译、采集、生成feedback和反馈编译。示例要求
-链接在AArch64上使用`HS_ENABLE_FP_FEEDBACK=ON`构建的库。
+下面的C用例使用块模式完成baseline编译、采集、生成feedback和反馈编译。示例要求链接在AArch64上使用`HS_ENABLE_FP_FEEDBACK=ON`构建的库。
 
 ```c
 #include <stdio.h>
-#include <string.h>
 #include "hs.h"
 
 static int on_match(unsigned int id, unsigned long long from,
@@ -1165,9 +1151,7 @@ cleanup:
 }
 ```
 
-将代码保存为`/opt/Ultrascan/feedback_example.c`。该用例要求先在AArch64上使用
-本章构建命令开启`HS_ENABLE_FP_FEEDBACK`。以下命令直接使用新生成的静态库，无需
-安装Ultrascan。先确认支持反馈能力的静态库已经生成：
+将代码保存为`/opt/Ultrascan/feedback_example.c`。该用例要求先在AArch64上使用本章构建命令开启`HS_ENABLE_FP_FEEDBACK`。以下命令直接使用新生成的静态库，无需安装Ultrascan。先确认支持反馈能力的静态库已经生成：
 
 ```bash
 test -f /opt/Ultrascan/build-feedback/lib/libhs.a && \
@@ -1199,10 +1183,10 @@ cc -std=c99 \
 feedback-compiled database created
 ```
 
-完整工具化流程请参考[快速入门](./quick_start.md)中的`hspgo`章节。
+完整工具化流程请参考《[快速入门](./quick_start.md)》中的`hspgo`章节。
 
 ## 修订记录
 
 | 文档版本 | 发布日期 | 修改说明 |
 | --- | --- | --- |
-| 01 | 2026-09-30 | 第一次正式发布。 |
+| 01 | 2026-12-30 | 第一次正式发布 |

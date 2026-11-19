@@ -4,7 +4,7 @@
 
 ## 前提条件
 
-请参考[安装指南](./installation_guide.md)完成Ultrascan安装和编译。需要使用正则匹配反馈优化技术时，必须在AArch64平台显式开启对应构建选项。
+请参考《[安装指南](./installation_guide.md)》完成Ultrascan安装和编译。需要使用正则匹配反馈优化技术时，必须在AArch64平台显式开启对应构建选项。
 
 ## Grey编译参数设置
 
@@ -53,7 +53,7 @@ Hao默认关闭。在编译数据库之前调用`hs_set_grey_overrides("allowHao
 | DOT | SVE | 至少256位 |
 | BEXT | SVE、SVE2、SVE2 BitPerm | 至少256位 |
 
-普通编译及`hsbench -e`使用单一路径选择：`haoHashMode:0`在BEXT可用时优先选BEXT，否则尝试DOT。显式指定BEXT而平台不支持时，Hao构建不被采用，不会自动改选DOT。运行时向量长度不足时使用保留的FDR路径。Hao的性能收益取决于规则集和语料，建议按[快速入门](./quick_start.md#hao算法验证与调优)对比命中数、吞吐和数据库大小。
+普通编译及`hsbench -e`使用单一路径选择：`haoHashMode:0`在BEXT可用时优先选BEXT，否则尝试DOT。显式指定BEXT而平台不支持时，Hao构建不被采用，不会自动改选DOT。运行时向量长度不足时使用保留的FDR路径。Hao的性能收益取决于规则集和语料，建议按《[快速入门](./quick_start.md#hao算法验证与调优)》对比命中数、吞吐和数据库大小。
 
 ### Grey参数
 
@@ -65,7 +65,7 @@ Hao参数统一通过Grey覆盖字符串设置，不读取旧的Hao环境变量�
 | haoHashMode | 0 | 单一路径编译时：0自动、1指定BEXT、2指定DOT。通用字节码的多变体编译行为见下节。 |
 | haoKeyBits | 0 | BEXT自动selector搜索中的目标键宽；0默认搜索18~22位，手动调优可使用12~22位。最终键宽还取决于可选bit数。 |
 | haoSelectorMode | 0 | BEXT的bit选择策略：0自动、1默认、2动态展开、3哈希优化、4高位对齐。自动策略默认比较默认、动态展开和高位对齐候选。 |
-| haoDebug | 0 | 位掩码：1向stderr输出引擎选择信息，2输出编译统计，4启用运行统计。可按位组合，例如3输出选择信息和编译统计。运行统计还需要专门构建，见[开发指南](./developer_guide.md#诊断与验证)。 |
+| haoDebug | 0 | 位掩码：1向stderr输出引擎选择信息，2输出编译统计，4启用运行统计。可按位组合，例如3输出选择信息和编译统计。运行统计还需要专门构建，见《[开发指南](./developer_guide.md#诊断与验证)》。 |
 | haoDebugAuto | 0 | 仅支持DUMP_SUPPORT的构建：非零值输出BEXT自动搜索的候选统计；小于18的有效值还会向下扩展搜索范围，例如16搜索16~22位。 |
 
 `haoKeyBits`和`haoDebugAuto`用于`haoSelectorMode:0`的BEXT自动搜索；显式selector策略使用22位目标键宽。DOT使用22位键空间，不使用BEXT的键宽和selector调优参数。建议保留自动配置，先通过`haoDebug:3`确认是否实际生成Hao。
@@ -106,10 +106,10 @@ Hao参数统一通过Grey覆盖字符串设置，不读取旧的Hao环境变量�
 
 需要将同一规则集字节码部署到x86和鲲鹏计算平台时，可以使用`hsdump`生成通用字节码，或调用`fat_hs_*`公开接口完成编译、序列化和反序列化。
 
-工具操作见[快速入门](./quick_start.md#hsdump通用字节码生成工具)，函数定义见[通用字节码API](./api_reference.md#通用字节码api)。
+工具操作见《[快速入门](./quick_start.md#hsdump通用字节码生成工具)》，函数定义见[通用字节码API](./api_reference.md#通用字节码api)。
 
 ## 修订记录
 
 | 文档版本 | 发布日期 | 修改说明 |
 | --- | --- | --- |
-| 01 | 2026-09-30 | 第一次正式发布。 |
+| 01 | 2026-12-30 | 第一次正式发布 |
