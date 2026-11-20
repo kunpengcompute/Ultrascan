@@ -2200,6 +2200,88 @@ TEST(HAOCompile, HAOProtoBuildRejectsHaoWhenDisabled) {
     EXPECT_EQ(nullptr, proto.get());
 }
 
+static std::vector<hwlmLiteral> admissionLiterals(u32 duplicates) {
+    std::vector<hwlmLiteral> lits;
+    for (u32 i = 0; i < 1000; i++) {
+        std::ostringstream word;
+        word << std::hex << std::setw(8) << std::setfill('0') << i;
+        lits.emplace_back(word.str(), false, false, i, HWLM_ALL_GROUPS,
+                          std::vector<u8>{}, std::vector<u8>{});
+        if (i < duplicates) {
+            lits.emplace_back(word.str(), false, false, i + 1000,
+                              HWLM_ALL_GROUPS, std::vector<u8>{},
+                              std::vector<u8>{});
+        }
+    }
+    return lits;
+}
+
+TEST(HAOCompile, AdmissionAcceptsFivePercentCollisionBoundary) {
+    if (!get_current_target().has_sve()) {
+        skipIfNoHaoSupport();
+        return;
+    }
+    Grey grey;
+    grey.allowHao = true;
+    grey.fdrAllowTeddy = false;
+    grey.haoHashMode = haoCanUseBextFastPath(get_current_target()) ? 1 : 2;
+    auto lits = admissionLiterals(50);
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(analyzeHAOFeasibility(get_current_target(), lits, grey,
+                                      nullptr, &artifacts));
+    ASSERT_EQ(1000U, artifacts.hash.stats.nonEmptyPrimary);
+    ASSERT_EQ(50U, artifacts.hash.stats.collisionBuckets);
+    auto proto = fdrBuildProto(HWLM_ENGINE_FDR, lits, false,
+                               get_current_target(), grey);
+    ASSERT_NE(nullptr, proto.get());
+    EXPECT_NE(nullptr, proto->haoArtifacts.get());
+}
+
+TEST(HAOCompile, AdmissionRejectsAboveBoundaryAndPreservesForcedHao) {
+    if (!get_current_target().has_sve()) {
+        skipIfNoHaoSupport();
+        return;
+    }
+    Grey grey;
+    grey.allowHao = true;
+    grey.fdrAllowTeddy = false;
+    grey.haoHashMode = haoCanUseBextFastPath(get_current_target()) ? 1 : 2;
+    auto lits = admissionLiterals(51);
+    HAOCompileArtifacts artifacts;
+    ASSERT_TRUE(analyzeHAOFeasibility(get_current_target(), lits, grey,
+                                      nullptr, &artifacts));
+    ASSERT_EQ(1000U, artifacts.hash.stats.nonEmptyPrimary);
+    ASSERT_EQ(51U, artifacts.hash.stats.collisionBuckets);
+    auto proto = fdrBuildProto(HWLM_ENGINE_FDR, lits, false,
+                               get_current_target(), grey);
+    ASSERT_NE(nullptr, proto.get());
+    EXPECT_EQ(nullptr, proto->haoArtifacts.get());
+    auto table = fdrBuildTable(*proto, grey);
+    ASSERT_NE(nullptr, table.get());
+    EXPECT_NE(ENGINE_ID_HAO, table->engineID);
+
+    auto forced = fdrBuildProtoHinted(HWLM_ENGINE_FDR, lits, false,
+                                       ENGINE_ID_HAO, get_current_target(),
+                                       grey);
+    ASSERT_NE(nullptr, forced.get());
+    EXPECT_NE(nullptr, forced->haoArtifacts.get());
+}
+
+TEST(HAOCompile, AdmissionDropsBothVariantsForCollidingRules) {
+    if (!get_current_target().has_sve()) {
+        skipIfNoHaoSupport();
+        return;
+    }
+    Grey grey;
+    grey.allowHao = true;
+    grey.fdrAllowTeddy = false;
+    auto proto = fdrBuildProto(HWLM_ENGINE_FDR, admissionLiterals(1000),
+                               false, get_current_target(), grey, true);
+    ASSERT_NE(nullptr, proto.get());
+    EXPECT_EQ(nullptr, proto->dotArtifacts.get());
+    EXPECT_EQ(nullptr, proto->bextArtifacts.get());
+}
+
 TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {
     std::vector<hwlmLiteral> lits = {
         hwlmLiteral("alpha", false, false, 644, HWLM_ALL_GROUPS, {}, {}),

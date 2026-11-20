@@ -120,7 +120,8 @@ static bool tryBuildHaoProto(const target_t &target,
                              const std::vector<hwlmLiteral> &lits,
                              const Grey &grey,
                              std::unique_ptr<HAOCompileArtifacts> *out,
-                             const std::vector<u32> *reportOrder = nullptr) {
+                             const std::vector<u32> *reportOrder = nullptr,
+                             bool checkAdmission = true) {
     if (out) {
         out->reset();
     }
@@ -134,6 +135,31 @@ static bool tryBuildHaoProto(const target_t &target,
                  haoFeasibilityReasonName(haoResult.reason), haoResult.flags);
     if (!haoFeasible) {
         return false;
+    }
+
+    if (checkAdmission) {
+        const auto &stats = builtArtifacts.hash.stats;
+        static constexpr u32 MAX_COLLISION_PCT = 5;
+        const bool admitted =
+            stats.nonEmptyPrimary &&
+            (u64a)stats.collisionBuckets * 100U <=
+                (u64a)stats.nonEmptyPrimary * MAX_COLLISION_PCT;
+        if (grey.haoDebug & 1) {
+            const double collisionPct =
+                stats.nonEmptyPrimary
+                    ? 100.0 * stats.collisionBuckets / stats.nonEmptyPrimary
+                    : 0.0;
+            fprintf(stderr,
+                    "[HAO][Admission] mode=%s lits=%zu collisionPct=%.5f "
+                    "limit=%u decision=%s\n",
+                    builtArtifacts.hashMode == HAO_LAYOUT_HASH_DOT ? "DOT"
+                                                                   : "BEXT",
+                    lits.size(), collisionPct, MAX_COLLISION_PCT,
+                    admitted ? "ACCEPT" : "REJECT_COLLISION");
+        }
+        if (!admitted) {
+            return false;
+        }
     }
 
     if (out) {
@@ -1014,8 +1040,10 @@ fdrBuildProtoInternal(u8 engType, vector<hwlmLiteral> &lits, bool make_small,
             buildHaoReportOrderRank(lits.size(), haoBucketToLits);
 
         std::unique_ptr<HAOCompileArtifacts> haoArtifacts;
+        // Internal forced-engine tests exercise correctness independently of
+        // the automatic performance admission policy.
         if (tryBuildHaoProto(target, lits, grey, &haoArtifacts,
-                             &haoReportOrder)) {
+                             &haoReportOrder, !forcedHao)) {
             auto proto = ue2::make_unique<HWLMProto>(
                 engType, move(haoDes), lits, haoBucketToLits, make_small);
             proto->haoArtifacts = std::move(haoArtifacts);

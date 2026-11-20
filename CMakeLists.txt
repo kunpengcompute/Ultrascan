@@ -2,7 +2,7 @@ cmake_minimum_required (VERSION 2.8.11)
 project (hyperscan C CXX)
 
 set (HS_MAJOR_VERSION 5)
-set (HS_MINOR_VERSION 8)
+set (HS_MINOR_VERSION 9)
 set (HS_PATCH_VERSION 0)
 set (HS_VERSION ${HS_MAJOR_VERSION}.${HS_MINOR_VERSION}.${HS_PATCH_VERSION})
 
@@ -1175,16 +1175,23 @@ set (hs_exec_SRCS
     src/database.c
     src/database.h
     src/database_common.h
-    src/kunpeng-enhanced/khsel_core.h
-    src/kunpeng-enhanced/khsel_ops.h
-    src/kunpeng-enhanced/khsel_type.h
-    src/kunpeng-enhanced/khsel_typebase.h
-    src/kunpeng-enhanced/fdr_enhanced.c
-    src/kunpeng-enhanced/runtime_lily.c
-    src/kunpeng-enhanced/shufti.c
-    src/kunpeng-enhanced/compare.h
-    src/kunpeng-enhanced/core_precomp.h
 )
+
+# These runtime implementations use NEON and must not enter x86 targets.
+# Keep the compiler-side lily.cpp available for universal bytecode builds.
+if (HS_TARGET_AARCH64)
+    list(APPEND hs_exec_SRCS
+        src/kunpeng-enhanced/khsel_core.h
+        src/kunpeng-enhanced/khsel_ops.h
+        src/kunpeng-enhanced/khsel_type.h
+        src/kunpeng-enhanced/khsel_typebase.h
+        src/kunpeng-enhanced/fdr_enhanced.c
+        src/kunpeng-enhanced/runtime_lily.c
+        src/kunpeng-enhanced/shufti.c
+        src/kunpeng-enhanced/compare.h
+        src/kunpeng-enhanced/core_precomp.h
+    )
+endif()
 
 set (hs_exec_avx2_SRCS
     src/fdr/teddy_avx2.c

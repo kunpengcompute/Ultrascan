@@ -42,7 +42,7 @@
 /* The current Hyperscan version information. */
 
 #define HS_MAJOR 5
-#define HS_MINOR 8
+#define HS_MINOR 9
 #define HS_PATCH 0
 
 #include "hs_compile.h"

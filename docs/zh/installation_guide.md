@@ -1,45 +1,40 @@
 # 安装指南
 
+本文档是Ultrascan安装指南，提供基于鲲鹏920新型号处理器和openEuler操作系统的镜像部署、环境配置与源码编译完整指导，适用于使用鲲鹏计算平台的用户。
+
 ## 简介
 
 本文基于鲲鹏920新型号处理器和openEuler操作系统，提供Ultrascan的安装和编译指导。
 
-Ultrascan是一款高性能的正则表达式匹配库，它是以PCRE（Perl-compatible regular
-expression）为原型开发，并以BSD（Berkeley Software Distribution）许可证开源，
-遵循libpcre库通用的正则表达式语法，拥有独立的C语言接口。在Ultrascan正式发布
-版本的基础上，参考鲲鹏微架构特征，重新设计核心接口的实现机制，并完成了开发
-和性能优化，推出适合鲲鹏计算平台的软件包。使用鲲鹏计算平台的用户可以根据自己
-业务需求下载本软件包，提升业务在鲲鹏平台上的稳定性和性能。
+Ultrascan是一款高性能的正则表达式匹配库，它是以PCRE（Perl Compatible Regular Expressions，Perl兼容正则表达式）为原型开发，并以BSD（Berkeley Software Distribution，伯克利软件发行版）许可证开源，
+遵循libpcre库通用的正则表达式语法，拥有独立的C语言接口。在Ultrascan正式发布版本的基础上，参考鲲鹏微架构特征，重新设计核心接口的实现机制，并完成了开发和性能优化，推出适合鲲鹏计算平台的软件包。使用鲲鹏计算平台的用户可以根据自己业务需求下载本软件包，提升业务在鲲鹏平台上的稳定性和性能。
 
 Ultrascan鲲鹏计算平台软件版本主要增加了以下功能：
 
 - 增加鲲鹏计算平台分支，且完全兼容ARMv8-A，同时确保x86平台使用不受影响。
 - 通过使用NEON指令、内联汇编、数据对齐、指令对齐、内存数据预取、静态分支预测、代码结构优化等方法，实现在鲲鹏计算平台的性能提升。
-- 发布KHSEL（Kunpeng Hyperscan Enhanced Library）软件增强包，包括短规则旁路混合模型和假阳性阻断模型。
+- 发布KHSEL（Kunpeng Hyperscan Enhanced Library，鲲鹏Hyperscan增强库）软件增强包，包括短规则旁路混合模型和假阳性阻断模型。
   - KHSEL优化了大规模规则集匹配算法FDR，小规模快速匹配算法Shufti，增强了
-    Ultrascan处理snort_literal，snort_pcre等数据集的scan性能，并且针对长规则
-    校验的场景进行了优化。
+    Ultrascan处理snort_literal，snort_pcre等数据集的scan性能，并且针对长规则校验的场景进行了优化。
   - 提供短规则旁路混合模型，对包含短规则的规则集合能大幅提高匹配性能。
   - 提供假阳性阻断模型，对包含坏字符串片段的规则集合能大幅提高匹配性能。
-    其中的“坏字符串”指少量含特殊片段的规则，其导致多模匹配算法报告的假阳性
-    过多，触发大量的解释器调用和低效的长规则校验，而最终无一真实匹配。大量
-    无谓的解释器调用成为热点，多模匹配失去了应有的预过滤能力。
+    其中的“坏字符串”指少量含特殊片段的规则，其导致多模匹配算法报告的假阳性过多，触发大量的解释器调用和低效的长规则校验，而最终无一真实匹配。大量无谓的解释器调用成为热点，多模匹配失去了应有的预过滤能力。
 - 增加通用字节码功能，用户可以通过hsdump工具将规则集编译为通用字节码，该字节码支持在x86和鲲鹏计算平台运行。
+- 增加Hao多模匹配算法，支持基于SVE的DOT路径和基于SVE2 BitPerm的BEXT路径，并可在通用字节码中保留FDR回退。
 - 增加正则匹配反馈优化技术，在AArch64平台根据真实扫描语料采集反馈，并使用反馈重新编译规则数据库。
 
-更多关于Ultrascan的信息，请参考[鲲鹏Gitcode代码仓](https://gitcode.com/boostkit/Ultrascan)。
+更多关于Ultrascan的信息，请参见[Ultrascan代码仓](https://gitcode.com/boostkit/Ultrascan)。
 
 ## 环境要求
 
 ### 已验证环境
 
 Ultrascan当前适配鲲鹏920新型号处理器，操作系统为openEuler 22.03 LTS SP4/
-openEuler 24.03 LTS SP3。若您在使用过程中遇到问题，请先检查使用的环境
-是否在已验证的环境范围内。
+openEuler 24.03 LTS SP3。若您在使用过程中遇到问题，请先检查使用的环境是否在已验证的环境范围内。
 
 ### 软件要求
 
-安装编译前参见本章节提供的相关链接获取对应的软件包
+安装编译前，请参见本章节提供的相关链接获取对应的软件包。
 
 软件要求如[**表 1** 软件要求](#软件要求)所示。
 
@@ -50,11 +45,11 @@ openEuler 24.03 LTS SP3。若您在使用过程中遇到问题，请先检查使
 |Git|系统软件源提供的版本|必选：获取Ultrascan源码。|使用Yum工具安装。|
 |GCC|10.3及以上|必选。|-|
 |CMake|2.8.11及以上|必选。|-|
-|Ragel|6.9及以上|必选：编译依赖Ragel。|[获取链接](http://www.colm.net/files/ragel/ragel-6.10.tar.gz)|
-|Boost|1.57及以上|必选：编译依赖Boost头文件。|[获取链接](https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz)|
-|PCRE|8.41及以上|可选：Ultrascan tools正确性验证工具hscollider编译依赖PCRE的8.41及以上版本。|[获取链接](https://sourceforge.net/projects/pcre/files/pcre/8.43/pcre-8.43.tar.gz)|
+|Ragel|6.9及以上|必选：编译依赖Ragel。|[Ragel 6.10源码包](http://www.colm.net/files/ragel/ragel-6.10.tar.gz)|
+|Boost|1.57及以上|必选：编译依赖Boost头文件。|[Boost 1.87.0源码包](https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz)|
+|PCRE|8.41及以上|可选：Ultrascan tools正确性验证工具hscollider编译依赖PCRE 8.41及以上版本。|[PCRE 8.43源码包](https://sourceforge.net/projects/pcre/files/pcre/8.43/pcre-8.43.tar.gz)|
 |SQLite|SQLite 3|可选：Ultrascan tools测试工具hsbench和hspgo编译依赖SQLite 3。|使用Yum工具安装。|
-|Ultrascan|master|必选：待编译软件。|[获取链接](https://gitcode.com/boostkit/Ultrascan/tree/master)|
+|Ultrascan|master|必选：待编译软件。|[Ultrascan源码master分支](https://gitcode.com/boostkit/Ultrascan/tree/master)|
 
 ## 镜像方式部署
 
@@ -107,7 +102,7 @@ Ultrascan提供基于openEuler 22.03 LTS SP4（AArch64）的预构建容器镜�
     docker exec -it ultrascan_container bash
     ```
 
->![](public_sys-resources/icon-note.gif) **说明：**
+>![说明](public_sys-resources/icon-note.gif) **说明：**
 >
 >- 镜像内已预装GCC、CMake、Ragel 6.10、Boost 1.87.0、SQLite 3等编译依赖，并预置PCRE 8.45源码。
 >- 容器工作目录为“/workspace”，容器启动时入口脚本会自动将PCRE源码拷贝到“/workspace/pcre”目录，相当于完成[编译Ultrascan](#编译ultrascan)章节中“添加PCRE依赖库”的步骤。
@@ -132,7 +127,7 @@ Ultrascan提供基于openEuler 22.03 LTS SP4（AArch64）的预构建容器镜�
     ```
 
     >![说明](public_sys-resources/icon-note.gif) **说明：**
-    >执行克隆前，请确保`/opt`所在文件系统具有数GB可用空间，并且目标路径
+    >执行克隆前，请确保`/opt`所在文件系统至少具有2GB可用空间，并且目标路径
     >`/opt/Ultrascan`不存在或为空。如果该路径中已经存在完整的Ultrascan
     >Git仓库，请不要重复克隆，可直接跳过本步骤。
 
@@ -164,7 +159,7 @@ mkdir -p /opt/Ultrascan/build \
 df -h /opt/Ultrascan
 ```
 
-完整源码、第三方依赖及多个构建配置会占用数GB空间。若空间不足，请先为`/opt/Ultrascan`配置容量足够的文件系统，再继续后续步骤。
+获取源码时至少预留2GB可用空间，第三方依赖及多个构建配置还会占用额外空间，请按实际需求预留数GB容量。若空间不足，请先为`/opt/Ultrascan`配置容量足够的文件系统，再继续后续步骤。
 
 ### （可选）配置本地源
 
@@ -324,6 +319,8 @@ df -h /opt/Ultrascan
 
 6. 安装Boost。
 
+    本步骤向系统目录`/usr`写入文件，下一步的`ldconfig`更新系统动态链接库缓存，均需要root权限。请使用root账户执行；普通用户如已获sudo权限，可分别执行`sudo ./b2 install --prefix=/usr`和`sudo ldconfig`。
+
     ```bash
     ./b2 install --prefix=/usr
     ```
@@ -379,7 +376,7 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
 
     - 如果执行成功，则回显内容如下所示。
 
-        ```bash
+        ```output
         -lsqlite3
         ```
 
@@ -394,12 +391,12 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
 
             ```bash
             # Package Information for pkg-config
-            
+
             prefix=/usr
             exec_prefix=/usr
             libdir=/usr/lib64
             includedir=/usr/include
-            
+
             Name: SQLite
             Description: SQL database engine
             Version: 3.37.2
@@ -451,8 +448,7 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
 3. 编译源码。
 
     编译支持Release、Debug、动态库和反馈优化等配置。以下方式按需选择；
-    需要同时保留多种构建结果时，使用各自独立的构建目录，避免CMake缓存中的
-    选项相互影响。
+    需要同时保留多种构建结果时，使用各自独立的构建目录，避免CMake缓存中的选项相互影响。
 
     - 编译默认Release静态库。
 
@@ -463,7 +459,7 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
         make -j
         ```
 
-        默认Release配置不生成`hsdump`。如需按照[快速入门](./quick_start.md)
+        默认Release配置不生成`hsdump`。如需按照《[快速入门](./quick_start.md)》
         生成通用字节码，请使用下面的Debug模式完成构建。
 
     - （可选）编译Debug模式。
@@ -504,7 +500,7 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
 
         生成的静态库：
 
-        ![生成的静态库](figures/2.png)
+        ![Ultrascan编译后生成的静态库文件回显，可见库文件名与大小信息](figures/2.png)
 
     - 编译动态库。
 
@@ -535,23 +531,13 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
         - `hspgo`依赖SQLite 3。已安装SQLite且反馈能力开启时，会生成
           `/opt/Ultrascan/build-feedback/bin/hspgo`；缺少SQLite时库仍可构建，
           但不会生成该工具。
-        - 应用通过API集成时，请参考[正则匹配反馈优化技术API](./api_reference.md#4-正则匹配反馈优化技术api)。
+        - 应用通过API集成时，请参考[正则匹配反馈优化技术API](./api_reference.md#正则匹配反馈优化技术api)。
 
-    - （可选）AArch64编译目标选择。
+    - AArch64公共代码与Hao内核构建。
 
-        当CMake目标处理器为`aarch64`或`AARCH64`时，可使用`HS_ARM_MARCH`控制
-        AArch64编译目标的指令集基线，支持以下取值：
-
-        - `AUTO`（默认）：原生构建时使用`-march=native -mtune=native`；
-          交叉编译，或C/C++编译器不支持该组合标志时，自动回退为`PORTABLE`。
-          适合构建机和部署机具备相同指令集基线的场景。
-        - `PORTABLE`：固定使用`-march=armv8-a+crc`。产物要求目标机支持
-          Armv8-A和CRC32扩展，适合在满足该最低基线的不同机型间分发，
-          也是性能对比测试的推荐基线。
-        - `native`：显式使用`-march=native -mtune=native`，与AUTO成功路径等价，但不带探测回退。
-        - 显式架构值（如`armv8.2-a+crc+sve`、`armv9-a+sve2`、
-          `armv8.6-a+crc+sve2+sve2-bitperm`）：目标机型统一且已知指令集基线时
-          使用。传入的是架构值本身，无需添加`-march=`前缀。
+        当CMake目标处理器为`aarch64`或`AARCH64`时，公共代码固定使用
+        `-march=armv8-a+crc`，要求部署机支持Armv8-A和CRC32扩展。
+        `HS_ARM_MARCH`默认值为`PORTABLE`；旧缓存中的`AUTO`、`native`或显式架构值仍可被读取，但不再改变公共代码基线，CMake会输出提示。
 
         使用示例：
 
@@ -562,13 +548,27 @@ Ultrascan tools工具hsbench和hspgo编译依赖SQLite 3，使用Yum命令安装
         make -j
         ```
 
-        使用时注意：
+        Hao的可选内核根据编译器能力单独探测并编译，不要求构建主机本身具备相应CPU扩展，也无需将整个工程的`-march`提升为SVE/SVE2基线：
 
-        - `AUTO`或`native`构建的产物只能部署到支持编译器所选全部指令集扩展的
-          机器上；部署到较低指令集基线的机器可能触发非法指令错误。跨机型分发请
-          使用`PORTABLE`，或按最低目标机型选择显式值。
-        - `PORTABLE`不将SVE/SVE2作为编译目标基线。需要SVE或SVE2指令集能力时，
-          应显式选择包含相应扩展的架构值，并确保所有部署机均支持该值。
-        - 交叉编译时，工具链文件应将`CMAKE_SYSTEM_PROCESSOR`设置为`aarch64`；否则该选项不会生效。
-        - 配置阶段会输出`AARCH64 single-ISA build mode/flags`及
-          `crc/sve/sve2/sve2-bitperm`特性探测结果，可据此核对实际生效的编译标志。
+        | 内核 | 工具链要求 | 运行条件 |
+        | --- | --- | --- |
+        | DOT | 能编译SVE intrinsic | CPU/操作系统支持SVE，当前向量长度至少256位。 |
+        | BEXT | 能编译SVE2 BitPerm intrinsic，且SVE内核可构建 | CPU/操作系统支持SVE、SVE2和SVE2 BitPerm，当前向量长度至少256位。 |
+
+        - `HS_BUILD_HAVE_SVE`、`HS_BUILD_HAVE_SVEBITPERM`是工具链探测结果，
+          不代表运行机一定具备对应能力。运行时会检查CPU/操作系统能力和向量长度。
+        - 未构建可选内核或运行条件不足时，使用可用的其他路径；通用字节码的
+          Hao多变体布局保留FDR回退。其变体生成还受编译数据库时主机能力限制，
+          详见《[用户指南](./user_guide.md#通用字节码中的hao)》。
+        - Hao默认关闭，使用时在编译数据库前设置Grey参数`allowHao:1`。
+          该算法不依赖`HS_ENABLE_FP_FEEDBACK`选项。
+        - 交叉编译时，工具链文件应将`CMAKE_SYSTEM_PROCESSOR`设置为`aarch64`。
+        - 配置阶段的`AARCH64 single-ISA build mode/flags`显示公共代码基线；
+          `ARM toolchain can/cannot compile SVE code paths`和
+          `ARM toolchain can/cannot compile SVE2 BitPerm code paths`显示可选内核构建能力。公共代码的`sve=FALSE`不表示可选Hao内核无法构建。
+
+## 修订记录
+
+| 文档版本 | 发布日期 | 修改说明 |
+| --- | --- | --- |
+| 01 | 2026-12-30 | 第一次正式发布 |
