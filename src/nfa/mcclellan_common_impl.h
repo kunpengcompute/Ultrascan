@@ -55,20 +55,26 @@ u32 doSherman16(const char *sherman_state, u8 cprime, const u16 *succ_table,
                 u32 as) {
     assert(ISALIGNED_N(sherman_state, 16));
 
-    u8 len = *(const u8 *)(sherman_state + SHERMAN_LEN_OFFSET);
+    /* Single 16-byte load covers the whole state slot; derive len and daddy
+     * from the header instead of issuing separate, dependent loads.
+     * Header bytes 0-3 (little-endian): 0=type, 1=len, 2-3=daddy. */
+    m128 ss = load128(sherman_state);
+    u32 hdr = extract32from128(ss, 0);
+    u8 len = (u8)((hdr >> 8) & 0xFF);
 
     if (len) {
-        m128 ss_char = load128(sherman_state);
         m128 cur_char = set16x8(cprime);
 
-        u32 z = movemask128(eq128(ss_char, cur_char));
+        u32 z = movemask128(eq128(ss, cur_char));
 
-        /* remove header cruft: type 1, len 1, daddy 2*/
-        z &= ~0xf;
-        z &= (1U << (len + 4)) - 1;
+        /* Keep only the len char bytes: the first 4 bytes are header cruft
+         * (type, len, daddy), so char[i] occupies bit (4 + i). This single
+         * mask also guarantees the bits below bit 4 are clear, so we can pass
+         * z straight to ctz() (no redundant re-mask). */
+        z &= ((1U << len) - 1) << 4;
 
         if (z) {
-            u32 i = ctz32(z & ~0xf) - 4;
+            u32 i = ctz32(z) - 4;
 
             u32 s_out = unaligned_load_u16((const u8 *)sherman_state
                                            + SHERMAN_STATES_OFFSET(len)
@@ -79,7 +85,7 @@ u32 doSherman16(const char *sherman_state, u8 cprime, const u16 *succ_table,
         }
     }
 
-    u32 daddy = *(const u16 *)(sherman_state + SHERMAN_DADDY_OFFSET);
+    u32 daddy = (hdr >> 16) & 0xFFFF;
     return succ_table[(daddy << as) + cprime];
 }
 

@@ -164,6 +164,97 @@ get_conf_stride_1(const u8 *itPtr, UNUSED const u8 *start_ptr,
                   const u64a *ft, u64a *conf0, u64a *conf8, m128 *s) {
     /* +1: the zones ensure that we can read the byte at z->end */
     assert(itPtr >= start_ptr && itPtr <= end_ptr);
+#if defined(HAVE_NEON)
+    domain_mask_flipped = ~domain_mask_flipped;
+
+    /* Load all 16 stride bytes in one 128-bit NEON load and mask once,
+       instead of two 64-bit scalar loads + 16 scalar shift/and ops. */
+    uint8x16_t data = vld1q_u8(itPtr);
+    uint8x16_t ind  = vandq_u8(data, vdupq_n_u8((u8)domain_mask_flipped));
+
+    u32 reach0 = vgetq_lane_u8(ind, 0);
+    u32 reach1 = vgetq_lane_u8(ind, 1);
+    u32 reach2 = vgetq_lane_u8(ind, 2);
+    u32 reach3 = vgetq_lane_u8(ind, 3);
+
+    m128 st0 = load_m128_from_u64a(ft + reach0);
+    m128 st1 = load_m128_from_u64a(ft + reach1);
+    m128 st2 = load_m128_from_u64a(ft + reach2);
+    m128 st3 = load_m128_from_u64a(ft + reach3);
+
+    u32 reach4 = vgetq_lane_u8(ind, 4);
+    u32 reach5 = vgetq_lane_u8(ind, 5);
+    u32 reach6 = vgetq_lane_u8(ind, 6);
+    u32 reach7 = vgetq_lane_u8(ind, 7);
+
+    m128 st4 = load_m128_from_u64a(ft + reach4);
+    m128 st5 = load_m128_from_u64a(ft + reach5);
+    m128 st6 = load_m128_from_u64a(ft + reach6);
+    m128 st7 = load_m128_from_u64a(ft + reach7);
+
+    m128 zero = zeroes128();
+
+    st1.vect_s8 = vextq_s8(zero.vect_s8, st1.vect_s8, 15);
+    st2.vect_s8 = vextq_s8(zero.vect_s8, st2.vect_s8, 14);
+    st3.vect_s8 = vextq_s8(zero.vect_s8, st3.vect_s8, 13);
+    st4.vect_s8 = vextq_s8(zero.vect_s8, st4.vect_s8, 12);
+    st5.vect_s8 = vextq_s8(zero.vect_s8, st5.vect_s8, 11);
+    st6.vect_s8 = vextq_s8(zero.vect_s8, st6.vect_s8, 10);
+    st7.vect_s8 = vextq_s8(zero.vect_s8, st7.vect_s8, 9);
+
+    st0 = or128(st0, st1);
+    st2 = or128(st2, st3);
+    st4 = or128(st4, st5);
+    st6 = or128(st6, st7);
+    st0 = or128(st0, st2);
+    st4 = or128(st4, st6);
+    st0 = or128(st0, st4);
+    *s = or128(*s, st0);
+
+    *conf0 = ~movq(*s);
+    *s = rshiftbyte_m128(*s, 8);
+
+    u32 reach8  = vgetq_lane_u8(ind, 8);
+    u32 reach9  = vgetq_lane_u8(ind, 9);
+    u32 reach10 = vgetq_lane_u8(ind, 10);
+    u32 reach11 = vgetq_lane_u8(ind, 11);
+
+    m128 st8 = load_m128_from_u64a(ft + reach8);
+    m128 st9 = load_m128_from_u64a(ft + reach9);
+    m128 st10 = load_m128_from_u64a(ft + reach10);
+    m128 st11 = load_m128_from_u64a(ft + reach11);
+
+    u32 reach12 = vgetq_lane_u8(ind, 12);
+    u32 reach13 = vgetq_lane_u8(ind, 13);
+    u32 reach14 = vgetq_lane_u8(ind, 14);
+    u32 reach15 = vgetq_lane_u8(ind, 15);
+
+    m128 st12 = load_m128_from_u64a(ft + reach12);
+    m128 st13 = load_m128_from_u64a(ft + reach13);
+    m128 st14 = load_m128_from_u64a(ft + reach14);
+    m128 st15 = load_m128_from_u64a(ft + reach15);
+
+    st9.vect_s8 = vextq_s8(zero.vect_s8, st9.vect_s8, 15);
+    st10.vect_s8 = vextq_s8(zero.vect_s8, st10.vect_s8, 14);
+    st11.vect_s8 = vextq_s8(zero.vect_s8, st11.vect_s8, 13);
+    st12.vect_s8 = vextq_s8(zero.vect_s8, st12.vect_s8, 12);
+    st13.vect_s8 = vextq_s8(zero.vect_s8, st13.vect_s8, 11);
+    st14.vect_s8 = vextq_s8(zero.vect_s8, st14.vect_s8, 10);
+    st15.vect_s8 = vextq_s8(zero.vect_s8, st15.vect_s8, 9);
+
+    st8 = or128(st8, st9);
+    st10 = or128(st10, st11);
+    st12 = or128(st12, st13);
+    st14 = or128(st14, st15);
+    st8 = or128(st8, st10);
+    st12 = or128(st12, st14);
+    st8 = or128(st8, st12);
+    *s = or128(*s, st8);
+
+    *conf8 = ~movq(*s);
+    *s = rshiftbyte_m128(*s, 8);
+
+#else
     u64a reach0 = andn(domain_mask_flipped, itPtr);
     u64a reach1 = andn(domain_mask_flipped, itPtr + 1);
     u64a reach2 = andn(domain_mask_flipped, itPtr + 2);
@@ -201,9 +292,8 @@ get_conf_stride_1(const u8 *itPtr, UNUSED const u8 *start_ptr,
     st0 = or128(st0, st4);
     *s = or128(*s, st0);
 
-    *conf0 = movq(*s);
+    *conf0 = ~movq(*s);
     *s = rshiftbyte_m128(*s, 8);
-    *conf0 ^= ~0ULL;
 
     u64a reach8 = andn(domain_mask_flipped, itPtr + 8);
     u64a reach9 = andn(domain_mask_flipped, itPtr + 9);
@@ -242,9 +332,9 @@ get_conf_stride_1(const u8 *itPtr, UNUSED const u8 *start_ptr,
     st8 = or128(st8, st12);
     *s = or128(*s, st8);
 
-    *conf8 = movq(*s);
+    *conf8 = ~movq(*s);
     *s = rshiftbyte_m128(*s, 8);
-    *conf8 ^= ~0ULL;
+#endif
 }
 
 static really_inline void
@@ -726,12 +816,14 @@ static really_inline size_t prepareZones(const u8 *buf, size_t len,
             u64a conf8;                                                        \
             get_conf_fn(itPtr, start_ptr, end_ptr, domain_mask_flipped, ft,    \
                         &conf0, &conf8, &s);                                   \
-            do_confirm_fdr(&conf0, 0, &control, confBase, a, itPtr,            \
-                           &last_match_id, zz);                                \
-            do_confirm_fdr(&conf8, 8, &control, confBase, a, itPtr,            \
-                           &last_match_id, zz);                                \
-            if (unlikely(control == HWLM_TERMINATE_MATCHING)) {                \
-                return HWLM_TERMINATED;                                        \
+            if (unlikely(conf0 || conf8)) {                                    \
+                do_confirm_fdr(&conf0, 0, &control, confBase, a, itPtr,        \
+                               &last_match_id, zz);                            \
+                do_confirm_fdr(&conf8, 8, &control, confBase, a, itPtr,        \
+                               &last_match_id, zz);                            \
+                if (unlikely(control == HWLM_TERMINATE_MATCHING)) {            \
+                    return HWLM_TERMINATED;                                    \
+                }                                                              \
             }                                                                  \
         } /* end for loop */                                                   \
     } while (0)
