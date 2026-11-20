@@ -60,7 +60,7 @@ directories:
 
 files:
   # Use the existing repository license; retain its BSD license text and notices.
-  - path: "./LICENSE"
+  - path: "./src/kunpeng-enhanced/LICENSE"
     type: license
   - path: "./ThirdPartyNotice.md"
     type: notice
