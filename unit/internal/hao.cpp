@@ -2200,15 +2200,16 @@ TEST(HAOCompile, HAOProtoBuildRejectsHaoWhenDisabled) {
     EXPECT_EQ(nullptr, proto.get());
 }
 
-static std::vector<hwlmLiteral> admissionLiterals(u32 duplicates) {
+static std::vector<hwlmLiteral> admissionLiterals(u32 duplicates,
+                                                u32 uniqueCount = 1000) {
     std::vector<hwlmLiteral> lits;
-    for (u32 i = 0; i < 1000; i++) {
+    for (u32 i = 0; i < uniqueCount; i++) {
         std::ostringstream word;
         word << std::hex << std::setw(8) << std::setfill('0') << i;
         lits.emplace_back(word.str(), false, false, i, HWLM_ALL_GROUPS,
                           std::vector<u8>{}, std::vector<u8>{});
         if (i < duplicates) {
-            lits.emplace_back(word.str(), false, false, i + 1000,
+            lits.emplace_back(word.str(), false, false, i + uniqueCount,
                               HWLM_ALL_GROUPS, std::vector<u8>{},
                               std::vector<u8>{});
         }
@@ -2225,12 +2226,12 @@ TEST(HAOCompile, AdmissionAcceptsFivePercentCollisionBoundary) {
     grey.allowHao = true;
     grey.fdrAllowTeddy = false;
     grey.haoHashMode = haoCanUseBextFastPath(get_current_target()) ? 1 : 2;
-    auto lits = admissionLiterals(50);
+    auto lits = admissionLiterals(200, 4000);
     HAOCompileArtifacts artifacts;
     ASSERT_TRUE(analyzeHAOFeasibility(get_current_target(), lits, grey,
                                       nullptr, &artifacts));
-    ASSERT_EQ(1000U, artifacts.hash.stats.nonEmptyPrimary);
-    ASSERT_EQ(50U, artifacts.hash.stats.collisionBuckets);
+    ASSERT_EQ(4000U, artifacts.hash.stats.nonEmptyPrimary);
+    ASSERT_EQ(200U, artifacts.hash.stats.collisionBuckets);
     auto proto = fdrBuildProto(HWLM_ENGINE_FDR, lits, false,
                                get_current_target(), grey);
     ASSERT_NE(nullptr, proto.get());
@@ -2246,12 +2247,12 @@ TEST(HAOCompile, AdmissionRejectsAboveBoundaryAndPreservesForcedHao) {
     grey.allowHao = true;
     grey.fdrAllowTeddy = false;
     grey.haoHashMode = haoCanUseBextFastPath(get_current_target()) ? 1 : 2;
-    auto lits = admissionLiterals(51);
+    auto lits = admissionLiterals(201, 4000);
     HAOCompileArtifacts artifacts;
     ASSERT_TRUE(analyzeHAOFeasibility(get_current_target(), lits, grey,
                                       nullptr, &artifacts));
-    ASSERT_EQ(1000U, artifacts.hash.stats.nonEmptyPrimary);
-    ASSERT_EQ(51U, artifacts.hash.stats.collisionBuckets);
+    ASSERT_EQ(4000U, artifacts.hash.stats.nonEmptyPrimary);
+    ASSERT_EQ(201U, artifacts.hash.stats.collisionBuckets);
     auto proto = fdrBuildProto(HWLM_ENGINE_FDR, lits, false,
                                get_current_target(), grey);
     ASSERT_NE(nullptr, proto.get());
@@ -2280,6 +2281,69 @@ TEST(HAOCompile, AdmissionDropsBothVariantsForCollidingRules) {
     ASSERT_NE(nullptr, proto.get());
     EXPECT_EQ(nullptr, proto->dotArtifacts.get());
     EXPECT_EQ(nullptr, proto->bextArtifacts.get());
+}
+
+TEST(HAOCompile, AdmissionRejectsMediumDotInAllCompileModes) {
+    if (!get_current_target().has_sve()) {
+        skipIfNoHaoSupport();
+        return;
+    }
+    hs_platform_info info = {};
+    info.cpu_features = HS_CPU_FEATURES_SVE;
+    const target_t target(info);
+    Grey grey;
+    grey.allowHao = true;
+    grey.fdrAllowTeddy = false;
+    const auto lits = admissionLiterals(0);
+    auto automatic = fdrBuildProto(HWLM_ENGINE_FDR, lits, false, target, grey);
+    ASSERT_NE(nullptr, automatic.get());
+    EXPECT_EQ(nullptr, automatic->haoArtifacts.get());
+    auto table = fdrBuildTable(*automatic, grey);
+    ASSERT_NE(nullptr, table.get());
+    EXPECT_NE(ENGINE_ID_HAO, table->engineID);
+
+    grey.haoHashMode = 2;
+    auto explicitDot = fdrBuildProto(HWLM_ENGINE_FDR, lits, false, target, grey);
+    ASSERT_NE(nullptr, explicitDot.get());
+    EXPECT_EQ(nullptr, explicitDot->haoArtifacts.get());
+    auto explicitTable = fdrBuildTable(*explicitDot, grey);
+    ASSERT_NE(nullptr, explicitTable.get());
+    EXPECT_NE(ENGINE_ID_HAO, explicitTable->engineID);
+
+    auto variants = fdrBuildProto(HWLM_ENGINE_FDR, lits, false, target,
+                                   grey, true);
+    ASSERT_NE(nullptr, variants.get());
+    EXPECT_EQ(nullptr, variants->dotArtifacts.get());
+    EXPECT_EQ(nullptr, variants->bextArtifacts.get());
+}
+
+TEST(HAOCompile, AdmissionAutoDotScaleBoundary) {
+    if (!get_current_target().has_sve()) {
+        skipIfNoHaoSupport();
+        return;
+    }
+    hs_platform_info info = {};
+    info.cpu_features = HS_CPU_FEATURES_SVE;
+    const target_t target(info);
+    Grey grey;
+    grey.allowHao = true;
+    grey.fdrAllowTeddy = false;
+    for (u32 count : {3999U, 4000U}) {
+        SCOPED_TRACE(count);
+        const auto lits = admissionLiterals(0, count);
+        for (u32 hashMode : {0U, 2U}) {
+            SCOPED_TRACE(hashMode);
+            grey.haoHashMode = hashMode;
+            auto proto = fdrBuildProto(HWLM_ENGINE_FDR, lits, false,
+                                       target, grey);
+            ASSERT_NE(nullptr, proto.get());
+            EXPECT_EQ(count == 4000U, proto->haoArtifacts != nullptr);
+            auto variants = fdrBuildProto(HWLM_ENGINE_FDR, lits, false,
+                                          target, grey, true);
+            ASSERT_NE(nullptr, variants.get());
+            EXPECT_EQ(count == 4000U, variants->dotArtifacts != nullptr);
+        }
+    }
 }
 
 TEST(HAOCompile, BuildHaoGlobalBlobHeaderMatchesArtifacts) {

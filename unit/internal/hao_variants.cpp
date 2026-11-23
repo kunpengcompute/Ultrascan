@@ -55,7 +55,9 @@ int publicCollect(unsigned id, unsigned long long, unsigned long long end,
 std::vector<hwlmLiteral> rules() {
     std::vector<hwlmLiteral> lits;
     const char *hex = "0123456789ABCDEF";
-    for (u32 i = 0; i < 1000; i++) {
+    // Keep host-coverage, serialization and VL-fallback tests eligible for
+    // automatic DOT selection. Medium-set admission is tested separately.
+    for (u32 i = 0; i < 4000; i++) {
         std::string s = "rule0000";
         for (u32 j = 0; j < 4; j++) {
             s[7 - j] = hex[(i >> (j * 4U)) & 15U];

@@ -75,6 +75,11 @@ using namespace std;
 
 namespace ue2 {
 
+/* HAO engine-selection thresholds (scale + length). */
+#define HAO_SEL_LITS_HIGH 4000U
+#define HAO_SEL_LITS_LOW 1000
+#define HAO_SEL_MIN_AVG_LEN 7.5
+
 namespace {
 
 /* In fat (dual-arch) builds the same HAO matcher is compiled once per slice
@@ -138,6 +143,19 @@ static bool tryBuildHaoProto(const target_t &target,
     }
 
     if (checkAdmission) {
+        // DOT uses a fixed 22-bit layout. Restrict selection to
+        // the large-set branch; low collision rates alone do not establish
+        // an advantage over FDR for medium-sized literal sets.
+        if (builtArtifacts.hashMode == HAO_LAYOUT_HASH_DOT &&
+            lits.size() < HAO_SEL_LITS_HIGH) {
+            if (grey.haoDebug & 1) {
+                fprintf(stderr,
+                        "[HAO][Admission] mode=DOT lits=%zu minLits=%u "
+                        "decision=REJECT_DOT_SCALE\n",
+                        lits.size(), HAO_SEL_LITS_HIGH);
+            }
+            return false;
+        }
         const auto &stats = builtArtifacts.hash.stats;
         static constexpr u32 MAX_COLLISION_PCT = 5;
         const bool admitted =
@@ -932,11 +950,6 @@ addIncludedInfo(vector<hwlmLiteral> &lits, u32 nBuckets,
 }
 
 } // namespace
-
-/* HAO engine-selection thresholds (scale + length). */
-#define HAO_SEL_LITS_HIGH 4000
-#define HAO_SEL_LITS_LOW 1000
-#define HAO_SEL_MIN_AVG_LEN 7.5
 
 /** \brief Compile-time gate deciding whether allowHao may use HAO.
  *

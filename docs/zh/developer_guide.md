@@ -120,10 +120,10 @@ Hao位于`src/fdr/`，用于匹配编译器提取的字符串片段（字面量�
 | --- | --- | --- |
 | 选型 | fdrBuildProtoInternal | 普通选型先尝试Teddy，再判断Hao候选。 |
 | 检查 | analyzeHAOFeasibility | 检查目标能力、规则覆盖和表容量。 |
-| 准入 | tryBuildHaoProto | 自动候选要求碰撞桶比例不超过5%。 |
+| 准入 | tryBuildHaoProto | DOT候选至少4000条；碰撞桶比例不超过5%。 |
 | 序列化 | buildHAOBlob / buildHAOVariants | 输出单路径或多变体字节码。 |
 
-碰撞桶比例为`collisionBuckets / nonEmptyPrimary`，多变体编译分别检查DOT/BEXT。该条件用于启发式选型，不保证实测性能优于FDR；候选被拒绝后继续其他引擎选型。
+碰撞桶比例为`collisionBuckets / nonEmptyPrimary`，多变体编译分别检查DOT/BEXT。DOT候选要求至少4000条内部字面量，自动选择、显式设置`haoHashMode:2`及通用变体均执行该门槛。上述条件用于启发式选型，不保证实测性能优于FDR；候选被拒绝后继续其他引擎选型。
 
 | 路径 | 哈希方式 | 默认键宽 |
 | --- | --- | --- |
@@ -187,7 +187,7 @@ bool analyzeHAOFeasibility(
 | artifacts | 编译中间结果，可为空。 | 输出 |
 | reportOrder | 可选的报告顺序。 | 输入 |
 
-返回`true`表示可构建，`false`表示不可构建；5%碰撞桶准入由调用方`tryBuildHaoProto()`另行检查。
+返回`true`表示可构建，`false`表示不可构建；DOT额外规模门槛和5%碰撞桶准入由调用方`tryBuildHaoProto()`另行检查。
 
 #### `buildHAOBlob`
 
