@@ -76,12 +76,14 @@ u32 doSherman16(const char *sherman_state, u8 cprime, const u16 *succ_table,
 
         u32 z = movemask128(eq128(ss_char, cur_char));
 
-        /* remove header cruft: type 1, len 1, daddy 2*/
-        z &= ~0xf;
-        z &= (1U << (len + 4)) - 1;
+        /* Keep only the len char bytes: the first 4 bytes are header cruft
+         * (type, len, daddy), so char[i] occupies bit (4 + i). This single
+         * mask also guarantees the bits below bit 4 are clear, so we can pass
+         * z straight to ctz() (no redundant re-mask). */
+        z &= ((1U << len) - 1) << 4;
 
         if (z) {
-            u32 i = ctz32(z & ~0xf) - 4;
+            u32 i = ctz32(z) - 4;
 
             u32 s_out = unaligned_load_u16((const u8 *)sherman_state
                                            + SHERMAN_STATES_OFFSET(len)
