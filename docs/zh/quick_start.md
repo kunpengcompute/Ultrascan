@@ -118,7 +118,8 @@ hsbench是Ultrascan提供的Benchmark性能测试工具，可用于观察指定�
 
     先核对`Matches per iteration`，再比较吞吐、编译时间和数据库大小。
     `haoDebug:1`输出`[HAO][EngSel]`及`SCALE_ACCEPT`、`MID_LEN_ACCEPT`、
-    `REJECT_LEN`或`REJECT_SMALL`决策，以及`[HAO][Admission]`的5%碰撞桶准入结果；
+    `REJECT_LEN`或`REJECT_SMALL`决策，以及`[HAO][Admission]`的DOT规模和5%碰撞桶准入结果；
+    `REJECT_DOT_SCALE`表示DOT候选不足4000条内部literal，继续其他引擎选型；显式设置`haoHashMode:2`也执行这一检查。
     `haoDebug:2`输出已生成Hao的编译统计。
     规模筛选通过后仍需通过完整可行性检查，不能仅凭`allowHao:1`或接受决策判断已经采用Hao。具体筛选条件见《[用户指南](./user_guide.md#启用与适用范围)》。
 
