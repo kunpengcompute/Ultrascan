@@ -27,6 +27,12 @@ repos:
     hooks:
       - id: detect-secrets
 
+  # gitleaks：敏感信息/密钥扫描（依赖本机已安装 gitleaks）
+  - repo: https://gitcode.com/GitHub_Trending/gi/gitleaks # 国内网络可使用gitcode镜像仓加速下载
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
   # clang-format：C/C++ 代码格式化
   # - repo: https://gitcode.com/pre-commit-clang/mirrors-clang-format
   #   rev: v18.1.8
